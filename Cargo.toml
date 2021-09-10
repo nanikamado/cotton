@@ -1,0 +1,12 @@
+[package]
+name = "cotton"
+version = "0.1.0"
+edition = "2018"
+description = "A programming language."
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+clap = "2.33.3"
+nom = "7"
+unic-ucd-category = "0.9.0"
