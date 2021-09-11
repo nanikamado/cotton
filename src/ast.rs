@@ -7,7 +7,7 @@ pub struct AST {
 pub struct Declaration {
     pub identifier: String,
     pub datatype: Datatype,
-    pub value: OpExpr,
+    pub value: OpSequence,
 }
 
 pub type Datatype = ();
@@ -22,9 +22,9 @@ pub enum Expr {
     Unit,
 }
 
-impl Into<OpExpr> for Expr {
-    fn into(self) -> OpExpr {
-        OpExpr {
+impl Into<OpSequence> for Expr {
+    fn into(self) -> OpSequence {
+        OpSequence {
             operators: Vec::new(),
             operands: vec![Operand::Expr(self)],
         }
@@ -32,7 +32,7 @@ impl Into<OpExpr> for Expr {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct OpExpr {
+pub struct OpSequence {
     pub operators: Vec<String>,
     pub operands: Vec<Operand>,
 }
@@ -40,13 +40,13 @@ pub struct OpExpr {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Operand {
     Expr(Expr),
-    FnCallArguments(Vec<OpExpr>),
+    FnCallArguments(Vec<OpSequence>),
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct FnArm {
     pub pattern: Pattern,
-    pub exprs: Vec<OpExpr>,
+    pub exprs: Vec<OpSequence>,
 }
 
 pub type Pattern = String;

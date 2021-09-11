@@ -1,4 +1,4 @@
-use crate::ast::{Declaration, Expr, FnArm, OpExpr, Operand, AST};
+use crate::ast::{Declaration, Expr, FnArm, OpSequence, Operand, AST};
 use nom::{
     branch::alt,
     bytes::complete::{is_not, tag, take_while1},
@@ -38,7 +38,7 @@ fn declaration(input: &str) -> IResult<&str, Declaration> {
     ))
 }
 
-fn type_expr(input: &str) -> IResult<&str, OpExpr> {
+fn type_expr(input: &str) -> IResult<&str, OpSequence> {
     op_sequence(input)
 }
 
@@ -124,7 +124,7 @@ fn unit(input: &str) -> IResult<&str, Expr> {
     Ok((input, Expr::Unit))
 }
 
-fn op_sequence(input: &str) -> IResult<&str, OpExpr> {
+fn op_sequence(input: &str) -> IResult<&str, OpSequence> {
     let (input, (_, e, eo, _)) = tuple((
         separator0,
         expr,
@@ -138,7 +138,7 @@ fn op_sequence(input: &str) -> IResult<&str, OpExpr> {
     let (os, mut es): (Vec<_>, Vec<_>) = eo.into_iter().unzip();
     Ok((
         input,
-        OpExpr {
+        OpSequence {
             operators: os,
             operands: {
                 let mut e = vec![Operand::Expr(e)];
@@ -174,7 +174,7 @@ fn fib_op_sequence() {
         op_sequence("fib(n - 1) + fib(n - 2)"),
         Ok((
             "",
-            OpExpr {
+            OpSequence {
                 operators: ["fn_call", "+", "fn_call"]
                     .iter()
                     .map(|s| s.to_string())
@@ -183,7 +183,7 @@ fn fib_op_sequence() {
                     Operand::Expr(Expr::Identifier(
                         "fib".to_string()
                     )),
-                    Operand::FnCallArguments(vec![OpExpr {
+                    Operand::FnCallArguments(vec![OpSequence {
                         operators: vec!["-".to_string()],
                         operands: vec![
                             Operand::Expr(Expr::Identifier(
@@ -197,7 +197,7 @@ fn fib_op_sequence() {
                     Operand::Expr(Expr::Identifier(
                         "fib".to_string()
                     )),
-                    Operand::FnCallArguments(vec![OpExpr {
+                    Operand::FnCallArguments(vec![OpSequence {
                         operators: vec!["-".to_string()],
                         operands: vec![
                             Operand::Expr(Expr::Identifier(
