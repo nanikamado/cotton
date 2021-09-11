@@ -48,9 +48,16 @@ name = "cotton"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "escodegen",
  "nom",
  "unic-ucd-category",
 ]
+
+[[package]]
+name = "escodegen"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ed0efb728f02a89c1c3be833fd17290f7a9b3d11a11b8cf4f9b7364fb501660"
 
 [[package]]
 name = "hermit-abi"
