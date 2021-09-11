@@ -3,7 +3,7 @@ pub struct AST {
     pub declarations: Vec<Declaration>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Declaration {
     pub identifier: String,
     pub datatype: Datatype,
@@ -12,7 +12,7 @@ pub struct Declaration {
 
 pub type Datatype = ();
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Expr {
     Lambda(Vec<FnArm>),
     Number(String),
@@ -20,30 +20,25 @@ pub enum Expr {
     Identifier(String),
     Declaration(Box<Declaration>),
     Unit,
+    Parenthesized(Box<OpSequence>),
 }
 
 impl Into<OpSequence> for Expr {
     fn into(self) -> OpSequence {
         OpSequence {
             operators: Vec::new(),
-            operands: vec![Operand::Expr(self)],
+            operands: vec![self],
         }
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct OpSequence {
     pub operators: Vec<String>,
-    pub operands: Vec<Operand>,
+    pub operands: Vec<Expr>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub enum Operand {
-    Expr(Expr),
-    FnCallArguments(Vec<OpSequence>),
-}
-
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FnArm {
     pub pattern: Pattern,
     pub exprs: Vec<OpSequence>,
