@@ -1,6 +1,4 @@
-use crate::ast::{
-    Declaration, Expr, FnArm, OpSequence, AST,
-};
+use crate::ast::{Declaration, Expr, FnArm, OpSequence, AST};
 use nom::{
     branch::alt,
     bytes::complete::{is_not, tag, take_while1},
@@ -105,7 +103,7 @@ fn num_literal(input: &str) -> IResult<&str, Expr> {
 }
 
 fn fn_call(input: &str) -> IResult<&str, Vec<Expr>> {
-    let (input, (_, mut a0, mut a1, _, _)) = tuple((
+    let (input, (_, a0, a1, _, _)) = tuple((
         tag("("),
         op_sequence,
         many0(preceded(tag(","), op_sequence)),
@@ -131,17 +129,18 @@ fn op_sequence(input: &str) -> IResult<&str, OpSequence> {
         separator0,
         expr,
         many0(alt((
-            tuple((delimited(separator0, op, separator0), expr))
-                .map(|(s, e)| vec![(s, e)]),
             fn_call.map(|es| {
                 es.into_iter()
                     .map(|e| ("fn_call".to_string(), e))
                     .collect()
             }),
+            tuple((delimited(separator0, op, separator0), expr))
+                .map(|(s, e)| vec![(s, e)]),
         ))),
         separator0,
     ))(input)?;
-    let (os, mut es): (Vec<_>, Vec<_>) = eo.concat().into_iter().unzip();
+    let (os, mut es): (Vec<_>, Vec<_>) =
+        eo.concat().into_iter().unzip();
     Ok((
         input,
         OpSequence {
@@ -166,6 +165,7 @@ fn op(input: &str) -> IResult<&str, String> {
                 && s != "=>"
                 && s != "|"
                 && s != "--"
+                && s != ","
                 && !s.contains("\"")
                 && !s.contains("(")
                 && !s.contains(")")

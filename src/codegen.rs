@@ -1,4 +1,4 @@
-use crate::ast::{Declaration, OpSequence, AST};
+use crate::ast2::{Declaration, Expr, AST};
 use escodegen::Stmt;
 
 pub fn compile(ast: AST) -> Stmt {
@@ -8,9 +8,9 @@ pub fn compile(ast: AST) -> Stmt {
 }
 
 fn declaration(d: Declaration) -> Stmt {
-    Stmt::Var(d.identifier, Some(op_expr(d.value)))
+    Stmt::Var(d.identifier, Some(expr(d.value)))
 }
 
-fn op_expr(_e: OpSequence) -> escodegen::Expr {
+fn expr(_e: Expr) -> escodegen::Expr {
     todo!()
 }
