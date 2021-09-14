@@ -44,4 +44,11 @@ pub struct FnArm {
     pub exprs: Vec<OpSequence>,
 }
 
-pub type Pattern = String;
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Pattern {
+    Number(String),
+    StrLiteral(String),
+    Constructor(String),
+    Binder(String),
+    Underscore,
+}

@@ -1,4 +1,6 @@
-use crate::ast::{Declaration, Expr, FnArm, OpSequence, AST};
+use crate::ast::{
+    Declaration, Expr, FnArm, OpSequence, Pattern, AST,
+};
 use nom::{
     branch::alt,
     bytes::complete::{is_not, tag, take_while1},
@@ -59,8 +61,8 @@ fn expr(input: &str) -> IResult<&str, Expr> {
     delimited(
         separator0,
         alt((
-            str_literal,
-            num_literal,
+            str_literal.map(|s| Expr::StrLiteral(s.to_string())),
+            num_literal.map(|s| Expr::Number(s.to_string())),
             unit,
             lambda,
             declaration.map(|d| Expr::Declaration(Box::new(d))),
@@ -80,26 +82,36 @@ fn lambda(input: &str) -> IResult<&str, Expr> {
 
 fn fn_arm(input: &str) -> IResult<&str, FnArm> {
     let (input, (_, pattern, _, arguments)) =
-        tuple((tag("|"), expr, tag("=>"), many1(op_sequence)))(
+        tuple((tag("|"), pattern, tag("=>"), many1(op_sequence)))(
             input,
         )?;
     Ok((
         input,
         FnArm {
-            pattern: format!("{:?}", pattern),
+            pattern,
             exprs: arguments,
         },
     ))
 }
 
-fn str_literal(input: &str) -> IResult<&str, Expr> {
-    let (input, s) =
-        delimited(tag("\""), is_not("\""), tag("\""))(input)?;
-    Ok((input, Expr::StrLiteral(s.to_string())))
+fn pattern(input: &str) -> IResult<&str, Pattern> {
+    alt((
+        str_literal.map(|s| Pattern::StrLiteral(s.to_string())),
+        num_literal.map(|s| Pattern::Number(s.to_string())),
+        tag("()").map(|_| Pattern::Constructor("()".to_string())),
+        tag("_").map(|_| Pattern::Underscore),
+        identifier.map(|s| Pattern::Binder(s)),
+    ))(input)
 }
 
-fn num_literal(input: &str) -> IResult<&str, Expr> {
-    digit1(input).map(|(i, s)| (i, Expr::Number(s.to_string())))
+fn str_literal(input: &str) -> IResult<&str, &str> {
+    let (input, s) =
+        delimited(tag("\""), is_not("\""), tag("\""))(input)?;
+    Ok((input, s))
+}
+
+fn num_literal(input: &str) -> IResult<&str, &str> {
+    digit1(input).map(|(i, s)| (i, s))
 }
 
 fn fn_call(input: &str) -> IResult<&str, Vec<Expr>> {
