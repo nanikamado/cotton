@@ -5,7 +5,7 @@ use nom::{
     branch::alt,
     bytes::complete::{is_not, tag, take_while1},
     character::complete::{anychar, digit1, one_of, space0},
-    combinator::verify,
+    combinator::{recognize, verify},
     multi::{many0, many1, many_m_n},
     sequence::{delimited, pair, preceded, tuple},
     AsChar, IResult, Parser,
@@ -110,7 +110,9 @@ fn pattern(input: &str) -> IResult<&str, Pattern> {
 
 fn str_literal(input: &str) -> IResult<&str, &str> {
     let (input, s) =
-        delimited(tag("\""), is_not("\""), tag("\""))(input)?;
+        recognize(tuple((tag("\""), is_not("\""), tag("\""))))(
+            input,
+        )?;
     Ok((input, s))
 }
 

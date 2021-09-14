@@ -8,5 +8,5 @@ fib : I32 -> I32
 main : () -> ()
 = fn
 | () =>
-    println(fib(4))
+    println(fib(10))
 --
