@@ -1,0 +1,24 @@
+fizzbuzz : I32 -> String
+= fn
+| n =>
+    fn
+    | 0, 0 => "FizzBuzz"
+    | 0, _ => "Fizz"
+    | _, 0 => "Buzz"
+    | _, _ => n
+    --(n % 3, n % 5)
+--
+
+fizzbuzz_loop : I32 -> ()
+= fn
+| 0 => ()
+| n =>
+    fizzbuzz_loop(n - 1)
+    println(fizzbuzz(n))
+--
+
+main : () -> ()
+= fn
+| () =>
+    fizzbuzz_loop(100)
+--
