@@ -95,13 +95,17 @@ fn fn_arm(input: &str) -> IResult<&str, FnArm> {
 }
 
 fn pattern(input: &str) -> IResult<&str, Pattern> {
-    alt((
-        str_literal.map(|s| Pattern::StrLiteral(s.to_string())),
-        num_literal.map(|s| Pattern::Number(s.to_string())),
-        tag("()").map(|_| Pattern::Constructor("()".to_string())),
-        tag("_").map(|_| Pattern::Underscore),
-        identifier.map(|s| Pattern::Binder(s)),
-    ))(input)
+    delimited(
+        separator0,
+        alt((
+            str_literal.map(|s| Pattern::StrLiteral(s.to_string())),
+            num_literal.map(|s| Pattern::Number(s.to_string())),
+            tag("()").map(|_| Pattern::Constructor("()".to_string())),
+            tag("_").map(|_| Pattern::Underscore),
+            identifier.map(|s| Pattern::Binder(s)),
+        )),
+        separator0,
+    )(input)
 }
 
 fn str_literal(input: &str) -> IResult<&str, &str> {
