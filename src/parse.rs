@@ -5,8 +5,8 @@ use nom::{
     branch::alt,
     bytes::complete::{is_not, tag, take_while1},
     character::complete::{anychar, digit1, one_of, space0},
-    combinator::{recognize, verify},
-    multi::{many0, many1, many_m_n},
+    combinator::{opt, recognize, verify},
+    multi::{many0, many1},
     sequence::{delimited, pair, preceded, tuple},
     AsChar, IResult, Parser,
 };
@@ -125,7 +125,7 @@ fn fn_call(input: &str) -> IResult<&str, Vec<Expr>> {
         tag("("),
         op_sequence,
         many0(preceded(tag(","), op_sequence)),
-        many_m_n(0, 1, tag(",")),
+        opt(tag(",")),
         tag(")"),
     ))(input)?;
     let mut a0 = vec![Expr::Parenthesized(Box::new(a0))];
