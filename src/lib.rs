@@ -3,11 +3,15 @@ mod ast2;
 mod codegen;
 mod parse;
 
-use parse::parse;
 use codegen::compile;
+use parse::parse;
 
 pub fn run(source: &str) {
-    let ast: ast2::AST =
-        parse(source).map(|(_, ast)| ast.into()).unwrap();
-    println!("{}", compile(ast));
+    let (remaining, ast) = parse(source).unwrap();
+    if remaining.is_empty() {
+        let ast: ast2::AST = ast.into();
+        println!("{}", compile(ast));
+    } else {
+        eprintln!("unexpected input:\n{}", remaining);
+    }
 }
