@@ -58,7 +58,7 @@ impl From<ast::Expr> for Expr {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FnArm {
-    pub pattern: ast::Pattern,
+    pub pattern: Vec<ast::Pattern>,
     pub exprs: Vec<Expr>,
 }
 

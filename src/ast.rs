@@ -40,7 +40,7 @@ pub struct OpSequence {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FnArm {
-    pub pattern: Pattern,
+    pub pattern: Vec<Pattern>,
     pub exprs: Vec<OpSequence>,
 }
 

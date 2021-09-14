@@ -46,7 +46,7 @@ fn type_expr(input: &str) -> IResult<&str, OpSequence> {
 
 fn identifier(input: &str) -> IResult<&str, String> {
     let head = verify(anychar, |c| {
-        is_identifier_char(*c) && !c.is_dec_digit()
+        is_identifier_char(*c) && !c.is_dec_digit() || *c == '_'
     });
     let tail = verify(anychar, |c| is_identifier_char(*c));
     let (input, (h, t)) = pair(head, many0(tail))(input)?;
@@ -54,7 +54,7 @@ fn identifier(input: &str) -> IResult<&str, String> {
 }
 
 fn is_identifier_char(c: char) -> bool {
-    c.is_alphanumeric()
+    c.is_alphanumeric() || c == '_'
 }
 
 fn expr(input: &str) -> IResult<&str, Expr> {
@@ -81,14 +81,23 @@ fn lambda(input: &str) -> IResult<&str, Expr> {
 }
 
 fn fn_arm(input: &str) -> IResult<&str, FnArm> {
-    let (input, (_, pattern, _, arguments)) =
-        tuple((tag("|"), pattern, tag("=>"), many1(op_sequence)))(
-            input,
-        )?;
+    let (input, (_, pattern0, mut pattern1, _, _, arguments)) =
+        tuple((
+            tag("|"),
+            pattern,
+            many0(preceded(tag(","), pattern)),
+            opt(tag(",")),
+            tag("=>"),
+            many1(op_sequence),
+        ))(input)?;
     Ok((
         input,
         FnArm {
-            pattern,
+            pattern: {
+                let mut p = vec![pattern0];
+                p.append(&mut pattern1);
+                p
+            },
             exprs: arguments,
         },
     ))
