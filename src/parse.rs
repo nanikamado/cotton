@@ -49,8 +49,12 @@ fn identifier(input: &str) -> IResult<&str, String> {
         is_identifier_char(*c) && !c.is_dec_digit() || *c == '_'
     });
     let tail = verify(anychar, |c| is_identifier_char(*c));
-    let (input, (h, t)) = pair(head, many0(tail))(input)?;
-    Ok((input, h.to_string() + &t.into_iter().collect::<String>()))
+    let op = delimited(tag("("), op, tag(")"));
+    alt((
+        recognize(pair(head, many0(tail)))
+            .map(|s: &str| s.to_string()),
+        op,
+    ))(input)
 }
 
 fn is_identifier_char(c: char) -> bool {
@@ -184,18 +188,14 @@ fn op_sequence(input: &str) -> IResult<&str, OpSequence> {
 fn op(input: &str) -> IResult<&str, String> {
     verify(
         take_while1(|c| {
-            GeneralCategory::of(c).is_punctuation()
-                || GeneralCategory::of(c).is_symbol()
+            (GeneralCategory::of(c).is_punctuation()
+                || GeneralCategory::of(c).is_symbol())
+                && c != '"'
+                && c != '('
+                && c != ')'
         }),
         |s: &str| {
-            s != "="
-                && s != "=>"
-                && s != "|"
-                && s != "--"
-                && s != ","
-                && !s.contains("\"")
-                && !s.contains("(")
-                && !s.contains(")")
+            s != "=" && s != "=>" && s != "|" && s != "--" && s != ","
         },
     )(input)
     .map(|(i, s)| (i, s.to_string()))

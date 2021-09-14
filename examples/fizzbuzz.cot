@@ -14,11 +14,16 @@ fizzbuzz_loop : I32 -> ()
 | 0 => ()
 | n =>
     fizzbuzz_loop(n - 1)
-    println(fizzbuzz(n))
+    n.fizzbuzz.println
+--
+
+(.) : Any
+= fn
+| a, f => f(a)
 --
 
 main : () -> ()
 = fn
 | () =>
-    fizzbuzz_loop(100)
+    100.fizzbuzz_loop
 --
