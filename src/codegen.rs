@@ -1,5 +1,5 @@
 use crate::ast0::{DataDeclaration, Pattern};
-use crate::ast1::{Declaration, Expr, FnArm, Ast};
+use crate::ast1::{Ast, Declaration, Expr, FnArm};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
@@ -121,7 +121,11 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
                 vec![format!("{} === {}", a.clone(), n)]
             }
             Pattern::Constructor(a, ps) => {
-                let mut v = vec![format!("'{}' === {}.name", convert_name(a), n)];
+                let mut v = vec![format!(
+                    "'{}' === {}.name",
+                    convert_name(a),
+                    n
+                )];
                 v.append(&mut _condition(
                     ps,
                     &(0..ps.len())

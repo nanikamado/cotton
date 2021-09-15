@@ -1,4 +1,7 @@
-use clap::{crate_authors, crate_description, crate_name, crate_version, App, Arg};
+use clap::{
+    crate_authors, crate_description, crate_name, crate_version, App,
+    Arg,
+};
 use cotton::run;
 use std::{fs, process};
 
