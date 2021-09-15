@@ -1,4 +1,4 @@
-use crate::ast::Pattern;
+use crate::ast::{DataDeclaration, Pattern};
 use crate::ast2::{Declaration, Expr, FnArm, AST};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
@@ -7,19 +7,33 @@ use unic_ucd_category::GeneralCategory;
 
 pub fn compile(ast: AST) -> String {
     format!(
-        "{}{}{}",
+        "{}{}{}{}",
         "{
         let println = a => console.log(a);
         let $plus = a => b => a + b;
         let $minus = a => b => a - b;
         let $mod = a => b => a % b;",
+        ast.data_declarations.into_iter().map(data_declaration).join(""),
         ast.declarations.into_iter().map(declaration).join(""),
         "main('()');}",
     )
 }
 
+fn data_declaration(d: DataDeclaration) -> String {
+    format!(
+        "let {} = {} [{}];",
+        convert_name(&d.name),
+        (0..d.field_len).map(|i| format!("${} =>", i)).join(""),
+        (0..d.field_len).map(|i| format!("${}", i)).join(", "),
+    )
+}
+
 fn declaration(d: Declaration) -> String {
-    format!("let {} = {};", convert_name(&d.identifier), expr(&d.value, 0))
+    format!(
+        "let {} = {};",
+        convert_name(&d.identifier),
+        expr(&d.value, 0)
+    )
 }
 
 static PRIMITIVES: Lazy<HashMap<&str, &str>> = Lazy::new(|| {

@@ -1,5 +1,6 @@
 use crate::ast::{
-    Declaration, Expr, FnArm, OpSequence, Pattern, AST,
+    DataDeclaration, Dec, Declaration, Expr, FnArm, OpSequence,
+    Pattern, AST,
 };
 use nom::{
     branch::alt,
@@ -17,8 +18,24 @@ fn separator0(input: &str) -> IResult<&str, Vec<char>> {
 }
 
 pub fn parse(source: &str) -> IResult<&str, AST> {
-    let (input, declarations) = many1(declaration)(source)?;
+    let (input, declarations) = many1(dec)(source)?;
     Ok((input, AST { declarations }))
+}
+
+fn dec(input: &str) -> IResult<&str, Dec> {
+    pad(alt((
+        declaration.map(Dec::Variable),
+        data_declaration.map(Dec::Data),
+    )))(input)
+}
+
+fn pad<'a, O, F>(
+    f: F,
+) -> impl FnMut(&'a str) -> IResult<&'a str, O, nom::error::Error<&str>>
+where
+    F: FnMut(&'a str) -> IResult<&'a str, O, nom::error::Error<&str>>,
+{
+    delimited(separator0, f, separator0)
 }
 
 fn declaration(input: &str) -> IResult<&str, Declaration> {
@@ -36,6 +53,39 @@ fn declaration(input: &str) -> IResult<&str, Declaration> {
             identifier,
             datatype: (),
             value,
+        },
+    ))
+}
+
+fn identifier_separators(input: &str) -> IResult<&str, String> {
+    pad(identifier)(input)
+}
+
+fn data_declaration(input: &str) -> IResult<&str, DataDeclaration> {
+    let (input, (_, _, name, fields)) = tuple((
+        tag("data"),
+        separator0,
+        identifier,
+        opt(tuple((
+            tag("("),
+            identifier_separators,
+            many0(preceded(tag(","), identifier_separators)),
+            opt(tag(",")),
+            tag(")"),
+        ))),
+    ))(input)?;
+    let fields = if let Some((_, field0, mut field1, _, _)) = fields {
+        let mut field0 = vec![field0];
+        field0.append(&mut field1);
+        field0
+    } else {
+        Vec::new()
+    };
+    Ok((
+        input,
+        DataDeclaration {
+            name,
+            field_len: fields.len(),
         },
     ))
 }
@@ -62,18 +112,14 @@ fn is_identifier_char(c: char) -> bool {
 }
 
 fn expr(input: &str) -> IResult<&str, Expr> {
-    delimited(
-        separator0,
-        alt((
-            str_literal.map(|s| Expr::StrLiteral(s.to_string())),
-            num_literal.map(|s| Expr::Number(s.to_string())),
-            unit,
-            lambda,
-            declaration.map(|d| Expr::Declaration(Box::new(d))),
-            identifier.map(|s| Expr::Identifier(s)),
-        )),
-        separator0,
-    )(input)
+    pad(alt((
+        str_literal.map(|s| Expr::StrLiteral(s.to_string())),
+        num_literal.map(|s| Expr::Number(s.to_string())),
+        unit,
+        lambda,
+        declaration.map(|d| Expr::Declaration(Box::new(d))),
+        identifier.map(|s| Expr::Identifier(s)),
+    )))(input)
 }
 
 fn lambda(input: &str) -> IResult<&str, Expr> {
@@ -108,17 +154,13 @@ fn fn_arm(input: &str) -> IResult<&str, FnArm> {
 }
 
 fn pattern(input: &str) -> IResult<&str, Pattern> {
-    delimited(
-        separator0,
-        alt((
-            str_literal.map(|s| Pattern::StrLiteral(s.to_string())),
-            num_literal.map(|s| Pattern::Number(s.to_string())),
-            tag("()").map(|_| Pattern::Constructor("()".to_string())),
-            tag("_").map(|_| Pattern::Underscore),
-            identifier.map(|s| Pattern::Binder(s)),
-        )),
-        separator0,
-    )(input)
+    pad(alt((
+        str_literal.map(|s| Pattern::StrLiteral(s.to_string())),
+        num_literal.map(|s| Pattern::Number(s.to_string())),
+        tag("()").map(|_| Pattern::Constructor("()".to_string())),
+        tag("_").map(|_| Pattern::Underscore),
+        identifier.map(|s| Pattern::Binder(s)),
+    )))(input)
 }
 
 fn str_literal(input: &str) -> IResult<&str, &str> {
@@ -165,8 +207,7 @@ fn op_sequence(input: &str) -> IResult<&str, OpSequence> {
                     .map(|e| ("fn_call".to_string(), e))
                     .collect()
             }),
-            tuple((delimited(separator0, op, separator0), expr))
-                .map(|(s, e)| vec![(s, e)]),
+            tuple((pad(op), expr)).map(|(s, e)| vec![(s, e)]),
         ))),
         separator0,
     ))(input)?;

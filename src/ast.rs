@@ -1,6 +1,12 @@
 #[derive(Debug, PartialEq, Eq)]
 pub struct AST {
-    pub declarations: Vec<Declaration>,
+    pub declarations: Vec<Dec>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Dec {
+    Variable(Declaration),
+    Data(DataDeclaration),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -11,6 +17,12 @@ pub struct Declaration {
 }
 
 pub type Datatype = ();
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct DataDeclaration {
+    pub name: String,
+    pub field_len: usize,
+}
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Expr {

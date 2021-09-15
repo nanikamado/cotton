@@ -1,10 +1,12 @@
 use crate::ast;
+use itertools::Itertools;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AST {
     pub declarations: Vec<Declaration>,
+    pub data_declarations: Vec<ast::DataDeclaration>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -102,9 +104,18 @@ impl PartialOrd for Operator {
 
 impl From<ast::AST> for AST {
     fn from(ast: ast::AST) -> Self {
-        let ds =
-            ast.declarations.into_iter().map(declaration).collect();
-        AST { declarations: ds }
+        let (vs, ds) = ast
+            .declarations
+            .into_iter()
+            .map(|d| match d {
+                ast::Dec::Variable(a) => Ok(declaration(a)),
+                ast::Dec::Data(a) => Err(a),
+            })
+            .partition_result();
+        AST {
+            declarations: vs,
+            data_declarations: ds,
+        }
     }
 }
 
