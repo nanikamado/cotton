@@ -35,19 +35,19 @@ pub enum Expr {
     Paren(OpSequence),
 }
 
-impl Into<OpSequence> for Expr {
-    fn into(self) -> OpSequence {
-        OpSequence {
-            operators: Vec::new(),
-            operands: vec![self],
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct OpSequence {
     pub operators: Vec<String>,
     pub operands: Vec<Expr>,
+}
+
+impl From<Expr> for OpSequence {
+    fn from(e: Expr) -> Self {
+        OpSequence {
+            operators: Vec::new(),
+            operands: vec![e],
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]

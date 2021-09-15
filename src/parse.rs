@@ -1,6 +1,6 @@
 use crate::ast0::{
-    DataDeclaration, Dec, Declaration, Expr, FnArm,
-    InfixConstructorSequence, OpSequence, Pattern, Ast,
+    Ast, DataDeclaration, Dec, Declaration, Expr, FnArm,
+    InfixConstructorSequence, OpSequence, Pattern,
 };
 use nom::{
     branch::alt,
@@ -243,8 +243,7 @@ fn fn_call(input: &str) -> IResult<&str, Vec<Expr>> {
         tag(")"),
     ))(input)?;
     let mut a0 = vec![Expr::Paren(a0)];
-    let mut a1 =
-        a1.into_iter().map(Expr::Paren).collect();
+    let mut a1 = a1.into_iter().map(Expr::Paren).collect();
     a0.append(&mut a1);
     Ok((input, a0))
 }
