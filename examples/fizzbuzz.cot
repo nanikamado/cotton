@@ -2,7 +2,7 @@ data Tuple(a, b)
 
 data a /\ b
 
-fizzbuzz : I32 -> String
+fizzbuzz
 = fn
 | n =>
     (n % 3 /\ n % 5).fn
@@ -21,7 +21,7 @@ fizzbuzz_loop : I32 -> ()
     n.fizzbuzz.println
 --
 
-(.) : Any
+(.)
 = fn
 | a, f => f(a)
 --

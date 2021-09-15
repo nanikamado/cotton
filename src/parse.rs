@@ -5,7 +5,7 @@ use crate::ast0::{
 use nom::{
     branch::alt,
     bytes::complete::{is_not, tag, take_while1},
-    character::complete::{anychar, digit1, one_of, space0},
+    character::complete::{anychar, digit1, one_of},
     combinator::{opt, recognize, verify},
     multi::{many0, many1},
     sequence::{delimited, pair, preceded, tuple},
@@ -40,11 +40,10 @@ where
 }
 
 fn declaration(input: &str) -> IResult<&str, Declaration> {
-    let (input, (identifier, _, _, _, _, value)) = tuple((
+    let (input, (identifier, _, _, _, value)) = tuple((
         identifier,
-        space0,
-        tag(":"),
-        type_expr,
+        separator0,
+        opt(preceded(tag(":"), type_expr)),
         tag("="),
         op_sequence,
     ))(input)?;
@@ -103,8 +102,8 @@ fn infix_constructor_declaration(
     Ok((input, DataDeclaration { name, field_len: 2 }))
 }
 
-fn type_expr(input: &str) -> IResult<&str, OpSequence> {
-    op_sequence(input)
+fn type_expr(input: &str) -> IResult<&str, InfixConstructorSequence> {
+    infix_constructor_sequence(input)
 }
 
 fn identifier(input: &str) -> IResult<&str, String> {
