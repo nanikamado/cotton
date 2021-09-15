@@ -53,7 +53,7 @@ impl From<ast::Expr> for Expr {
                 Declaration(Box::new((*a).into()))
             }
             ast::Expr::Unit => Unit,
-            ast::Expr::Parenthesized(a) => a.into(),
+            ast::Expr::Paren(a) => a.into(),
         }
     }
 }

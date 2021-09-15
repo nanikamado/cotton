@@ -154,7 +154,7 @@ fn expr(input: &str) -> IResult<&str, Expr> {
 fn paren(input: &str) -> IResult<&str, Expr> {
     let (input, s) =
         delimited(tag("("), op_sequence, tag(")"))(input)?;
-    Ok((input, Expr::Parenthesized(s)))
+    Ok((input, Expr::Paren(s)))
 }
 
 fn lambda(input: &str) -> IResult<&str, Expr> {
@@ -242,9 +242,9 @@ fn fn_call(input: &str) -> IResult<&str, Vec<Expr>> {
         opt(tag(",")),
         tag(")"),
     ))(input)?;
-    let mut a0 = vec![Expr::Parenthesized(a0)];
+    let mut a0 = vec![Expr::Paren(a0)];
     let mut a1 =
-        a1.into_iter().map(|s| Expr::Parenthesized(s)).collect();
+        a1.into_iter().map(|s| Expr::Paren(s)).collect();
     a0.append(&mut a1);
     Ok((input, a0))
 }

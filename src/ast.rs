@@ -32,7 +32,7 @@ pub enum Expr {
     Identifier(String),
     Declaration(Box<Declaration>),
     Unit,
-    Parenthesized(OpSequence),
+    Paren(OpSequence),
 }
 
 impl Into<OpSequence> for Expr {
