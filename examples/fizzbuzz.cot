@@ -1,5 +1,7 @@
 data Tuple(a, b)
 
+data a /\ b
+
 fizzbuzz : I32 -> String
 = fn
 | n =>

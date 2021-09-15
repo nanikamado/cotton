@@ -25,6 +25,7 @@ pub fn parse(source: &str) -> IResult<&str, AST> {
 fn dec(input: &str) -> IResult<&str, Dec> {
     pad(alt((
         declaration.map(Dec::Variable),
+        infix_constructor_declaration.map(Dec::Data),
         data_declaration.map(Dec::Data),
     )))(input)
 }
@@ -65,7 +66,7 @@ fn data_declaration(input: &str) -> IResult<&str, DataDeclaration> {
     let (input, (_, _, name, fields)) = tuple((
         tag("data"),
         separator0,
-        identifier,
+        capital_head_identifier,
         opt(tuple((
             tag("("),
             identifier_separators,
@@ -88,6 +89,18 @@ fn data_declaration(input: &str) -> IResult<&str, DataDeclaration> {
             field_len: fields.len(),
         },
     ))
+}
+
+fn infix_constructor_declaration(
+    input: &str,
+) -> IResult<&str, DataDeclaration> {
+    let (input, (_, _l, name, _r)) = tuple((
+        tag("data"),
+        identifier_separators,
+        op,
+        identifier_separators,
+    ))(input)?;
+    Ok((input, DataDeclaration { name, field_len: 2 }))
 }
 
 fn type_expr(input: &str) -> IResult<&str, OpSequence> {
