@@ -1,5 +1,5 @@
-use crate::ast::{DataDeclaration, Pattern};
-use crate::ast2::{Declaration, Expr, FnArm, AST};
+use crate::ast0::{DataDeclaration, Pattern};
+use crate::ast1::{Declaration, Expr, FnArm, AST};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};

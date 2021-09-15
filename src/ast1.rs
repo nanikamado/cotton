@@ -1,4 +1,4 @@
-use crate::ast;
+use crate::ast0;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use std::collections::{BTreeSet, HashMap};
@@ -6,7 +6,7 @@ use std::collections::{BTreeSet, HashMap};
 #[derive(Debug, PartialEq, Eq)]
 pub struct AST {
     pub declarations: Vec<Declaration>,
-    pub data_declarations: Vec<ast::DataDeclaration>,
+    pub data_declarations: Vec<ast0::DataDeclaration>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -16,8 +16,8 @@ pub struct Declaration {
     pub value: Expr,
 }
 
-impl From<ast::Declaration> for Declaration {
-    fn from(d: ast::Declaration) -> Self {
+impl From<ast0::Declaration> for Declaration {
+    fn from(d: ast0::Declaration) -> Self {
         Self {
             identifier: d.identifier,
             datatype: d.datatype,
@@ -39,44 +39,44 @@ pub enum Expr {
     Unit,
 }
 
-impl From<ast::Expr> for Expr {
-    fn from(ast_expr: ast::Expr) -> Self {
+impl From<ast0::Expr> for Expr {
+    fn from(ast_expr: ast0::Expr) -> Self {
         use Expr::*;
         match ast_expr {
-            ast::Expr::Lambda(a) => {
+            ast0::Expr::Lambda(a) => {
                 Lambda(a.into_iter().map(|f| f.into()).collect())
             }
-            ast::Expr::Number(a) => Number(a),
-            ast::Expr::StrLiteral(a) => StrLiteral(a),
-            ast::Expr::Identifier(a) => Identifier(a),
-            ast::Expr::Declaration(a) => {
+            ast0::Expr::Number(a) => Number(a),
+            ast0::Expr::StrLiteral(a) => StrLiteral(a),
+            ast0::Expr::Identifier(a) => Identifier(a),
+            ast0::Expr::Declaration(a) => {
                 Declaration(Box::new((*a).into()))
             }
-            ast::Expr::Unit => Unit,
-            ast::Expr::Paren(a) => a.into(),
+            ast0::Expr::Unit => Unit,
+            ast0::Expr::Paren(a) => a.into(),
         }
     }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FnArm {
-    pub pattern: Vec<ast::Pattern>,
+    pub pattern: Vec<ast0::Pattern>,
     pub exprs: Vec<Expr>,
 }
 
 fn infix_constructor_sequence_to_pattern(
-    s: ast::InfixConstructorSequence,
-) -> ast::Pattern {
+    s: ast0::InfixConstructorSequence,
+) -> ast0::Pattern {
     let op_list: BTreeSet<_> =
         s.operators.iter().map(|s| OP_PRECEDENCE[&s[..]]).collect();
     let mut operators = s.operators;
-    let mut operands: Vec<ast::Pattern> = s.operands;
+    let mut operands: Vec<ast0::Pattern> = s.operands;
     for a in op_list.into_iter().rev() {
         let mut operand_head = 0;
         for i in 0..operators.len() {
             let op = operators[i].clone();
             if a == OP_PRECEDENCE[&op[..]] {
-                operands[operand_head] = ast::Pattern::Constructor(
+                operands[operand_head] = ast0::Pattern::Constructor(
                     op,
                     vec![
                         operands[operand_head].clone(),
@@ -93,8 +93,8 @@ fn infix_constructor_sequence_to_pattern(
     operands[0].clone()
 }
 
-impl From<ast::FnArm> for FnArm {
-    fn from(ast_fn_arm: ast::FnArm) -> Self {
+impl From<ast0::FnArm> for FnArm {
+    fn from(ast_fn_arm: ast0::FnArm) -> Self {
         Self {
             pattern: ast_fn_arm
                 .pattern
@@ -142,14 +142,14 @@ impl PartialOrd for Operator {
     }
 }
 
-impl From<ast::AST> for AST {
-    fn from(ast: ast::AST) -> Self {
+impl From<ast0::AST> for AST {
+    fn from(ast: ast0::AST) -> Self {
         let (vs, ds) = ast
             .declarations
             .into_iter()
             .map(|d| match d {
-                ast::Dec::Variable(a) => Ok(declaration(a)),
-                ast::Dec::Data(a) => Err(a),
+                ast0::Dec::Variable(a) => Ok(declaration(a)),
+                ast0::Dec::Data(a) => Err(a),
             })
             .partition_result();
         AST {
@@ -159,7 +159,7 @@ impl From<ast::AST> for AST {
     }
 }
 
-fn declaration(d: ast::Declaration) -> Declaration {
+fn declaration(d: ast0::Declaration) -> Declaration {
     Declaration {
         identifier: d.identifier,
         datatype: d.datatype,
@@ -167,8 +167,8 @@ fn declaration(d: ast::Declaration) -> Declaration {
     }
 }
 
-impl From<ast::OpSequence> for Expr {
-    fn from(s: ast::OpSequence) -> Self {
+impl From<ast0::OpSequence> for Expr {
+    fn from(s: ast0::OpSequence) -> Self {
         let op_list: BTreeSet<_> = s
             .operators
             .clone()
