@@ -1,6 +1,6 @@
 use crate::ast0::{
     DataDeclaration, Dec, Declaration, Expr, FnArm,
-    InfixConstructorSequence, OpSequence, Pattern, AST,
+    InfixConstructorSequence, OpSequence, Pattern, Ast,
 };
 use nom::{
     branch::alt,
@@ -17,9 +17,9 @@ fn separator0(input: &str) -> IResult<&str, Vec<char>> {
     many0(one_of("\r\n\t "))(input)
 }
 
-pub fn parse(source: &str) -> IResult<&str, AST> {
+pub fn parse(source: &str) -> IResult<&str, Ast> {
     let (input, declarations) = many1(dec)(source)?;
-    Ok((input, AST { declarations }))
+    Ok((input, Ast { declarations }))
 }
 
 fn dec(input: &str) -> IResult<&str, Dec> {

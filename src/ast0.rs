@@ -1,5 +1,5 @@
 #[derive(Debug, PartialEq, Eq)]
-pub struct AST {
+pub struct Ast {
     pub declarations: Vec<Dec>,
 }
 

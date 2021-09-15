@@ -4,7 +4,7 @@ use once_cell::sync::Lazy;
 use std::collections::{BTreeSet, HashMap};
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct AST {
+pub struct Ast {
     pub declarations: Vec<Declaration>,
     pub data_declarations: Vec<ast0::DataDeclaration>,
 }
@@ -142,8 +142,8 @@ impl PartialOrd for Operator {
     }
 }
 
-impl From<ast0::AST> for AST {
-    fn from(ast: ast0::AST) -> Self {
+impl From<ast0::Ast> for Ast {
+    fn from(ast: ast0::Ast) -> Self {
         let (vs, ds) = ast
             .declarations
             .into_iter()
@@ -152,7 +152,7 @@ impl From<ast0::AST> for AST {
                 ast0::Dec::Data(a) => Err(a),
             })
             .partition_result();
-        AST {
+        Ast {
             declarations: vs,
             data_declarations: ds,
         }

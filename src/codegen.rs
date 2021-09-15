@@ -1,11 +1,11 @@
 use crate::ast0::{DataDeclaration, Pattern};
-use crate::ast1::{Declaration, Expr, FnArm, AST};
+use crate::ast1::{Declaration, Expr, FnArm, Ast};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
 use unic_ucd_category::GeneralCategory;
 
-pub fn compile(ast: AST) -> String {
+pub fn compile(ast: Ast) -> String {
     format!(
         "{}{}{}{}",
         "{

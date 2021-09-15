@@ -9,7 +9,7 @@ use parse::parse;
 pub fn run(source: &str) {
     let (remaining, ast) = parse(source).unwrap();
     if remaining.is_empty() {
-        let ast: ast1::AST = ast.into();
+        let ast: ast1::Ast = ast.into();
         println!("{}", compile(ast));
     } else {
         eprintln!("unexpected input:\n{}", remaining);
