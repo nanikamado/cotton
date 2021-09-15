@@ -107,6 +107,21 @@ fn identifier(input: &str) -> IResult<&str, String> {
     ))(input)
 }
 
+fn capital_head_identifier(input: &str) -> IResult<&str, String> {
+    let head = verify(anychar, |c| {
+        c.is_uppercase()
+            && is_identifier_char(*c)
+            && !c.is_dec_digit()
+    });
+    let tail = verify(anychar, |c| is_identifier_char(*c));
+    let op = delimited(tag("("), op, tag(")"));
+    alt((
+        recognize(pair(head, many0(tail)))
+            .map(|s: &str| s.to_string()),
+        op,
+    ))(input)
+}
+
 fn is_identifier_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
@@ -157,10 +172,34 @@ fn pattern(input: &str) -> IResult<&str, Pattern> {
     pad(alt((
         str_literal.map(|s| Pattern::StrLiteral(s.to_string())),
         num_literal.map(|s| Pattern::Number(s.to_string())),
-        tag("()").map(|_| Pattern::Constructor("()".to_string())),
+        tag("()").map(|_| {
+            Pattern::Constructor("()".to_string(), Vec::new())
+        }),
         tag("_").map(|_| Pattern::Underscore),
+        constructor_pattern,
         identifier.map(|s| Pattern::Binder(s)),
     )))(input)
+}
+
+fn constructor_pattern(input: &str) -> IResult<&str, Pattern> {
+    let (input, (name, fields)) = tuple((
+        capital_head_identifier,
+        opt(tuple((
+            tag("("),
+            pattern,
+            many0(preceded(tag(","), pattern)),
+            opt(tag(",")),
+            tag(")"),
+        ))),
+    ))(input)?;
+    let fields = if let Some((_, field0, mut field1, _, _)) = fields {
+        let mut field0 = vec![field0];
+        field0.append(&mut field1);
+        field0
+    } else {
+        Vec::new()
+    };
+    Ok((input, Pattern::Constructor(name, fields)))
 }
 
 fn str_literal(input: &str) -> IResult<&str, &str> {

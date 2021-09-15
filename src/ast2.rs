@@ -1,7 +1,7 @@
 use crate::ast;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AST {
@@ -81,7 +81,7 @@ impl From<ast::FnArm> for FnArm {
 struct Operator(String);
 
 static OP_PRECEDENCE: Lazy<HashMap<&str, i32>> = Lazy::new(|| {
-    [("fn_call", 10), (".", 10), ("+", 6), ("-", 6)]
+    [("fn_call", 10), (".", 10), ("+", 6), ("-", 6), ("%", 7)]
         .iter()
         .cloned()
         .collect()
@@ -129,14 +129,12 @@ fn declaration(d: ast::Declaration) -> Declaration {
 
 impl From<ast::OpSequence> for Expr {
     fn from(s: ast::OpSequence) -> Self {
-        let mut op_list: Vec<_> = s
+        let op_list: BTreeSet<_> = s
             .operators
             .clone()
             .into_iter()
-            .map(|s| Operator(s))
+            .map(|s| OP_PRECEDENCE[&s[..]])
             .collect();
-        op_list.sort();
-        op_list.dedup();
         let mut operators = s.operators;
         let mut operands: Vec<Expr> =
             s.operands.into_iter().map(|o| o.into()).collect();
@@ -144,7 +142,7 @@ impl From<ast::OpSequence> for Expr {
             let mut operand_head = 0;
             for i in 0..operators.len() {
                 let op = operators[i].clone();
-                if a.0 == op {
+                if a == OP_PRECEDENCE[&op[..]] {
                     operands[operand_head] = Expr::Call(
                         Box::new(if op == *"fn_call" {
                             operands[operand_head].clone()
@@ -163,7 +161,7 @@ impl From<ast::OpSequence> for Expr {
                     operands[operand_head] = operands[i + 1].clone();
                 }
             }
-            operators.retain(|o| *o != a.0);
+            operators.retain(|o| OP_PRECEDENCE[&o[..]] != a);
         }
         operands[0].clone()
     }

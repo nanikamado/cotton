@@ -13,18 +13,23 @@ pub fn compile(ast: AST) -> String {
         let $plus = a => b => a + b;
         let $minus = a => b => a - b;
         let $mod = a => b => a % b;",
-        ast.data_declarations.into_iter().map(data_declaration).join(""),
+        ast.data_declarations
+            .into_iter()
+            .map(data_declaration)
+            .join(""),
         ast.declarations.into_iter().map(declaration).join(""),
-        "main('()');}",
+        "main({name: '()'});}",
     )
 }
 
 fn data_declaration(d: DataDeclaration) -> String {
+    let name = convert_name(&d.name);
     format!(
-        "let {} = {} [{}];",
-        convert_name(&d.name),
+        "let {} = {} ({{name: '{}', {}}});",
+        name,
         (0..d.field_len).map(|i| format!("${} =>", i)).join(""),
-        (0..d.field_len).map(|i| format!("${}", i)).join(", "),
+        name,
+        (0..d.field_len).map(|i| format!("{0}: ${0}", i)).join(", "),
     )
 }
 
@@ -46,7 +51,7 @@ static PRIMITIVES: Lazy<HashMap<&str, &str>> = Lazy::new(|| {
 fn expr(e: &Expr, name_count: u32) -> String {
     match e {
         Expr::Lambda(a) => format!(
-            "{} {{ return {} 'unexpected';}}",
+            "{} {} 'unexpected'",
             (0..a[0].pattern.len())
                 .map(|c| format!("${} => ", name_count + c as u32))
                 .join(""),
@@ -93,19 +98,41 @@ fn fn_arm(e: &FnArm, name_count: u32) -> String {
 }
 
 fn condition(pattern: &[Pattern], name_count: u32) -> String {
+    let rst = _condition(
+        pattern,
+        &(0..pattern.len())
+            .map(|i| format!("${}", i + name_count as usize))
+            .collect_vec(),
+    )
+    .join(" && ");
+    if rst.is_empty() {
+        "true".to_string()
+    } else {
+        rst
+    }
+}
+
+fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
     pattern
         .iter()
-        .zip(name_count..)
-        .filter_map(|(p, n)| match p {
+        .zip(names)
+        .flat_map(|(p, n)| match p {
             Pattern::Number(a) | Pattern::StrLiteral(a) => {
-                Some((a.clone(), n))
+                vec![format!("{} === {}", a.clone(), n)]
             }
-            Pattern::Constructor(a) => Some((format!("'{}'", a), n)),
-            _ => None,
+            Pattern::Constructor(a, ps) => {
+                let mut v = vec![format!("'{}' === {}.name", a, n)];
+                v.append(&mut _condition(
+                    ps,
+                    &(0..ps.len())
+                        .map(|i| format!("{}[{}]", n, i))
+                        .collect_vec(),
+                ));
+                v
+            }
+            _ => Vec::new(),
         })
-        .map(|(a, n)| format!("{} === ${} &&", a, n))
-        .join("")
-        + &"true"
+        .collect()
 }
 
 fn bindings(

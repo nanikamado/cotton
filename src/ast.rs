@@ -60,7 +60,7 @@ pub struct FnArm {
 pub enum Pattern {
     Number(String),
     StrLiteral(String),
-    Constructor(String),
+    Constructor(String, Vec<Pattern>),
     Binder(String),
     Underscore,
 }

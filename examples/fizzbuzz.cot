@@ -3,12 +3,12 @@ data Tuple(a, b)
 fizzbuzz : I32 -> String
 = fn
 | n =>
-    fn
-    | 0, 0 => "FizzBuzz"
-    | 0, _ => "Fizz"
-    | _, 0 => "Buzz"
-    | _, _ => n
-    --(n % 3, n % 5)
+    Tuple(n % 3, n % 5).fn
+    | Tuple(0, 0) => "FizzBuzz"
+    | Tuple(0, _) => "Fizz"
+    | Tuple(_, 0) => "Buzz"
+    | Tuple(_, _) => n
+    --
 --
 
 fizzbuzz_loop : I32 -> ()
