@@ -1,4 +1,19 @@
-data Tuple(a, b)
+(.)
+= fn
+| a, f => f(a)
+--
+
+data Next(a)
+data End(a)
+
+loop
+= fn
+| init, f =>
+    init.f.fn
+    | Next(a) => a.loop(f)
+    | End(a) => a
+    --
+--
 
 data a /\ b
 
@@ -13,21 +28,14 @@ fizzbuzz
     --
 --
 
-fizzbuzz_loop : I32 -> ()
-= fn
-| 0 => ()
-| n =>
-    fizzbuzz_loop(n - 1)
-    n.fizzbuzz.println
---
-
-(.)
-= fn
-| a, f => f(a)
---
-
 main : () -> ()
 = fn
 | () =>
-    100.fizzbuzz_loop
+    1.loop(fn
+    | 101 => End(())
+    | i =>
+        i.fizzbuzz.println
+        Next(i + 1)
+    --
+    )
 --
