@@ -70,8 +70,7 @@ fn infix_constructor_sequence_to_pattern(
     let op_list: BTreeSet<_> =
         s.operators.iter().map(|s| OP_PRECEDENCE[&s[..]]).collect();
     let mut operators = s.operators;
-    let mut operands: Vec<ast::Pattern> =
-        s.operands.into_iter().map(|o| o.into()).collect();
+    let mut operands: Vec<ast::Pattern> = s.operands;
     for a in op_list.into_iter().rev() {
         let mut operand_head = 0;
         for i in 0..operators.len() {
