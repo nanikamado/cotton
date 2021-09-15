@@ -32,7 +32,7 @@ pub enum Expr {
     Identifier(String),
     Declaration(Box<Declaration>),
     Unit,
-    Parenthesized(Box<OpSequence>),
+    Parenthesized(OpSequence),
 }
 
 impl Into<OpSequence> for Expr {
@@ -52,8 +52,14 @@ pub struct OpSequence {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FnArm {
-    pub pattern: Vec<Pattern>,
+    pub pattern: Vec<InfixConstructorSequence>,
     pub exprs: Vec<OpSequence>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct InfixConstructorSequence {
+    pub operators: Vec<String>,
+    pub operands: Vec<Pattern>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]

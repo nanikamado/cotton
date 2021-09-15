@@ -18,7 +18,7 @@ pub fn compile(ast: AST) -> String {
             .map(data_declaration)
             .join(""),
         ast.declarations.into_iter().map(declaration).join(""),
-        "main({name: '()'});}",
+        "main({name: '$unicode_28_29'});}",
     )
 }
 
@@ -121,7 +121,7 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
                 vec![format!("{} === {}", a.clone(), n)]
             }
             Pattern::Constructor(a, ps) => {
-                let mut v = vec![format!("'{}' === {}.name", a, n)];
+                let mut v = vec![format!("'{}' === {}.name", convert_name(a), n)];
                 v.append(&mut _condition(
                     ps,
                     &(0..ps.len())

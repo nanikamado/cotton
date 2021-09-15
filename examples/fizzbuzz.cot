@@ -5,11 +5,11 @@ data a /\ b
 fizzbuzz : I32 -> String
 = fn
 | n =>
-    Tuple(n % 3, n % 5).fn
-    | Tuple(0, 0) => "FizzBuzz"
-    | Tuple(0, _) => "Fizz"
-    | Tuple(_, 0) => "Buzz"
-    | Tuple(_, _) => n
+    (n % 3 /\ n % 5).fn
+    | 0 /\ 0 => "FizzBuzz"
+    | 0 /\ _ => "Fizz"
+    | _ /\ 0 => "Buzz"
+    | _ /\ _ => n
     --
 --
 

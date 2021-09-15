@@ -1,6 +1,6 @@
 use crate::ast::{
-    DataDeclaration, Dec, Declaration, Expr, FnArm, OpSequence,
-    Pattern, AST,
+    DataDeclaration, Dec, Declaration, Expr, FnArm,
+    InfixConstructorSequence, OpSequence, Pattern, AST,
 };
 use nom::{
     branch::alt,
@@ -147,7 +147,14 @@ fn expr(input: &str) -> IResult<&str, Expr> {
         lambda,
         declaration.map(|d| Expr::Declaration(Box::new(d))),
         identifier.map(|s| Expr::Identifier(s)),
+        paren,
     )))(input)
+}
+
+fn paren(input: &str) -> IResult<&str, Expr> {
+    let (input, s) =
+        delimited(tag("("), op_sequence, tag(")"))(input)?;
+    Ok((input, Expr::Parenthesized(s)))
 }
 
 fn lambda(input: &str) -> IResult<&str, Expr> {
@@ -162,8 +169,8 @@ fn fn_arm(input: &str) -> IResult<&str, FnArm> {
     let (input, (_, pattern0, mut pattern1, _, _, arguments)) =
         tuple((
             tag("|"),
-            pattern,
-            many0(preceded(tag(","), pattern)),
+            infix_constructor_sequence,
+            many0(preceded(tag(","), infix_constructor_sequence)),
             opt(tag(",")),
             tag("=>"),
             many1(op_sequence),
@@ -235,11 +242,9 @@ fn fn_call(input: &str) -> IResult<&str, Vec<Expr>> {
         opt(tag(",")),
         tag(")"),
     ))(input)?;
-    let mut a0 = vec![Expr::Parenthesized(Box::new(a0))];
-    let mut a1 = a1
-        .into_iter()
-        .map(|s| Expr::Parenthesized(Box::new(s)))
-        .collect();
+    let mut a0 = vec![Expr::Parenthesized(a0)];
+    let mut a1 =
+        a1.into_iter().map(|s| Expr::Parenthesized(s)).collect();
     a0.append(&mut a1);
     Ok((input, a0))
 }
@@ -247,6 +252,29 @@ fn fn_call(input: &str) -> IResult<&str, Vec<Expr>> {
 fn unit(input: &str) -> IResult<&str, Expr> {
     let (input, _) = tag("()")(input)?;
     Ok((input, Expr::Unit))
+}
+
+fn infix_constructor_sequence(
+    input: &str,
+) -> IResult<&str, InfixConstructorSequence> {
+    let (input, (_, e, eo, _)) = tuple((
+        separator0,
+        pattern,
+        many0(tuple((pad(op), pattern))),
+        separator0,
+    ))(input)?;
+    let (os, mut es): (Vec<_>, Vec<_>) = eo.into_iter().unzip();
+    Ok((
+        input,
+        InfixConstructorSequence {
+            operators: os,
+            operands: {
+                let mut e = vec![e];
+                e.append(&mut es);
+                e
+            },
+        },
+    ))
 }
 
 fn op_sequence(input: &str) -> IResult<&str, OpSequence> {

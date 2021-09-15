@@ -53,7 +53,7 @@ impl From<ast::Expr> for Expr {
                 Declaration(Box::new((*a).into()))
             }
             ast::Expr::Unit => Unit,
-            ast::Expr::Parenthesized(a) => (*a).into(),
+            ast::Expr::Parenthesized(a) => a.into(),
         }
     }
 }
@@ -64,10 +64,44 @@ pub struct FnArm {
     pub exprs: Vec<Expr>,
 }
 
+fn infix_constructor_sequence_to_pattern(
+    s: ast::InfixConstructorSequence,
+) -> ast::Pattern {
+    let op_list: BTreeSet<_> =
+        s.operators.iter().map(|s| OP_PRECEDENCE[&s[..]]).collect();
+    let mut operators = s.operators;
+    let mut operands: Vec<ast::Pattern> =
+        s.operands.into_iter().map(|o| o.into()).collect();
+    for a in op_list.into_iter().rev() {
+        let mut operand_head = 0;
+        for i in 0..operators.len() {
+            let op = operators[i].clone();
+            if a == OP_PRECEDENCE[&op[..]] {
+                operands[operand_head] = ast::Pattern::Constructor(
+                    op,
+                    vec![
+                        operands[operand_head].clone(),
+                        operands[i + 1].clone(),
+                    ],
+                );
+            } else {
+                operand_head += 1;
+                operands[operand_head] = operands[i + 1].clone();
+            }
+        }
+        operators.retain(|o| OP_PRECEDENCE[&o[..]] != a);
+    }
+    operands[0].clone()
+}
+
 impl From<ast::FnArm> for FnArm {
     fn from(ast_fn_arm: ast::FnArm) -> Self {
         Self {
-            pattern: ast_fn_arm.pattern,
+            pattern: ast_fn_arm
+                .pattern
+                .into_iter()
+                .map(infix_constructor_sequence_to_pattern)
+                .collect(),
             exprs: ast_fn_arm
                 .exprs
                 .into_iter()
@@ -81,10 +115,17 @@ impl From<ast::FnArm> for FnArm {
 struct Operator(String);
 
 static OP_PRECEDENCE: Lazy<HashMap<&str, i32>> = Lazy::new(|| {
-    [("fn_call", 10), (".", 10), ("+", 6), ("-", 6), ("%", 7)]
-        .iter()
-        .cloned()
-        .collect()
+    [
+        ("fn_call", 10),
+        (".", 10),
+        ("+", 6),
+        ("-", 6),
+        ("%", 7),
+        ("/\\", 2),
+    ]
+    .iter()
+    .cloned()
+    .collect()
 });
 
 impl Ord for Operator {
