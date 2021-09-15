@@ -92,7 +92,7 @@ fn fn_arm(e: &FnArm, name_count: u32) -> String {
             cond,
             binds.iter().map(|(s, _)| format!("{} =>", s)).join(""),
             multi_expr(&e.exprs, name_count + e.pattern.len() as u32),
-            binds.iter().map(|(_, n)| format!("(${})", n)).join(""),
+            binds.iter().map(|(_, n)| format!("({})", n)).join(""),
         )
     }
 }
@@ -142,13 +142,29 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
 fn bindings(
     pattern: &[Pattern],
     name_count: u32,
-) -> Vec<(&str, u32)> {
+) -> Vec<(&str, String)> {
+    _bindings(
+        pattern,
+        (0..pattern.len()).map(|i| format!("${}", i + name_count as usize)).collect(),
+    )
+}
+
+fn _bindings(
+    pattern: &[Pattern],
+    names: Vec<String>,
+) -> Vec<(&str, String)> {
     pattern
         .iter()
-        .zip(name_count..)
-        .filter_map(|(p, n)| match p {
-            Pattern::Binder(a) => Some((&a[..], n)),
-            _ => None,
+        .zip(names)
+        .flat_map(|(p, n)| match p {
+            Pattern::Binder(a) => vec![(&a[..], n)],
+            Pattern::Constructor(_, ps) => _bindings(
+                ps,
+                (0..ps.len())
+                    .map(|i| format!("{}[{}]", n, i))
+                    .collect(),
+            ),
+            _ => Vec::new(),
         })
         .collect()
 }
