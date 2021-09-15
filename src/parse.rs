@@ -146,7 +146,7 @@ fn expr(input: &str) -> IResult<&str, Expr> {
         unit,
         lambda,
         declaration.map(|d| Expr::Declaration(Box::new(d))),
-        identifier.map(|s| Expr::Identifier(s)),
+        identifier.map(Expr::Identifier),
         paren,
     )))(input)
 }
@@ -197,7 +197,7 @@ fn pattern(input: &str) -> IResult<&str, Pattern> {
         }),
         tag("_").map(|_| Pattern::Underscore),
         constructor_pattern,
-        identifier.map(|s| Pattern::Binder(s)),
+        identifier.map(Pattern::Binder),
     )))(input)
 }
 
@@ -244,7 +244,7 @@ fn fn_call(input: &str) -> IResult<&str, Vec<Expr>> {
     ))(input)?;
     let mut a0 = vec![Expr::Paren(a0)];
     let mut a1 =
-        a1.into_iter().map(|s| Expr::Paren(s)).collect();
+        a1.into_iter().map(Expr::Paren).collect();
     a0.append(&mut a1);
     Ok((input, a0))
 }
