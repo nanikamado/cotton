@@ -33,17 +33,17 @@ pub fn compile(ast: Ast) -> String {
 fn data_declaration(d: DataDeclaration) -> String {
     let name = convert_name(&d.name);
     format!(
-        "let {} = {} ({{name: '{}', {}}});",
+        "let {}={}({{name:'{}',{}}});",
         name,
-        (0..d.field_len).map(|i| format!("${} =>", i)).join(""),
+        (0..d.field_len).map(|i| format!("${}=>", i)).join(""),
         name,
-        (0..d.field_len).map(|i| format!("{0}: ${0}", i)).join(", "),
+        (0..d.field_len).map(|i| format!("{0}:${0}", i)).join(", "),
     )
 }
 
 fn declaration(d: Declaration) -> String {
     format!(
-        "let {} = {};",
+        "let {}={};",
         convert_name(&d.identifier),
         expr(&d.value, 0)
     )
@@ -65,9 +65,9 @@ static PRIMITIVES: Lazy<HashMap<&str, &str>> = Lazy::new(|| {
 fn expr(e: &Expr, name_count: u32) -> String {
     match e {
         Expr::Lambda(a) => format!(
-            "{} {} 'unexpected'",
+            "{}{}'unexpected'",
             (0..a[0].pattern.len())
-                .map(|c| format!("${} => ", name_count + c as u32))
+                .map(|c| format!("${}=>", name_count + c as u32))
                 .join(""),
             a.iter().map(|e| fn_arm(e, name_count)).join("")
         ),
@@ -79,7 +79,7 @@ fn expr(e: &Expr, name_count: u32) -> String {
         },
         Expr::Declaration(a) => declaration(*a.clone()),
         Expr::Call(f, a) => format!(
-            "({})({})",
+            "{}({})",
             expr(&*f, name_count),
             expr(&*a, name_count)
         ),
@@ -96,15 +96,15 @@ fn fn_arm(e: &FnArm, name_count: u32) -> String {
     let binds = bindings(&e.pattern, name_count);
     if binds.is_empty() {
         format!(
-            "{} ? {} :",
+            "{}?{}:",
             cond,
             multi_expr(&e.exprs, name_count + e.pattern.len() as u32),
         )
     } else {
         format!(
-            "{} ? ({} {}){} :",
+            "{}?({}{}){}:",
             cond,
-            binds.iter().map(|(s, _)| format!("{} =>", s)).join(""),
+            binds.iter().map(|(s, _)| format!("{}=>", s)).join(""),
             multi_expr(&e.exprs, name_count + e.pattern.len() as u32),
             binds.iter().map(|(_, n)| format!("({})", n)).join(""),
         )
@@ -118,7 +118,7 @@ fn condition(pattern: &[Pattern], name_count: u32) -> String {
             .map(|i| format!("${}", i + name_count as usize))
             .collect_vec(),
     )
-    .join(" && ");
+    .join("&&");
     if rst.is_empty() {
         "true".to_string()
     } else {
@@ -132,11 +132,11 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
         .zip(names)
         .flat_map(|(p, n)| match p {
             Pattern::Number(a) | Pattern::StrLiteral(a) => {
-                vec![format!("{} === {}", a.clone(), n)]
+                vec![format!("{}==={}", a.clone(), n)]
             }
             Pattern::Constructor(a, ps) => {
                 let mut v = vec![format!(
-                    "'{}' === {}.name",
+                    "'{}'==={}.name",
                     convert_name(a),
                     n
                 )];
