@@ -1,0 +1,75 @@
+(.)
+= fn
+| a, f => f(a)
+--
+
+($)
+= fn
+| f, a => f(a)
+--
+
+data a /\ b
+
+data a .. b
+
+data None
+
+pop = fn
+| a .. b =>
+    (a < b).fn
+    | True => (a + 1)..b /\ a
+    | False => None
+    --
+| Filter(l, f) =>
+    l.pop.fn
+    | None => None
+    | l2 /\ a =>
+        a.f.fn
+        | True => Filter(l2, f) /\ a
+        | False => Filter(l2, f).pop
+        --
+    --
+--
+
+all = fn
+| i, f =>
+    i.pop.fn
+    | None => True
+    | i2 /\ a =>
+        a.f.fn
+        | True => i2.all(f)
+        | False => False
+        --
+    --
+--
+
+is_prime
+= fn
+| n =>
+    (2..n - 1).all $ fn
+    | i => n % i != 0
+    --
+--
+
+each = fn
+| l, f =>
+    l.pop.fn
+    | None => ()
+    | l2 /\ a =>
+        a.f
+        l2.each(f)
+    --
+--
+
+data Filter(a, b)
+
+filter = fn
+| l, f =>
+    Filter(l, f)
+--
+
+main : () -> ()
+= fn
+| () =>
+    (2..100).filter(is_prime).each(println)
+--

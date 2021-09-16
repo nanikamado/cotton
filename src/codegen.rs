@@ -9,10 +9,18 @@ pub fn compile(ast: Ast) -> String {
     format!(
         "{}{}{}{}",
         "{
+        let to_string = a => String(a);
+        let type_name = a => a.name;
+        let print = a => process.stdout.write(a);
         let println = a => console.log(a);
         let $plus = a => b => a + b;
         let $minus = a => b => a - b;
-        let $mod = a => b => a % b;",
+        let $mod = a => b => a % b;
+        let $neq = a => b => $$bool(a !== b);
+        let $lt = a => b => $$bool(a < b);
+        let $$bool = a => a ? True : False;
+        let True = {name: 'True'};
+        let False = {name: 'False'};",
         ast.data_declarations
             .into_iter()
             .map(data_declaration)
@@ -42,10 +50,16 @@ fn declaration(d: Declaration) -> String {
 }
 
 static PRIMITIVES: Lazy<HashMap<&str, &str>> = Lazy::new(|| {
-    [("+", "$plus"), ("-", "$minus"), ("%", "$mod")]
-        .iter()
-        .cloned()
-        .collect()
+    [
+        ("+", "$plus"),
+        ("-", "$minus"),
+        ("%", "$mod"),
+        ("<", "$lt"),
+        ("!=", "$neq"),
+    ]
+    .iter()
+    .cloned()
+    .collect()
 });
 
 fn expr(e: &Expr, name_count: u32) -> String {
@@ -145,7 +159,9 @@ fn bindings(
 ) -> Vec<(&str, String)> {
     _bindings(
         pattern,
-        (0..pattern.len()).map(|i| format!("${}", i + name_count as usize)).collect(),
+        (0..pattern.len())
+            .map(|i| format!("${}", i + name_count as usize))
+            .collect(),
     )
 }
 

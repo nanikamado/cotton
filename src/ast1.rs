@@ -117,10 +117,14 @@ static OP_PRECEDENCE: Lazy<HashMap<&str, i32>> = Lazy::new(|| {
     [
         ("fn_call", 10),
         (".", 10),
+        ("%", 7),
         ("+", 6),
         ("-", 6),
-        ("%", 7),
+        ("<", 5),
+        ("!=", 5),
+        ("..", 3),
         ("/\\", 2),
+        ("$", 1),
     ]
     .iter()
     .cloned()
@@ -173,7 +177,13 @@ impl From<ast0::OpSequence> for Expr {
             .operators
             .clone()
             .into_iter()
-            .map(|s| OP_PRECEDENCE[&s[..]])
+            .map(|s| {
+                if let Some(a) = OP_PRECEDENCE.get(&s[..]) {
+                    *a
+                } else {
+                    panic!("no entry found for key: {}", s)
+                }
+            })
             .collect();
         let mut operators = s.operators;
         let mut operands: Vec<Expr> =

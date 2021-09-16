@@ -139,7 +139,7 @@ fn is_identifier_char(c: char) -> bool {
 }
 
 fn expr(input: &str) -> IResult<&str, Expr> {
-    pad(alt((
+    alt((
         str_literal.map(|s| Expr::StrLiteral(s.to_string())),
         num_literal.map(|s| Expr::Number(s.to_string())),
         unit,
@@ -147,7 +147,7 @@ fn expr(input: &str) -> IResult<&str, Expr> {
         declaration.map(|d| Expr::Declaration(Box::new(d))),
         identifier.map(Expr::Identifier),
         paren,
-    )))(input)
+    ))(input)
 }
 
 fn paren(input: &str) -> IResult<&str, Expr> {
