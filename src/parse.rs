@@ -1,6 +1,6 @@
 use crate::ast0::{
-    Ast, DataDeclaration, Dec, Declaration, Expr, FnArm,
-    InfixConstructorSequence, OpSequence, Pattern,
+    Ast, DataDeclaration, Datatype, Dec, Declaration, Expr, FnArm,
+    InfixConstructorSequence, InfixTypeSequence, OpSequence, Pattern,
 };
 use nom::{
     branch::alt,
@@ -40,10 +40,10 @@ where
 }
 
 fn declaration(input: &str) -> IResult<&str, Declaration> {
-    let (input, (identifier, _, _, _, value)) = tuple((
+    let (input, (identifier, _, data_type, _, value)) = tuple((
         identifier,
         separator0,
-        opt(preceded(tag(":"), type_expr)),
+        opt(preceded(tag(":"), infix_type_sequence)),
         tag("="),
         op_sequence,
     ))(input)?;
@@ -51,7 +51,8 @@ fn declaration(input: &str) -> IResult<&str, Declaration> {
         input,
         Declaration {
             identifier,
-            datatype: (),
+            datatype: data_type
+                .expect("type inference is not supported"),
             value,
         },
     ))
@@ -102,8 +103,59 @@ fn infix_constructor_declaration(
     Ok((input, DataDeclaration { name, field_len: 2 }))
 }
 
-fn type_expr(input: &str) -> IResult<&str, InfixConstructorSequence> {
-    infix_constructor_sequence(input)
+fn type_expr(input: &str) -> IResult<&str, Datatype> {
+    alt((
+        identifier.map(Datatype::Identifier),
+        tag("()").map(|_| Datatype::Identifier("()".to_string())),
+        delimited(tag("("), infix_type_sequence, tag(")"))
+            .map(Datatype::Paren),
+    ))(input)
+}
+
+fn infix_type_sequence(
+    input: &str,
+) -> IResult<&str, InfixTypeSequence> {
+    let (input, (_, e, eo, _)) = tuple((
+        separator0,
+        type_expr,
+        many0(alt((
+            type_call.map(|es| {
+                es.into_iter()
+                    .map(|e| ("type_call".to_string(), e))
+                    .collect()
+            }),
+            tuple((pad(type_op), type_expr))
+                .map(|(s, e)| vec![(s, e)]),
+        ))),
+        separator0,
+    ))(input)?;
+    let (os, mut es): (Vec<_>, Vec<_>) =
+        eo.concat().into_iter().unzip();
+    Ok((
+        input,
+        InfixTypeSequence {
+            operators: os,
+            operands: {
+                let mut e = vec![e];
+                e.append(&mut es);
+                e
+            },
+        },
+    ))
+}
+
+fn type_call(input: &str) -> IResult<&str, Vec<Datatype>> {
+    let (input, (_, a0, a1, _, _)) = tuple((
+        tag("["),
+        infix_type_sequence,
+        many0(preceded(tag(","), infix_type_sequence)),
+        opt(tag(",")),
+        tag("]"),
+    ))(input)?;
+    let mut a0 = vec![Datatype::Paren(a0)];
+    let mut a1 = a1.into_iter().map(Datatype::Paren).collect();
+    a0.append(&mut a1);
+    Ok((input, a0))
 }
 
 fn identifier(input: &str) -> IResult<&str, String> {
@@ -165,21 +217,37 @@ fn lambda(input: &str) -> IResult<&str, Expr> {
 }
 
 fn fn_arm(input: &str) -> IResult<&str, FnArm> {
-    let (input, (_, pattern0, mut pattern1, _, _, arguments)) =
-        tuple((
-            tag("|"),
-            infix_constructor_sequence,
-            many0(preceded(tag(","), infix_constructor_sequence)),
-            opt(tag(",")),
-            tag("=>"),
-            many1(op_sequence),
-        ))(input)?;
+    let (
+        input,
+        (_, pattern0, type0, pattern1_type1, _, _, arguments),
+    ) = tuple((
+        tag("|"),
+        infix_constructor_sequence,
+        opt(preceded(tag(":"), infix_type_sequence)),
+        many0(preceded(
+            tag(","),
+            tuple((
+                infix_constructor_sequence,
+                opt(preceded(tag(":"), infix_type_sequence)),
+            )),
+        )),
+        opt(tag(",")),
+        tag("=>"),
+        many1(op_sequence),
+    ))(input)?;
+    let (mut pattern1, mut type1) =
+        pattern1_type1.into_iter().unzip();
     Ok((
         input,
         FnArm {
             pattern: {
                 let mut p = vec![pattern0];
                 p.append(&mut pattern1);
+                p
+            },
+            pattern_type: {
+                let mut p = vec![type0];
+                p.append(&mut type1);
                 p
             },
             exprs: arguments,
@@ -313,9 +381,11 @@ fn op(input: &str) -> IResult<&str, String> {
                 && c != '('
                 && c != ')'
         }),
-        |s: &str| {
-            s != "=" && s != "=>" && s != "|" && s != "--" && s != ","
-        },
+        |s: &str| !["=", "=>", "|", "--", ",", ":"].contains(&s),
     )(input)
     .map(|(i, s)| (i, s.to_string()))
+}
+
+fn type_op(input: &str) -> IResult<&str, String> {
+    alt((op, tag("|").map(|_| "|".to_string())))(input)
 }

@@ -10,6 +10,7 @@ pub fn compile(ast: Ast) -> String {
         "{}{}{}{}",
         "{
         let to_string = a => String(a);
+        let num_to_string = a => String(a);
         let type_name = a => a.name;
         let print = a => process.stdout.write(a);
         let println = a => console.log(a);

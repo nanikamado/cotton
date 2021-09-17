@@ -1,18 +1,21 @@
 use crate::ast0;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
-use std::collections::{BTreeSet, HashMap};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeSet, HashMap},
+};
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub struct Ast {
     pub declarations: Vec<Declaration>,
     pub data_declarations: Vec<ast0::DataDeclaration>,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Declaration {
     pub identifier: String,
-    pub datatype: Datatype,
+    pub datatype: Type,
     pub value: Expr,
 }
 
@@ -20,15 +23,13 @@ impl From<ast0::Declaration> for Declaration {
     fn from(d: ast0::Declaration) -> Self {
         Self {
             identifier: d.identifier,
-            datatype: d.datatype,
+            datatype: d.datatype.into(),
             value: d.value.into(),
         }
     }
 }
 
-pub type Datatype = ();
-
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Lambda(Vec<FnArm>),
     Number(String),
@@ -58,9 +59,10 @@ impl From<ast0::Expr> for Expr {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct FnArm {
     pub pattern: Vec<ast0::Pattern>,
+    pub pattern_type: Vec<Option<Type>>,
     pub exprs: Vec<Expr>,
 }
 
@@ -101,6 +103,11 @@ impl From<ast0::FnArm> for FnArm {
                 .into_iter()
                 .map(infix_constructor_sequence_to_pattern)
                 .collect(),
+            pattern_type: ast_fn_arm
+                .pattern_type
+                .into_iter()
+                .map(|a| a.map(|a| a.into()))
+                .collect(),
             exprs: ast_fn_arm
                 .exprs
                 .into_iter()
@@ -116,6 +123,7 @@ struct Operator(String);
 static OP_PRECEDENCE: Lazy<HashMap<&str, i32>> = Lazy::new(|| {
     [
         ("fn_call", 10),
+        ("type_call", 10),
         (".", 10),
         ("%", 7),
         ("+", 6),
@@ -124,7 +132,8 @@ static OP_PRECEDENCE: Lazy<HashMap<&str, i32>> = Lazy::new(|| {
         ("!=", 5),
         ("..", 3),
         ("/\\", 2),
-        ("$", 1),
+        ("->", 1),
+        ("$", 0),
     ]
     .iter()
     .cloned()
@@ -166,7 +175,7 @@ impl From<ast0::Ast> for Ast {
 fn declaration(d: ast0::Declaration) -> Declaration {
     Declaration {
         identifier: d.identifier,
-        datatype: d.datatype,
+        datatype: d.datatype.into(),
         value: d.value.into(),
     }
 }
@@ -206,6 +215,115 @@ impl From<ast0::OpSequence> for Expr {
                         }),
                         Box::new(operands[i + 1].clone()),
                     );
+                } else {
+                    operand_head += 1;
+                    operands[operand_head] = operands[i + 1].clone();
+                }
+            }
+            operators.retain(|o| OP_PRECEDENCE[&o[..]] != a);
+        }
+        operands[0].clone()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Type {
+    Normal(String, Vec<Type>),
+    Fn(Box<Type>, Box<Type>),
+}
+
+impl PartialEq for Type {
+    fn eq(&self, other: &Self) -> bool {
+        self.partial_cmp(other) == Some(Ordering::Equal)
+    }
+}
+
+impl PartialOrd for Type {
+    fn partial_cmp(
+        &self,
+        other: &Self,
+    ) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (Type::Normal(s, a1), Type::Normal(o, a2)) => {
+                if s == o && a1.len() == a2.len() {
+                    let mut cmps = a1
+                        .iter()
+                        .zip(a2)
+                        .map(|(a, b)| a.partial_cmp(b));
+                    if let Some(c) = cmps.next() {
+                        if cmps.all(|x| x == c) {
+                            c
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some(Ordering::Equal)
+                    }
+                } else {
+                    None
+                }
+            }
+            (Type::Fn(a1, r1), Type::Fn(a2, r2)) => {
+                let a = a2.partial_cmp(a1);
+                let r = r1.partial_cmp(r2);
+                if a == r {
+                    a
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+}
+
+impl From<ast0::Datatype> for Type {
+    fn from(t: ast0::Datatype) -> Self {
+        match t {
+            ast0::Datatype::Identifier(s) => {
+                Type::Normal(s, Vec::new())
+            }
+            ast0::Datatype::Paren(s) => s.into(),
+        }
+    }
+}
+
+impl From<ast0::InfixTypeSequence> for Type {
+    fn from(s: ast0::InfixTypeSequence) -> Self {
+        let op_list: BTreeSet<_> = s
+            .operators
+            .clone()
+            .into_iter()
+            .map(|s| {
+                *OP_PRECEDENCE
+                    .get(&s[..])
+                    .expect(&format!("no entry found for key: {}", s))
+            })
+            .collect();
+        let mut operators = s.operators;
+        let mut operands: Vec<Type> =
+            s.operands.into_iter().map(|o| o.into()).collect();
+        for a in op_list.into_iter().rev() {
+            let mut operand_head = 0;
+            for i in 0..operators.len() {
+                let op = operators[i].clone();
+                if a == OP_PRECEDENCE[&op[..]] {
+                    operands[operand_head] = if op == *"type_call" {
+                        unimplemented!()
+                    } else if op == *"->" {
+                        Type::Fn(
+                            Box::new(operands[operand_head].clone()),
+                            Box::new(operands[i + 1].clone()),
+                        )
+                    } else {
+                        Type::Normal(
+                            op,
+                            vec![
+                                operands[operand_head].clone(),
+                                operands[i + 1].clone(),
+                            ],
+                        )
+                    }
                 } else {
                     operand_head += 1;
                     operands[operand_head] = operands[i + 1].clone();

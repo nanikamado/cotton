@@ -12,11 +12,22 @@ pub enum Dec {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Declaration {
     pub identifier: String,
-    pub datatype: Datatype,
+    pub datatype: InfixTypeSequence,
     pub value: OpSequence,
 }
 
-pub type Datatype = ();
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Datatype {
+    Identifier(String),
+    Paren(InfixTypeSequence),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct InfixTypeSequence {
+    pub operators: Vec<String>,
+    pub operands: Vec<Datatype>,
+}
+
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DataDeclaration {
@@ -53,6 +64,7 @@ impl From<Expr> for OpSequence {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FnArm {
     pub pattern: Vec<InfixConstructorSequence>,
+    pub pattern_type: Vec<Option<InfixTypeSequence>>,
     pub exprs: Vec<OpSequence>,
 }
 

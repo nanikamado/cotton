@@ -1,4 +1,4 @@
-(.)
+(.) : a -> (a -> b) -> b
 = fn
 | a, f => f(a)
 --
@@ -6,7 +6,7 @@
 data Next(a)
 data End(a)
 
-loop
+loop : a -> (a -> Next[a] | End[a]) -> a
 = fn
 | init, f =>
     init.f.fn
@@ -17,7 +17,7 @@ loop
 
 data a /\ b
 
-fizzbuzz
+fizzbuzz : Num -> String | Num
 = fn
 | n =>
     (n % 3 /\ n % 5).fn

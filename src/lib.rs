@@ -10,8 +10,12 @@ pub fn run(source: &str) {
     let (remaining, ast) = parse(source).unwrap();
     if remaining.is_empty() {
         let ast: ast1::Ast = ast.into();
+        dbg!(&ast);
         println!("{}", compile(ast));
     } else {
-        eprintln!("unexpected input:\n{}", remaining);
+        eprintln!(
+            "unexpected input:\n{}\nast:\n{:?}",
+            remaining, ast
+        );
     }
 }

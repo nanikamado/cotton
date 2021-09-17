@@ -1,0 +1,20 @@
+data Hoge
+
+greet : Hoge -> String
+= fn
+| _ => "Hogeeeeee"
+--
+
+data Fuga
+
+greet : Fuga -> String
+= fn
+| _ => "Fugaaaaaa"
+--
+
+main : () -> ()
+= fn
+| () =>
+    println(greet(Hoge))
+    println(greet(Fuga))
+--
