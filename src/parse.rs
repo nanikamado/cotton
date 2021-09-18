@@ -51,8 +51,7 @@ fn declaration(input: &str) -> IResult<&str, Declaration> {
         input,
         Declaration {
             identifier,
-            datatype: data_type
-                .expect("type inference is not supported"),
+            datatype: data_type,
             value,
         },
     ))

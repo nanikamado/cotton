@@ -12,7 +12,7 @@ pub enum Dec {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Declaration {
     pub identifier: String,
-    pub datatype: InfixTypeSequence,
+    pub datatype: Option<InfixTypeSequence>,
     pub value: OpSequence,
 }
 

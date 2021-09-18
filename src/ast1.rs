@@ -15,7 +15,7 @@ pub struct Ast {
 #[derive(Debug, PartialEq, Clone)]
 pub struct Declaration {
     pub identifier: String,
-    pub datatype: Type,
+    pub datatype: Option<Type>,
     pub value: Expr,
 }
 
@@ -23,7 +23,7 @@ impl From<ast0::Declaration> for Declaration {
     fn from(d: ast0::Declaration) -> Self {
         Self {
             identifier: d.identifier,
-            datatype: d.datatype.into(),
+            datatype: d.datatype.map(|t| t.into()),
             value: d.value.into(),
         }
     }
@@ -175,7 +175,7 @@ impl From<ast0::Ast> for Ast {
 fn declaration(d: ast0::Declaration) -> Declaration {
     Declaration {
         identifier: d.identifier,
-        datatype: d.datatype.into(),
+        datatype: d.datatype.map(|t| t.into()),
         value: d.value.into(),
     }
 }
