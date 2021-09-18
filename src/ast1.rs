@@ -187,11 +187,9 @@ impl From<ast0::OpSequence> for Expr {
             .clone()
             .into_iter()
             .map(|s| {
-                if let Some(a) = OP_PRECEDENCE.get(&s[..]) {
-                    *a
-                } else {
+                *OP_PRECEDENCE.get(&s[..]).unwrap_or_else(|| {
                     panic!("no entry found for key: {}", s)
-                }
+                })
             })
             .collect();
         let mut operators = s.operators;
@@ -295,9 +293,9 @@ impl From<ast0::InfixTypeSequence> for Type {
             .clone()
             .into_iter()
             .map(|s| {
-                *OP_PRECEDENCE
-                    .get(&s[..])
-                    .expect(&format!("no entry found for key: {}", s))
+                *OP_PRECEDENCE.get(&s[..]).unwrap_or_else(|| {
+                    panic!("no entry found for key: {}", s)
+                })
             })
             .collect();
         let mut operators = s.operators;
