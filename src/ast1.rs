@@ -1,10 +1,7 @@
 use crate::ast0;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
-use std::{
-    cmp::Ordering,
-    collections::{BTreeSet, HashMap},
-};
+use std::collections::{BTreeSet, HashMap};
 
 #[derive(Debug, PartialEq)]
 pub struct Ast {
@@ -224,53 +221,44 @@ impl From<ast0::OpSequence> for Expr {
     }
 }
 
-#[derive(Debug, Clone)]
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Type {
     Normal(String, Vec<Type>),
-    Fn(Box<Type>, Box<Type>),
+    Fn(Vec<FnArmType>),
+    Union(Box<Type>, Box<Type>),
+    Anonymous(usize),
 }
 
-impl PartialEq for Type {
-    fn eq(&self, other: &Self) -> bool {
-        self.partial_cmp(other) == Some(Ordering::Equal)
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FnArmType(pub Type, pub Type);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct IncompleteType {
+    pub constructor: Type,
+    pub requirements: Requirements,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Requirements {
+    pub variable_requirements: Vec<(String, Type)>,
+    pub subtype_relationship: Vec<(Type, Type)>,
+}
+
+impl Default for Requirements {
+    fn default() -> Self {
+        Self {
+            variable_requirements: Vec::new(),
+            subtype_relationship: Vec::new(),
+        }
     }
 }
 
-impl PartialOrd for Type {
-    fn partial_cmp(
-        &self,
-        other: &Self,
-    ) -> Option<std::cmp::Ordering> {
-        match (self, other) {
-            (Type::Normal(s, a1), Type::Normal(o, a2)) => {
-                if s == o && a1.len() == a2.len() {
-                    let mut cmps = a1
-                        .iter()
-                        .zip(a2)
-                        .map(|(a, b)| a.partial_cmp(b));
-                    if let Some(c) = cmps.next() {
-                        if cmps.all(|x| x == c) {
-                            c
-                        } else {
-                            None
-                        }
-                    } else {
-                        Some(Ordering::Equal)
-                    }
-                } else {
-                    None
-                }
-            }
-            (Type::Fn(a1, r1), Type::Fn(a2, r2)) => {
-                let a = a2.partial_cmp(a1);
-                let r = r1.partial_cmp(r2);
-                if a == r {
-                    a
-                } else {
-                    None
-                }
-            }
-            _ => None,
+impl From<Type> for IncompleteType {
+    fn from(t: Type) -> Self {
+        Self {
+            constructor: t,
+            requirements: Requirements::default(),
         }
     }
 }
@@ -309,10 +297,10 @@ impl From<ast0::InfixTypeSequence> for Type {
                     operands[operand_head] = if op == *"type_call" {
                         unimplemented!()
                     } else if op == *"->" {
-                        Type::Fn(
-                            Box::new(operands[operand_head].clone()),
-                            Box::new(operands[i + 1].clone()),
-                        )
+                        Type::Fn(vec![FnArmType(
+                            operands[operand_head].clone(),
+                            operands[i + 1].clone(),
+                        )])
                     } else {
                         Type::Normal(
                             op,

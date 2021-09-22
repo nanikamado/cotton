@@ -2,14 +2,17 @@ mod ast0;
 mod ast1;
 mod codegen;
 mod parse;
+mod type_check;
 
 use codegen::compile;
 use parse::parse;
+use type_check::type_check;
 
 pub fn run(source: &str) {
     let (remaining, ast) = parse(source).unwrap();
     if remaining.is_empty() {
         let ast: ast1::Ast = ast.into();
+        type_check(&ast);
         // dbg!(&ast);
         println!("{}", compile(ast));
     } else {
