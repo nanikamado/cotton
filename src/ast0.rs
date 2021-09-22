@@ -28,7 +28,6 @@ pub struct InfixTypeSequence {
     pub operands: Vec<Datatype>,
 }
 
-
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DataDeclaration {
     pub name: String,
