@@ -1,57 +1,112 @@
-use crate::ast0::Pattern;
+mod simplify;
+
+use crate::ast0::{DataDeclaration, Pattern};
 use crate::ast1::{
     Ast, Expr, FnArm, FnArmType, IncompleteType, Requirements, Type,
 };
 use itertools::Itertools;
+use std::fmt::Display;
 use std::{collections::HashMap, vec};
 
 pub fn type_check(ast: &Ast) {
+    use simplify::simplify_type;
+    let mut resolved_variables: HashMap<String, Vec<simplify::Type>> =
+        HashMap::new();
+    let mut anonymous_type_count = 0;
+    for d in &ast.data_declarations {
+        resolved_variables.entry(d.name.clone()).or_default().push(
+            constructor_type(d.clone(), &mut anonymous_type_count),
+        )
+    }
     for d in &ast.declarations {
         eprintln!("{} :", d.identifier);
-        let _ = dbg!(min_type(&d.value, &mut 0));
+        let t: IncompleteType =
+            min_type(&d.value, &mut anonymous_type_count).unwrap();
+        let t: simplify::IncompleteType = t.into();
+        let t = simplify_type(
+            t,
+            &resolved_variables
+                .iter()
+                .filter_map(|(n, v)| {
+                    if v.len() == 1 {
+                        Some((n.clone(), v[0].clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            &mut anonymous_type_count,
+        );
+        if t.resolved() {
+            resolved_variables
+                .entry(d.identifier.clone())
+                .or_default()
+                .push(t.constructor.clone())
+        }
+        eprintln!("{}", t);
     }
+    // dbg!(resolved_variables);
+}
+
+fn constructor_type(
+    d: DataDeclaration,
+    anonymous_type_count: &mut usize,
+) -> simplify::Type {
+    use simplify::Type;
+    let field_types: Vec<_> = (0..d.field_len)
+        .map(|_| new_anonymous_type(anonymous_type_count).into())
+        .collect();
+    let mut t = Type::Normal(d.name, field_types.clone());
+    for field in field_types.into_iter().rev() {
+        t = Type::Fn(Box::new(field), Box::new(t))
+    }
+    t
 }
 
 fn min_type(
     expr: &Expr,
     anonymous_type_count: &mut usize,
 ) -> Result<IncompleteType, &'static str> {
+    Ok(min_type_incomplite(expr, anonymous_type_count))
+}
+
+fn min_type_incomplite(
+    expr: &Expr,
+    anonymous_type_count: &mut usize,
+) -> IncompleteType {
     match expr {
         Expr::Lambda(arms) => {
             let (arm_types, requirements): (Vec<_>, Vec<_>) = arms
                 .iter()
                 .map(|a| arm_min_type(a, anonymous_type_count))
-                .collect::<Result<Vec<_>, _>>()?
-                .iter()
-                .cloned()
                 .unzip();
-            Ok(IncompleteType {
+            IncompleteType {
                 constructor: Type::Fn(arm_types),
                 requirements: marge_requirements(requirements),
-            })
+            }
         }
         Expr::Number(_) => {
-            Ok(Type::Normal("Num".to_string(), Vec::new()).into())
+            Type::Normal("Num".to_string(), Vec::new()).into()
         }
         Expr::StrLiteral(_) => {
-            Ok(Type::Normal("String".to_string(), Vec::new()).into())
+            Type::Normal("String".to_string(), Vec::new()).into()
         }
         Expr::Identifier(n) => {
             let t = new_anonymous_type(anonymous_type_count);
-            Ok(IncompleteType {
+            IncompleteType {
                 constructor: t.clone(),
                 requirements: Requirements {
                     variable_requirements: vec![(n.to_string(), t)],
                     subtype_relationship: Vec::new(),
                 },
-            })
+            }
         }
         Expr::Declaration(_) => {
-            Ok(Type::Normal("[]".to_string(), Vec::new()).into())
+            Type::Normal("[]".to_string(), Vec::new()).into()
         }
         Expr::Call(f, a) => {
-            let f_t = min_type(f, anonymous_type_count)?;
-            let a_t = min_type(a, anonymous_type_count)?;
+            let f_t = min_type_incomplite(f, anonymous_type_count);
+            let a_t = min_type_incomplite(a, anonymous_type_count);
             let b = new_anonymous_type(anonymous_type_count);
             let c = new_anonymous_type(anonymous_type_count);
             // c -> b
@@ -69,7 +124,7 @@ fn min_type(
                 variable_requirements: Vec::new(),
                 subtype_relationship: vec![(a_t.constructor, c)],
             };
-            Ok(IncompleteType {
+            IncompleteType {
                 constructor: b,
                 requirements: marge_requirements(vec![
                     f_sub_cb,
@@ -77,31 +132,51 @@ fn min_type(
                     f_t.requirements,
                     a_t.requirements,
                 ]),
-            })
+            }
         }
         Expr::Unit => {
-            Ok(Type::Normal("[]".to_string(), Vec::new()).into())
+            Type::Normal("[]".to_string(), Vec::new()).into()
         }
+    }
+}
+
+#[allow(dead_code)]
+fn all_anonymous_types_in(t: Type) -> Vec<usize> {
+    match t {
+        Type::Normal(_, _) => Vec::new(),
+        Type::Fn(arms) => {
+            let mut rst = Vec::new();
+            for FnArmType(a, b) in arms {
+                rst.append(&mut all_anonymous_types_in(a));
+                rst.append(&mut all_anonymous_types_in(b));
+            }
+            rst
+        }
+        Type::Union(a, b) => {
+            [all_anonymous_types_in(*a), all_anonymous_types_in(*b)]
+                .concat()
+        }
+        Type::Anonymous(a) => vec![a],
     }
 }
 
 fn multi_expr_min_type(
     exprs: &[Expr],
     anonymous_type_count: &mut usize,
-) -> Result<IncompleteType, &'static str> {
+) -> IncompleteType {
     let mut req = Requirements::default();
     let t = exprs
         .iter()
         .map(|e| {
-            let t = min_type(e, anonymous_type_count)?;
+            let t = min_type_incomplite(e, anonymous_type_count);
             req = marge_requirements(vec![
                 req.clone(),
                 t.clone().requirements,
             ]);
-            Ok(t)
+            t
         })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(t.last().unwrap().clone())
+        .collect::<Vec<_>>();
+    t.last().unwrap().clone()
 }
 
 fn new_anonymous_type(anonymous_type_count: &mut usize) -> Type {
@@ -124,9 +199,9 @@ fn marge_requirements(
 fn arm_min_type(
     arm: &FnArm,
     anonymous_type_count: &mut usize,
-) -> Result<(FnArmType, Requirements), &'static str> {
+) -> (FnArmType, Requirements) {
     let body_type =
-        multi_expr_min_type(&arm.exprs, anonymous_type_count)?;
+        multi_expr_min_type(&arm.exprs, anonymous_type_count);
     let (types, bindings): (Vec<_>, Vec<_>) = arm
         .pattern
         .iter()
@@ -147,15 +222,18 @@ fn arm_min_type(
         .requirements
         .variable_requirements
         .into_iter()
-        .map(|p| {
+        .flat_map(|p| {
             if let Some(a) = bindings.get(&p.0) {
-                Err((a.clone(), p.1))
+                vec![
+                    Err((a.clone(), p.1.clone())),
+                    Err((p.1, a.clone())),
+                ]
             } else {
-                Ok(p)
+                vec![Ok(p)]
             }
         })
         .partition_result();
-    Ok((
+    (
         arm_type,
         Requirements {
             variable_requirements,
@@ -166,7 +244,7 @@ fn arm_min_type(
                 tmp
             },
         },
-    ))
+    )
 }
 
 fn pattern_to_type(
@@ -195,5 +273,75 @@ fn pattern_to_type(
         Pattern::Underscore => {
             (new_anonymous_type(anonymous_type_count), Vec::new())
         }
+    }
+}
+
+impl Display for IncompleteType {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        write!(
+            f,
+            "{} forall\n{}--",
+            self.constructor, self.requirements
+        )
+    }
+}
+
+impl Display for Type {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        use Type::*;
+        match self {
+            Normal(name, cs) => {
+                if cs.is_empty() {
+                    write!(f, "{}", name)
+                } else {
+                    write!(
+                        f,
+                        "{}({})",
+                        name,
+                        cs.iter()
+                            .map(|c| format!("{}", c))
+                            .join(", ")
+                    )
+                }
+            }
+            Fn(arms) => {
+                write!(
+                    f,
+                    "{}",
+                    arms.iter()
+                        .map(|FnArmType(arg, rtn)| {
+                            if let Type::Fn(_) = arg {
+                                format!("({}) -> {}", arg, rtn)
+                            } else {
+                                format!("{} -> {}", arg, rtn)
+                            }
+                        })
+                        .join(" & ")
+                )
+            }
+            Union(_, _) => unimplemented!(),
+            Anonymous(n) => write!(f, "t{}", n),
+        }
+    }
+}
+
+impl Display for Requirements {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        for (a, b) in &self.subtype_relationship {
+            writeln!(f, "    {} < {},", a, b)?;
+        }
+        for (a, b) in &self.variable_requirements {
+            writeln!(f, "    ?{} : {},", a, b)?;
+        }
+        Ok(())
     }
 }
