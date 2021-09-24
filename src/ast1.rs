@@ -239,19 +239,10 @@ pub struct IncompleteType {
     pub requirements: Requirements,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Requirements {
     pub variable_requirements: Vec<(String, Type)>,
     pub subtype_relationship: Vec<(Type, Type)>,
-}
-
-impl Default for Requirements {
-    fn default() -> Self {
-        Self {
-            variable_requirements: Vec::new(),
-            subtype_relationship: Vec::new(),
-        }
-    }
 }
 
 impl From<Type> for IncompleteType {
