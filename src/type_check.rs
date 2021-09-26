@@ -1,9 +1,11 @@
+mod intrinsics;
 mod simplify;
 
 use crate::ast0::{DataDeclaration, Pattern};
 use crate::ast1::{
     Ast, Expr, FnArm, FnArmType, IncompleteType, Requirements, Type,
 };
+use intrinsics::INTRINSIC_VARIABLES;
 use itertools::Itertools;
 use std::fmt::Display;
 use std::{collections::HashMap, vec};
@@ -11,41 +13,96 @@ use std::{collections::HashMap, vec};
 pub fn type_check(ast: &Ast) {
     use simplify::simplify_type;
     let mut resolved_variables: HashMap<String, Vec<simplify::Type>> =
-        HashMap::new();
+        INTRINSIC_VARIABLES.clone();
+    let mut variable_count: HashMap<String, usize> =
+        INTRINSIC_VARIABLES
+            .iter()
+            .map(|(name, ts)| (name.clone(), ts.len()))
+            .collect();
+    // let mut resolved_variables2: HashMap<
+    //     String,
+    //     Vec<Option<simplify::Type>>,
+    // > = INTRINSIC_VARIABLES
+    //     .iter()
+    //     .map(|(name, ts)| {
+    //         (
+    //             name.clone(),
+    //             ts.into_iter().map(|t| Some(t.clone())).collect(),
+    //         )
+    //     })
+    //     .collect();
     let mut anonymous_type_count = 0;
     for d in &ast.data_declarations {
         resolved_variables.entry(d.name.clone()).or_default().push(
             constructor_type(d.clone(), &mut anonymous_type_count),
-        )
-    }
-    for d in &ast.declarations {
-        eprintln!("{} :", d.identifier);
-        let t: IncompleteType =
-            min_type(&d.value, &mut anonymous_type_count).unwrap();
-        let t: simplify::IncompleteType = t.into();
-        let t = simplify_type(
-            t,
-            &resolved_variables
-                .iter()
-                .filter_map(|(n, v)| {
-                    if v.len() == 1 {
-                        Some((n.clone(), v[0].clone()))
-                    } else {
-                        None
-                    }
-                })
-                .collect(),
-            &mut anonymous_type_count,
         );
-        if t.resolved() {
-            resolved_variables
-                .entry(d.identifier.clone())
-                .or_default()
-                .push(t.constructor.clone())
-        }
-        eprintln!("{}", t);
+        *variable_count.entry(d.name.clone()).or_default() += 1;
     }
-    // dbg!(resolved_variables);
+    let mut unresolved_variables = ast
+        .declarations
+        .iter()
+        .map(|d| {
+            *variable_count
+                .entry(d.identifier.clone())
+                .or_default() += 1;
+            (
+                d.identifier.clone(),
+                min_type(&d.value, &mut anonymous_type_count)
+                    .unwrap()
+                    .into(),
+            )
+        })
+        .collect_vec();
+    loop {
+        eprintln!("-------------------");
+        let resolved = resolved_variables.clone();
+        let declar_types_last = unresolved_variables.clone();
+        unresolved_variables = unresolved_variables
+            .into_iter()
+            .filter_map(
+                |(name, t): (String, simplify::IncompleteType)| {
+                    eprint!("{} : ", name);
+                    let t = simplify_type(
+                        t.clone(),
+                        &resolved
+                            .iter()
+                            .filter_map(|(n, v)| {
+                                if v.len() == 1
+                                    && variable_count.get(n)
+                                        == Some(&1)
+                                {
+                                    Some((n.clone(), v[0].clone()))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect(),
+                        &mut anonymous_type_count,
+                    );
+                    eprintln!("{}", t);
+                    if t.resolved() {
+                        resolved_variables
+                            .entry(name.clone())
+                            .or_default()
+                            .push(t.constructor.clone());
+                        None
+                    } else {
+                        Some((name, t))
+                    }
+                },
+            )
+            .collect();
+        if declar_types_last == unresolved_variables {
+            break;
+        }
+    }
+    eprintln!("-- resolved --");
+    for (name, rs) in resolved_variables {
+        eprintln!("{} :", name);
+        for r in rs {
+            eprintln!("{}", r);
+        }
+    }
 }
 
 fn constructor_type(
@@ -102,7 +159,7 @@ fn min_type_incomplite(
             }
         }
         Expr::Declaration(_) => {
-            Type::Normal("[]".to_string(), Vec::new()).into()
+            Type::Normal("()".to_string(), Vec::new()).into()
         }
         Expr::Call(f, a) => {
             let f_t = min_type_incomplite(f, anonymous_type_count);
@@ -135,7 +192,7 @@ fn min_type_incomplite(
             }
         }
         Expr::Unit => {
-            Type::Normal("[]".to_string(), Vec::new()).into()
+            Type::Normal("()".to_string(), Vec::new()).into()
         }
     }
 }

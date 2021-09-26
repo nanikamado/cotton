@@ -3,6 +3,7 @@ use hashbag::HashBag;
 use itertools::Itertools;
 use petgraph::{self, algo::tarjan_scc, graphmap::DiGraphMap};
 use std::{
+    cmp::Ordering,
     collections::{BTreeSet, HashMap, HashSet},
     fmt::Display,
 };
@@ -82,6 +83,48 @@ impl From<ast1::Requirements> for Requirements {
                 .map(|(a, b)| (a.into(), b.into()))
                 .collect(),
         }
+    }
+}
+
+struct SubtypeOrd<'a>(&'a Type);
+
+impl PartialOrd for SubtypeOrd<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        use Ordering::*;
+        match (self <= other, other <= self) {
+            (true, true) => Some(Equal),
+            (true, false) => Some(Less),
+            (false, true) => Some(Greater),
+            (false, false) => None,
+        }
+    }
+    fn le(&self, other: &Self) -> bool {
+        use Type::*;
+        match (self.0, other.0) {
+            (Normal(n1, cs1), Normal(n2, cs2)) => {
+                debug_assert_eq!(cs1.len(), cs2.len());
+                n1 == n2
+                    && cs1.iter().zip(cs2).all(|(c1, c2)| {
+                        SubtypeOrd(c1) <= SubtypeOrd(c2)
+                    })
+            }
+            (Fn(a1, r1), Fn(a2, r2)) => r1 <= r2 && a2 <= a1,
+            (Union(u), _) => {
+                u.iter().all(|c| SubtypeOrd(c) <= *other)
+            }
+            (_, Union(u)) => {
+                u.contains(self.0)
+                    || u.iter().any(|c| *self <= SubtypeOrd(c))
+            }
+            (Anonymous(a), Anonymous(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl PartialEq for SubtypeOrd<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.partial_cmp(other) == Some(Ordering::Equal)
     }
 }
 
@@ -169,10 +212,14 @@ fn _simplify_type(
             }
         }
     }
-    let anonymous_return_types: HashSet<usize> =
-        anonymous_return_type(&t.constructor).into_iter().collect();
-    let anonymous_arg_types: HashSet<usize> =
-        anonymous_arg_type(&t.constructor).into_iter().collect();
+    let co_types: HashSet<usize> =
+        anonymous_covariant_types(&t.constructor)
+            .into_iter()
+            .collect();
+    let contra_types: HashSet<usize> =
+        anonymous_contravariant_types(&t.constructor)
+            .into_iter()
+            .collect();
     let anonymous_types_in_sub_rel: HashBag<usize> = t
         .requirements
         .subtype_relation
@@ -215,8 +262,32 @@ fn _simplify_type(
         .collect();
     for (a, b) in t.requirements.subtype_relation.clone() {
         match (a, b) {
+            (Union(cs), b) => {
+                for c in &cs {
+                    t.requirements
+                        .subtype_relation
+                        .insert((c.clone(), b.clone()));
+                }
+                t.requirements
+                    .subtype_relation
+                    .remove(&(Union(cs), b));
+            }
+            (Fn(a1, r1), Fn(a2, r2)) => {
+                t.requirements.subtype_relation.remove(&(
+                    Fn(a1.clone(), r1.clone()),
+                    Fn(a2.clone(), r2.clone()),
+                ));
+                t.requirements.subtype_relation.insert((*a2, *a1));
+                t.requirements.subtype_relation.insert((*r1, *r2));
+            }
+            (a, b) if SubtypeOrd(&a) <= SubtypeOrd(&b) => {
+                assert!(t
+                    .requirements
+                    .subtype_relation
+                    .remove(&(a, b)));
+            }
             (Anonymous(a), b)
-                if !anonymous_return_types.contains(&a)
+                if !co_types.contains(&a)
                     && anonymous_types_in_sub_rel.contains(&a)
                         == 1
                     || anonymous_types_in_sub_rel.contains(&a)
@@ -229,21 +300,29 @@ fn _simplify_type(
                 t = t.replace_num(a, &b);
                 // break;
             }
-            (Fn(a1, r1), Fn(a2, r2)) => {
-                t.requirements.subtype_relation.remove(&(
-                    Fn(a1.clone(), r1.clone()),
-                    Fn(a2.clone(), r2.clone()),
-                ));
-                t.requirements.subtype_relation.insert((*a2, *a1));
-                t.requirements.subtype_relation.insert((*r1, *r2));
-            }
-            (a, Anonymous(b))
-                if !anonymous_arg_types.contains(&b)
-                    && anonymous_types_in_sub_rel.contains(&b)
+            (b, Anonymous(a))
+                if !contra_types.contains(&a)
+                    && anonymous_types_in_sub_rel.contains(&a)
                         == 1 =>
             {
-                t = t.replace_num(b, &a);
+                t = t.replace_num(a, &b);
                 // break;
+            }
+            (a, Union(cs)) if a.is_singleton() => {
+                let new_cs: BTreeSet<Type> = cs
+                    .clone()
+                    .into_iter()
+                    .filter(|c| !(c.is_singleton() && a != *c))
+                    .collect();
+                if new_cs.len() != cs.len() {
+                    t.requirements
+                        .subtype_relation
+                        .insert((a.clone(), Union(new_cs)));
+                    assert!(t
+                        .requirements
+                        .subtype_relation
+                        .remove(&(a, Union(cs))));
+                }
             }
             (Anonymous(a), Fn(_, _)) => {
                 let new_fn_type = Fn(
@@ -261,14 +340,11 @@ fn _simplify_type(
                     .subtype_relation
                     .insert((new_fn_type, Anonymous(a)));
             }
-            (Anonymous(a), b) => if b.is_constructive() {
-                t.requirements
-                    .subtype_relation
-                    .insert((Anonymous(a), b.clone()));
-                t.requirements
-                    .subtype_relation
-                    .insert((b, Anonymous(a)));
-            }
+            // (Anonymous(a), b) if b.is_constructive() => {
+            //     t.requirements
+            //         .subtype_relation
+            //         .insert((b, Anonymous(a)));
+            // }
             _ => (),
         }
     }
@@ -287,37 +363,83 @@ fn change_anonymous_num(
     t
 }
 
+#[allow(unused)]
+fn possible_weakest(
+    t: usize,
+    subtype_relation: &BTreeSet<(Type, Type)>,
+) -> Option<&Type> {
+    let mut up = Vec::new();
+    for (sub, sup) in subtype_relation {
+        if *sub == Type::Anonymous(t) {
+            up.push(sup);
+        } else if sub.contains(t) {
+            return None;
+        }
+    }
+    if up.len() == 1 {
+        Some(up[0])
+    } else {
+        unimplemented!()
+    }
+}
+
+#[allow(unused)]
+fn possible_strongest(
+    t: usize,
+    subtype_relation: &BTreeSet<(Type, Type)>,
+) -> Option<&Type> {
+    let mut down = Vec::new();
+    for (sub, sup) in subtype_relation {
+        if *sup == Type::Anonymous(t) {
+            down.push(sub);
+        } else if sup.contains(t) {
+            return None;
+        }
+    }
+    if down.len() == 1 {
+        Some(down[0])
+    } else {
+        unimplemented!()
+    }
+}
+
 fn new_anonymous_type(anonymous_type_count: &mut usize) -> Type {
     *anonymous_type_count += 1;
     Type::Anonymous(*anonymous_type_count - 1)
 }
 
-fn anonymous_return_type(t: &Type) -> Vec<usize> {
+fn anonymous_covariant_types(t: &Type) -> Vec<usize> {
     match t {
-        Type::Fn(a, r) => {
-            [anonymous_return_type(r), anonymous_arg_type(a)].concat()
-        }
+        Type::Fn(a, r) => [
+            anonymous_covariant_types(r),
+            anonymous_contravariant_types(a),
+        ]
+        .concat(),
         Type::Normal(_, cs) => {
-            cs.iter().map(|c| anonymous_return_type(c)).concat()
+            cs.iter().map(|c| anonymous_covariant_types(c)).concat()
         }
         Type::Union(cs) => {
-            cs.iter().map(|c| anonymous_return_type(c)).concat()
+            cs.iter().map(|c| anonymous_covariant_types(c)).concat()
         }
         Type::Anonymous(n) => vec![*n],
     }
 }
 
-fn anonymous_arg_type(t: &Type) -> Vec<usize> {
+fn anonymous_contravariant_types(t: &Type) -> Vec<usize> {
     match t {
-        Type::Fn(a, r) => {
-            [anonymous_return_type(a), anonymous_arg_type(r)].concat()
-        }
-        Type::Normal(_, cs) => {
-            cs.iter().map(|c| anonymous_arg_type(c)).concat()
-        }
-        Type::Union(cs) => {
-            cs.iter().map(|c| anonymous_arg_type(c)).concat()
-        }
+        Type::Fn(a, r) => [
+            anonymous_covariant_types(a),
+            anonymous_contravariant_types(r),
+        ]
+        .concat(),
+        Type::Normal(_, cs) => cs
+            .iter()
+            .map(|c| anonymous_contravariant_types(c))
+            .concat(),
+        Type::Union(cs) => cs
+            .iter()
+            .map(|c| anonymous_contravariant_types(c))
+            .concat(),
         Type::Anonymous(_) => Vec::new(),
     }
 }
@@ -414,14 +536,28 @@ impl Type {
         }
     }
 
-    fn is_constructive(&self) -> bool {
+    fn is_singleton(&self) -> bool {
         match self {
             Type::Normal(_, cs) => {
-                cs.iter().all(|c| c.is_constructive())
+                cs.iter().all(|c| c.is_singleton())
             }
-            Type::Fn(_, _) => false,
-            Type::Union(cs) => cs.iter().all(|c| c.is_constructive()),
-            Type::Anonymous(_) => false,
+            Type::Fn(a, b) => a.is_singleton() && b.is_singleton(),
+            _ => false,
+        }
+    }
+
+    fn contains(&self, variable_num: usize) -> bool {
+        match self {
+            Type::Normal(_, cs) => {
+                cs.iter().any(|c| c.contains(variable_num))
+            }
+            Type::Fn(a, r) => {
+                a.contains(variable_num) || r.contains(variable_num)
+            }
+            Type::Union(cs) => {
+                cs.iter().any(|cs| cs.contains(variable_num))
+            }
+            Type::Anonymous(n) => *n == variable_num,
         }
     }
 }
@@ -489,7 +625,15 @@ impl Display for Type {
             Union(a) => write!(
                 f,
                 "{}",
-                a.iter().map(|t| format!("({})", t)).join(" | ")
+                a.iter()
+                    .map(|t| {
+                        if let Fn(_, _) = t {
+                            format!("({})", t)
+                        } else {
+                            format!("{}", t)
+                        }
+                    })
+                    .join(" | ")
             ),
             Anonymous(n) => write!(f, "t{}", n),
         }

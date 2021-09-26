@@ -1,0 +1,4 @@
+data a /\ b
+
+hoge
+= () /\ hoge

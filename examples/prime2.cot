@@ -12,20 +12,18 @@ data a /\ b
 
 data a .. b
 
-data None
-
 pop = fn
 | a .. b =>
     (a < b).fn
     | True => (a + 1)..b /\ a
-    | False => None
+    | False => ()
     --
 --
 
 pop = fn
 | Filter(l, f) =>
     l.pop.fn
-    | None => None
+    | () => ()
     | l2 /\ a =>
         a.f.fn
         | True => Filter(l2, f) /\ a
@@ -37,7 +35,7 @@ pop = fn
 all = fn
 | i, f =>
     i.pop.fn
-    | None => True
+    | () => True
     | i2 /\ a =>
         a.f.fn
         | True => i2.all(f)
@@ -57,7 +55,7 @@ is_prime
 each = fn
 | l, f =>
     l.pop.fn
-    | None => ()
+    | () => ()
     | l2 /\ a =>
         a.f
         l2.each(f)
