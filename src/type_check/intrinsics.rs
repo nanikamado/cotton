@@ -1,5 +1,5 @@
-use super::simplify::Type;
-use super::simplify::Type::*;
+use super::Type;
+use super::Type::*;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 

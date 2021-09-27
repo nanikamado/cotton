@@ -1,4 +1,4 @@
-use crate::ast1;
+use crate::ast1::{IncompleteType, Requirements, Type};
 use hashbag::HashBag;
 use itertools::Itertools;
 use petgraph::{self, algo::tarjan_scc, graphmap::DiGraphMap};
@@ -6,85 +6,8 @@ use std::{
     cmp::Ordering,
     collections::{BTreeSet, HashMap, HashSet},
     fmt::Display,
+    vec,
 };
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Type {
-    Normal(String, Vec<Type>),
-    Fn(Box<Type>, Box<Type>),
-    Union(BTreeSet<Type>),
-    Anonymous(usize),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct IncompleteType {
-    pub constructor: Type,
-    pub requirements: Requirements,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub struct Requirements {
-    variable_requirements: Vec<(String, Type)>,
-    subtype_relation: BTreeSet<(Type, Type)>,
-}
-
-impl From<ast1::IncompleteType> for IncompleteType {
-    fn from(i: ast1::IncompleteType) -> Self {
-        IncompleteType {
-            constructor: i.constructor.into(),
-            requirements: i.requirements.into(),
-        }
-    }
-}
-
-impl From<ast1::Type> for Type {
-    fn from(t: ast1::Type) -> Self {
-        match t {
-            ast1::Type::Normal(n, cs) => Type::Normal(
-                n,
-                cs.into_iter().map(|c| c.into()).collect(),
-            ),
-            ast1::Type::Fn(arms) => {
-                let (args, rtns): (BTreeSet<Type>, BTreeSet<Type>) =
-                    arms.into_iter()
-                        .map(|ast1::FnArmType(a, r)| {
-                            (a.into(), r.into())
-                        })
-                        .unzip();
-                if args.len() == 1 {
-                    Type::Fn(
-                        Box::new(args.into_iter().next().unwrap()),
-                        Box::new(rtns.into_iter().next().unwrap()),
-                    )
-                } else {
-                    Type::Fn(
-                        Box::new(Type::Union(args)),
-                        Box::new(Type::Union(rtns)),
-                    )
-                }
-            }
-            ast1::Type::Union(_, _) => todo!(),
-            ast1::Type::Anonymous(n) => Type::Anonymous(n),
-        }
-    }
-}
-
-impl From<ast1::Requirements> for Requirements {
-    fn from(r: ast1::Requirements) -> Self {
-        Requirements {
-            variable_requirements: r
-                .variable_requirements
-                .into_iter()
-                .map(|(n, t)| (n, t.into()))
-                .collect(),
-            subtype_relation: r
-                .subtype_relationship
-                .into_iter()
-                .map(|(a, b)| (a.into(), b.into()))
-                .collect(),
-        }
-    }
-}
 
 struct SubtypeOrd<'a>(&'a Type);
 
@@ -167,10 +90,9 @@ fn _simplify_type(
         .into_iter()
         .filter(|(name, req_type)| {
             if let Some(fixed) = fixed_variables.get(name) {
-                let fixed = change_anonymous_num(
-                    fixed.clone(),
-                    anonymous_type_count,
-                );
+                let fixed = fixed
+                    .clone()
+                    .change_anonymous_num(anonymous_type_count);
                 subtype_relationship
                     .insert((fixed.clone(), req_type.clone()));
                 subtype_relationship
@@ -212,29 +134,48 @@ fn _simplify_type(
             }
         }
     }
-    let co_types: HashSet<usize> =
-        anonymous_covariant_types(&t.constructor)
-            .into_iter()
-            .collect();
-    let contra_types: HashSet<usize> =
-        anonymous_contravariant_types(&t.constructor)
-            .into_iter()
-            .collect();
+    t.requirements.subtype_relation = t
+        .requirements
+        .subtype_relation
+        .into_iter()
+        .flat_map(|(a, b)| deconstruct_subtype_rel(a, b))
+        .collect();
+    for cov in mk_covariant_candidates(&t) {
+        if !mk_contravariant_candidates(&t).contains(&cov) {
+            if let Some(s) = possible_strongest(
+                cov,
+                &t.requirements.subtype_relation,
+            ) {
+                t = t.replace_num(cov, &s);
+            }
+        }
+    }
+    for cont in mk_contravariant_candidates(&t) {
+        if !mk_covariant_candidates(&t).contains(&cont) {
+            if let Some(s) = possible_weakest(
+                cont,
+                &t.requirements.subtype_relation,
+            ) {
+                t = t.replace_num(cont, &s);
+            }
+        }
+    }
     let anonymous_types_in_sub_rel: HashBag<usize> = t
         .requirements
         .subtype_relation
         .iter()
         .flat_map(|(a, b)| {
-            [anonymous_types_in(a), anonymous_types_in(b)].concat()
+            [a.all_anonymous_types(), b.all_anonymous_types()]
+                .concat()
         })
         .collect();
     let anonymous_types_in_cons: HashSet<usize> =
-        anonymous_types_in(&t.constructor).into_iter().collect();
+        t.constructor.all_anonymous_types().into_iter().collect();
     let anonymous_types_in_vreq: HashSet<usize> = t
         .requirements
         .variable_requirements
         .iter()
-        .flat_map(|(_, r)| anonymous_types_in(r))
+        .flat_map(|(_, r)| r.all_anonymous_types())
         .collect();
     let sub_right_anonymous: HashBag<usize> = t
         .requirements
@@ -262,88 +203,54 @@ fn _simplify_type(
         .collect();
     for (a, b) in t.requirements.subtype_relation.clone() {
         match (a, b) {
-            (Union(cs), b) => {
-                for c in &cs {
-                    t.requirements
-                        .subtype_relation
-                        .insert((c.clone(), b.clone()));
-                }
-                t.requirements
-                    .subtype_relation
-                    .remove(&(Union(cs), b));
-            }
-            (Fn(a1, r1), Fn(a2, r2)) => {
-                t.requirements.subtype_relation.remove(&(
-                    Fn(a1.clone(), r1.clone()),
-                    Fn(a2.clone(), r2.clone()),
-                ));
-                t.requirements.subtype_relation.insert((*a2, *a1));
-                t.requirements.subtype_relation.insert((*r1, *r2));
-            }
-            (a, b) if SubtypeOrd(&a) <= SubtypeOrd(&b) => {
-                assert!(t
-                    .requirements
-                    .subtype_relation
-                    .remove(&(a, b)));
-            }
             (Anonymous(a), b)
-                if !co_types.contains(&a)
-                    && anonymous_types_in_sub_rel.contains(&a)
-                        == 1
-                    || anonymous_types_in_sub_rel.contains(&a)
-                        == 2
-                        && sub_left_anonymous.contains(&a) == 1
-                        && sub_right_anonymous.contains(&a) == 1
-                        && !anonymous_types_in_cons.contains(&a)
-                        && !anonymous_types_in_vreq.contains(&a) =>
+                if anonymous_types_in_sub_rel.contains(&a)
+                    == 1 + sub_right_anonymous.contains(&a)
+                    && sub_left_anonymous.contains(&a) == 1
+                    && !anonymous_types_in_cons.contains(&a)
+                    && !anonymous_types_in_vreq.contains(&a) =>
             {
                 t = t.replace_num(a, &b);
-                // break;
-            }
-            (b, Anonymous(a))
-                if !contra_types.contains(&a)
-                    && anonymous_types_in_sub_rel.contains(&a)
-                        == 1 =>
-            {
-                t = t.replace_num(a, &b);
-                // break;
-            }
-            (a, Union(cs)) if a.is_singleton() => {
-                let new_cs: BTreeSet<Type> = cs
-                    .clone()
-                    .into_iter()
-                    .filter(|c| !(c.is_singleton() && a != *c))
-                    .collect();
-                if new_cs.len() != cs.len() {
-                    t.requirements
-                        .subtype_relation
-                        .insert((a.clone(), Union(new_cs)));
-                    assert!(t
-                        .requirements
-                        .subtype_relation
-                        .remove(&(a, Union(cs))));
-                }
             }
             (Anonymous(a), Fn(_, _)) => {
                 let new_fn_type = Fn(
-                    Box::new(new_anonymous_type(
+                    Box::new(Type::new_variable(
                         anonymous_type_count,
                     )),
-                    Box::new(new_anonymous_type(
+                    Box::new(Type::new_variable(
                         anonymous_type_count,
                     )),
                 );
-                t.requirements
-                    .subtype_relation
-                    .insert((Anonymous(a), new_fn_type.clone()));
-                t.requirements
-                    .subtype_relation
-                    .insert((new_fn_type, Anonymous(a)));
+                t = t.replace_num(a, &new_fn_type.clone());
             }
-            // (Anonymous(a), b) if b.is_constructive() => {
-            //     t.requirements
-            //         .subtype_relation
-            //         .insert((b, Anonymous(a)));
+            // (Normal(name, cs), Anonymous(n)) => {
+            //     let new_type = Union(
+            //         [
+            //             Normal(name, cs),
+            //             Type::new_variable(anonymous_type_count),
+            //         ]
+            //         .iter()
+            //         .cloned()
+            //         .collect(),
+            //     );
+            //     t = t.replace_num(n, &new_type);
+            // }
+            // (Fn(a, r), Anonymous(n)) => {
+            //     let new_type = Union(
+            //         [
+            //             Fn(a, r),
+            //             Type::new_variable(anonymous_type_count),
+            //         ]
+            //         .iter()
+            //         .cloned()
+            //         .collect(),
+            //     );
+            //     t = t.replace_num(n, &new_type);
+            // }
+            // (Anonymous(n), a) if a.is_singleton() => {
+            //     let new_type =
+            //         Union(vec![a, Empty].into_iter().collect());
+            //     t = t.replace_num(n, &new_type);
             // }
             _ => (),
         }
@@ -351,61 +258,133 @@ fn _simplify_type(
     t
 }
 
-fn change_anonymous_num(
-    mut t: Type,
-    anonymous_type_count: &mut usize,
-) -> Type {
-    let anos = anonymous_types_in(&t);
-    for a in anos {
-        t = t
-            .replace_num(a, &new_anonymous_type(anonymous_type_count))
+fn deconstruct_subtype_rel(
+    sub: Type,
+    sup: Type,
+) -> Vec<(Type, Type)> {
+    use Type::*;
+    match (sub, sup) {
+        (Union(cs), b) => cs
+            .into_iter()
+            .flat_map(|c| deconstruct_subtype_rel(c, b.clone()))
+            .collect(),
+        (Fn(a1, r1), Fn(a2, r2)) => [
+            deconstruct_subtype_rel(*r1, *r2),
+            deconstruct_subtype_rel(*a2, *a1),
+        ]
+        .concat(),
+        (Normal(n1, cs1), Normal(n2, cs2)) => {
+            if n1 == n2 {
+                assert_eq!(cs1.len(), cs2.len());
+                cs1.into_iter()
+                    .zip(cs2)
+                    .flat_map(|(a, b)| deconstruct_subtype_rel(a, b))
+                    .collect()
+            } else {
+                eprintln!("{} != {}", n1, n2);
+                unimplemented!()
+            }
+        }
+        (Empty, _) => Vec::new(),
+        (Anonymous(a), Anonymous(b)) if a == b => Vec::new(),
+        (a, Union(u)) if u.contains(&a) => Vec::new(),
+        (a, Union(u)) if u.len() == 1 => {
+            deconstruct_subtype_rel(a, u.into_iter().next().unwrap())
+        }
+        (a, Union(mut u)) if u.contains(&Empty) => {
+            u.remove(&Empty);
+            deconstruct_subtype_rel(a, Union(u))
+        }
+        (a, Union(cs)) if a.is_singleton() => {
+            let new_cs: BTreeSet<Type> = cs
+                .clone()
+                .into_iter()
+                .filter(|c| !(c.is_singleton() && a != *c))
+                .collect();
+            vec![(a, Union(new_cs))]
+        }
+        (sub, sup) => vec![(sub, sup)],
     }
-    t
 }
 
-#[allow(unused)]
 fn possible_weakest(
     t: usize,
     subtype_relation: &BTreeSet<(Type, Type)>,
-) -> Option<&Type> {
+) -> Option<Type> {
     let mut up = Vec::new();
     for (sub, sup) in subtype_relation {
-        if *sub == Type::Anonymous(t) {
+        if anonymous_contravariant_types(sup).contains(&t) {
+            return None;
+        } else if *sub == Type::Anonymous(t) {
             up.push(sup);
-        } else if sub.contains(t) {
+        } else if anonymous_covariant_types(sub).contains(&t) {
             return None;
         }
     }
     if up.len() == 1 {
-        Some(up[0])
+        Some(up[0].clone())
+    } else if up.is_empty() {
+        eprintln!("{} -> Any", t);
+        Some(Type::Normal("Any".to_string(), Vec::new()))
     } else {
-        unimplemented!()
+        let upc = up
+            .iter()
+            .filter(|t| {
+                matches!(t, Type::Fn(_, _) | Type::Normal(_, _))
+            })
+            .collect_vec();
+        if upc.len() == 1 {
+            Some((**upc[0]).clone())
+        } else {
+            None
+        }
     }
 }
 
-#[allow(unused)]
 fn possible_strongest(
     t: usize,
     subtype_relation: &BTreeSet<(Type, Type)>,
-) -> Option<&Type> {
+) -> Option<Type> {
     let mut down = Vec::new();
     for (sub, sup) in subtype_relation {
-        if *sup == Type::Anonymous(t) {
+        if anonymous_contravariant_types(sub).contains(&t) {
+            return None;
+        } else if *sup == Type::Anonymous(t) {
             down.push(sub);
-        } else if sup.contains(t) {
+        } else if anonymous_covariant_types(sup).contains(&t) {
             return None;
         }
     }
     if down.len() == 1 {
-        Some(down[0])
+        Some(down[0].clone())
+    } else if down.is_empty() {
+        eprintln!("t{} -> ∅", t);
+        Some(Type::Empty)
     } else {
-        unimplemented!()
+        Some(Type::Union(down.into_iter().cloned().collect()))
     }
 }
 
-fn new_anonymous_type(anonymous_type_count: &mut usize) -> Type {
-    *anonymous_type_count += 1;
-    Type::Anonymous(*anonymous_type_count - 1)
+fn mk_contravariant_candidates(t: &IncompleteType) -> HashSet<usize> {
+    let mut rst: HashSet<usize> =
+        anonymous_contravariant_types(&t.constructor)
+            .into_iter()
+            .collect();
+    for (_, v) in &t.requirements.variable_requirements {
+        rst.extend(anonymous_covariant_types(v));
+    }
+    rst
+}
+
+fn mk_covariant_candidates(t: &IncompleteType) -> HashSet<usize> {
+    let mut rst: HashSet<usize> =
+        anonymous_covariant_types(&t.constructor)
+            .into_iter()
+            .collect();
+    for (_, v) in &t.requirements.variable_requirements {
+        rst.extend(anonymous_contravariant_types(v));
+    }
+    rst
 }
 
 fn anonymous_covariant_types(t: &Type) -> Vec<usize> {
@@ -422,6 +401,7 @@ fn anonymous_covariant_types(t: &Type) -> Vec<usize> {
             cs.iter().map(|c| anonymous_covariant_types(c)).concat()
         }
         Type::Anonymous(n) => vec![*n],
+        Type::Empty => Vec::new(),
     }
 }
 
@@ -440,22 +420,7 @@ fn anonymous_contravariant_types(t: &Type) -> Vec<usize> {
             .iter()
             .map(|c| anonymous_contravariant_types(c))
             .concat(),
-        Type::Anonymous(_) => Vec::new(),
-    }
-}
-
-fn anonymous_types_in(t: &Type) -> Vec<usize> {
-    match t {
-        Type::Fn(a, r) => {
-            [anonymous_types_in(a), anonymous_types_in(r)].concat()
-        }
-        Type::Normal(_, cs) => {
-            cs.iter().map(|c| anonymous_types_in(c)).concat()
-        }
-        Type::Union(cs) => {
-            cs.iter().map(|c| anonymous_types_in(c)).concat()
-        }
-        Type::Anonymous(n) => vec![*n],
+        Type::Anonymous(_) | Type::Empty => Vec::new(),
     }
 }
 
@@ -478,14 +443,10 @@ impl IncompleteType {
                     .collect(),
                 subtype_relation: subtype_relationship
                     .into_iter()
-                    .filter_map(|(a, b)| {
+                    .flat_map(|(a, b)| {
                         let a = a.replace_num(from, to);
                         let b = b.replace_num(from, to);
-                        if a == b {
-                            None
-                        } else {
-                            Some((a, b))
-                        }
+                        deconstruct_subtype_rel(a, b)
                     })
                     .collect(),
             },
@@ -506,60 +467,6 @@ fn mk_graph(
         g.add_edge(a, b, ());
     }
     g
-}
-
-impl Type {
-    fn replace_num(self, from: usize, to: &Type) -> Self {
-        match self {
-            Type::Fn(args, rtn) => Type::Fn(
-                args.replace_num(from, to).into(),
-                rtn.replace_num(from, to).into(),
-            ),
-            Type::Union(m) => Type::Union(
-                m.into_iter()
-                    .map(|t| t.replace_num(from, to))
-                    .collect(),
-            ),
-            Type::Normal(name, cs) => Type::Normal(
-                name,
-                cs.into_iter()
-                    .map(|t| t.replace_num(from, to))
-                    .collect(),
-            ),
-            Type::Anonymous(n) => {
-                if n == from {
-                    to.clone()
-                } else {
-                    Type::Anonymous(n)
-                }
-            }
-        }
-    }
-
-    fn is_singleton(&self) -> bool {
-        match self {
-            Type::Normal(_, cs) => {
-                cs.iter().all(|c| c.is_singleton())
-            }
-            Type::Fn(a, b) => a.is_singleton() && b.is_singleton(),
-            _ => false,
-        }
-    }
-
-    fn contains(&self, variable_num: usize) -> bool {
-        match self {
-            Type::Normal(_, cs) => {
-                cs.iter().any(|c| c.contains(variable_num))
-            }
-            Type::Fn(a, r) => {
-                a.contains(variable_num) || r.contains(variable_num)
-            }
-            Type::Union(cs) => {
-                cs.iter().any(|cs| cs.contains(variable_num))
-            }
-            Type::Anonymous(n) => *n == variable_num,
-        }
-    }
 }
 
 #[test]
@@ -624,7 +531,7 @@ impl Display for Type {
             }
             Union(a) => write!(
                 f,
-                "{}",
+                "{{{}}}",
                 a.iter()
                     .map(|t| {
                         if let Fn(_, _) = t {
@@ -636,6 +543,7 @@ impl Display for Type {
                     .join(" | ")
             ),
             Anonymous(n) => write!(f, "t{}", n),
+            Empty => write!(f, "∅"),
         }
     }
 }

@@ -9,6 +9,27 @@ pub struct Ast {
     pub data_declarations: Vec<ast0::DataDeclaration>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Type {
+    Normal(String, Vec<Type>),
+    Fn(Box<Type>, Box<Type>),
+    Union(BTreeSet<Type>),
+    Anonymous(usize),
+    Empty,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct IncompleteType {
+    pub constructor: Type,
+    pub requirements: Requirements,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub struct Requirements {
+    pub variable_requirements: Vec<(String, Type)>,
+    pub subtype_relation: BTreeSet<(Type, Type)>,
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct Declaration {
     pub identifier: String,
@@ -222,30 +243,6 @@ impl From<ast0::OpSequence> for Expr {
     }
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Type {
-    Normal(String, Vec<Type>),
-    Fn(Vec<FnArmType>),
-    Union(Box<Type>, Box<Type>),
-    Anonymous(usize),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct FnArmType(pub Type, pub Type);
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct IncompleteType {
-    pub constructor: Type,
-    pub requirements: Requirements,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
-pub struct Requirements {
-    pub variable_requirements: Vec<(String, Type)>,
-    pub subtype_relationship: Vec<(Type, Type)>,
-}
-
 impl From<Type> for IncompleteType {
     fn from(t: Type) -> Self {
         Self {
@@ -289,10 +286,10 @@ impl From<ast0::InfixTypeSequence> for Type {
                     operands[operand_head] = if op == *"type_call" {
                         unimplemented!()
                     } else if op == *"->" {
-                        Type::Fn(vec![FnArmType(
-                            operands[operand_head].clone(),
-                            operands[i + 1].clone(),
-                        )])
+                        Type::Fn(
+                            Box::new(operands[operand_head].clone()),
+                            Box::new(operands[i + 1].clone()),
+                        )
                     } else {
                         Type::Normal(
                             op,
