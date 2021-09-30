@@ -12,7 +12,7 @@ pub enum Dec {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Declaration {
     pub identifier: String,
-    pub datatype: Option<InfixTypeSequence>,
+    pub type_annotation: Option<(InfixTypeSequence, Forall)>,
     pub value: OpSequence,
 }
 
@@ -26,6 +26,11 @@ pub enum Datatype {
 pub struct InfixTypeSequence {
     pub operators: Vec<String>,
     pub operands: Vec<Datatype>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub struct Forall {
+    pub type_variable_names: Vec<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]

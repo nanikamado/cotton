@@ -1,6 +1,7 @@
 use crate::ast0::{
     Ast, DataDeclaration, Datatype, Dec, Declaration, Expr, FnArm,
-    InfixConstructorSequence, InfixTypeSequence, OpSequence, Pattern,
+    Forall, InfixConstructorSequence, InfixTypeSequence, OpSequence,
+    Pattern,
 };
 use nom::{
     branch::alt,
@@ -40,19 +41,40 @@ where
 }
 
 fn declaration(input: &str) -> IResult<&str, Declaration> {
-    let (input, (identifier, _, data_type, _, value)) = tuple((
-        identifier,
-        separator0,
-        opt(preceded(tag(":"), infix_type_sequence)),
-        tag("="),
-        op_sequence,
-    ))(input)?;
+    let (input, (identifier, _, data_type, _, _, value)) =
+        tuple((
+            identifier,
+            separator0,
+            opt(tuple((tag(":"), infix_type_sequence, opt(forall)))),
+            separator0,
+            tag("="),
+            op_sequence,
+        ))(input)?;
     Ok((
         input,
         Declaration {
             identifier,
-            datatype: data_type,
+            type_annotation: data_type.map(|(_, t, forall)| {
+                (t, forall.unwrap_or_default())
+            }),
             value,
+        },
+    ))
+}
+
+fn forall(input: &str) -> IResult<&str, Forall> {
+    let (input, (_, id, ids, _, _, _)) = tuple((
+        tag("forall"),
+        identifier_separators,
+        many0(preceded(tag(","), identifier_separators)),
+        opt(tag(",")),
+        separator0,
+        tag("--"),
+    ))(input)?;
+    Ok((
+        input,
+        Forall {
+            type_variable_names: [vec![id], ids].concat(),
         },
     ))
 }

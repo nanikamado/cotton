@@ -1,9 +1,9 @@
-(.) : a -> (a -> b) -> b
+(.) : a -> (a -> b) -> b forall a, b --
 = fn
 | a, f => f(a)
 --
 
-($) : (a -> b) -> a -> b
+($) : (a -> b) -> a -> b forall a, b --
 = fn
 | f, a => f(a)
 --
@@ -12,7 +12,8 @@ data a /\ b
 
 data a .. b
 
-pop = fn
+pop : (Num..Num) -> (() | (Num..Num /\ Num))
+= fn
 | a .. b =>
     (a < b).fn
     | True => (a + 1)..b /\ a
@@ -20,7 +21,9 @@ pop = fn
     --
 --
 
-pop = fn
+pop : Filter[Num..Num, Num -> (True | False)]
+    -> () | (Filter[Num..Num, Num -> (True | False)] /\ Num)
+= fn
 | Filter(l, f) =>
     l.pop.fn
     | () => ()
@@ -32,7 +35,8 @@ pop = fn
     --
 --
 
-all = fn
+all : Num..Num -> (Num -> (True | False)) -> (True | False)
+= fn
 | i, f =>
     i.pop.fn
     | () => True

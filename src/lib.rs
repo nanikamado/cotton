@@ -3,6 +3,7 @@ mod ast1;
 mod codegen;
 mod parse;
 mod type_check;
+mod type_variable;
 
 use codegen::compile;
 use parse::parse;

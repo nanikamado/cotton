@@ -1,7 +1,7 @@
 use crate::ast0;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 #[derive(Debug, PartialEq)]
 pub struct Ast {
@@ -33,7 +33,7 @@ pub struct Requirements {
 #[derive(Debug, PartialEq, Clone)]
 pub struct Declaration {
     pub identifier: String,
-    pub datatype: Option<Type>,
+    pub type_annotation: Option<IncompleteType>,
     pub value: Expr,
 }
 
@@ -41,9 +41,26 @@ impl From<ast0::Declaration> for Declaration {
     fn from(d: ast0::Declaration) -> Self {
         Self {
             identifier: d.identifier,
-            datatype: d.datatype.map(|t| t.into()),
+            type_annotation: d.type_annotation.map(|t| t.into()),
             value: d.value.into(),
         }
+    }
+}
+
+impl From<(ast0::InfixTypeSequence, ast0::Forall)>
+    for IncompleteType
+{
+    fn from(
+        (t, forall): (ast0::InfixTypeSequence, ast0::Forall),
+    ) -> Self {
+        let mut t: Type = t.into();
+        for v in forall.type_variable_names {
+            t = t.replace_type(
+                &Type::Normal(v, Vec::new()),
+                &Type::new_variable(),
+            );
+        }
+        t.into()
     }
 }
 
@@ -159,6 +176,9 @@ static OP_PRECEDENCE: Lazy<HashMap<&str, i32>> = Lazy::new(|| {
     .collect()
 });
 
+static RIGHT_ASSOCIATIVE: Lazy<HashSet<i32>> =
+    Lazy::new(|| [1].iter().cloned().collect());
+
 impl Ord for Operator {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         OP_PRECEDENCE[&self.0[..]].cmp(&OP_PRECEDENCE[&other.0[..]])
@@ -194,7 +214,7 @@ impl From<ast0::Ast> for Ast {
 fn declaration(d: ast0::Declaration) -> Declaration {
     Declaration {
         identifier: d.identifier,
-        datatype: d.datatype.map(|t| t.into()),
+        type_annotation: d.type_annotation.map(|t| t.into()),
         value: d.value.into(),
     }
 }
@@ -238,6 +258,7 @@ impl From<ast0::OpSequence> for Expr {
                 }
             }
             operators.retain(|o| OP_PRECEDENCE[&o[..]] != a);
+            // operands.truncate(operand_head + 1);
         }
         operands[0].clone()
     }
@@ -275,37 +296,87 @@ impl From<ast0::InfixTypeSequence> for Type {
                 })
             })
             .collect();
-        let mut operators = s.operators;
-        let mut operands: Vec<Type> =
+        let mut operators = s.operators.into_iter().collect();
+        let mut operands: VecDeque<Type> =
             s.operands.into_iter().map(|o| o.into()).collect();
         for a in op_list.into_iter().rev() {
-            let mut operand_head = 0;
-            for i in 0..operators.len() {
-                let op = operators[i].clone();
-                if a == OP_PRECEDENCE[&op[..]] {
-                    operands[operand_head] = if op == *"type_call" {
-                        unimplemented!()
-                    } else if op == *"->" {
-                        Type::Fn(
-                            Box::new(operands[operand_head].clone()),
-                            Box::new(operands[i + 1].clone()),
-                        )
-                    } else {
-                        Type::Normal(
-                            op,
-                            vec![
-                                operands[operand_head].clone(),
-                                operands[i + 1].clone(),
-                            ],
-                        )
-                    }
-                } else {
-                    operand_head += 1;
-                    operands[operand_head] = operands[i + 1].clone();
-                }
+            if RIGHT_ASSOCIATIVE.contains(&a) {
+                let os = type_op_apply_right(operators, operands, a);
+                operators = os.0;
+                operands = os.1;
+            } else {
+                let os = type_op_apply_left(operators, operands, a);
+                operators = os.0;
+                operands = os.1;
             }
-            operators.retain(|o| OP_PRECEDENCE[&o[..]] != a);
         }
         operands[0].clone()
+    }
+}
+
+fn type_op_apply_right(
+    mut operators: VecDeque<String>,
+    mut operands: VecDeque<Type>,
+    precedence: i32,
+) -> (VecDeque<String>, VecDeque<Type>) {
+    if let Some(op) = operators.pop_back() {
+        let last = operands.pop_back().unwrap();
+        if OP_PRECEDENCE[&op[..]] == precedence {
+            let last_ = operands.pop_back().unwrap();
+            let new_elm = if op == "type_call" {
+                unimplemented!()
+            } else if op == "->" {
+                Type::Fn(Box::new(last_), Box::new(last))
+            } else {
+                Type::Normal(op, vec![last_, last])
+            };
+            operands.push_back(new_elm);
+            type_op_apply_right(operators, operands, precedence)
+        } else {
+            let (mut operators, mut operands) =
+                type_op_apply_right(operators, operands, precedence);
+            operators.push_back(op);
+            operands.push_back(last);
+            (operators, operands)
+        }
+    } else {
+        (operators, operands)
+    }
+}
+
+fn type_op_apply_left(
+    mut operators: VecDeque<String>,
+    mut operands: VecDeque<Type>,
+    precedence: i32,
+) -> (VecDeque<String>, VecDeque<Type>) {
+    if let Some(op) = operators.pop_front() {
+        let head = operands.pop_front().unwrap();
+        if OP_PRECEDENCE[&op[..]] == precedence {
+            let head_ = operands.pop_front().unwrap();
+            let new_elm = if op == "type_call" {
+                if let Type::Normal(n, mut args) = head {
+                    args.push(head_);
+                    Type::Normal(n, args)
+                } else {
+                    unimplemented!()
+                }
+            } else if op == "->" {
+                Type::Fn(Box::new(head), Box::new(head_))
+            } else if op == "|" {
+                head.union_with(head_)
+            } else {
+                Type::Normal(op, vec![head, head_])
+            };
+            operands.push_front(new_elm);
+            type_op_apply_left(operators, operands, precedence)
+        } else {
+            let (mut operators, mut operands) =
+                type_op_apply_left(operators, operands, precedence);
+            operators.push_front(op);
+            operands.push_front(head);
+            (operators, operands)
+        }
+    } else {
+        (operators, operands)
     }
 }

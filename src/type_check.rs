@@ -11,33 +11,25 @@ use itertools::Itertools;
 use std::collections::BTreeSet;
 use std::{collections::HashMap, vec};
 
+type DeclId = u32;
+
 pub fn type_check(ast: &Ast) {
     use simplify::simplify_type;
-    let mut resolved_variables: HashMap<String, Vec<Type>> =
+    let mut fixed_variables: HashMap<String, Vec<Type>> =
         INTRINSIC_VARIABLES.clone();
     let mut variable_count: HashMap<String, usize> =
         INTRINSIC_VARIABLES
             .iter()
             .map(|(name, ts)| (name.clone(), ts.len()))
             .collect();
-    // let mut resolved_variables2: HashMap<
-    //     String,
-    //     Vec<Option<simplify::Type>>,
-    // > = INTRINSIC_VARIABLES
-    //     .iter()
-    //     .map(|(name, ts)| {
-    //         (
-    //             name.clone(),
-    //             ts.into_iter().map(|t| Some(t.clone())).collect(),
-    //         )
-    //     })
-    //     .collect();
-    let mut anonymous_type_count = 0;
+    let mut decl_id = 0;
     for d in &ast.data_declarations {
-        resolved_variables.entry(d.name.clone()).or_default().push(
-            constructor_type(d.clone(), &mut anonymous_type_count),
-        );
+        fixed_variables
+            .entry(d.name.clone())
+            .or_default()
+            .push(constructor_type(d.clone()));
         *variable_count.entry(d.name.clone()).or_default() += 1;
+        decl_id += 1;
     }
     let mut unresolved_variables = ast
         .declarations
@@ -46,69 +38,127 @@ pub fn type_check(ast: &Ast) {
             *variable_count
                 .entry(d.identifier.clone())
                 .or_default() += 1;
-            (
-                d.identifier.clone(),
-                min_type(&d.value, &mut anonymous_type_count)
-                    .unwrap(),
-            )
+            decl_id += 1;
+            let mut t = min_type(&d.value).unwrap();
+            if let Some(annotation) = &d.type_annotation {
+                let annotation =
+                    annotation.clone().change_anonymous_num();
+                t.requirements.subtype_relation.insert((
+                    t.constructor.clone(),
+                    annotation.constructor.clone(),
+                ));
+                t.requirements.subtype_relation.insert((
+                    annotation.constructor,
+                    t.constructor.clone(),
+                ));
+                t.requirements =
+                    t.requirements.merge(annotation.requirements);
+                eprintln!("65 : t : {}", t);
+            }
+            (d.identifier.clone(), decl_id - 1, t)
         })
         .collect_vec();
     loop {
         eprintln!("-------------------");
-        let resolved = resolved_variables.clone();
+        let resolved = fixed_variables.clone();
         let declar_types_last = unresolved_variables.clone();
         unresolved_variables = unresolved_variables
             .into_iter()
-            .filter_map(|(name, t): (String, IncompleteType)| {
-                eprint!("{} : ", name);
-                let t = simplify_type(
-                    t,
-                    &resolved
-                        .iter()
-                        .filter_map(|(n, v)| {
-                            if v.len() == 1
-                                && variable_count.get(n) == Some(&1)
-                            {
-                                Some((n.clone(), v[0].clone()))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect(),
-                    &mut anonymous_type_count,
-                );
-                eprintln!("{}", t);
-                if t.resolved() {
-                    resolved_variables
-                        .entry(name)
-                        .or_default()
-                        .push(t.constructor);
-                    None
-                } else {
-                    Some((name, t))
-                }
-            })
+            .filter_map(
+                |(name, id, t): (String, DeclId, IncompleteType)| {
+                    eprint!("{} : ", name);
+                    let t = simplify_type(
+                        t,
+                        &resolved
+                            .iter()
+                            .filter_map(|(n, v)| {
+                                if v.len() == 1
+                                    && variable_count.get(n)
+                                        == Some(&1)
+                                {
+                                    Some((n.clone(), v[0].clone()))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect(),
+                    )
+                    .unwrap();
+                    eprintln!("{}", t);
+                    if t.resolved() {
+                        fixed_variables
+                            .entry(name)
+                            .or_default()
+                            .push(t.constructor);
+                        None
+                    } else {
+                        Some((name, id, t))
+                    }
+                },
+            )
             .collect();
         if declar_types_last == unresolved_variables {
             break;
         }
     }
     eprintln!("-- resolved --");
-    for (name, rs) in resolved_variables {
+    for (name, rs) in &fixed_variables {
         eprintln!("{} :", name);
         for r in rs {
             eprintln!("{}", r);
         }
     }
+    let mut toplevels: HashMap<&str, Vec<IncompleteType>> =
+        HashMap::new();
+    for (name, _, t) in &unresolved_variables {
+        toplevels.entry(name).or_default().push(t.clone());
+    }
+    for (name, t) in &fixed_variables {
+        toplevels.entry(name).or_default().append(
+            &mut t.iter().map(|a| a.clone().into()).collect(),
+        );
+    }
+    let mut unresolved_variables_map: HashMap<
+        &str,
+        Vec<(DeclId, IncompleteType)>,
+    > = HashMap::new();
+    for (name, id, t) in &unresolved_variables {
+        unresolved_variables_map
+            .entry(name)
+            .or_default()
+            .push((*id, t.clone()));
+    }
+    // for (name, id, t) in &unresolved_variables {
+    //     let mut additional_sub_req: Vec<(Type, Type)> = Vec::new();
+    //     let _ = t.requirements.variable_requirements.iter().map(
+    //         |(req_name, req_t)| {
+    //             if let Some(candi) =
+    //                 unresolved_variables_map.get(&req_name[..])
+    //             {
+    //                 if candi.len() == 1 && candi[0].0 == *id {
+    //                     additional_sub_req.push((
+    //                         req_t.clone(),
+    //                         t.constructor.clone(),
+    //                     ));
+    //                     additional_sub_req.push((
+    //                         t.constructor.clone(),
+    //                         req_t.clone(),
+    //                     ));
+    //                     false
+    //                 } else {
+    //                     true
+    //                 }
+    //             } else {
+    //                 true
+    //             }
+    //         },
+    //     );
+    // }
 }
 
-fn constructor_type(
-    d: DataDeclaration,
-    anonymous_type_count: &mut usize,
-) -> Type {
-    let field_types: Vec<_> = (0..d.field_len)
-        .map(|_| new_anonymous_type(anonymous_type_count))
-        .collect();
+fn constructor_type(d: DataDeclaration) -> Type {
+    let field_types: Vec<_> =
+        (0..d.field_len).map(|_| Type::new_variable()).collect();
     let mut t = Type::Normal(d.name, field_types.clone());
     for field in field_types.into_iter().rev() {
         t = Type::Fn(Box::new(field), Box::new(t))
@@ -116,24 +166,16 @@ fn constructor_type(
     t
 }
 
-fn min_type(
-    expr: &Expr,
-    anonymous_type_count: &mut usize,
-) -> Result<IncompleteType, &'static str> {
-    Ok(min_type_incomplite(expr, anonymous_type_count))
+fn min_type(expr: &Expr) -> Result<IncompleteType, &'static str> {
+    Ok(min_type_incomplite(expr))
 }
 
-fn min_type_incomplite(
-    expr: &Expr,
-    anonymous_type_count: &mut usize,
-) -> IncompleteType {
+fn min_type_incomplite(expr: &Expr) -> IncompleteType {
     match expr {
         Expr::Lambda(arms) => {
-            let (arm_types, requirements): (Vec<_>, Vec<_>) = arms
-                .iter()
-                .map(|a| arm_min_type(a, anonymous_type_count))
-                .unzip();
-            let (args, rtns): (BTreeSet<Type>, BTreeSet<Type>) =
+            let (arm_types, requirements): (Vec<_>, Vec<_>) =
+                arms.iter().map(|a| arm_min_type(a)).unzip();
+            let (args, rtns): (Vec<Type>, Vec<Type>) =
                 arm_types.into_iter().unzip();
             let constructor = if args.len() == 1 {
                 Type::Fn(
@@ -142,8 +184,8 @@ fn min_type_incomplite(
                 )
             } else {
                 Type::Fn(
-                    Box::new(Type::Union(args)),
-                    Box::new(Type::Union(rtns)),
+                    Box::new(Type::union_from(args.into_iter())),
+                    Box::new(Type::union_from(rtns.into_iter())),
                 )
             };
             IncompleteType {
@@ -158,7 +200,7 @@ fn min_type_incomplite(
             Type::Normal("String".to_string(), Vec::new()).into()
         }
         Expr::Identifier(n) => {
-            let t = new_anonymous_type(anonymous_type_count);
+            let t = Type::new_variable();
             IncompleteType {
                 constructor: t.clone(),
                 requirements: Requirements {
@@ -171,10 +213,10 @@ fn min_type_incomplite(
             Type::Normal("()".to_string(), Vec::new()).into()
         }
         Expr::Call(f, a) => {
-            let f_t = min_type_incomplite(f, anonymous_type_count);
-            let a_t = min_type_incomplite(a, anonymous_type_count);
-            let b = new_anonymous_type(anonymous_type_count);
-            let c = new_anonymous_type(anonymous_type_count);
+            let f_t = min_type_incomplite(f);
+            let a_t = min_type_incomplite(a);
+            let b = Type::new_variable();
+            let c = Type::new_variable();
             // c -> b
             let cb_fn =
                 Type::Fn(Box::new(c.clone()), Box::new(b.clone()));
@@ -212,15 +254,12 @@ fn min_type_incomplite(
     }
 }
 
-fn multi_expr_min_type(
-    exprs: &[Expr],
-    anonymous_type_count: &mut usize,
-) -> IncompleteType {
+fn multi_expr_min_type(exprs: &[Expr]) -> IncompleteType {
     let mut req = Requirements::default();
     let t = exprs
         .iter()
         .map(|e| {
-            let t = min_type_incomplite(e, anonymous_type_count);
+            let t = min_type_incomplite(e);
             req = marge_requirements(vec![
                 req.clone(),
                 t.clone().requirements,
@@ -229,11 +268,6 @@ fn multi_expr_min_type(
         })
         .collect::<Vec<_>>();
     t.last().unwrap().clone()
-}
-
-fn new_anonymous_type(anonymous_type_count: &mut usize) -> Type {
-    *anonymous_type_count += 1;
-    Type::Anonymous(*anonymous_type_count - 1)
 }
 
 fn marge_requirements(
@@ -248,17 +282,10 @@ fn marge_requirements(
     rst
 }
 
-fn arm_min_type(
-    arm: &FnArm,
-    anonymous_type_count: &mut usize,
-) -> ((Type, Type), Requirements) {
-    let body_type =
-        multi_expr_min_type(&arm.exprs, anonymous_type_count);
-    let (types, bindings): (Vec<_>, Vec<_>) = arm
-        .pattern
-        .iter()
-        .map(|p| pattern_to_type(p, anonymous_type_count))
-        .unzip();
+fn arm_min_type(arm: &FnArm) -> ((Type, Type), Requirements) {
+    let body_type = multi_expr_min_type(&arm.exprs);
+    let (types, bindings): (Vec<_>, Vec<_>) =
+        arm.pattern.iter().map(|p| pattern_to_type(p)).unzip();
     let mut arm_type = body_type.constructor;
     for pattern_type in types[1..].iter().rev() {
         arm_type = Type::Fn(
@@ -301,10 +328,7 @@ fn arm_min_type(
     )
 }
 
-fn pattern_to_type(
-    p: &Pattern,
-    anonymous_type_count: &mut usize,
-) -> (Type, Vec<(String, Type)>) {
+fn pattern_to_type(p: &Pattern) -> (Type, Vec<(String, Type)>) {
     match p {
         Pattern::Number(_) => {
             (Type::Normal("Num".to_string(), Vec::new()), Vec::new())
@@ -314,18 +338,14 @@ fn pattern_to_type(
             Vec::new(),
         ),
         Pattern::Constructor(name, cs) => {
-            let (types, bindings): (Vec<_>, Vec<_>) = cs
-                .iter()
-                .map(|c| pattern_to_type(c, anonymous_type_count))
-                .unzip();
+            let (types, bindings): (Vec<_>, Vec<_>) =
+                cs.iter().map(|c| pattern_to_type(c)).unzip();
             (Type::Normal(name.clone(), types), bindings.concat())
         }
         Pattern::Binder(name) => {
-            let t = new_anonymous_type(anonymous_type_count);
+            let t = Type::new_variable();
             (t.clone(), vec![(name.to_string(), t)])
         }
-        Pattern::Underscore => {
-            (new_anonymous_type(anonymous_type_count), Vec::new())
-        }
+        Pattern::Underscore => (Type::new_variable(), Vec::new()),
     }
 }
