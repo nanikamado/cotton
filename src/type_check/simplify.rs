@@ -1,4 +1,5 @@
 use crate::ast1::{IncompleteType, Requirements, Type};
+use hashbag::HashBag;
 use itertools::Itertools;
 use petgraph::{self, algo::tarjan_scc, graphmap::DiGraphMap};
 use std::{
@@ -58,6 +59,7 @@ pub fn simplify_type(
     let mut lim = 3;
     while t != t_ {
         t = t_.clone();
+        // eprintln!("~~~{}", t);
         t_ = _simplify_type(t_)?;
         lim -= 1;
         if lim == 0 {
@@ -109,29 +111,27 @@ fn _simplify_type(mut t: IncompleteType) -> Option<IncompleteType> {
         .into_iter()
         .flatten()
         .collect();
-    let covariant_candidates = mk_covariant_candidates(&t);
-    for cov in &covariant_candidates {
+    for cov in mk_covariant_candidates(&t) {
         if !mk_contravariant_candidates(&t).contains(&cov) {
             if let Some(s) = possible_strongest(
-                *cov,
+                cov,
                 &t.requirements.subtype_relation,
             ) {
-                t = t.replace_num_option(*cov, &s)?;
+                t = t.replace_num_option(cov, &s)?;
             }
         }
     }
-    let contravariant_candidates = mk_contravariant_candidates(&t);
-    for cont in &contravariant_candidates {
+    for cont in mk_contravariant_candidates(&t) {
         if !mk_covariant_candidates(&t).contains(&cont) {
             if let Some(s) = possible_weakest(
-                *cont,
+                cont,
                 &t.requirements.subtype_relation,
             ) {
-                t = t.replace_num_option(*cont, &s)?;
+                t = t.replace_num_option(cont, &s)?;
             }
         }
     }
-    let anonymous_types_in_sub_rel: HashSet<usize> = t
+    let anonymous_types_in_sub_rel: HashBag<usize> = t
         .requirements
         .subtype_relation
         .iter()
@@ -165,47 +165,35 @@ fn _simplify_type(mut t: IncompleteType) -> Option<IncompleteType> {
             _ => (),
         }
     }
-    for (a, b) in t.requirements.subtype_relation.clone() {
-        match (a, b) {
-            (Anonymous(a), Fn(_, _)) => {
-                let new_fn_type = Fn(
-                    Box::new(Type::new_variable()),
-                    Box::new(Type::new_variable()),
-                );
-                t = t.replace_num_option(a, &new_fn_type.clone())?;
+    let covariant_candidates = mk_covariant_candidates(&t);
+    let contravariant_candidates = mk_contravariant_candidates(&t);
+    t.requirements.subtype_relation = t
+        .requirements
+        .subtype_relation
+        .clone()
+        .into_iter()
+        .filter(|(_, a)| {
+            if let Anonymous(a) = a {
+                contravariant_candidates.contains(a)
+                    || covariant_candidates.contains(a)
+                    || anonymous_types_in_sub_rel.contains(a) >= 2
+            } else {
+                true
             }
-            // (Normal(name, cs), Anonymous(n)) => {
-            //     let new_type = Union(
-            //         [
-            //             Normal(name, cs),
-            //             Type::new_variable(anonymous_type_count),
-            //         ]
-            //         .iter()
-            //         .cloned()
-            //         .collect(),
-            //     );
-            //     t = t.replace_num(n, &new_type);
-            // }
-            // (Fn(a, r), Anonymous(n)) => {
-            //     let new_type = Union(
-            //         [
-            //             Fn(a, r),
-            //             Type::new_variable(anonymous_type_count),
-            //         ]
-            //         .iter()
-            //         .cloned()
-            //         .collect(),
-            //     );
-            //     t = t.replace_num(n, &new_type);
-            // }
-            // (Anonymous(n), a) if a.is_singleton() => {
-            //     let new_type =
-            //         Union(vec![a, Empty].into_iter().collect());
-            //     t = t.replace_num(n, &new_type);
-            // }
-            _ => (),
-        }
-    }
+        })
+        .collect();
+    // for (a, b) in t.requirements.subtype_relation.clone() {
+    //     match (a, b) {
+    //         (Anonymous(a), Fn(_, _)) => {
+    //             let new_fn_type = Fn(
+    //                 Box::new(Type::new_variable()),
+    //                 Box::new(Type::new_variable()),
+    //             );
+    //             t = t.replace_num_option(a, &new_fn_type.clone())?;
+    //         }
+    //         _ => (),
+    //     }
+    // }
     Some(t)
 }
 
@@ -264,6 +252,19 @@ fn deconstruct_subtype_rel(
                 .collect();
             Some(vec![(a, Union(new_cs))])
         }
+        (Normal(name, cs), Union(u)) => {
+            let new_u: BTreeSet<Type> = u
+                .into_iter()
+                .filter(|c| {
+                    if let Normal(c_name, _) = c {
+                        *c_name == name
+                    } else {
+                        true
+                    }
+                })
+                .collect();
+            Some(vec![(Normal(name, cs), Union(new_u))])
+        }
         (sub, sup) => Some(vec![(sub, sup)]),
     }
 }
@@ -286,7 +287,11 @@ fn possible_weakest(
         Some(up.into_iter().next().unwrap().clone())
     } else if up.is_empty() {
         // eprintln!("{} -> Any", t);
-        Some(Type::new_variable())
+        if let Type::Anonymous(n) = Type::new_variable() {
+            Some(Type::Anonymous(n + 10000))
+        } else {
+            unreachable!()
+        }
     } else {
         let up_fs: HashSet<_> = up
             .iter()
@@ -430,7 +435,7 @@ impl IncompleteType {
 
     pub fn resolved(&self) -> bool {
         self.requirements.variable_requirements.is_empty()
-            && self.requirements.subtype_relation.is_empty()
+        // && self.requirements.subtype_relation.is_empty()
     }
 }
 

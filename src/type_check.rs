@@ -105,6 +105,12 @@ fn test_simplify(
                         .enumerate()
                     {
                         let candidates = &toplevels[&req_name[..]];
+                        if candidates.iter().all(|c| {
+                            c.face.is_none()
+                                && !c.incomplete.resolved()
+                        }) {
+                            continue;
+                        }
                         let successes: Vec<_> = candidates
                             .iter()
                             .filter_map(|cand| {
@@ -114,7 +120,9 @@ fn test_simplify(
                                     } else {
                                         &cand.incomplete
                                     };
-                                let cand_t = cand_t.clone().change_anonymous_num();
+                                let cand_t = cand_t
+                                    .clone()
+                                    .change_anonymous_num();
                                 let mut incomplete =
                                     t.incomplete.clone();
                                 incomplete
@@ -145,13 +153,14 @@ fn test_simplify(
                                             .clone(),
                                     );
                                 simplify::simplify_type(incomplete)
+                                    .map(|t| (t, cand_t.resolved()))
                             })
                             .collect();
-                        if successes.len() == 1 {
+                        if successes.len() == 1 && successes[0].1 {
                             resolved = Some((
                                 (*name).clone(),
                                 t_index,
-                                successes[0].clone(),
+                                successes[0].0.clone(),
                             ));
                             break 'outer;
                         } else if successes.is_empty() {
@@ -287,7 +296,11 @@ fn multi_expr_min_type(exprs: &[Expr]) -> IncompleteType {
             t
         })
         .collect::<Vec<_>>();
-    t.last().unwrap().clone()
+    let t = t.last().unwrap().clone();
+    IncompleteType {
+        constructor: t.constructor,
+        requirements: req,
+    }
 }
 
 fn marge_requirements(

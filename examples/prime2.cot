@@ -1,4 +1,4 @@
-(.) : a -> (a -> b) -> b forall a, b --
+(.)
 = fn
 | a, f => f(a)
 --
@@ -12,7 +12,7 @@ data a /\ b
 
 data a .. b
 
-pop : (Num..Num) -> (() | (Num..Num /\ Num))
+pop
 = fn
 | a .. b =>
     (a < b).fn
@@ -56,7 +56,9 @@ is_prime
     --
 --
 
-each = fn
+each : Filter[Num..Num, Num -> (True | False)]
+    -> (Num -> ()) -> ()
+= fn
 | l, f =>
     l.pop.fn
     | () => ()
@@ -76,5 +78,7 @@ filter = fn
 main : () -> ()
 = fn
 | () =>
-    (2..100).filter(is_prime).each(println)
+    (2..100).filter(is_prime).each $ fn
+    | n => n.num_to_string.println
+    --
 --
