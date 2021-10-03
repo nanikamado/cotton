@@ -1,4 +1,5 @@
 use crate::ast1::{IncompleteType, Requirements, Type};
+use itertools::Itertools;
 use std::collections::{BTreeSet, HashSet};
 use Type::*;
 
@@ -23,13 +24,13 @@ impl Type {
         }
     }
 
-    pub fn change_anonymous_num(mut self) -> Type {
-        let anos = self.all_anonymous_types();
-        for a in anos {
-            self = self.replace_num(a, &Type::new_variable())
-        }
-        self
-    }
+    // pub fn change_anonymous_num(mut self) -> Type {
+    //     let anos = self.all_anonymous_types();
+    //     for a in anos {
+    //         self = self.replace_num(a, &Type::new_variable())
+    //     }
+    //     self
+    // }
 
     pub fn replace_num(self, from: usize, to: &Type) -> Self {
         match self {
@@ -40,12 +41,17 @@ impl Type {
             Type::Union(m) => Type::union_from(
                 m.into_iter().map(|t| t.replace_num(from, to)),
             ),
-            Type::Normal(name, cs) => Type::Normal(
-                name,
-                cs.into_iter()
+            Type::Normal(name, cs) => {
+                let cs = cs
+                    .into_iter()
                     .map(|t| t.replace_num(from, to))
-                    .collect(),
-            ),
+                    .collect_vec();
+                if cs.contains(&Empty) {
+                    Empty
+                } else {
+                    Type::Normal(name, cs)
+                }
+            }
             Type::Anonymous(n) => {
                 if n == from {
                     to.clone()
@@ -109,6 +115,7 @@ impl Type {
         for t in it {
             match t {
                 Union(a) => u.extend(a),
+                Empty => (),
                 other => {
                     u.insert(other);
                 }

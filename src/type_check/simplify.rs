@@ -3,7 +3,7 @@ use itertools::Itertools;
 use petgraph::{self, algo::tarjan_scc, graphmap::DiGraphMap};
 use std::{
     cmp::Ordering,
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeSet, HashSet},
     fmt::Display,
     vec,
 };
@@ -52,57 +52,30 @@ impl PartialEq for SubtypeOrd<'_> {
 
 pub fn simplify_type(
     mut t: IncompleteType,
-    fixed_variables: &HashMap<String, Type>,
 ) -> Option<IncompleteType> {
     // eprintln!("{}", t);
-    let mut t_ = _simplify_type(t.clone(), fixed_variables)?;
-    let mut lim = 100;
+    let mut t_ = _simplify_type(t.clone())?;
+    let mut lim = 3;
     while t != t_ {
         t = t_.clone();
-        // eprintln!("{}", t);
-        t_ = _simplify_type(t_, fixed_variables)?;
+        t_ = _simplify_type(t_)?;
         lim -= 1;
         if lim == 0 {
-            eprintln!("loop count reached the limit.");
+            // eprintln!("loop count reached the limit.");
+            // eprintln!("last t: {}", t);
+            // eprintln!("next t: {}", t_);
             break;
         }
     }
     Some(t_)
 }
 
-fn _simplify_type(
-    t: IncompleteType,
-    fixed_variables: &HashMap<String, Type>,
-) -> Option<IncompleteType> {
+fn _simplify_type(mut t: IncompleteType) -> Option<IncompleteType> {
     use Type::*;
-    let mut subtype_relationship = t.requirements.subtype_relation;
-    let variable_requirements: Vec<(String, Type)> = t
-        .requirements
-        .variable_requirements
-        .into_iter()
-        .filter(|(name, req_type)| {
-            if let Some(fixed) = fixed_variables.get(name) {
-                let fixed = fixed.clone().change_anonymous_num();
-                subtype_relationship
-                    .insert((fixed.clone(), req_type.clone()));
-                subtype_relationship
-                    .insert((req_type.clone(), fixed));
-                false
-            } else {
-                true
-            }
-        })
-        .collect();
+    let subtype_relationship =
+        t.requirements.subtype_relation.clone();
     let g = mk_graph(&subtype_relationship);
     let eq_types = tarjan_scc(&g);
-    let mut t = IncompleteType {
-        constructor: t.constructor,
-        requirements: Requirements {
-            variable_requirements,
-            subtype_relation: subtype_relationship.clone(),
-        },
-    };
-    // eprintln!("105: {}", &t);
     for eqs in eq_types {
         let (eq_anonymous, eq_cons): (Vec<_>, Vec<_>) = eqs
             .into_iter()
@@ -136,23 +109,25 @@ fn _simplify_type(
         .into_iter()
         .flatten()
         .collect();
-    for cov in mk_covariant_candidates(&t) {
+    let covariant_candidates = mk_covariant_candidates(&t);
+    for cov in &covariant_candidates {
         if !mk_contravariant_candidates(&t).contains(&cov) {
             if let Some(s) = possible_strongest(
-                cov,
+                *cov,
                 &t.requirements.subtype_relation,
             ) {
-                t = t.replace_num_option(cov, &s)?;
+                t = t.replace_num_option(*cov, &s)?;
             }
         }
     }
-    for cont in mk_contravariant_candidates(&t) {
+    let contravariant_candidates = mk_contravariant_candidates(&t);
+    for cont in &contravariant_candidates {
         if !mk_covariant_candidates(&t).contains(&cont) {
             if let Some(s) = possible_weakest(
-                cont,
+                *cont,
                 &t.requirements.subtype_relation,
             ) {
-                t = t.replace_num_option(cont, &s)?;
+                t = t.replace_num_option(*cont, &s)?;
             }
         }
     }
@@ -175,6 +150,18 @@ fn _simplify_type(
             (Some(st), Some(we)) if st == we => {
                 t = t.replace_num_option(*a, &st)?
             }
+            (_, Some(Type::Empty)) => {
+                t = t.replace_num_option(*a, &Type::Empty)?
+            }
+            // (Some(st), _)
+            //     if !covariant_candidates.contains(a)
+            //         && !contravariant_candidates.contains(a)
+            //         && st != Type::Empty =>
+            // {
+            //     let new_type =
+            //         Type::union_with(st, Type::new_variable());
+            //     t = t.replace_num_option(*a, &new_type)?
+            // }
             _ => (),
         }
     }
@@ -252,10 +239,14 @@ fn deconstruct_subtype_rel(
                         .concat(),
                 )
             } else {
-                eprintln!("{} != {}", n1, n2);
+                // eprintln!("{} != {}", n1, n2);
                 None
             }
         }
+        (Fn(_, _), Normal(_, _))
+        | (Normal(_, _), Fn(_, _))
+        | (Fn(_, _), Empty)
+        | (Normal(_, _), Empty) => None,
         (Empty, _) => Some(Vec::new()),
         (Anonymous(a), Anonymous(b)) if a == b => Some(Vec::new()),
         (a, Union(u)) if u.contains(&a) => Some(Vec::new()),
@@ -281,30 +272,38 @@ fn possible_weakest(
     t: usize,
     subtype_relation: &BTreeSet<(Type, Type)>,
 ) -> Option<Type> {
-    let mut up = Vec::new();
+    let mut up = HashSet::new();
     for (sub, sup) in subtype_relation {
         if anonymous_contravariant_types(sup).contains(&t) {
             return None;
         } else if *sub == Type::Anonymous(t) {
-            up.push(sup);
+            up.insert(sup);
         } else if anonymous_covariant_types(sub).contains(&t) {
             return None;
         }
     }
     if up.len() == 1 {
-        Some(up[0].clone())
+        Some(up.into_iter().next().unwrap().clone())
     } else if up.is_empty() {
-        eprintln!("{} -> Any", t);
-        Some(Type::Normal("Any".to_string(), Vec::new()))
+        // eprintln!("{} -> Any", t);
+        Some(Type::new_variable())
     } else {
-        let upc = up
+        let up_fs: HashSet<_> = up
             .iter()
-            .filter(|t| {
-                matches!(t, Type::Fn(_, _) | Type::Normal(_, _))
+            .filter(|t| matches!(t, Type::Fn(_, _)))
+            .collect();
+        let up_ns: HashSet<_> = up
+            .iter()
+            .filter_map(|t| {
+                if let Type::Normal(name, _) = t {
+                    Some(name)
+                } else {
+                    None
+                }
             })
-            .collect_vec();
-        if upc.len() == 1 {
-            Some((**upc[0]).clone())
+            .collect();
+        if !up_fs.is_empty() && !up_ns.is_empty() || up_ns.len() > 1 {
+            Some(Type::Empty)
         } else {
             None
         }

@@ -11,166 +11,71 @@ use itertools::Itertools;
 use std::collections::BTreeSet;
 use std::{collections::HashMap, vec};
 
-type DeclId = usize;
-
 pub fn type_check(ast: &Ast) {
-    use simplify::simplify_type;
-    let mut fixed_variables: HashMap<String, Vec<Type>> =
-        INTRINSIC_VARIABLES.clone();
-    let mut variable_count: HashMap<String, usize> =
-        INTRINSIC_VARIABLES
-            .iter()
-            .map(|(name, ts)| (name.clone(), ts.len()))
-            .collect();
-    let mut type_faces: HashMap<String, Vec<Option<IncompleteType>>> =
+    let mut toplevels: HashMap<String, Vec<Toplevel>> =
         HashMap::new();
-    let mut decl_id = 0;
+    for (name, ts) in &*INTRINSIC_VARIABLES {
+        *toplevels.entry(name.clone()).or_default() = ts
+            .iter()
+            .map(|t| Toplevel {
+                incomplete: t.clone().into(),
+                face: None,
+            })
+            .collect();
+    }
     for d in &ast.data_declarations {
         let d_type = constructor_type(d.clone());
-        fixed_variables
-            .entry(d.name.clone())
-            .or_default()
-            .push(d_type.clone());
-        type_faces
-            .entry(d.name.clone())
-            .or_default()
-            .push(Some(d_type.into()));
-        *variable_count.entry(d.name.clone()).or_default() += 1;
-        decl_id += 1;
+        toplevels.entry(d.name.clone()).or_default().push(Toplevel {
+            incomplete: d_type.into(),
+            face: None,
+        });
     }
-    let mut unresolved_variables = ast
-        .declarations
-        .iter()
-        .map(|d| {
-            let count = variable_count
-                .entry(d.identifier.clone())
-                .or_default();
-            *count += 1;
-            decl_id += 1;
-            let mut t = min_type(&d.value).unwrap();
-            let face = if let Some(annotation) = &d.type_annotation {
-                let annotation =
-                    annotation.clone().change_anonymous_num();
-                t.requirements.subtype_relation.insert((
-                    t.constructor.clone(),
-                    annotation.constructor.clone(),
-                ));
-                t.requirements.subtype_relation.insert((
-                    annotation.constructor.clone(),
-                    t.constructor.clone(),
-                ));
-                t.requirements = t
-                    .requirements
-                    .merge(annotation.requirements.clone());
-                Some(annotation)
-            } else {
-                None
-            };
-            type_faces
-                .entry(d.identifier.clone())
-                .or_default()
-                .push(face);
-            (d.identifier.clone(), *count - 1, t)
-        })
-        .collect_vec();
-    loop {
-        eprintln!("-------------------");
-        let resolved = fixed_variables.clone();
-        let declar_types_last = unresolved_variables.clone();
-        unresolved_variables = unresolved_variables
-            .into_iter()
-            .filter_map(
-                |(name, num, t): (String, DeclId, IncompleteType)| {
-                    eprint!("{} : ", name);
-                    let t = simplify_type(
-                        t,
-                        &resolved
-                            .iter()
-                            .filter_map(|(n, v)| {
-                                if v.len() == 1
-                                    && variable_count.get(n)
-                                        == Some(&1)
-                                {
-                                    Some((n.clone(), v[0].clone()))
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect(),
-                    )
-                    .unwrap();
-                    eprintln!("{}", t);
-                    if t.resolved() {
-                        fixed_variables
-                            .entry(name.clone())
-                            .or_default()
-                            .push(t.constructor.clone());
-                        let v = type_faces.get_mut(&name).unwrap();
-                        v[num] = Some(t);
-                        None
-                    } else {
-                        Some((name, num, t))
-                    }
-                },
-            )
-            .collect();
-        if declar_types_last == unresolved_variables {
-            break;
-        }
-    }
-    eprintln!("-- resolved --");
-    for (name, rs) in &fixed_variables {
-        eprintln!("{} :", name);
-        for r in rs {
-            eprintln!("{}", r);
-        }
-    }
-    let mut toplevels: HashMap<&str, Vec<IncompleteType>> =
-        HashMap::new();
-    for (name, _, t) in &unresolved_variables {
-        toplevels.entry(name).or_default().push(t.clone());
-    }
-    for (name, t) in &fixed_variables {
-        toplevels.entry(name).or_default().append(
-            &mut t.iter().map(|a| a.clone().into()).collect(),
+    for d in &ast.declarations {
+        let mut t = min_type(&d.value).unwrap();
+        let face = if let Some(annotation) = &d.type_annotation {
+            let annotation =
+                annotation.clone().change_anonymous_num();
+            t.requirements.subtype_relation.insert((
+                t.constructor.clone(),
+                annotation.constructor.clone(),
+            ));
+            t.requirements.subtype_relation.insert((
+                annotation.constructor.clone(),
+                t.constructor.clone(),
+            ));
+            t.requirements =
+                t.requirements.merge(annotation.requirements.clone());
+            Some(annotation)
+        } else {
+            None
+        };
+        toplevels.entry(d.identifier.clone()).or_default().push(
+            Toplevel {
+                incomplete: simplify::simplify_type(t.clone())
+                    .unwrap(),
+                face,
+            },
         );
     }
-    let mut unresolved_variables_map: HashMap<
-        &str,
-        Vec<(DeclId, IncompleteType)>,
-    > = HashMap::new();
-    for (name, id, t) in &unresolved_variables {
-        unresolved_variables_map
-            .entry(name)
-            .or_default()
-            .push((*id, t.clone()));
+    for (name, top) in &toplevels {
+        eprintln!("{} : ", name);
+        for t in top {
+            if let Some(f) = &t.face {
+                eprintln!("face: {}", f);
+                eprintln!("incomplete: {}", t.incomplete);
+            } else {
+                eprintln!("{}", t.incomplete);
+            }
+        }
     }
-    // for (name, id, t) in &unresolved_variables {
-    //     let mut additional_sub_req: Vec<(Type, Type)> = Vec::new();
-    //     let _ = t.requirements.variable_requirements.iter().map(
-    //         |(req_name, req_t)| {
-    //             if let Some(candi) =
-    //                 unresolved_variables_map.get(&req_name[..])
-    //             {
-    //                 if candi.len() == 1 && candi[0].0 == *id {
-    //                     additional_sub_req.push((
-    //                         req_t.clone(),
-    //                         t.constructor.clone(),
-    //                     ));
-    //                     additional_sub_req.push((
-    //                         t.constructor.clone(),
-    //                         req_t.clone(),
-    //                     ));
-    //                     false
-    //                 } else {
-    //                     true
-    //                 }
-    //             } else {
-    //                 true
-    //             }
-    //         },
-    //     );
-    // }
+    let toplevels = test_simplify(toplevels);
+    eprintln!("------------------------------");
+    for (name, top) in toplevels {
+        eprintln!("{} : ", name);
+        for t in top {
+            eprintln!("{}", t.incomplete);
+        }
+    }
 }
 
 struct Toplevel {
@@ -178,19 +83,16 @@ struct Toplevel {
     face: Option<IncompleteType>,
 }
 
-#[allow(unused)]
-fn test_simplify(mut toplevels: HashMap<String, Vec<Toplevel>>) {
+fn test_simplify(
+    mut toplevels: HashMap<String, Vec<Toplevel>>,
+) -> HashMap<String, Vec<Toplevel>> {
     let names: Vec<_> = toplevels.keys().cloned().collect();
-    let mut improved = false;
     loop {
         // (name, num, variable req num, type)
-        let mut resolved: Vec<(
-            String,
-            usize,
-            usize,
-            IncompleteType,
-        )> = Vec::new();
-        for name in &names {
+        let mut resolved: Option<(String, usize, IncompleteType)> =
+            None;
+        'outer: for name in &names {
+            // dbg!(&name);
             for (t_index, t) in
                 toplevels[&name[..]].iter().enumerate()
             {
@@ -212,19 +114,20 @@ fn test_simplify(mut toplevels: HashMap<String, Vec<Toplevel>>) {
                                     } else {
                                         &cand.incomplete
                                     };
+                                let cand_t = cand_t.clone().change_anonymous_num();
                                 let mut incomplete =
                                     t.incomplete.clone();
                                 incomplete
                                     .requirements
                                     .variable_requirements
                                     .remove(req_i);
-                                incomplete
-                                    .requirements
-                                    .subtype_relation
-                                    .insert((
-                                        req_t.clone(),
-                                        cand_t.constructor.clone(),
-                                    ));
+                                // incomplete
+                                //     .requirements
+                                //     .subtype_relation
+                                //     .insert((
+                                //         req_t.clone(),
+                                //         cand_t.constructor.clone(),
+                                //     ));
                                 incomplete
                                     .requirements
                                     .subtype_relation
@@ -241,43 +144,36 @@ fn test_simplify(mut toplevels: HashMap<String, Vec<Toplevel>>) {
                                             .subtype_relation
                                             .clone(),
                                     );
-                                simplify::simplify_type(
-                                    incomplete,
-                                    &Default::default(),
-                                )
+                                simplify::simplify_type(incomplete)
                             })
                             .collect();
                         if successes.len() == 1 {
-                            resolved.push((
+                            resolved = Some((
                                 (*name).clone(),
                                 t_index,
-                                req_i,
                                 successes[0].clone(),
                             ));
-                            improved = true;
+                            break 'outer;
+                        } else if successes.is_empty() {
+                            eprintln!(
+                                "all of {} has failed in {}[{}]",
+                                req_name, name, t_index
+                            );
+                            eprintln!("req_t: {}", req_t);
+                            eprintln!("req_i: {}", req_i);
+                            eprintln!("t -> {}", t.incomplete);
                         }
                     }
                 }
             }
         }
-        if resolved.is_empty() {
-            break;
+        if let Some((name, v_index, r)) = resolved {
+            toplevels.get_mut(&name).unwrap()[v_index].incomplete = r;
         } else {
-            for (name, v_index, req_index, r) in resolved {
-                let req = &mut toplevels.get_mut(&name).unwrap()
-                    [v_index]
-                    .incomplete
-                    .requirements;
-                let (_, req_t) =
-                    req.variable_requirements.remove(req_index);
-                req.subtype_relation
-                    .insert((r.constructor.clone(), req_t.clone()));
-                req.subtype_relation.insert((req_t, r.constructor));
-                req.subtype_relation
-                    .extend(r.requirements.subtype_relation);
-            }
+            break;
         }
     }
+    toplevels
 }
 
 fn constructor_type(d: DataDeclaration) -> Type {
