@@ -39,7 +39,7 @@ impl PartialOrd for SubtypeOrd<'_> {
                 u.contains(self.0)
                     || u.iter().any(|c| *self <= SubtypeOrd(c))
             }
-            (Anonymous(a), Anonymous(b)) => a == b,
+            (Variable(a), Variable(b)) => a == b,
             _ => false,
         }
     }
@@ -79,10 +79,10 @@ fn _simplify_type(mut t: IncompleteType) -> Option<IncompleteType> {
     let g = mk_graph(&subtype_relationship);
     let eq_types = tarjan_scc(&g);
     for eqs in eq_types {
-        let (eq_anonymous, eq_cons): (Vec<_>, Vec<_>) = eqs
+        let (eq_variable, eq_cons): (Vec<_>, Vec<_>) = eqs
             .into_iter()
             .map(|ts| {
-                if let Anonymous(n) = ts {
+                if let Variable(n) = ts {
                     Ok(*n)
                 } else {
                     Err(ts)
@@ -90,14 +90,14 @@ fn _simplify_type(mut t: IncompleteType) -> Option<IncompleteType> {
             })
             .partition_result();
         if eq_cons.is_empty() {
-            for a in &eq_anonymous[1..] {
+            for a in &eq_variable[1..] {
                 t = t.replace_num_option(
                     *a,
-                    &Anonymous(eq_anonymous[0]),
+                    &Variable(eq_variable[0]),
                 )?;
             }
         } else {
-            for a in eq_anonymous {
+            for a in eq_variable {
                 t = t.replace_num_option(a, eq_cons[0])?;
             }
         }
@@ -131,17 +131,17 @@ fn _simplify_type(mut t: IncompleteType) -> Option<IncompleteType> {
             }
         }
     }
-    let anonymous_types_in_sub_rel: HashBag<usize> = t
+    let type_variables_in_sub_rel: HashBag<usize> = t
         .requirements
         .subtype_relation
         .iter()
         .flat_map(|(a, b)| {
-            let mut a = a.all_anonymous_types();
-            a.extend(b.all_anonymous_types());
+            let mut a = a.all_type_variables();
+            a.extend(b.all_type_variables());
             a
         })
         .collect();
-    for a in &anonymous_types_in_sub_rel {
+    for a in &type_variables_in_sub_rel {
         let st =
             possible_strongest(*a, &t.requirements.subtype_relation);
         let we =
@@ -173,10 +173,10 @@ fn _simplify_type(mut t: IncompleteType) -> Option<IncompleteType> {
         .clone()
         .into_iter()
         .filter(|(_, a)| {
-            if let Anonymous(a) = a {
+            if let Variable(a) = a {
                 contravariant_candidates.contains(a)
                     || covariant_candidates.contains(a)
-                    || anonymous_types_in_sub_rel.contains(a) >= 2
+                    || type_variables_in_sub_rel.contains(a) >= 2
             } else {
                 true
             }
@@ -236,7 +236,7 @@ fn deconstruct_subtype_rel(
         | (Fn(_, _), Empty)
         | (Normal(_, _), Empty) => None,
         (Empty, _) => Some(Vec::new()),
-        (Anonymous(a), Anonymous(b)) if a == b => Some(Vec::new()),
+        (Variable(a), Variable(b)) if a == b => Some(Vec::new()),
         (a, Union(u)) if u.contains(&a) => Some(Vec::new()),
         (a, Union(u)) if u.len() == 1 => {
             deconstruct_subtype_rel(a, u.into_iter().next().unwrap())
@@ -275,11 +275,11 @@ fn possible_weakest(
 ) -> Option<Type> {
     let mut up = HashSet::new();
     for (sub, sup) in subtype_relation {
-        if anonymous_contravariant_types(sup).contains(&t) {
+        if contravariant_type_variables(sup).contains(&t) {
             return None;
-        } else if *sub == Type::Anonymous(t) {
+        } else if *sub == Type::Variable(t) {
             up.insert(sup);
-        } else if anonymous_covariant_types(sub).contains(&t) {
+        } else if covariant_type_variables(sub).contains(&t) {
             return None;
         }
     }
@@ -287,8 +287,8 @@ fn possible_weakest(
         Some(up.into_iter().next().unwrap().clone())
     } else if up.is_empty() {
         // eprintln!("{} -> Any", t);
-        if let Type::Anonymous(n) = Type::new_variable() {
-            Some(Type::Anonymous(n + 10000))
+        if let Type::Variable(n) = Type::new_variable() {
+            Some(Type::Variable(n + 10000))
         } else {
             unreachable!()
         }
@@ -321,11 +321,11 @@ fn possible_strongest(
 ) -> Option<Type> {
     let mut down = Vec::new();
     for (sub, sup) in subtype_relation {
-        if anonymous_contravariant_types(sub).contains(&t) {
+        if contravariant_type_variables(sub).contains(&t) {
             return None;
-        } else if *sup == Type::Anonymous(t) {
+        } else if *sup == Type::Variable(t) {
             down.push(sub);
-        } else if anonymous_covariant_types(sup).contains(&t) {
+        } else if covariant_type_variables(sup).contains(&t) {
             return None;
         }
     }
@@ -340,60 +340,60 @@ fn possible_strongest(
 
 fn mk_contravariant_candidates(t: &IncompleteType) -> HashSet<usize> {
     let mut rst: HashSet<usize> =
-        anonymous_contravariant_types(&t.constructor)
+        contravariant_type_variables(&t.constructor)
             .into_iter()
             .collect();
     for (_, v) in &t.requirements.variable_requirements {
-        rst.extend(anonymous_covariant_types(v));
+        rst.extend(covariant_type_variables(v));
     }
     rst
 }
 
 fn mk_covariant_candidates(t: &IncompleteType) -> HashSet<usize> {
     let mut rst: HashSet<usize> =
-        anonymous_covariant_types(&t.constructor)
+        covariant_type_variables(&t.constructor)
             .into_iter()
             .collect();
     for (_, v) in &t.requirements.variable_requirements {
-        rst.extend(anonymous_contravariant_types(v));
+        rst.extend(contravariant_type_variables(v));
     }
     rst
 }
 
-fn anonymous_covariant_types(t: &Type) -> Vec<usize> {
+fn covariant_type_variables(t: &Type) -> Vec<usize> {
     match t {
         Type::Fn(a, r) => [
-            anonymous_covariant_types(r),
-            anonymous_contravariant_types(a),
+            covariant_type_variables(r),
+            contravariant_type_variables(a),
         ]
         .concat(),
         Type::Normal(_, cs) => {
-            cs.iter().map(|c| anonymous_covariant_types(c)).concat()
+            cs.iter().map(|c| covariant_type_variables(c)).concat()
         }
         Type::Union(cs) => {
-            cs.iter().map(|c| anonymous_covariant_types(c)).concat()
+            cs.iter().map(|c| covariant_type_variables(c)).concat()
         }
-        Type::Anonymous(n) => vec![*n],
+        Type::Variable(n) => vec![*n],
         Type::Empty => Vec::new(),
     }
 }
 
-fn anonymous_contravariant_types(t: &Type) -> Vec<usize> {
+fn contravariant_type_variables(t: &Type) -> Vec<usize> {
     match t {
         Type::Fn(a, r) => [
-            anonymous_covariant_types(a),
-            anonymous_contravariant_types(r),
+            covariant_type_variables(a),
+            contravariant_type_variables(r),
         ]
         .concat(),
         Type::Normal(_, cs) => cs
             .iter()
-            .map(|c| anonymous_contravariant_types(c))
+            .map(|c| contravariant_type_variables(c))
             .concat(),
         Type::Union(cs) => cs
             .iter()
-            .map(|c| anonymous_contravariant_types(c))
+            .map(|c| contravariant_type_variables(c))
             .concat(),
-        Type::Anonymous(_) | Type::Empty => Vec::new(),
+        Type::Variable(_) | Type::Empty => Vec::new(),
     }
 }
 
@@ -453,8 +453,8 @@ fn mk_graph(
 fn replace_type_test0() {
     use Type::*;
     assert_eq!(
-        Anonymous(0).replace_num(0, &Anonymous(1)),
-        Anonymous(1)
+        Variable(0).replace_num(0, &Variable(1)),
+        Variable(1)
     );
 }
 
@@ -462,9 +462,9 @@ fn replace_type_test0() {
 fn replace_type_test1() {
     use Type::*;
     assert_eq!(
-        Fn(Box::new(Anonymous(0)), Box::new(Anonymous(2)))
-            .replace_num(0, &Anonymous(1)),
-        Fn(Box::new(Anonymous(1)), Box::new(Anonymous(2)))
+        Fn(Box::new(Variable(0)), Box::new(Variable(2)))
+            .replace_num(0, &Variable(1)),
+        Fn(Box::new(Variable(1)), Box::new(Variable(2)))
     );
 }
 
@@ -522,7 +522,7 @@ impl Display for Type {
                     })
                     .join(" | ")
             ),
-            Anonymous(n) => write!(f, "t{}", n),
+            Variable(n) => write!(f, "t{}", n),
             Empty => write!(f, "∅"),
         }
     }

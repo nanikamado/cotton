@@ -4,22 +4,22 @@ use std::collections::{BTreeSet, HashSet};
 use Type::*;
 
 impl Type {
-    pub fn all_anonymous_types(&self) -> HashSet<usize> {
+    pub fn all_type_variables(&self) -> HashSet<usize> {
         match self {
             Type::Fn(a, r) => {
-                let mut a = a.all_anonymous_types();
-                a.extend(r.all_anonymous_types());
+                let mut a = a.all_type_variables();
+                a.extend(r.all_type_variables());
                 a
             }
             Type::Normal(_, cs) => cs
                 .iter()
-                .flat_map(|c| c.all_anonymous_types())
+                .flat_map(|c| c.all_type_variables())
                 .collect(),
             Type::Union(cs) => cs
                 .iter()
-                .flat_map(|c| c.all_anonymous_types())
+                .flat_map(|c| c.all_type_variables())
                 .collect(),
-            Type::Anonymous(n) => [*n].iter().copied().collect(),
+            Type::Variable(n) => [*n].iter().copied().collect(),
             Type::Empty => HashSet::new(),
         }
     }
@@ -52,11 +52,11 @@ impl Type {
                     Type::Normal(name, cs)
                 }
             }
-            Type::Anonymous(n) => {
+            Type::Variable(n) => {
                 if n == from {
                     to.clone()
                 } else {
-                    Type::Anonymous(n)
+                    Type::Variable(n)
                 }
             }
             Type::Empty => Type::Empty,
@@ -81,7 +81,7 @@ impl Type {
                     .map(|t| t.replace_type(from, to))
                     .collect(),
             ),
-            Type::Anonymous(n) => Type::Anonymous(n),
+            Type::Variable(n) => Type::Variable(n),
             Type::Empty => Type::Empty,
         }
     }
@@ -136,14 +136,14 @@ impl Type {
             Type::Union(cs) => {
                 cs.iter().any(|cs| cs.contains(variable_num))
             }
-            Type::Anonymous(n) => *n == variable_num,
+            Type::Variable(n) => *n == variable_num,
             Type::Empty => false,
         }
     }
 }
 
 impl IncompleteType {
-    fn all_anonymous_types(&self) -> HashSet<usize> {
+    fn all_type_variables(&self) -> HashSet<usize> {
         let IncompleteType {
             constructor,
             requirements:
@@ -154,18 +154,18 @@ impl IncompleteType {
         } = self;
         variable_requirements
             .iter()
-            .flat_map(|(_, t)| t.all_anonymous_types())
+            .flat_map(|(_, t)| t.all_type_variables())
             .chain(subtype_relation.iter().flat_map(|(a, b)| {
-                let mut a = a.all_anonymous_types();
-                a.extend(b.all_anonymous_types());
+                let mut a = a.all_type_variables();
+                a.extend(b.all_type_variables());
                 a
             }))
-            .chain(constructor.all_anonymous_types())
+            .chain(constructor.all_type_variables())
             .collect()
     }
 
-    pub fn change_anonymous_num(mut self) -> Self {
-        let anos = self.all_anonymous_types();
+    pub fn change_variable_num(mut self) -> Self {
+        let anos = self.all_type_variables();
         for a in anos {
             self = self.replace_num(a, &Type::new_variable())
         }

@@ -8,7 +8,7 @@ impl Type {
             c.set(t + 1);
             t
         });
-        Type::Anonymous(c)
+        Type::Variable(c)
     }
 }
 

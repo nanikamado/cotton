@@ -34,7 +34,7 @@ pub fn type_check(ast: &Ast) {
         let mut t = min_type(&d.value).unwrap();
         let face = if let Some(annotation) = &d.type_annotation {
             let annotation =
-                annotation.clone().change_anonymous_num();
+                annotation.clone().change_variable_num();
             t.requirements.subtype_relation.insert((
                 t.constructor.clone(),
                 annotation.constructor.clone(),
@@ -122,7 +122,7 @@ fn test_simplify(
                                     };
                                 let cand_t = cand_t
                                     .clone()
-                                    .change_anonymous_num();
+                                    .change_variable_num();
                                 let mut incomplete =
                                     t.incomplete.clone();
                                 incomplete

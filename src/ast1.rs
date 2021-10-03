@@ -14,7 +14,7 @@ pub enum Type {
     Normal(String, Vec<Type>),
     Fn(Box<Type>, Box<Type>),
     Union(BTreeSet<Type>),
-    Anonymous(usize),
+    Variable(usize),
     Empty,
 }
 
