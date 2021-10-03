@@ -3,77 +3,36 @@ use hashbag::HashBag;
 use itertools::Itertools;
 use petgraph::{self, algo::tarjan_scc, graphmap::DiGraphMap};
 use std::{
-    cmp::Ordering,
     collections::{BTreeSet, HashSet},
     fmt::Display,
     vec,
 };
 
-struct SubtypeOrd<'a>(&'a Type);
-
-impl PartialOrd for SubtypeOrd<'_> {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        use Ordering::*;
-        match (self <= other, other <= self) {
-            (true, true) => Some(Equal),
-            (true, false) => Some(Less),
-            (false, true) => Some(Greater),
-            (false, false) => None,
-        }
-    }
-    fn le(&self, other: &Self) -> bool {
-        use Type::*;
-        match (self.0, other.0) {
-            (Normal(n1, cs1), Normal(n2, cs2)) => {
-                debug_assert_eq!(cs1.len(), cs2.len());
-                n1 == n2
-                    && cs1.iter().zip(cs2).all(|(c1, c2)| {
-                        SubtypeOrd(c1) <= SubtypeOrd(c2)
-                    })
-            }
-            (Fn(a1, r1), Fn(a2, r2)) => r1 <= r2 && a2 <= a1,
-            (Union(u), _) => {
-                u.iter().all(|c| SubtypeOrd(c) <= *other)
-            }
-            (_, Union(u)) => {
-                u.contains(self.0)
-                    || u.iter().any(|c| *self <= SubtypeOrd(c))
-            }
-            (Variable(a), Variable(b)) => a == b,
-            _ => false,
-        }
-    }
-}
-
-impl PartialEq for SubtypeOrd<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.partial_cmp(other) == Some(Ordering::Equal)
-    }
-}
-
 pub fn simplify_type(
     mut t: IncompleteType,
 ) -> Option<IncompleteType> {
-    // eprintln!("{}", t);
-    let mut t_ = _simplify_type(t.clone())?;
-    let mut lim = 3;
-    while t != t_ {
-        t = t_.clone();
-        // eprintln!("~~~{}", t);
-        t_ = _simplify_type(t_)?;
-        lim -= 1;
-        if lim == 0 {
-            // eprintln!("loop count reached the limit.");
-            // eprintln!("last t: {}", t);
-            // eprintln!("next t: {}", t_);
+    let mut i = 0;
+    loop {
+        i += 1;
+        let r = _simplify_type(t)?;
+        t = r.0;
+        let updated = r.1;
+        if !updated {
+            break;
+        } else if i > 10 {
+            eprintln!("loop count reached the limit.");
             break;
         }
     }
-    Some(t_)
+    eprintln!("loop: {}", i);
+    Some(t)
 }
 
-fn _simplify_type(mut t: IncompleteType) -> Option<IncompleteType> {
+fn _simplify_type(
+    mut t: IncompleteType,
+) -> Option<(IncompleteType, bool)> {
     use Type::*;
+    let mut updated = false;
     let subtype_relationship =
         t.requirements.subtype_relation.clone();
     let g = mk_graph(&subtype_relationship);
@@ -89,6 +48,11 @@ fn _simplify_type(mut t: IncompleteType) -> Option<IncompleteType> {
                 }
             })
             .partition_result();
+        if !eq_variable.is_empty()
+            && eq_variable.len() + eq_cons.len() >= 2
+        {
+            updated = true;
+        }
         if eq_cons.is_empty() {
             for a in &eq_variable[1..] {
                 t = t.replace_num_option(
@@ -118,6 +82,7 @@ fn _simplify_type(mut t: IncompleteType) -> Option<IncompleteType> {
                 &t.requirements.subtype_relation,
             ) {
                 t = t.replace_num_option(cov, &s)?;
+                updated = true;
             }
         }
     }
@@ -128,10 +93,11 @@ fn _simplify_type(mut t: IncompleteType) -> Option<IncompleteType> {
                 &t.requirements.subtype_relation,
             ) {
                 t = t.replace_num_option(cont, &s)?;
+                updated = true;
             }
         }
     }
-    let type_variables_in_sub_rel: HashBag<usize> = t
+    let type_variables_in_sub_rel: HashSet<usize> = t
         .requirements
         .subtype_relation
         .iter()
@@ -148,10 +114,12 @@ fn _simplify_type(mut t: IncompleteType) -> Option<IncompleteType> {
             possible_weakest(*a, &t.requirements.subtype_relation);
         match (st, we) {
             (Some(st), Some(we)) if st == we => {
-                t = t.replace_num_option(*a, &st)?
+                t = t.replace_num_option(*a, &st)?;
+                updated = true;
             }
             (_, Some(Type::Empty)) => {
-                t = t.replace_num_option(*a, &Type::Empty)?
+                t = t.replace_num_option(*a, &Type::Empty)?;
+                updated = true;
             }
             // (Some(st), _)
             //     if !covariant_candidates.contains(a)
@@ -167,6 +135,16 @@ fn _simplify_type(mut t: IncompleteType) -> Option<IncompleteType> {
     }
     let covariant_candidates = mk_covariant_candidates(&t);
     let contravariant_candidates = mk_contravariant_candidates(&t);
+    let type_variables_in_sub_rel: HashBag<usize> = t
+        .requirements
+        .subtype_relation
+        .iter()
+        .flat_map(|(a, b)| {
+            let mut a = a.all_type_variables();
+            a.extend(b.all_type_variables());
+            a
+        })
+        .collect();
     t.requirements.subtype_relation = t
         .requirements
         .subtype_relation
@@ -174,27 +152,19 @@ fn _simplify_type(mut t: IncompleteType) -> Option<IncompleteType> {
         .into_iter()
         .filter(|(_, a)| {
             if let Variable(a) = a {
-                contravariant_candidates.contains(a)
+                let b = contravariant_candidates.contains(a)
                     || covariant_candidates.contains(a)
-                    || type_variables_in_sub_rel.contains(a) >= 2
+                    || type_variables_in_sub_rel.contains(a) >= 2;
+                if !b {
+                    updated = true;
+                }
+                b
             } else {
                 true
             }
         })
         .collect();
-    // for (a, b) in t.requirements.subtype_relation.clone() {
-    //     match (a, b) {
-    //         (Anonymous(a), Fn(_, _)) => {
-    //             let new_fn_type = Fn(
-    //                 Box::new(Type::new_variable()),
-    //                 Box::new(Type::new_variable()),
-    //             );
-    //             t = t.replace_num_option(a, &new_fn_type.clone())?;
-    //         }
-    //         _ => (),
-    //     }
-    // }
-    Some(t)
+    Some((t, updated))
 }
 
 fn deconstruct_subtype_rel(
@@ -287,11 +257,12 @@ fn possible_weakest(
         Some(up.into_iter().next().unwrap().clone())
     } else if up.is_empty() {
         // eprintln!("{} -> Any", t);
-        if let Type::Variable(n) = Type::new_variable() {
-            Some(Type::Variable(n + 10000))
-        } else {
-            unreachable!()
-        }
+        // if let Type::Variable(n) = Type::new_variable() {
+        //     Some(Type::Variable(n + 10000))
+        // } else {
+        //     unreachable!()
+        // }
+        None
     } else {
         let up_fs: HashSet<_> = up
             .iter()
@@ -435,7 +406,6 @@ impl IncompleteType {
 
     pub fn resolved(&self) -> bool {
         self.requirements.variable_requirements.is_empty()
-        // && self.requirements.subtype_relation.is_empty()
     }
 }
 
@@ -452,10 +422,7 @@ fn mk_graph(
 #[test]
 fn replace_type_test0() {
     use Type::*;
-    assert_eq!(
-        Variable(0).replace_num(0, &Variable(1)),
-        Variable(1)
-    );
+    assert_eq!(Variable(0).replace_num(0, &Variable(1)), Variable(1));
 }
 
 #[test]
