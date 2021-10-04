@@ -67,7 +67,7 @@ pub fn type_check(ast: &Ast) {
             }
         }
     }
-    let toplevels = test_simplify(toplevels);
+    let toplevels = resolve_names(toplevels);
     eprintln!("------------------------------");
     for (name, top) in toplevels {
         eprintln!("{} : ", name);
@@ -82,7 +82,7 @@ struct Toplevel {
     face: Option<IncompleteType>,
 }
 
-fn test_simplify(
+fn resolve_names(
     mut toplevels: HashMap<String, Vec<Toplevel>>,
 ) -> HashMap<String, Vec<Toplevel>> {
     loop {
