@@ -1,5 +1,5 @@
-use std::cell::Cell;
 use crate::ast1::Type;
+use std::cell::Cell;
 
 impl Type {
     pub fn new_variable() -> Type {

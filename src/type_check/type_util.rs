@@ -58,7 +58,7 @@ impl Type {
     pub fn replace_type(self, from: &Type, to: &Type) -> Self {
         match self {
             t if t == *from => to.clone(),
-           Fn(args, rtn) => Fn(
+            Fn(args, rtn) => Fn(
                 args.replace_type(from, to).into(),
                 rtn.replace_type(from, to).into(),
             ),
@@ -80,9 +80,7 @@ impl Type {
 
     pub fn is_singleton(&self) -> bool {
         match self {
-            Normal(_, cs) => {
-                cs.iter().all(|c| c.is_singleton())
-            }
+            Normal(_, cs) => cs.iter().all(|c| c.is_singleton()),
             Fn(a, b) => a.is_singleton() && b.is_singleton(),
             _ => false,
         }
