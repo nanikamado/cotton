@@ -1,47 +1,39 @@
 use crate::ast1::{IncompleteType, Requirements, Type};
 use itertools::Itertools;
 use std::collections::{BTreeSet, HashSet};
-use Type::*;
+use Type::{Empty, Fn, Normal, Union, Variable};
 
 impl Type {
     pub fn all_type_variables(&self) -> HashSet<usize> {
         match self {
-            Type::Fn(a, r) => {
+            Fn(a, r) => {
                 let mut a = a.all_type_variables();
                 a.extend(r.all_type_variables());
                 a
             }
-            Type::Normal(_, cs) => cs
+            Normal(_, cs) => cs
                 .iter()
                 .flat_map(|c| c.all_type_variables())
                 .collect(),
-            Type::Union(cs) => cs
+            Union(cs) => cs
                 .iter()
                 .flat_map(|c| c.all_type_variables())
                 .collect(),
-            Type::Variable(n) => [*n].iter().copied().collect(),
-            Type::Empty => HashSet::new(),
+            Variable(n) => [*n].iter().copied().collect(),
+            Empty => HashSet::new(),
         }
     }
 
-    // pub fn change_anonymous_num(mut self) -> Type {
-    //     let anos = self.all_anonymous_types();
-    //     for a in anos {
-    //         self = self.replace_num(a, &Type::new_variable())
-    //     }
-    //     self
-    // }
-
-    pub fn replace_num(self, from: usize, to: &Type) -> Self {
+    pub fn replace_num(self, from: usize, to: &Self) -> Self {
         match self {
-            Type::Fn(args, rtn) => Type::Fn(
+            Fn(args, rtn) => Fn(
                 args.replace_num(from, to).into(),
                 rtn.replace_num(from, to).into(),
             ),
-            Type::Union(m) => Type::union_from(
+            Union(m) => Type::union_from(
                 m.into_iter().map(|t| t.replace_num(from, to)),
             ),
-            Type::Normal(name, cs) => {
+            Normal(name, cs) => {
                 let cs = cs
                     .into_iter()
                     .map(|t| t.replace_num(from, to))
@@ -49,49 +41,49 @@ impl Type {
                 if cs.contains(&Empty) {
                     Empty
                 } else {
-                    Type::Normal(name, cs)
+                    Normal(name, cs)
                 }
             }
-            Type::Variable(n) => {
+            Variable(n) => {
                 if n == from {
                     to.clone()
                 } else {
-                    Type::Variable(n)
+                    Variable(n)
                 }
             }
-            Type::Empty => Type::Empty,
+            Empty => Empty,
         }
     }
 
     pub fn replace_type(self, from: &Type, to: &Type) -> Self {
         match self {
             t if t == *from => to.clone(),
-            Type::Fn(args, rtn) => Type::Fn(
+           Fn(args, rtn) => Fn(
                 args.replace_type(from, to).into(),
                 rtn.replace_type(from, to).into(),
             ),
-            Type::Union(m) => Type::Union(
+            Union(m) => Union(
                 m.into_iter()
                     .map(|t| t.replace_type(from, to))
                     .collect(),
             ),
-            Type::Normal(name, cs) => Type::Normal(
+            Normal(name, cs) => Normal(
                 name,
                 cs.into_iter()
                     .map(|t| t.replace_type(from, to))
                     .collect(),
             ),
-            Type::Variable(n) => Type::Variable(n),
-            Type::Empty => Type::Empty,
+            Variable(n) => Variable(n),
+            Empty => Empty,
         }
     }
 
     pub fn is_singleton(&self) -> bool {
         match self {
-            Type::Normal(_, cs) => {
+            Normal(_, cs) => {
                 cs.iter().all(|c| c.is_singleton())
             }
-            Type::Fn(a, b) => a.is_singleton() && b.is_singleton(),
+            Fn(a, b) => a.is_singleton() && b.is_singleton(),
             _ => false,
         }
     }
@@ -127,17 +119,17 @@ impl Type {
     #[allow(unused)]
     pub fn contains(&self, variable_num: usize) -> bool {
         match self {
-            Type::Normal(_, cs) => {
+            Normal(_, cs) => {
                 cs.iter().any(|c| c.contains(variable_num))
             }
-            Type::Fn(a, r) => {
+            Fn(a, r) => {
                 a.contains(variable_num) || r.contains(variable_num)
             }
-            Type::Union(cs) => {
+            Union(cs) => {
                 cs.iter().any(|cs| cs.contains(variable_num))
             }
-            Type::Variable(n) => *n == variable_num,
-            Type::Empty => false,
+            Variable(n) => *n == variable_num,
+            Empty => false,
         }
     }
 }
