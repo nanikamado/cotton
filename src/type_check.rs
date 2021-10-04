@@ -33,8 +33,7 @@ pub fn type_check(ast: &Ast) {
     for d in &ast.declarations {
         let mut t = min_type(&d.value).unwrap();
         let face = if let Some(annotation) = &d.type_annotation {
-            let annotation =
-                annotation.clone().change_variable_num();
+            let annotation = annotation.clone().change_variable_num();
             t.requirements.subtype_relation.insert((
                 t.constructor.clone(),
                 annotation.constructor.clone(),
