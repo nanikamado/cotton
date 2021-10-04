@@ -86,16 +86,12 @@ struct Toplevel {
 fn test_simplify(
     mut toplevels: HashMap<String, Vec<Toplevel>>,
 ) -> HashMap<String, Vec<Toplevel>> {
-    let names: Vec<_> = toplevels.keys().cloned().collect();
     loop {
         // (name, num, variable req num, type)
-        let mut resolved: Option<(String, usize, IncompleteType)> =
+        let mut resolved: Option<(&String, usize, IncompleteType)> =
             None;
-        'outer: for name in &names {
-            // dbg!(&name);
-            for (t_index, t) in
-                toplevels[&name[..]].iter().enumerate()
-            {
+        'outer: for (name, types) in &toplevels {
+            for (t_index, t) in types.iter().enumerate() {
                 if !t.incomplete.resolved() {
                     for (req_i, (req_name, req_t)) in t
                         .incomplete
@@ -123,24 +119,18 @@ fn test_simplify(
                                 let cand_t = cand_t
                                     .clone()
                                     .change_variable_num();
+                                let cand_resolved = cand_t.resolved();
                                 let mut incomplete =
                                     t.incomplete.clone();
                                 incomplete
                                     .requirements
                                     .variable_requirements
                                     .remove(req_i);
-                                // incomplete
-                                //     .requirements
-                                //     .subtype_relation
-                                //     .insert((
-                                //         req_t.clone(),
-                                //         cand_t.constructor.clone(),
-                                //     ));
                                 incomplete
                                     .requirements
                                     .subtype_relation
                                     .insert((
-                                        cand_t.constructor.clone(),
+                                        cand_t.constructor,
                                         req_t.clone(),
                                     ));
                                 incomplete
@@ -149,16 +139,15 @@ fn test_simplify(
                                     .extend(
                                         cand_t
                                             .requirements
-                                            .subtype_relation
-                                            .clone(),
+                                            .subtype_relation,
                                     );
                                 simplify::simplify_type(incomplete)
-                                    .map(|t| (t, cand_t.resolved()))
+                                    .map(|t| (t, cand_resolved))
                             })
                             .collect();
                         if successes.len() == 1 && successes[0].1 {
                             resolved = Some((
-                                (*name).clone(),
+                                name,
                                 t_index,
                                 successes[0].0.clone(),
                             ));
@@ -177,6 +166,7 @@ fn test_simplify(
             }
         }
         if let Some((name, v_index, r)) = resolved {
+            let name = name.clone();
             toplevels.get_mut(&name).unwrap()[v_index].incomplete = r;
         } else {
             break;

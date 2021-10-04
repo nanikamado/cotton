@@ -148,7 +148,6 @@ fn _simplify_type(
     t.requirements.subtype_relation = t
         .requirements
         .subtype_relation
-        .clone()
         .into_iter()
         .filter(|(_, a)| {
             if let Variable(a) = a {

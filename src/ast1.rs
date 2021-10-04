@@ -172,12 +172,12 @@ static OP_PRECEDENCE: Lazy<HashMap<&str, i32>> = Lazy::new(|| {
         ("$", 0),
     ]
     .iter()
-    .cloned()
+    .copied()
     .collect()
 });
 
 static RIGHT_ASSOCIATIVE: Lazy<HashSet<i32>> =
-    Lazy::new(|| [1].iter().cloned().collect());
+    Lazy::new(|| [1].iter().copied().collect());
 
 impl Ord for Operator {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
@@ -223,8 +223,7 @@ impl From<ast0::OpSequence> for Expr {
     fn from(s: ast0::OpSequence) -> Self {
         let op_list: BTreeSet<_> = s
             .operators
-            .clone()
-            .into_iter()
+            .iter()
             .map(|s| {
                 *OP_PRECEDENCE.get(&s[..]).unwrap_or_else(|| {
                     panic!("no entry found for key: {}", s)
@@ -242,20 +241,20 @@ impl From<ast0::OpSequence> for Expr {
                     operands[operand_head] = Expr::Call(
                         Box::new(if op == *"fn_call" {
                             operands[operand_head].clone()
-                        } else {
-                            Expr::Call(
+            } else {
+                Expr::Call(
                                 Box::new(Expr::Identifier(op)),
                                 Box::new(
                                     operands[operand_head].clone(),
                                 ),
-                            )
+                    )
                         }),
                         Box::new(operands[i + 1].clone()),
                     );
-                } else {
+        } else {
                     operand_head += 1;
                     operands[operand_head] = operands[i + 1].clone();
-                }
+        }
             }
             operators.retain(|o| OP_PRECEDENCE[&o[..]] != a);
             // operands.truncate(operand_head + 1);
@@ -288,8 +287,7 @@ impl From<ast0::InfixTypeSequence> for Type {
     fn from(s: ast0::InfixTypeSequence) -> Self {
         let op_list: BTreeSet<_> = s
             .operators
-            .clone()
-            .into_iter()
+            .iter()
             .map(|s| {
                 *OP_PRECEDENCE.get(&s[..]).unwrap_or_else(|| {
                     panic!("no entry found for key: {}", s)

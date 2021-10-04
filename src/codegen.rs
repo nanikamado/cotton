@@ -26,7 +26,7 @@ pub fn compile(ast: Ast) -> String {
             .into_iter()
             .map(data_declaration)
             .join(""),
-        ast.declarations.into_iter().map(declaration).join(""),
+        ast.declarations.iter().map(declaration).join(""),
         "main({name: '$unicode_28_29'});}",
     )
 }
@@ -42,7 +42,7 @@ fn data_declaration(d: DataDeclaration) -> String {
     )
 }
 
-fn declaration(d: Declaration) -> String {
+fn declaration(d: &Declaration) -> String {
     format!(
         "let {}={};",
         convert_name(&d.identifier),
@@ -59,7 +59,7 @@ static PRIMITIVES: Lazy<HashMap<&str, &str>> = Lazy::new(|| {
         ("!=", "$neq"),
     ]
     .iter()
-    .cloned()
+    .copied()
     .collect()
 });
 
@@ -78,7 +78,7 @@ fn expr(e: &Expr, name_count: u32) -> String {
             Some(s) => s.to_string(),
             None => convert_name(a),
         },
-        Expr::Declaration(a) => declaration(*a.clone()),
+        Expr::Declaration(a) => declaration(a),
         Expr::Call(f, a) => format!(
             "{}({})",
             expr(&*f, name_count),
@@ -133,7 +133,7 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
         .zip(names)
         .flat_map(|(p, n)| match p {
             Pattern::Number(a) | Pattern::StrLiteral(a) => {
-                vec![format!("{}==={}", a.clone(), n)]
+                vec![format!("{}==={}", a, n)]
             }
             Pattern::Constructor(a, ps) => {
                 let mut v = vec![format!(
