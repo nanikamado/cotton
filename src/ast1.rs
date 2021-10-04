@@ -230,36 +230,54 @@ impl From<ast0::OpSequence> for Expr {
                 })
             })
             .collect();
-        let mut operators = s.operators;
-        let mut operands: Vec<Expr> =
+        let mut operators = s.operators.into_iter().collect();
+        let mut operands: VecDeque<Expr> =
             s.operands.into_iter().map(|o| o.into()).collect();
         for a in op_list.into_iter().rev() {
-            let mut operand_head = 0;
-            for i in 0..operators.len() {
-                let op = operators[i].clone();
-                if a == OP_PRECEDENCE[&op[..]] {
-                    operands[operand_head] = Expr::Call(
-                        Box::new(if op == *"fn_call" {
-                            operands[operand_head].clone()
+            if RIGHT_ASSOCIATIVE.contains(&a) {
+                unimplemented!()
             } else {
-                Expr::Call(
-                                Box::new(Expr::Identifier(op)),
-                                Box::new(
-                                    operands[operand_head].clone(),
-                                ),
-                    )
-                        }),
-                        Box::new(operands[i + 1].clone()),
-                    );
-        } else {
-                    operand_head += 1;
-                    operands[operand_head] = operands[i + 1].clone();
-        }
+                let os = value_op_apply_left(operators, operands, a);
+                operators = os.0;
+                operands = os.1;
             }
-            operators.retain(|o| OP_PRECEDENCE[&o[..]] != a);
-            // operands.truncate(operand_head + 1);
         }
         operands[0].clone()
+    }
+}
+
+fn value_op_apply_left(
+    mut operators: VecDeque<String>,
+    mut operands: VecDeque<Expr>,
+    precedence: i32,
+) -> (VecDeque<String>, VecDeque<Expr>) {
+    if let Some(op) = operators.pop_front() {
+        let head = operands.pop_front().unwrap();
+        if OP_PRECEDENCE[&op[..]] == precedence {
+            let head_ = operands.pop_front().unwrap();
+            let new_elm = if op == "fn_call" {
+                Expr::Call(head.into(), head_.into())
+            } else {
+                Expr::Call(
+                    Expr::Call(
+                        Expr::Identifier(op).into(),
+                        head.into(),
+                    )
+                    .into(),
+                    head_.into(),
+                )
+            };
+            operands.push_front(new_elm);
+            value_op_apply_left(operators, operands, precedence)
+        } else {
+            let (mut operators, mut operands) =
+                value_op_apply_left(operators, operands, precedence);
+            operators.push_front(op);
+            operands.push_front(head);
+            (operators, operands)
+        }
+    } else {
+        (operators, operands)
     }
 }
 
