@@ -21,13 +21,14 @@ pub fn compile(ast: Ast) -> String {
         let $lt = a => b => $$bool(a < b);
         let $$bool = a => a ? True : False;
         let True = {name: 'True'};
-        let False = {name: 'False'};",
+        let False = {name: 'False'};
+        let $unicode_28_29 = {name: '$unicode_28_29'};",
         ast.data_declarations
             .into_iter()
             .map(data_declaration)
             .join(""),
         ast.declarations.iter().map(declaration).join(""),
-        "main({name: '$unicode_28_29'});}",
+        "main($unicode_28_29);}",
     )
 }
 
@@ -84,7 +85,7 @@ fn expr(e: &Expr, name_count: u32) -> String {
             expr(&*f, name_count),
             expr(&*a, name_count)
         ),
-        Expr::Unit => "null".to_string(),
+        Expr::Unit => "$unicode_28_29".to_string(),
     }
 }
 
