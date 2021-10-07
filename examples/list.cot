@@ -1,0 +1,31 @@
+(.)
+= fn
+| a, f => f(a)
+--
+
+data a /\ b
+
+data a .. b
+
+range_to_list
+= fn
+| a .. b =>
+    (a < b).fn
+    | True => (a..(b - 1)).range_to_list /\ b
+    | False => ()
+    --
+--
+
+print_num_list
+= fn
+| () => ()
+| t /\ h =>
+    h.num_to_string.print
+    t.print_num_list
+--
+
+main : () -> ()
+= fn
+| () =>
+    (2..100).range_to_list.print_num_list
+--
