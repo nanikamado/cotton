@@ -99,6 +99,13 @@ pub static INTRINSIC_VARIABLES: Lazy<HashMap<String, Vec<Type>>> =
                 )],
             ),
             (
+                "print",
+                [Fn(
+                    Normal("String".to_string(), Vec::new()).into(),
+                    Normal("()".to_string(), Vec::new()).into(),
+                )],
+            ),
+            (
                 "num_to_string",
                 [Fn(
                     Normal("Num".to_string(), Vec::new()).into(),
