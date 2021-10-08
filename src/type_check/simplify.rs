@@ -207,22 +207,22 @@ fn deconstruct_subtype_rel(
         (Empty, _) => Some(Vec::new()),
         (Variable(a), Variable(b)) if a == b => Some(Vec::new()),
         (a, Union(u)) if u.contains(&a) => Some(Vec::new()),
-        (a, Union(u)) if u.len() == 1 => {
-            deconstruct_subtype_rel(a, u.into_iter().next().unwrap())
-        }
-        (a, Union(mut u)) if u.contains(&Empty) => {
-            u.remove(&Empty);
-            deconstruct_subtype_rel(a, Union(u))
-        }
+        // (a, Union(u)) if u.len() == 1 => {
+        //     deconstruct_subtype_rel(a, u.into_iter().next().unwrap())
+        // }
+        // (a, Union(mut u)) if u.contains(&Empty) => {
+        //     u.remove(&Empty);
+        //     deconstruct_subtype_rel(a, Union(u))
+        // }
         (a, Union(cs)) if a.is_singleton() => {
-            let new_cs: BTreeSet<Type> = cs
+            let new_cs = cs
                 .into_iter()
                 .filter(|c| !(c.is_singleton() && a != *c))
                 .collect();
-            Some(vec![(a, Union(new_cs))])
+            Some(vec![(a, new_cs)])
         }
         (Normal(name, cs), Union(u)) => {
-            let new_u: BTreeSet<Type> = u
+            let new_u: Type = u
                 .into_iter()
                 .filter(|c| {
                     if let Normal(c_name, _) = c {
@@ -232,7 +232,7 @@ fn deconstruct_subtype_rel(
                     }
                 })
                 .collect();
-            Some(vec![(Normal(name, cs), Union(new_u))])
+            Some(vec![(Normal(name, cs), new_u)])
         }
         (sub, sup) => Some(vec![(sub, sup)]),
     }

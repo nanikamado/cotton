@@ -1,7 +1,10 @@
 use crate::ast0;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use std::{
+    collections::{BTreeSet, HashMap, HashSet, VecDeque},
+    iter::FromIterator,
+};
 
 #[derive(Debug, PartialEq)]
 pub struct Ast {
@@ -13,9 +16,54 @@ pub struct Ast {
 pub enum Type {
     Normal(String, Vec<Type>),
     Fn(Box<Type>, Box<Type>),
-    Union(BTreeSet<Type>),
+    Union(Union),
     Variable(usize),
     Empty,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Union(BTreeSet<Type>);
+
+impl IntoIterator for Union {
+    type Item = Type;
+
+    type IntoIter = std::collections::btree_set::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl Union {
+    pub fn iter(
+        &self,
+    ) -> std::collections::btree_set::Iter<'_, Type> {
+        self.0.iter()
+    }
+
+    pub fn contains(&self, value: &Type) -> bool {
+        self.0.contains(value)
+    }
+}
+
+impl FromIterator<Type> for Type {
+    fn from_iter<T: IntoIterator<Item = Type>>(iter: T) -> Self {
+        let mut u = BTreeSet::new();
+        for t in iter {
+            match t {
+                Type::Union(Union(a)) => u.extend(a),
+                Type::Empty => (),
+                other => {
+                    u.insert(other);
+                }
+            }
+        }
+        match u.len() {
+            0 => Type::Empty,
+            1 => u.into_iter().next().unwrap(),
+            _ => Type::Union(Union(u)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

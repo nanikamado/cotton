@@ -45,21 +45,13 @@ pub static INTRINSIC_VARIABLES: Lazy<HashMap<String, Vec<Type>>> =
                     Normal("Num".to_string(), Vec::new()).into(),
                     Fn(
                         Normal("Num".to_string(), Vec::new()).into(),
-                        Union(
-                            [
-                                Normal(
-                                    "True".to_string(),
-                                    Vec::new(),
-                                ),
-                                Normal(
-                                    "False".to_string(),
-                                    Vec::new(),
-                                ),
-                            ]
-                            .iter()
-                            .cloned()
-                            .collect(),
-                        )
+                        [
+                            Normal("True".to_string(), Vec::new()),
+                            Normal("False".to_string(), Vec::new()),
+                        ]
+                        .iter()
+                        .cloned()
+                        .collect::<Type>()
                         .into(),
                     )
                     .into(),
@@ -71,21 +63,13 @@ pub static INTRINSIC_VARIABLES: Lazy<HashMap<String, Vec<Type>>> =
                     Normal("Num".to_string(), Vec::new()).into(),
                     Fn(
                         Normal("Num".to_string(), Vec::new()).into(),
-                        Union(
-                            [
-                                Normal(
-                                    "True".to_string(),
-                                    Vec::new(),
-                                ),
-                                Normal(
-                                    "False".to_string(),
-                                    Vec::new(),
-                                ),
-                            ]
-                            .iter()
-                            .cloned()
-                            .collect(),
-                        )
+                        [
+                            Normal("True".to_string(), Vec::new()),
+                            Normal("False".to_string(), Vec::new()),
+                        ]
+                        .iter()
+                        .cloned()
+                        .collect::<Type>()
                         .into(),
                     )
                     .into(),

@@ -1,6 +1,6 @@
 use crate::ast1::{IncompleteType, Requirements, Type};
 use itertools::Itertools;
-use std::collections::{BTreeSet, HashSet};
+use std::collections::HashSet;
 use Type::{Empty, Fn, Normal, Union, Variable};
 
 impl Type {
@@ -89,21 +89,7 @@ impl Type {
     }
 
     pub fn union_from(it: impl Iterator<Item = Type>) -> Self {
-        let mut u = BTreeSet::new();
-        for t in it {
-            match t {
-                Union(a) => u.extend(a),
-                Empty => (),
-                other => {
-                    u.insert(other);
-                }
-            }
-        }
-        match u.len() {
-            0 => Empty,
-            1 => u.into_iter().next().unwrap(),
-            _ => Union(u),
-        }
+        it.collect()
     }
 
     #[allow(unused)]
