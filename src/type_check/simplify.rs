@@ -373,7 +373,9 @@ fn possible_strongest(
     }
 }
 
-fn mk_contravariant_candidates(t: &IncompleteType) -> FxHashSet<usize> {
+fn mk_contravariant_candidates(
+    t: &IncompleteType,
+) -> FxHashSet<usize> {
     let mut rst: FxHashSet<usize> =
         contravariant_type_variables(&t.constructor)
             .into_iter()
@@ -418,7 +420,10 @@ fn covariant_type_variables(t: &Type) -> FxHashSet<usize> {
     }
 }
 
-fn marge_hashset<T>(mut a: FxHashSet<T>, b: FxHashSet<T>) -> FxHashSet<T>
+fn marge_hashset<T>(
+    mut a: FxHashSet<T>,
+    b: FxHashSet<T>,
+) -> FxHashSet<T>
 where
     T: Eq + core::hash::Hash,
 {
