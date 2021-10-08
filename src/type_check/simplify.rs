@@ -202,8 +202,8 @@ fn simplify_subtype_rel(
         | (Normal(_, _), Fn(_, _))
         | (Fn(_, _), Empty)
         | (Normal(_, _), Empty) => None,
+        (sub, sup) if sub == sup => Some(Vec::new()),
         (Empty, _) => Some(Vec::new()),
-        (Variable(a), Variable(b)) if a == b => Some(Vec::new()),
         (a, Union(u)) if u.contains(&a) => Some(Vec::new()),
         (a, RecursiveAlias { alias: _, body })
             if (if let Union(u) = &*body {
@@ -214,13 +214,28 @@ fn simplify_subtype_rel(
         {
             Some(Vec::new())
         }
-        // (a, Union(u)) if u.len() == 1 => {
-        //     deconstruct_subtype_rel(a, u.into_iter().next().unwrap())
-        // }
-        // (a, Union(mut u)) if u.contains(&Empty) => {
-        //     u.remove(&Empty);
-        //     deconstruct_subtype_rel(a, Union(u))
-        // }
+        (Normal(name, cs), RecursiveAlias { alias, body }) => {
+            simplify_subtype_rel(
+                Normal(name, cs),
+                unwrap_recursive_alias(alias, *body),
+            )
+        }
+        (
+            RecursiveAlias {
+                alias: alias1,
+                body: body1,
+            },
+            RecursiveAlias {
+                alias: alias2,
+                body: body2,
+            },
+        ) if *body1
+            == body2
+                .clone()
+                .replace_num(alias2, &Type::Variable(alias1)) =>
+        {
+            Some(Vec::new())
+        }
         (a, Union(cs)) if a.is_singleton() => {
             let new_cs = cs
                 .into_iter()
@@ -265,6 +280,16 @@ fn lift_recursive_alias(t: Type) -> Type {
     } else {
         t
     }
+}
+
+fn unwrap_recursive_alias(alias: usize, body: Type) -> Type {
+    body.clone().replace_num(
+        alias,
+        &Type::RecursiveAlias {
+            alias,
+            body: Box::new(body),
+        },
+    )
 }
 
 fn find_recursive_alias(t: &Type) -> Option<(usize, Type)> {
