@@ -6,14 +6,15 @@ use crate::ast0::{DataDeclaration, Pattern};
 use crate::ast1::{
     Ast, Expr, FnArm, IncompleteType, Requirements, Type,
 };
+use fxhash::FxHashMap;
 use intrinsics::INTRINSIC_VARIABLES;
 use itertools::Itertools;
 use std::collections::BTreeSet;
-use std::{collections::HashMap, vec};
+use std::vec;
 
 pub fn type_check(ast: &Ast) {
-    let mut toplevels: HashMap<String, Vec<Toplevel>> =
-        HashMap::new();
+    let mut toplevels: FxHashMap<String, Vec<Toplevel>> =
+        FxHashMap::default();
     for (name, ts) in &*INTRINSIC_VARIABLES {
         *toplevels.entry(name.clone()).or_default() = ts
             .iter()
@@ -83,8 +84,8 @@ struct Toplevel {
 }
 
 fn resolve_names(
-    mut toplevels: HashMap<String, Vec<Toplevel>>,
-) -> HashMap<String, Vec<Toplevel>> {
+    mut toplevels: FxHashMap<String, Vec<Toplevel>>,
+) -> FxHashMap<String, Vec<Toplevel>> {
     loop {
         // (name, num, variable req num, type)
         let mut resolved: Option<(&String, usize, IncompleteType)> =
@@ -102,8 +103,8 @@ fn resolve_names(
                         let candidates = &toplevels[&req_name[..]];
                         if candidates.iter().enumerate().all(
                             |(i, c)| {
-                            c.face.is_none()
-                                && !c.incomplete.resolved()
+                                c.face.is_none()
+                                    && !c.incomplete.resolved()
                                     && !(name == req_name
                                         && t_index == i)
                             },
@@ -338,7 +339,7 @@ fn arm_min_type(arm: &FnArm) -> ((Type, Type), Requirements) {
             Box::new(arm_type),
         )
     }
-    let bindings: HashMap<String, Type> =
+    let bindings: FxHashMap<String, Type> =
         bindings.into_iter().flatten().collect();
     let (variable_requirements, subtype_requirement): (
         Vec<_>,

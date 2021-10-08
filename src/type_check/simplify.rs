@@ -1,13 +1,9 @@
 use crate::ast1::{IncompleteType, Requirements, Type};
+use fxhash::FxHashSet;
 use hashbag::HashBag;
 use itertools::Itertools;
 use petgraph::{self, algo::tarjan_scc, graphmap::DiGraphMap};
-use std::{
-    collections::{BTreeSet, HashSet},
-    fmt::Display,
-    iter::Extend,
-    vec,
-};
+use std::{collections::BTreeSet, fmt::Display, iter::Extend, vec};
 
 pub fn simplify_type(
     mut t: IncompleteType,
@@ -76,6 +72,7 @@ fn _simplify_type(
         .into_iter()
         .flatten()
         .collect();
+    t.constructor = lift_recursive_alias(t.constructor);
     for cov in mk_covariant_candidates(&t) {
         if !mk_contravariant_candidates(&t).contains(&cov) {
             if let Some(s) = possible_strongest(
@@ -98,7 +95,7 @@ fn _simplify_type(
             }
         }
     }
-    let type_variables_in_sub_rel: HashSet<usize> = t
+    let type_variables_in_sub_rel: FxHashSet<usize> = t
         .requirements
         .subtype_relation
         .iter()
@@ -291,7 +288,7 @@ fn possible_weakest(
     t: usize,
     subtype_relation: &BTreeSet<(Type, Type)>,
 ) -> Option<Type> {
-    let mut up = HashSet::new();
+    let mut up = FxHashSet::default();
     for (sub, sup) in subtype_relation {
         if contravariant_type_variables(sup).contains(&t) {
             return None;
@@ -321,11 +318,11 @@ fn possible_weakest(
         // }
         None
     } else {
-        let up_fs: HashSet<_> = up
+        let up_fs: FxHashSet<_> = up
             .iter()
             .filter(|t| matches!(t, Type::Fn(_, _)))
             .collect();
-        let up_ns: HashSet<_> = up
+        let up_ns: FxHashSet<_> = up
             .iter()
             .filter_map(|t| {
                 if let Type::Normal(name, _) = t {
@@ -376,8 +373,8 @@ fn possible_strongest(
     }
 }
 
-fn mk_contravariant_candidates(t: &IncompleteType) -> HashSet<usize> {
-    let mut rst: HashSet<usize> =
+fn mk_contravariant_candidates(t: &IncompleteType) -> FxHashSet<usize> {
+    let mut rst: FxHashSet<usize> =
         contravariant_type_variables(&t.constructor)
             .into_iter()
             .collect();
@@ -387,8 +384,8 @@ fn mk_contravariant_candidates(t: &IncompleteType) -> HashSet<usize> {
     rst
 }
 
-fn mk_covariant_candidates(t: &IncompleteType) -> HashSet<usize> {
-    let mut rst: HashSet<usize> =
+fn mk_covariant_candidates(t: &IncompleteType) -> FxHashSet<usize> {
+    let mut rst: FxHashSet<usize> =
         covariant_type_variables(&t.constructor)
             .into_iter()
             .collect();
@@ -398,7 +395,7 @@ fn mk_covariant_candidates(t: &IncompleteType) -> HashSet<usize> {
     rst
 }
 
-fn covariant_type_variables(t: &Type) -> HashSet<usize> {
+fn covariant_type_variables(t: &Type) -> FxHashSet<usize> {
     match t {
         Type::Fn(a, r) => marge_hashset(
             covariant_type_variables(r),
@@ -412,7 +409,7 @@ fn covariant_type_variables(t: &Type) -> HashSet<usize> {
             cs.iter().map(|c| covariant_type_variables(c)).concat()
         }
         Type::Variable(n) => [*n].iter().copied().collect(),
-        Type::Empty => HashSet::new(),
+        Type::Empty => FxHashSet::default(),
         Type::RecursiveAlias { alias, body } => {
             let mut vs = covariant_type_variables(body);
             vs.remove(alias);
@@ -421,7 +418,7 @@ fn covariant_type_variables(t: &Type) -> HashSet<usize> {
     }
 }
 
-fn marge_hashset<T>(mut a: HashSet<T>, b: HashSet<T>) -> HashSet<T>
+fn marge_hashset<T>(mut a: FxHashSet<T>, b: FxHashSet<T>) -> FxHashSet<T>
 where
     T: Eq + core::hash::Hash,
 {
@@ -429,7 +426,7 @@ where
     a
 }
 
-fn contravariant_type_variables(t: &Type) -> HashSet<usize> {
+fn contravariant_type_variables(t: &Type) -> FxHashSet<usize> {
     match t {
         Type::Fn(a, r) => marge_hashset(
             covariant_type_variables(a),
@@ -443,7 +440,7 @@ fn contravariant_type_variables(t: &Type) -> HashSet<usize> {
             .iter()
             .map(|c| contravariant_type_variables(c))
             .concat(),
-        Type::Variable(_) | Type::Empty => HashSet::new(),
+        Type::Variable(_) | Type::Empty => FxHashSet::default(),
         Type::RecursiveAlias { alias, body } => {
             let mut vs = contravariant_type_variables(body);
             vs.remove(alias);
