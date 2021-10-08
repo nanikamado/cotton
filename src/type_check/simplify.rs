@@ -208,6 +208,15 @@ fn simplify_subtype_rel(
         (Empty, _) => Some(Vec::new()),
         (Variable(a), Variable(b)) if a == b => Some(Vec::new()),
         (a, Union(u)) if u.contains(&a) => Some(Vec::new()),
+        (a, RecursiveAlias { alias: _, body })
+            if (if let Union(u) = &*body {
+                u.contains(&a)
+            } else {
+                false
+            }) =>
+        {
+            Some(Vec::new())
+        }
         // (a, Union(u)) if u.len() == 1 => {
         //     deconstruct_subtype_rel(a, u.into_iter().next().unwrap())
         // }
@@ -235,7 +244,46 @@ fn simplify_subtype_rel(
                 .collect();
             Some(vec![(Normal(name, cs), new_u)])
         }
-        (sub, sup) => Some(vec![(sub, sup)]),
+        (sub, sup) => {
+            let subl = lift_recursive_alias(sub.clone());
+            let supl = lift_recursive_alias(sup.clone());
+            if subl != sub || supl != sup {
+                simplify_subtype_rel(subl, supl)
+            } else {
+                Some(vec![(subl, supl)])
+            }
+        }
+    }
+}
+
+fn lift_recursive_alias(t: Type) -> Type {
+    if let Some((alias, body)) = find_recursive_alias(&t) {
+        let r = &Type::RecursiveAlias {
+            alias,
+            body: Box::new(body.clone()),
+        };
+        let t = t.replace_type(r, &Type::Variable(alias));
+        let t = t.replace_type(&body, &Type::Variable(alias));
+        t.replace_num(alias, r)
+    } else {
+        t
+    }
+}
+
+fn find_recursive_alias(t: &Type) -> Option<(usize, Type)> {
+    match t {
+        Type::Normal(_, cs) => {
+            cs.iter().find_map(find_recursive_alias)
+        }
+        Type::Fn(a, r) => {
+            [a, r].iter().find_map(|c| find_recursive_alias(c))
+        }
+        Type::Union(u) => u.iter().find_map(find_recursive_alias),
+        Type::Variable(_) => None,
+        Type::Empty => None,
+        Type::RecursiveAlias { alias, body } => {
+            Some((*alias, (**body).clone()))
+        }
     }
 }
 
