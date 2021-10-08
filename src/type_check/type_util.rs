@@ -62,10 +62,8 @@ impl Type {
                 args.replace_type(from, to).into(),
                 rtn.replace_type(from, to).into(),
             ),
-            Union(m) => Union(
-                m.into_iter()
-                    .map(|t| t.replace_type(from, to))
-                    .collect(),
+            Union(m) => Type::union_from(
+                m.into_iter().map(|t| t.replace_type(from, to)),
             ),
             Normal(name, cs) => Normal(
                 name,
@@ -87,17 +85,7 @@ impl Type {
     }
 
     pub fn union_with(self, other: Type) -> Type {
-        match (self, other) {
-            (Union(mut a), Union(b)) => {
-                a.extend(b);
-                Union(a)
-            }
-            (Union(mut a), b) | (b, Union(mut a)) => {
-                a.insert(b);
-                Union(a)
-            }
-            (a, b) => Union(vec![a, b].into_iter().collect()),
-        }
+        Type::union_from(vec![self, other].into_iter())
     }
 
     pub fn union_from(it: impl Iterator<Item = Type>) -> Self {
@@ -111,7 +99,11 @@ impl Type {
                 }
             }
         }
-        Union(u)
+        match u.len() {
+            0 => Empty,
+            1 => u.into_iter().next().unwrap(),
+            _ => Union(u),
+        }
     }
 
     #[allow(unused)]

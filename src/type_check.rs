@@ -100,24 +100,32 @@ fn resolve_names(
                         .enumerate()
                     {
                         let candidates = &toplevels[&req_name[..]];
-                        if candidates.iter().all(|c| {
+                        if candidates.iter().enumerate().all(
+                            |(i, c)| {
                             c.face.is_none()
                                 && !c.incomplete.resolved()
-                        }) {
+                                    && !(name == req_name
+                                        && t_index == i)
+                            },
+                        ) {
                             continue;
                         }
                         let successes: Vec<_> = candidates
                             .iter()
-                            .filter_map(|cand| {
-                                let cand_t =
+                            .enumerate()
+                            .filter_map(|(i, cand)| {
+                                let mut cand_t =
                                     if let Some(face) = &cand.face {
-                                        face
+                                        face.clone()
                                     } else {
-                                        &cand.incomplete
+                                        cand.incomplete.clone()
                                     };
-                                let cand_t = cand_t
-                                    .clone()
-                                    .change_variable_num();
+                                let is_recursive =
+                                    name == req_name && t_index == i;
+                                if !is_recursive {
+                                    cand_t =
+                                        cand_t.change_variable_num();
+                                }
                                 let cand_resolved = cand_t.resolved();
                                 let mut incomplete =
                                     t.incomplete.clone();
@@ -129,9 +137,18 @@ fn resolve_names(
                                     .requirements
                                     .subtype_relation
                                     .insert((
-                                        cand_t.constructor,
+                                        cand_t.constructor.clone(),
                                         req_t.clone(),
                                     ));
+                                // if is_recursive {
+                                //     incomplete
+                                //         .requirements
+                                //         .subtype_relation
+                                //         .insert((
+                                //             req_t.clone(),
+                                //             cand_t.constructor,
+                                //         ));
+                                // }
                                 incomplete
                                     .requirements
                                     .subtype_relation
@@ -141,7 +158,13 @@ fn resolve_names(
                                             .subtype_relation,
                                     );
                                 simplify::simplify_type(incomplete)
-                                    .map(|t| (t, cand_resolved))
+                                    .map(|t| {
+                                        (
+                                            t,
+                                            cand_resolved
+                                                || is_recursive,
+                                        )
+                                    })
                             })
                             .collect();
                         if successes.len() == 1 && successes[0].1 {

@@ -19,7 +19,7 @@ pub fn simplify_type(
         let updated = r.1;
         if !updated {
             break;
-        } else if i > 10 {
+        } else if i > 4 {
             eprintln!("loop count reached the limit.");
             break;
         }
@@ -48,8 +48,8 @@ fn _simplify_type(
                 }
             })
             .partition_result();
-        if !eq_variable.is_empty()
-            && eq_variable.len() + eq_cons.len() >= 2
+        if eq_variable.len() >= 2
+            || !eq_variable.is_empty() && !eq_cons.is_empty()
         {
             updated = true;
         }
