@@ -5,6 +5,7 @@ use petgraph::{self, algo::tarjan_scc, graphmap::DiGraphMap};
 use std::{
     collections::{BTreeSet, HashSet},
     fmt::Display,
+    iter::Extend,
     vec,
 };
 
@@ -19,7 +20,7 @@ pub fn simplify_type(
         let updated = r.1;
         if !updated {
             break;
-        } else if i > 4 {
+        } else if i > 10 {
             eprintln!("loop count reached the limit.");
             break;
         }
@@ -252,8 +253,19 @@ fn possible_weakest(
             return None;
         }
     }
-    if up.len() == 1 {
-        Some(up.into_iter().next().unwrap().clone())
+    if up.iter().any(|u| u.contains(t)) {
+        None
+    } else if up.len() == 1 {
+        let up = up.into_iter().next().unwrap().clone();
+        Some(if up.contains(t) {
+            let v = Type::new_variable_num();
+            Type::RecursiveAlias {
+                alias: v,
+                body: Box::new(up.replace_num(t, &Type::Variable(v))),
+            }
+        } else {
+            up
+        })
     } else if up.is_empty() {
         // eprintln!("{} -> Any", t);
         // if let Type::Variable(n) = Type::new_variable() {
@@ -299,12 +311,22 @@ fn possible_strongest(
             return None;
         }
     }
-    if down.len() == 1 {
-        Some(down[0].clone())
+
+    let result = if down.len() == 1 {
+        down[0].clone()
     } else if down.is_empty() {
-        Some(Type::Empty)
+        Type::Empty
     } else {
-        Some(Type::union_from(down.into_iter().cloned()))
+        down.iter().copied().cloned().collect()
+    };
+    if down.iter().any(|d| d.contains(t)) {
+        let v = Type::new_variable_num();
+        Some(Type::RecursiveAlias {
+            alias: v,
+            body: Box::new(result.replace_num(t, &Type::Variable(v))),
+        })
+    } else {
+        Some(result)
     }
 }
 
@@ -330,31 +352,43 @@ fn mk_covariant_candidates(t: &IncompleteType) -> HashSet<usize> {
     rst
 }
 
-fn covariant_type_variables(t: &Type) -> Vec<usize> {
+fn covariant_type_variables(t: &Type) -> HashSet<usize> {
     match t {
-        Type::Fn(a, r) => [
+        Type::Fn(a, r) => marge_hashset(
             covariant_type_variables(r),
             contravariant_type_variables(a),
-        ]
-        .concat(),
-        Type::Normal(_, cs) => {
-            cs.iter().map(|c| covariant_type_variables(c)).concat()
-        }
+        ),
+        Type::Normal(_, cs) => cs
+            .iter()
+            .flat_map(|c| covariant_type_variables(c))
+            .collect(),
         Type::Union(cs) => {
             cs.iter().map(|c| covariant_type_variables(c)).concat()
         }
-        Type::Variable(n) => vec![*n],
-        Type::Empty => Vec::new(),
+        Type::Variable(n) => [*n].iter().copied().collect(),
+        Type::Empty => HashSet::new(),
+        Type::RecursiveAlias { alias, body } => {
+            let mut vs = covariant_type_variables(body);
+            vs.remove(alias);
+            vs
+        }
     }
 }
 
-fn contravariant_type_variables(t: &Type) -> Vec<usize> {
+fn marge_hashset<T>(mut a: HashSet<T>, b: HashSet<T>) -> HashSet<T>
+where
+    T: Eq + core::hash::Hash,
+{
+    a.extend(b);
+    a
+}
+
+fn contravariant_type_variables(t: &Type) -> HashSet<usize> {
     match t {
-        Type::Fn(a, r) => [
+        Type::Fn(a, r) => marge_hashset(
             covariant_type_variables(a),
             contravariant_type_variables(r),
-        ]
-        .concat(),
+        ),
         Type::Normal(_, cs) => cs
             .iter()
             .map(|c| contravariant_type_variables(c))
@@ -363,7 +397,12 @@ fn contravariant_type_variables(t: &Type) -> Vec<usize> {
             .iter()
             .map(|c| contravariant_type_variables(c))
             .concat(),
-        Type::Variable(_) | Type::Empty => Vec::new(),
+        Type::Variable(_) | Type::Empty => HashSet::new(),
+        Type::RecursiveAlias { alias, body } => {
+            let mut vs = contravariant_type_variables(body);
+            vs.remove(alias);
+            vs
+        }
     }
 }
 
@@ -490,6 +529,9 @@ impl Display for Type {
             ),
             Variable(n) => write!(f, "t{}", n),
             Empty => write!(f, "∅"),
+            RecursiveAlias { alias, body } => {
+                write!(f, "rec[t{}: {}]", alias, *body)
+            }
         }
     }
 }

@@ -19,6 +19,7 @@ pub enum Type {
     Union(Union),
     Variable(usize),
     Empty,
+    RecursiveAlias { alias: usize, body: Box<Type> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]

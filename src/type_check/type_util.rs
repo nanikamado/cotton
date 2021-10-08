@@ -1,7 +1,7 @@
 use crate::ast1::{IncompleteType, Requirements, Type};
 use itertools::Itertools;
 use std::collections::HashSet;
-use Type::{Empty, Fn, Normal, Union, Variable};
+use Type::{Empty, Fn, Normal, RecursiveAlias, Union, Variable};
 
 impl Type {
     pub fn all_type_variables(&self) -> HashSet<usize> {
@@ -21,6 +21,11 @@ impl Type {
                 .collect(),
             Variable(n) => [*n].iter().copied().collect(),
             Empty => HashSet::new(),
+            RecursiveAlias { alias, body } => {
+                let mut vs = body.all_type_variables();
+                vs.remove(alias);
+                vs
+            }
         }
     }
 
@@ -52,6 +57,10 @@ impl Type {
                 }
             }
             Empty => Empty,
+            RecursiveAlias { alias, body } => RecursiveAlias {
+                alias,
+                body: Box::new(body.replace_num(from, to)),
+            },
         }
     }
 
@@ -73,6 +82,10 @@ impl Type {
             ),
             Variable(n) => Variable(n),
             Empty => Empty,
+            RecursiveAlias { alias, body } => RecursiveAlias {
+                alias,
+                body: Box::new(body.replace_type(from, to)),
+            },
         }
     }
 
@@ -106,6 +119,9 @@ impl Type {
             }
             Variable(n) => *n == variable_num,
             Empty => false,
+            RecursiveAlias { alias, body } => {
+                body.contains(variable_num)
+            }
         }
     }
 }

@@ -2,13 +2,16 @@ use crate::ast1::Type;
 use std::cell::Cell;
 
 impl Type {
-    pub fn new_variable() -> Type {
-        let c = VARIABLE_COUNT.with(|c| {
+    pub fn new_variable() -> Self {
+        Self::Variable(Self::new_variable_num())
+    }
+
+    pub fn new_variable_num() -> usize {
+        VARIABLE_COUNT.with(|c| {
             let t = c.get();
             c.set(t + 1);
             t
-        });
-        Type::Variable(c)
+        })
     }
 }
 
