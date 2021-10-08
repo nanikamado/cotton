@@ -71,7 +71,7 @@ fn _simplify_type(
         .requirements
         .subtype_relation
         .into_iter()
-        .map(|(a, b)| deconstruct_subtype_rel(a, b))
+        .map(|(a, b)| simplify_subtype_rel(a, b))
         .collect::<Option<Vec<_>>>()?
         .into_iter()
         .flatten()
@@ -167,7 +167,7 @@ fn _simplify_type(
     Some((t, updated))
 }
 
-fn deconstruct_subtype_rel(
+fn simplify_subtype_rel(
     sub: Type,
     sup: Type,
 ) -> Option<Vec<(Type, Type)>> {
@@ -175,14 +175,14 @@ fn deconstruct_subtype_rel(
     match (sub, sup) {
         (Union(cs), b) => Some(
             cs.into_iter()
-                .map(|c| deconstruct_subtype_rel(c, b.clone()))
+                .map(|c| simplify_subtype_rel(c, b.clone()))
                 .collect::<Option<Vec<_>>>()?
                 .concat(),
         ),
         (Fn(a1, r1), Fn(a2, r2)) => Some(
             [
-                deconstruct_subtype_rel(*r1, *r2)?,
-                deconstruct_subtype_rel(*a2, *a1)?,
+                simplify_subtype_rel(*r1, *r2)?,
+                simplify_subtype_rel(*a2, *a1)?,
             ]
             .concat(),
         ),
@@ -192,7 +192,7 @@ fn deconstruct_subtype_rel(
                 Some(
                     cs1.into_iter()
                         .zip(cs2)
-                        .map(|(a, b)| deconstruct_subtype_rel(a, b))
+                        .map(|(a, b)| simplify_subtype_rel(a, b))
                         .collect::<Option<Vec<_>>>()?
                         .concat(),
                 )
@@ -253,9 +253,7 @@ fn possible_weakest(
             return None;
         }
     }
-    if up.iter().any(|u| u.contains(t)) {
-        None
-    } else if up.len() == 1 {
+    if up.len() == 1 {
         let up = up.into_iter().next().unwrap().clone();
         Some(if up.contains(t) {
             let v = Type::new_variable_num();
@@ -432,7 +430,7 @@ impl IncompleteType {
                     .map(|(a, b)| {
                         let a = a.replace_num(from, to);
                         let b = b.replace_num(from, to);
-                        deconstruct_subtype_rel(a, b)
+                        simplify_subtype_rel(a, b)
                     })
                     .collect::<Option<Vec<_>>>()?
                     .into_iter()
@@ -530,7 +528,7 @@ impl Display for Type {
             Variable(n) => write!(f, "t{}", n),
             Empty => write!(f, "∅"),
             RecursiveAlias { alias, body } => {
-                write!(f, "rec[t{}: {}]", alias, *body)
+                write!(f, "rec[t{} = {}]", alias, *body)
             }
         }
     }
