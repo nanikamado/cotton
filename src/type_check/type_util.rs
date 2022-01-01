@@ -138,7 +138,7 @@ impl IncompleteType {
         } = self;
         variable_requirements
             .iter()
-            .flat_map(|(_, t)| t.all_type_variables())
+            .flat_map(|(_, t, _)| t.all_type_variables())
             .chain(subtype_relation.iter().flat_map(|(a, b)| {
                 let mut a = a.all_type_variables();
                 a.extend(b.all_type_variables());
@@ -170,7 +170,9 @@ impl IncompleteType {
             requirements: Requirements {
                 variable_requirements: variable_requirements
                     .into_iter()
-                    .map(|(name, t)| (name, t.replace_num(from, to)))
+                    .map(|(name, t, id)| {
+                        (name, t.replace_num(from, to), id)
+                    })
                     .collect(),
                 subtype_relation: subtype_relationship
                     .into_iter()

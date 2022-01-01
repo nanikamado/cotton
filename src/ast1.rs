@@ -5,6 +5,7 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
     iter::FromIterator,
 };
+use self::ident_id::{new_ident_id, IdentId};
 
 #[derive(Debug, PartialEq)]
 pub struct Ast {
@@ -75,7 +76,7 @@ pub struct IncompleteType {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Requirements {
-    pub variable_requirements: Vec<(String, Type)>,
+    pub variable_requirements: Vec<(String, Type, IdentId)>,
     pub subtype_relation: BTreeSet<(Type, Type)>,
 }
 
@@ -118,10 +119,40 @@ pub enum Expr {
     Lambda(Vec<FnArm>),
     Number(String),
     StrLiteral(String),
-    Identifier(String),
+    Identifier(String, IdentId),
     Declaration(Box<Declaration>),
     Call(Box<Expr>, Box<Expr>),
     Unit,
+}
+
+pub mod ident_id {
+    use std::{cell::Cell, fmt::Display};
+
+    #[derive(
+        Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord,
+    )]
+    pub struct IdentId(u32);
+
+    pub fn new_ident_id() -> IdentId {
+        IDENT_COUNT.with(|c| {
+            let t = c.get();
+            c.set(t + 1);
+            IdentId(t)
+        })
+    }
+
+    thread_local! {
+        static IDENT_COUNT: Cell<u32> = Cell::new(0);
+    }
+
+    impl Display for IdentId {
+        fn fmt(
+            &self,
+            f: &mut std::fmt::Formatter<'_>,
+        ) -> std::fmt::Result {
+            self.0.fmt(f)
+        }
+    }
 }
 
 impl From<ast0::Expr> for Expr {
@@ -133,7 +164,9 @@ impl From<ast0::Expr> for Expr {
             }
             ast0::Expr::Number(a) => Number(a),
             ast0::Expr::StrLiteral(a) => StrLiteral(a),
-            ast0::Expr::Identifier(a) => Identifier(a),
+            ast0::Expr::Identifier(a) => {
+                Identifier(a, new_ident_id())
+            }
             ast0::Expr::Declaration(a) => {
                 Declaration(Box::new((*a).into()))
             }
@@ -309,7 +342,7 @@ fn value_op_apply_left(
             } else {
                 Expr::Call(
                     Expr::Call(
-                        Expr::Identifier(op).into(),
+                        Expr::Identifier(op, new_ident_id()).into(),
                         head.into(),
                     )
                     .into(),

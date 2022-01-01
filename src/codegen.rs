@@ -28,7 +28,7 @@ pub fn compile(ast: Ast) -> String {
             .map(data_declaration)
             .join(""),
         ast.declarations.iter().map(declaration).join(""),
-        "main($unicode_28_29);}",
+        "main$0($unicode_28_29);}",
     )
 }
 
@@ -53,11 +53,13 @@ fn declaration(d: &Declaration) -> String {
 
 static PRIMITIVES: Lazy<HashMap<&str, &str>> = Lazy::new(|| {
     [
-        ("+", "$plus"),
-        ("-", "$minus"),
-        ("%", "$mod"),
-        ("<", "$lt"),
-        ("!=", "$neq"),
+        ("+$0", "$plus"),
+        ("-$0", "$minus"),
+        ("%$0", "$mod"),
+        ("<$0", "$lt"),
+        ("!=$0", "$neq"),
+        ("println$0", "println"),
+        ("num_to_string$0", "num_to_string"),
     ]
     .iter()
     .copied()
@@ -75,7 +77,7 @@ fn expr(e: &Expr, name_count: u32) -> String {
         ),
         Expr::Number(a) => a.clone(),
         Expr::StrLiteral(a) => a.clone(),
-        Expr::Identifier(a) => match PRIMITIVES.get(&a[..]) {
+        Expr::Identifier(a, _) => match PRIMITIVES.get(&a[..]) {
             Some(s) => s.to_string(),
             None => convert_name(a),
         },

@@ -405,7 +405,7 @@ fn mk_contravariant_candidates(
         contravariant_type_variables(&t.constructor)
             .into_iter()
             .collect();
-    for (_, v) in &t.requirements.variable_requirements {
+    for (_, v, _) in &t.requirements.variable_requirements {
         rst.extend(covariant_type_variables(v));
     }
     rst
@@ -416,7 +416,7 @@ fn mk_covariant_candidates(t: &IncompleteType) -> FxHashSet<usize> {
         covariant_type_variables(&t.constructor)
             .into_iter()
             .collect();
-    for (_, v) in &t.requirements.variable_requirements {
+    for (_, v, _) in &t.requirements.variable_requirements {
         rst.extend(contravariant_type_variables(v));
     }
     rst
@@ -498,7 +498,9 @@ impl IncompleteType {
             requirements: Requirements {
                 variable_requirements: variable_requirements
                     .into_iter()
-                    .map(|(name, t)| (name, t.replace_num(from, to)))
+                    .map(|(name, t, id)| {
+                        (name, t.replace_num(from, to), id)
+                    })
                     .collect(),
                 subtype_relation: subtype_relationship
                     .into_iter()
@@ -617,7 +619,7 @@ impl Display for Requirements {
         for (a, b) in &self.subtype_relation {
             writeln!(f, "    {} < {},", a, b)?;
         }
-        for (a, b) in &self.variable_requirements {
+        for (a, b, _) in &self.variable_requirements {
             writeln!(f, "    ?{} : {},", a, b)?;
         }
         Ok(())

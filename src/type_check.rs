@@ -4,15 +4,16 @@ mod type_util;
 
 use crate::ast0::{DataDeclaration, Pattern};
 use crate::ast1::{
-    Ast, Expr, FnArm, IncompleteType, Requirements, Type,
+    ident_id::IdentId, Ast, Expr, FnArm, IncompleteType,
+    Requirements, Type,
 };
 use fxhash::FxHashMap;
 use intrinsics::INTRINSIC_VARIABLES;
 use itertools::Itertools;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::vec;
 
-pub fn type_check(ast: &Ast) {
+pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, usize> {
     let mut toplevels: FxHashMap<String, Vec<Toplevel>> =
         FxHashMap::default();
     for (name, ts) in &*INTRINSIC_VARIABLES {
@@ -21,6 +22,7 @@ pub fn type_check(ast: &Ast) {
             .map(|t| Toplevel {
                 incomplete: t.clone().into(),
                 face: None,
+                resolved_idents: Default::default(),
             })
             .collect();
     }
@@ -29,6 +31,7 @@ pub fn type_check(ast: &Ast) {
         toplevels.entry(d.name.clone()).or_default().push(Toplevel {
             incomplete: d_type.into(),
             face: None,
+            resolved_idents: Default::default(),
         });
     }
     for d in &ast.declarations {
@@ -54,33 +57,40 @@ pub fn type_check(ast: &Ast) {
                 incomplete: simplify::simplify_type(t.clone())
                     .unwrap(),
                 face,
+                resolved_idents: Default::default(),
             },
         );
     }
     for (name, top) in &toplevels {
         eprintln!("{} : ", name);
         for t in top {
+            eprintln!("resolved: {:?}", t.resolved_idents);
             if let Some(f) = &t.face {
                 eprintln!("face: {}", f);
                 eprintln!("incomplete: {}", t.incomplete);
             } else {
-                eprintln!("{}", t.incomplete);
+                eprintln!("not face: {}", t.incomplete);
             }
         }
     }
     let toplevels = resolve_names(toplevels);
     eprintln!("------------------------------");
+    let mut resolved_idents = FxHashMap::default();
     for (name, top) in toplevels {
         eprintln!("{} : ", name);
         for t in top {
             eprintln!("{}", t.incomplete);
+            eprintln!("resolved: {:?}", t.resolved_idents);
+            resolved_idents.extend(t.resolved_idents)
         }
     }
+    resolved_idents
 }
 
 struct Toplevel {
     incomplete: IncompleteType,
     face: Option<IncompleteType>,
+    resolved_idents: HashMap<IdentId, usize>,
 }
 
 fn resolve_names(
@@ -88,12 +98,17 @@ fn resolve_names(
 ) -> FxHashMap<String, Vec<Toplevel>> {
     loop {
         // (name, num, variable req num, type)
-        let mut resolved: Option<(&String, usize, IncompleteType)> =
-            None;
+        let mut resolved: Option<(
+            &String,
+            usize,
+            IncompleteType,
+            IdentId,
+            usize,
+        )> = None;
         'outer: for (name, types) in &toplevels {
             for (t_index, t) in types.iter().enumerate() {
                 if !t.incomplete.resolved() {
-                    for (req_i, (req_name, req_t)) in t
+                    for (req_i, (req_name, req_t, _)) in t
                         .incomplete
                         .requirements
                         .variable_requirements
@@ -130,7 +145,7 @@ fn resolve_names(
                                 let cand_resolved = cand_t.resolved();
                                 let mut incomplete =
                                     t.incomplete.clone();
-                                incomplete
+                                let removed_req = incomplete
                                     .requirements
                                     .variable_requirements
                                     .remove(req_i);
@@ -164,6 +179,8 @@ fn resolve_names(
                                             t,
                                             cand_resolved
                                                 || is_recursive,
+                                            removed_req.2,
+                                            i,
                                         )
                                     })
                             })
@@ -173,6 +190,8 @@ fn resolve_names(
                                 name,
                                 t_index,
                                 successes[0].0.clone(),
+                                successes[0].2.clone(),
+                                successes[0].3.clone(),
                             ));
                             break 'outer;
                         } else if successes.is_empty() {
@@ -188,9 +207,12 @@ fn resolve_names(
                 }
             }
         }
-        if let Some((name, v_index, r)) = resolved {
+        if let Some((name, v_index, r, ident_id, n)) = resolved {
             let name = name.clone();
-            toplevels.get_mut(&name).unwrap()[v_index].incomplete = r;
+            let topl =
+                &mut toplevels.get_mut(&name).unwrap()[v_index];
+            topl.incomplete = r;
+            topl.resolved_idents.insert(ident_id, n);
         } else {
             break;
         }
@@ -241,12 +263,16 @@ fn min_type_incomplite(expr: &Expr) -> IncompleteType {
         Expr::StrLiteral(_) => {
             Type::Normal("String".to_string(), Vec::new()).into()
         }
-        Expr::Identifier(n) => {
+        Expr::Identifier(n, id) => {
             let t = Type::new_variable();
             IncompleteType {
                 constructor: t.clone(),
                 requirements: Requirements {
-                    variable_requirements: vec![(n.to_string(), t)],
+                    variable_requirements: vec![(
+                        n.to_string(),
+                        t,
+                        *id,
+                    )],
                     subtype_relation: BTreeSet::new(),
                 },
             }
