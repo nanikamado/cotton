@@ -3,26 +3,29 @@ use crate::ast1::{Ast, Declaration, Expr, FnArm};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
+use stripmargin::StripMargin;
 use unic_ucd_category::GeneralCategory;
 
 pub fn compile(ast: Ast) -> String {
     format!(
         "{}{}{}{}",
-        "{
-        let to_string = a => String(a);
-        let num_to_string = a => String(a);
-        let type_name = a => a.name;
-        let print = a => process.stdout.write(a);
-        let println = a => console.log(a);
-        let $plus = a => b => a + b;
-        let $minus = a => b => a - b;
-        let $mod = a => b => a % b;
-        let $neq = a => b => $$bool(a !== b);
-        let $lt = a => b => $$bool(a < b);
-        let $$bool = a => a ? True : False;
-        let True = {name: 'True'};
-        let False = {name: 'False'};
-        let $unicode_28_29 = {name: '$unicode_28_29'};",
+        r#"{
+        |let to_string = a => String(a);
+        |let num_to_string = a => String(a);
+        |let type_name = a => a.name;
+        |let print = a => process.stdout.write(a);
+        |let println = a => console.log(a);
+        |let $plus = a => b => a + b;
+        |let $minus = a => b => a - b;
+        |let $mod = a => b => a % b;
+        |let $neq = a => b => $$bool(a !== b);
+        |let $lt = a => b => $$bool(a < b);
+        |let $$bool = a => a ? True : False;
+        |let True = {name: 'True'};
+        |let False = {name: 'False'};
+        |let $unicode_28_29 = {name: '$unicode_28_29'};
+        |"#
+        .strip_margin(),
         ast.data_declarations
             .into_iter()
             .map(data_declaration)
