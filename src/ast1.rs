@@ -1,3 +1,4 @@
+use self::decl_id::{new_decl_id, DeclId};
 use self::ident_id::{new_ident_id, IdentId};
 use crate::ast0;
 use itertools::Itertools;
@@ -10,7 +11,15 @@ use std::{
 #[derive(Debug, PartialEq)]
 pub struct Ast {
     pub declarations: Vec<Declaration>,
-    pub data_declarations: Vec<ast0::DataDeclaration>,
+    pub data_declarations: Vec<DataDeclaration>,
+    pub entry_point: Option<DeclId>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct DataDeclaration {
+    pub name: String,
+    pub field_len: usize,
+    pub decl_id: DeclId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -161,6 +170,7 @@ pub struct Declaration {
     pub identifier: String,
     pub type_annotation: Option<IncompleteType>,
     pub value: Expr,
+    pub decl_id: DeclId,
 }
 
 impl From<ast0::Declaration> for Declaration {
@@ -169,6 +179,7 @@ impl From<ast0::Declaration> for Declaration {
             identifier: d.identifier,
             type_annotation: d.type_annotation.map(|t| t.into()),
             value: d.value.into(),
+            decl_id: new_decl_id(),
         }
     }
 }
@@ -195,7 +206,11 @@ pub enum Expr {
     Lambda(Vec<FnArm>),
     Number(String),
     StrLiteral(String),
-    Identifier { info: String, ident_id: IdentId },
+    Identifier {
+        info: String,
+        ident_id: IdentId,
+        decl_id: Option<DeclId>,
+    },
     Declaration(Box<Declaration>),
     Call(Box<Expr>, Box<Expr>),
     Unit,
@@ -231,6 +246,36 @@ pub mod ident_id {
     }
 }
 
+pub mod decl_id {
+    use std::{cell::Cell, fmt::Display};
+
+    #[derive(
+        Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord,
+    )]
+    pub struct DeclId(u32);
+
+    pub fn new_decl_id() -> DeclId {
+        DECL_COUNT.with(|c| {
+            let t = c.get();
+            c.set(t + 1);
+            DeclId(t)
+        })
+    }
+
+    thread_local! {
+        static DECL_COUNT: Cell<u32> = Cell::new(0);
+    }
+
+    impl Display for DeclId {
+        fn fmt(
+            &self,
+            f: &mut std::fmt::Formatter<'_>,
+        ) -> std::fmt::Result {
+            self.0.fmt(f)
+        }
+    }
+}
+
 impl From<ast0::Expr> for Expr {
     fn from(ast_expr: ast0::Expr) -> Self {
         use Expr::*;
@@ -243,6 +288,7 @@ impl From<ast0::Expr> for Expr {
             ast0::Expr::Identifier(a) => Identifier {
                 info: a,
                 ident_id: new_ident_id(),
+                decl_id: None,
             },
             ast0::Expr::Declaration(a) => {
                 Declaration(Box::new((*a).into()))
@@ -255,24 +301,34 @@ impl From<ast0::Expr> for Expr {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FnArm {
-    pub pattern: Vec<ast0::Pattern>,
+    pub pattern: Vec<Pattern>,
     pub pattern_type: Vec<Option<Type>>,
     pub exprs: Vec<Expr>,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Pattern {
+    Number(String),
+    StrLiteral(String),
+    Constructor(String, Vec<Pattern>),
+    Binder(String, DeclId),
+    Underscore,
+}
+
 fn infix_constructor_sequence_to_pattern(
     s: ast0::InfixConstructorSequence,
-) -> ast0::Pattern {
+) -> Pattern {
     let op_list: BTreeSet<_> =
         s.operators.iter().map(|s| OP_PRECEDENCE[&s[..]]).collect();
     let mut operators = s.operators;
-    let mut operands: Vec<ast0::Pattern> = s.operands;
+    let mut operands: Vec<Pattern> =
+        s.operands.into_iter().map(Pattern::from).collect();
     for a in op_list.into_iter().rev() {
         let mut operand_head = 0;
         for i in 0..operators.len() {
             let op = operators[i].clone();
             if a == OP_PRECEDENCE[&op[..]] {
-                operands[operand_head] = ast0::Pattern::Constructor(
+                operands[operand_head] = Pattern::Constructor(
                     op,
                     vec![
                         operands[operand_head].clone(),
@@ -287,6 +343,25 @@ fn infix_constructor_sequence_to_pattern(
         operators.retain(|o| OP_PRECEDENCE[&o[..]] != a);
     }
     operands[0].clone()
+}
+
+impl From<ast0::Pattern> for Pattern {
+    fn from(p: ast0::Pattern) -> Self {
+        match p {
+            ast0::Pattern::Number(n) => Pattern::Number(n),
+            ast0::Pattern::StrLiteral(s) => Pattern::StrLiteral(s),
+            ast0::Pattern::Constructor(name, cs) => {
+                Pattern::Constructor(
+                    name,
+                    cs.into_iter().map(Pattern::from).collect(),
+                )
+            }
+            ast0::Pattern::Binder(name) => {
+                Pattern::Binder(name, new_decl_id())
+            }
+            ast0::Pattern::Underscore => Pattern::Underscore,
+        }
+    }
 }
 
 impl From<ast0::FnArm> for FnArm {
@@ -360,12 +435,17 @@ impl From<ast0::Ast> for Ast {
             .into_iter()
             .map(|d| match d {
                 ast0::Dec::Variable(a) => Ok(declaration(a)),
-                ast0::Dec::Data(a) => Err(a),
+                ast0::Dec::Data(a) => Err(DataDeclaration {
+                    name: a.name,
+                    field_len: a.field_len,
+                    decl_id: new_decl_id(),
+                }),
             })
             .partition_result();
         Ast {
             declarations: vs,
             data_declarations: ds,
+            entry_point: None,
         }
     }
 }
@@ -375,6 +455,7 @@ fn declaration(d: ast0::Declaration) -> Declaration {
         identifier: d.identifier,
         type_annotation: d.type_annotation.map(|t| t.into()),
         value: d.value.into(),
+        decl_id: new_decl_id(),
     }
 }
 
@@ -422,6 +503,7 @@ fn value_op_apply_left(
                         Expr::Identifier {
                             info: op,
                             ident_id: new_ident_id(),
+                            decl_id: None,
                         }
                         .into(),
                         head.into(),

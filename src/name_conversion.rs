@@ -1,61 +1,51 @@
-use crate::{
-    ast0::DataDeclaration,
-    ast1::{ident_id::IdentId, Ast, Declaration, Expr, FnArm},
+use crate::ast1::{
+    decl_id::DeclId, ident_id::IdentId, Ast,
+    Declaration, Expr, FnArm,
 };
 use fxhash::FxHashMap;
-use hashbag::HashBag;
 
-pub fn run(mut ast: Ast, idents: &FxHashMap<IdentId, usize>) -> Ast {
-    let mut toplevel_name_count = HashBag::<String>::new();
+pub fn run(mut ast: Ast, idents: &FxHashMap<IdentId, DeclId>) -> Ast {
+    ast.entry_point = ast
+        .declarations
+        .iter()
+        .find(|d| d.identifier == "main")
+        .map(|d| d.decl_id);
     ast.declarations = ast
         .declarations
         .into_iter()
-        .map(|d| declaration(d, idents, &mut toplevel_name_count))
-        .collect();
-    ast.data_declarations = ast
-        .data_declarations
-        .into_iter()
-        .map(|d| data_declaration(d, &mut toplevel_name_count))
+        .map(|d| declaration(d, idents))
         .collect();
     ast
 }
 
 fn declaration(
     mut d: Declaration,
-    idents: &FxHashMap<IdentId, usize>,
-    toplevel_name_count: &mut HashBag<String>,
+    idents: &FxHashMap<IdentId, DeclId>,
 ) -> Declaration {
-    let count = toplevel_name_count.insert(d.identifier.clone());
-    d.identifier += &format!("${}", count);
-    d.value = expr(d.value, idents, toplevel_name_count);
+    d.value = expr(d.value, idents);
     d
 }
 
-fn expr(
-    e: Expr,
-    idents: &FxHashMap<IdentId, usize>,
-    toplevel_name_count: &mut HashBag<String>,
-) -> Expr {
+fn expr(e: Expr, idents: &FxHashMap<IdentId, DeclId>) -> Expr {
     match e {
         Expr::Lambda(arms) => Expr::Lambda(
-            arms.into_iter()
-                .map(|a| fn_arm(a, idents, toplevel_name_count))
-                .collect(),
+            arms.into_iter().map(|a| fn_arm(a, idents)).collect(),
         ),
-        Expr::Identifier { info, ident_id } => Expr::Identifier {
-            info: if let Some(n) = idents.get(&ident_id) {
-                format!("{}${}", info, n)
-            } else {
-                info
-            },
+        Expr::Identifier {
+            info,
             ident_id,
+            decl_id: _,
+        } => Expr::Identifier {
+            info,
+            ident_id,
+            decl_id: idents.get(&ident_id).copied(),
         },
-        Expr::Declaration(d) => Expr::Declaration(Box::new(
-            declaration(*d, idents, toplevel_name_count),
-        )),
+        Expr::Declaration(d) => {
+            Expr::Declaration(Box::new(declaration(*d, idents)))
+        }
         Expr::Call(a, b) => Expr::Call(
-            Box::new(expr(*a, idents, toplevel_name_count)),
-            Box::new(expr(*b, idents, toplevel_name_count)),
+            Box::new(expr(*a, idents)),
+            Box::new(expr(*b, idents)),
         ),
         other => other,
     }
@@ -63,22 +53,9 @@ fn expr(
 
 fn fn_arm(
     mut arm: FnArm,
-    idents: &FxHashMap<IdentId, usize>,
-    toplevel_name_count: &mut HashBag<String>,
+    idents: &FxHashMap<IdentId, DeclId>,
 ) -> FnArm {
-    arm.exprs = arm
-        .exprs
-        .into_iter()
-        .map(|e| expr(e, idents, toplevel_name_count))
-        .collect();
+    arm.exprs =
+        arm.exprs.into_iter().map(|e| expr(e, idents)).collect();
     arm
-}
-
-fn data_declaration(
-    mut d: DataDeclaration,
-    toplevel_name_count: &mut HashBag<String>,
-) -> DataDeclaration {
-    let count = toplevel_name_count.insert(d.name.clone());
-    d.name += &format!("${}", count);
-    d
 }

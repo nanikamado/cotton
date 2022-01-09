@@ -15,8 +15,9 @@ pub fn run(source: &str) {
     if remaining.is_empty() {
         let ast: ast1::Ast = ast.into();
         let resolved_idents = type_check(&ast);
+        // dbg!(&resolved_idents);
         let ast = name_conversion::run(ast, &resolved_idents);
-        // dbg!(&ast);
+        dbg!(&ast);
         println!("{}", compile(ast));
     } else {
         eprintln!(

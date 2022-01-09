@@ -1,30 +1,33 @@
-mod intrinsics;
 mod simplify;
 mod type_util;
+pub(crate) mod intrinsics;
 
 use self::type_util::construct_type;
-use crate::ast0::{DataDeclaration, Pattern};
 use crate::ast1;
+use crate::ast1::decl_id::DeclId;
 use crate::ast1::{
-    ident_id::IdentId, Ast, Expr, FnArm, IncompleteType,
-    Requirements, TypeUnit,
+    ident_id::IdentId, Ast, DataDeclaration, Expr, FnArm,
+    IncompleteType, Pattern, Requirements, TypeUnit,
 };
 use fxhash::FxHashMap;
 use intrinsics::INTRINSIC_VARIABLES;
-use itertools::Itertools;
+use itertools::multiunzip;
 use std::collections::{BTreeSet, HashMap};
 use std::vec;
 
-pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, usize> {
+type Resolved = Vec<(IdentId, DeclId)>;
+
+pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, DeclId> {
     let mut toplevels: FxHashMap<String, Vec<Toplevel>> =
         FxHashMap::default();
     for (name, ts) in &*INTRINSIC_VARIABLES {
         *toplevels.entry(name.clone()).or_default() = ts
             .iter()
-            .map(|t| Toplevel {
+            .map(|(t, decl_id)| Toplevel {
                 incomplete: t.clone().into(),
                 face: None,
                 resolved_idents: Default::default(),
+                decl_id: *decl_id,
             })
             .collect();
     }
@@ -34,10 +37,13 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, usize> {
             incomplete: d_type.into(),
             face: None,
             resolved_idents: Default::default(),
+            decl_id: d.decl_id,
         });
     }
+    let mut resolved_idents = FxHashMap::default();
     for d in &ast.declarations {
-        let mut t = min_type(&d.value).unwrap();
+        let (mut t, resolved) = min_type(&d.value).unwrap();
+        resolved_idents.extend(resolved);
         let face = if let Some(annotation) = &d.type_annotation {
             let annotation = annotation.clone().change_variable_num();
             t.requirements.subtype_relation.insert((
@@ -60,6 +66,7 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, usize> {
                     .unwrap(),
                 face,
                 resolved_idents: Default::default(),
+                decl_id: d.decl_id,
             },
         );
     }
@@ -77,7 +84,6 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, usize> {
     }
     let toplevels = resolve_names(toplevels);
     eprintln!("------------------------------");
-    let mut resolved_idents = FxHashMap::default();
     for (name, top) in toplevels {
         eprintln!("{} : ", name);
         for t in top {
@@ -92,7 +98,8 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, usize> {
 struct Toplevel {
     incomplete: IncompleteType,
     face: Option<IncompleteType>,
-    resolved_idents: HashMap<IdentId, usize>,
+    resolved_idents: HashMap<IdentId, DeclId>,
+    decl_id: DeclId,
 }
 
 fn resolve_names(
@@ -106,6 +113,7 @@ fn resolve_names(
             IncompleteType,
             IdentId,
             usize,
+            DeclId,
         )> = None;
         'outer: for (name, types) in &toplevels {
             for (t_index, t) in types.iter().enumerate() {
@@ -183,6 +191,7 @@ fn resolve_names(
                                                 || is_recursive,
                                             removed_req.2,
                                             i,
+                                            cand.decl_id,
                                         )
                                     })
                             })
@@ -194,6 +203,7 @@ fn resolve_names(
                                 successes[0].0.clone(),
                                 successes[0].2.clone(),
                                 successes[0].3.clone(),
+                                successes[0].4,
                             ));
                             break 'outer;
                         } else if successes.is_empty() {
@@ -209,12 +219,14 @@ fn resolve_names(
                 }
             }
         }
-        if let Some((name, v_index, r, ident_id, n)) = resolved {
+        if let Some((name, v_index, r, ident_id, _, decl_id)) =
+            resolved
+        {
             let name = name.clone();
             let topl =
                 &mut toplevels.get_mut(&name).unwrap()[v_index];
             topl.incomplete = r;
-            topl.resolved_idents.insert(ident_id, n);
+            topl.resolved_idents.insert(ident_id, decl_id);
         } else {
             break;
         }
@@ -235,15 +247,22 @@ fn constructor_type(d: DataDeclaration) -> TypeUnit {
     t
 }
 
-fn min_type(expr: &Expr) -> Result<IncompleteType, &'static str> {
+fn min_type(
+    expr: &Expr,
+) -> Result<(IncompleteType, Resolved), &'static str> {
     Ok(min_type_incomplite(expr))
 }
 
-fn min_type_incomplite(expr: &Expr) -> IncompleteType {
+fn min_type_incomplite(expr: &Expr) -> (IncompleteType, Resolved) {
     match expr {
         Expr::Lambda(arms) => {
-            let (arm_types, requirements): (Vec<_>, Vec<_>) =
-                arms.iter().map(|a| arm_min_type(a)).unzip();
+            let (arm_types, requirements, resolved_idents): (
+                Vec<_>,
+                Vec<_>,
+                Vec<_>,
+            ) = multiunzip(arms.iter().map(|a| arm_min_type(a)));
+            let resolved_idents =
+                resolved_idents.into_iter().flatten().collect();
             let (args, rtns): (Vec<ast1::Type>, Vec<ast1::Type>) =
                 arm_types.into_iter().unzip();
             let constructor = if args.len() == 1 {
@@ -257,31 +276,43 @@ fn min_type_incomplite(expr: &Expr) -> IncompleteType {
                     rtns.into_iter().flatten().collect(),
                 )
             };
-            IncompleteType {
-                constructor: constructor.into(),
-                requirements: marge_requirements(requirements),
-            }
-        }
-        Expr::Number(_) => construct_type("Num").into(),
-        Expr::StrLiteral(_) => construct_type("String").into(),
-        Expr::Identifier { info, ident_id } => {
-            let t: ast1::Type = TypeUnit::new_variable().into();
-            IncompleteType {
-                constructor: t.clone(),
-                requirements: Requirements {
-                    variable_requirements: vec![(
-                        info.to_string(),
-                        t,
-                        *ident_id,
-                    )],
-                    subtype_relation: BTreeSet::new(),
+            (
+                IncompleteType {
+                    constructor: constructor.into(),
+                    requirements: marge_requirements(requirements),
                 },
-            }
+                resolved_idents,
+            )
         }
-        Expr::Declaration(_) => construct_type("()").into(),
+        Expr::Number(_) => {
+            (construct_type("Num").into(), Default::default())
+        }
+        Expr::StrLiteral(_) => {
+            (construct_type("String").into(), Default::default())
+        }
+        Expr::Identifier { info, ident_id, .. } => {
+            let t: ast1::Type = TypeUnit::new_variable().into();
+            (
+                IncompleteType {
+                    constructor: t.clone(),
+                    requirements: Requirements {
+                        variable_requirements: vec![(
+                            info.to_string(),
+                            t,
+                            *ident_id,
+                        )],
+                        subtype_relation: BTreeSet::new(),
+                    },
+                },
+                Default::default(),
+            )
+        }
+        Expr::Declaration(_) => {
+            (construct_type("()").into(), Default::default())
+        }
         Expr::Call(f, a) => {
-            let f_t = min_type_incomplite(f);
-            let a_t = min_type_incomplite(a);
+            let (f_t, resolved1) = min_type_incomplite(f);
+            let (a_t, resolved2) = min_type_incomplite(a);
             let b: ast1::Type = TypeUnit::new_variable().into();
             let c: ast1::Type = TypeUnit::new_variable().into();
             // c -> b
@@ -304,26 +335,33 @@ fn min_type_incomplite(expr: &Expr) -> IncompleteType {
                     .cloned()
                     .collect(),
             };
-            IncompleteType {
-                constructor: b,
-                requirements: marge_requirements(vec![
-                    f_sub_cb,
-                    a_sub_c,
-                    f_t.requirements,
-                    a_t.requirements,
-                ]),
-            }
+            (
+                IncompleteType {
+                    constructor: b,
+                    requirements: marge_requirements(vec![
+                        f_sub_cb,
+                        a_sub_c,
+                        f_t.requirements,
+                        a_t.requirements,
+                    ]),
+                },
+                [resolved1, resolved2].concat(),
+            )
         }
-        Expr::Unit => construct_type("()").into(),
+        Expr::Unit => {
+            (construct_type("()").into(), Default::default())
+        }
     }
 }
 
-fn multi_expr_min_type(exprs: &[Expr]) -> IncompleteType {
+fn multi_expr_min_type(exprs: &[Expr]) -> (IncompleteType, Resolved) {
     let mut req = Requirements::default();
+    let mut resolved_idents = Vec::default();
     let t = exprs
         .iter()
         .map(|e| {
-            let t = min_type_incomplite(e);
+            let (t, resolved) = min_type_incomplite(e);
+            resolved_idents.extend(resolved);
             req = marge_requirements(vec![
                 req.clone(),
                 t.clone().requirements,
@@ -332,10 +370,13 @@ fn multi_expr_min_type(exprs: &[Expr]) -> IncompleteType {
         })
         .collect::<Vec<_>>();
     let t = t.last().unwrap().clone();
-    IncompleteType {
-        constructor: t.constructor,
-        requirements: req,
-    }
+    (
+        IncompleteType {
+            constructor: t.constructor,
+            requirements: req,
+        },
+        resolved_idents,
+    )
 }
 
 fn marge_requirements(
@@ -352,8 +393,9 @@ fn marge_requirements(
 
 fn arm_min_type(
     arm: &FnArm,
-) -> ((ast1::Type, ast1::Type), Requirements) {
-    let body_type = multi_expr_min_type(&arm.exprs);
+) -> ((ast1::Type, ast1::Type), Requirements, Resolved) {
+    let (body_type, mut resolved_idents) =
+        multi_expr_min_type(&arm.exprs);
     let (types, bindings): (Vec<_>, Vec<_>) =
         arm.pattern.iter().map(|p| pattern_to_type(p)).unzip();
     let mut arm_type = body_type.constructor;
@@ -361,26 +403,23 @@ fn arm_min_type(
         arm_type =
             TypeUnit::Fn(pattern_type.clone().into(), arm_type).into()
     }
-    let bindings: FxHashMap<String, ast1::Type> =
-        bindings.into_iter().flatten().collect();
-    let (variable_requirements, subtype_requirement): (
-        Vec<_>,
-        Vec<_>,
-    ) = body_type
-        .requirements
-        .variable_requirements
+    let bindings: FxHashMap<String, (DeclId, ast1::Type)> = bindings
         .into_iter()
-        .flat_map(|p| {
-            if let Some(a) = bindings.get(&p.0) {
-                vec![
-                    Err((a.clone(), p.1.clone())),
-                    Err((p.1, a.clone())),
-                ]
-            } else {
-                vec![Ok(p)]
-            }
-        })
-        .partition_result();
+        .flatten()
+        .map(|(n, i, t)| (n, (i, t)))
+        .collect();
+    let mut variable_requirements = Vec::new();
+    let mut subtype_requirement = Vec::new();
+    for p in body_type.requirements.variable_requirements.into_iter()
+    {
+        if let Some(a) = bindings.get(&p.0) {
+            subtype_requirement.push((a.1.clone(), p.1.clone()));
+            subtype_requirement.push((p.1, a.1.clone()));
+            resolved_idents.push((p.2, a.0));
+        } else {
+            variable_requirements.push(p);
+        }
+    }
     (
         (types[0].clone(), arm_type),
         Requirements {
@@ -393,12 +432,13 @@ fn arm_min_type(
                 tmp
             },
         },
+        resolved_idents,
     )
 }
 
 fn pattern_to_type(
     p: &Pattern,
-) -> (ast1::Type, Vec<(String, ast1::Type)>) {
+) -> (ast1::Type, Vec<(String, DeclId, ast1::Type)>) {
     match p {
         Pattern::Number(_) => (construct_type("Num"), Vec::new()),
         Pattern::StrLiteral(_) => {
@@ -412,9 +452,9 @@ fn pattern_to_type(
                 bindings.concat(),
             )
         }
-        Pattern::Binder(name) => {
+        Pattern::Binder(name, decl_id) => {
             let t: ast1::Type = TypeUnit::new_variable().into();
-            (t.clone(), vec![(name.to_string(), t)])
+            (t.clone(), vec![(name.to_string(), *decl_id, t)])
         }
         Pattern::Underscore => {
             (TypeUnit::new_variable().into(), Vec::new())
@@ -427,8 +467,8 @@ mod tests {
     use super::Toplevel;
     use crate::{
         ast1::{
-            ident_id::new_ident_id, IncompleteType, Requirements,
-            Type, TypeUnit,
+            decl_id::new_decl_id, ident_id::new_ident_id,
+            IncompleteType, Requirements, Type, TypeUnit,
         },
         parse::infix_type_sequence,
         type_check::resolve_names,
@@ -464,6 +504,7 @@ mod tests {
                     },
                     face: None,
                     resolved_idents: Default::default(),
+                    decl_id: new_decl_id(),
                 }],
             ),
             (
@@ -476,6 +517,7 @@ mod tests {
                         },
                         face: None,
                         resolved_idents: Default::default(),
+                        decl_id: new_decl_id(),
                     }),
                     (Toplevel {
                         incomplete: IncompleteType {
@@ -484,6 +526,7 @@ mod tests {
                         },
                         face: None,
                         resolved_idents: Default::default(),
+                        decl_id: new_decl_id(),
                     }),
                 ],
             ),
@@ -536,6 +579,7 @@ mod tests {
                     },
                     face: None,
                     resolved_idents: Default::default(),
+                    decl_id: new_decl_id(),
                 }],
             ),
             (
@@ -550,6 +594,7 @@ mod tests {
                         },
                         face: None,
                         resolved_idents: Default::default(),
+                        decl_id: new_decl_id(),
                     }),
                     (Toplevel {
                         incomplete: IncompleteType {
@@ -560,6 +605,7 @@ mod tests {
                         },
                         face: None,
                         resolved_idents: Default::default(),
+                        decl_id: new_decl_id(),
                     }),
                 ],
             ),
