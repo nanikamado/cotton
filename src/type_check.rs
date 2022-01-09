@@ -421,3 +421,214 @@ fn pattern_to_type(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Toplevel;
+    use crate::{
+        ast1::{
+            ident_id::new_ident_id, IncompleteType, Requirements,
+            Type, TypeUnit,
+        },
+        parse::infix_type_sequence,
+        type_check::resolve_names,
+    };
+    use fxhash::FxHashMap;
+    use std::collections::BTreeSet;
+    use stripmargin::StripMargin;
+
+    #[test]
+    fn resolve_1() {
+        // FxHashMap<String, Vec<Toplevel>>,
+        let top_levels: FxHashMap<String, Vec<Toplevel>> = vec![
+            (
+                ("main".to_string()),
+                vec![Toplevel {
+                    incomplete: IncompleteType {
+                        constructor: construct_type("()"),
+                        requirements: Requirements {
+                            variable_requirements: vec![
+                                (
+                                    "default".to_string(),
+                                    construct_type("Hoge"),
+                                    new_ident_id(),
+                                ),
+                                (
+                                    "default".to_string(),
+                                    construct_type("Fuga"),
+                                    new_ident_id(),
+                                ),
+                            ],
+                            subtype_relation: BTreeSet::new(),
+                        },
+                    },
+                    face: None,
+                    resolved_idents: Default::default(),
+                }],
+            ),
+            (
+                ("default".to_string()),
+                vec![
+                    (Toplevel {
+                        incomplete: IncompleteType {
+                            constructor: construct_type("Hoge"),
+                            requirements: Default::default(),
+                        },
+                        face: None,
+                        resolved_idents: Default::default(),
+                    }),
+                    (Toplevel {
+                        incomplete: IncompleteType {
+                            constructor: construct_type("Fuga"),
+                            requirements: Default::default(),
+                        },
+                        face: None,
+                        resolved_idents: Default::default(),
+                    }),
+                ],
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let s = debug_toplevels(resolve_names(top_levels));
+        assert_eq!(
+            s,
+            "main : 
+            |resolved: {IdentId(0): 0, IdentId(1): 1}
+            |not face: () forall
+            |--
+            |default : 
+            |resolved: {}
+            |not face: Hoge forall
+            |--
+            |resolved: {}
+            |not face: Fuga forall
+            |--
+            |"
+            .strip_margin()
+        );
+    }
+
+    #[test]
+    fn resolve_2() {
+        // FxHashMap<String, Vec<Toplevel>>,
+        let top_levels: FxHashMap<String, Vec<Toplevel>> = vec![
+            (
+                ("main".to_string()),
+                vec![Toplevel {
+                    incomplete: IncompleteType {
+                        constructor: construct_type("()"),
+                        requirements: Requirements {
+                            variable_requirements: vec![
+                                (
+                                    "greet".to_string(),
+                                    construct_type("Hoge -> String"),
+                                    new_ident_id(),
+                                ),
+                                (
+                                    "greet".to_string(),
+                                    construct_type("Fuga -> String"),
+                                    new_ident_id(),
+                                ),
+                            ],
+                            subtype_relation: BTreeSet::new(),
+                        },
+                    },
+                    face: None,
+                    resolved_idents: Default::default(),
+                }],
+            ),
+            (
+                ("greet".to_string()),
+                vec![
+                    (Toplevel {
+                        incomplete: IncompleteType {
+                            constructor: construct_type(
+                                "Hoge -> String",
+                            ),
+                            requirements: Default::default(),
+                        },
+                        face: None,
+                        resolved_idents: Default::default(),
+                    }),
+                    (Toplevel {
+                        incomplete: IncompleteType {
+                            constructor: construct_type(
+                                "Fuga -> String",
+                            ),
+                            requirements: Default::default(),
+                        },
+                        face: None,
+                        resolved_idents: Default::default(),
+                    }),
+                ],
+            ),
+        ]
+        .into_iter()
+        .collect();
+        let s = debug_toplevels(resolve_names(top_levels));
+        assert_eq!(
+            s,
+            r#"main : 
+            |resolved: {IdentId(0): 0, IdentId(1): 1}
+            |not face: () forall
+            |--
+            |greet : 
+            |resolved: {}
+            |not face: Hoge -> String forall
+            |--
+            |resolved: {}
+            |not face: Fuga -> String forall
+            |--
+            |"#
+            .strip_margin()
+        );
+    }
+
+    fn debug_toplevels(
+        toplevels: FxHashMap<String, Vec<Toplevel>>,
+    ) -> String {
+        let mut ret = String::new();
+        for (name, top) in &toplevels {
+            ret += &format!("{} : \n", name);
+            for t in top {
+                ret +=
+                    &format!("resolved: {:?}\n", t.resolved_idents);
+                if let Some(f) = &t.face {
+                    ret += &format!("face: {}\n", f);
+                    ret += &format!("incomplete: {}\n", t.incomplete);
+                } else {
+                    ret += &format!("not face: {}\n", t.incomplete);
+                }
+            }
+        }
+        ret
+    }
+
+    fn construct_type(s: &str) -> Type {
+        let (_, type_seq) = infix_type_sequence(s).unwrap();
+        let inc_t: IncompleteType =
+            (type_seq, Default::default()).into();
+        inc_t.constructor
+    }
+
+    #[test]
+    fn construct_type_test_1() {
+        assert_eq!(
+            construct_type("Foge"),
+            TypeUnit::Normal("Foge".to_string(), Vec::new()).into()
+        )
+    }
+
+    #[test]
+    fn construct_type_test_2() {
+        assert_eq!(
+            construct_type("Foge -> String"),
+            TypeUnit::Fn(
+                construct_type("Foge").into(),
+                construct_type("String").into()
+            )
+            .into()
+        )
+    }
+}
