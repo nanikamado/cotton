@@ -11,7 +11,7 @@ range_to_list
 = fn
 | a .. b =>
     (a < b).fn
-    | True => (a..(b - 1)).range_to_list /\ b
+    | True => a /\ ((a + 1)..b).range_to_list
     | False => ()
     --
 --
@@ -19,13 +19,13 @@ range_to_list
 print_num_list
 = fn
 | () => ()
-| t /\ h =>
-    h.num_to_string.print
+| h /\ t =>
+    h.num_to_string.println
     t.print_num_list
 --
 
 main : () -> ()
 = fn
 | () =>
-    (2..100).range_to_list.print_num_list
+    (0..100).range_to_list.print_num_list
 --
