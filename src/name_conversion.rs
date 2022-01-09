@@ -42,14 +42,14 @@ fn expr(
                 .map(|a| fn_arm(a, idents, toplevel_name_count))
                 .collect(),
         ),
-        Expr::Identifier(name, id) => Expr::Identifier(
-            if let Some(n) = idents.get(&id) {
-                format!("{}${}", name, n)
+        Expr::Identifier { info, ident_id } => Expr::Identifier {
+            info: if let Some(n) = idents.get(&ident_id) {
+                format!("{}${}", info, n)
             } else {
-                name
+                info
             },
-            id,
-        ),
+            ident_id,
+        },
         Expr::Declaration(d) => Expr::Declaration(Box::new(
             declaration(*d, idents, toplevel_name_count),
         )),

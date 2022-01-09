@@ -264,15 +264,15 @@ fn min_type_incomplite(expr: &Expr) -> IncompleteType {
         }
         Expr::Number(_) => construct_type("Num").into(),
         Expr::StrLiteral(_) => construct_type("String").into(),
-        Expr::Identifier(n, id) => {
+        Expr::Identifier { info, ident_id } => {
             let t: ast1::Type = TypeUnit::new_variable().into();
             IncompleteType {
                 constructor: t.clone(),
                 requirements: Requirements {
                     variable_requirements: vec![(
-                        n.to_string(),
+                        info.to_string(),
                         t,
-                        *id,
+                        *ident_id,
                     )],
                     subtype_relation: BTreeSet::new(),
                 },

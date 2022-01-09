@@ -80,10 +80,12 @@ fn expr(e: &Expr, name_count: u32) -> String {
         ),
         Expr::Number(a) => a.clone(),
         Expr::StrLiteral(a) => a.clone(),
-        Expr::Identifier(a, _) => match PRIMITIVES.get(&a[..]) {
-            Some(s) => s.to_string(),
-            None => convert_name(a),
-        },
+        Expr::Identifier { info, ident_id: _ } => {
+            match PRIMITIVES.get(&info[..]) {
+                Some(s) => s.to_string(),
+                None => convert_name(info),
+            }
+        }
         Expr::Declaration(a) => declaration(a),
         Expr::Call(f, a) => format!(
             "{}({})",

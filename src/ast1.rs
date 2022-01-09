@@ -133,7 +133,9 @@ impl From<TypeMatchable> for Type {
             }
             TypeMatchable::Fn(a, b) => TypeUnit::Fn(a, b).into(),
             TypeMatchable::Union(u) => u,
-            TypeMatchable::Variable(i) => TypeUnit::Variable(i).into(),
+            TypeMatchable::Variable(i) => {
+                TypeUnit::Variable(i).into()
+            }
             TypeMatchable::Empty => Default::default(),
             TypeMatchable::RecursiveAlias { alias, body } => {
                 TypeUnit::RecursiveAlias { alias, body }.into()
@@ -193,7 +195,7 @@ pub enum Expr {
     Lambda(Vec<FnArm>),
     Number(String),
     StrLiteral(String),
-    Identifier(String, IdentId),
+    Identifier { info: String, ident_id: IdentId },
     Declaration(Box<Declaration>),
     Call(Box<Expr>, Box<Expr>),
     Unit,
@@ -238,9 +240,10 @@ impl From<ast0::Expr> for Expr {
             }
             ast0::Expr::Number(a) => Number(a),
             ast0::Expr::StrLiteral(a) => StrLiteral(a),
-            ast0::Expr::Identifier(a) => {
-                Identifier(a, new_ident_id())
-            }
+            ast0::Expr::Identifier(a) => Identifier {
+                info: a,
+                ident_id: new_ident_id(),
+            },
             ast0::Expr::Declaration(a) => {
                 Declaration(Box::new((*a).into()))
             }
@@ -416,7 +419,11 @@ fn value_op_apply_left(
             } else {
                 Expr::Call(
                     Expr::Call(
-                        Expr::Identifier(op, new_ident_id()).into(),
+                        Expr::Identifier {
+                            info: op,
+                            ident_id: new_ident_id(),
+                        }
+                        .into(),
                         head.into(),
                     )
                     .into(),
