@@ -1,4 +1,7 @@
-use crate::ast1::{IncompleteType, Requirements, Type};
+use crate::ast1::{
+    self, IncompleteType, Requirements, TypeUnit, TypeMatchable,
+    TypeMatchableRef, Type,
+};
 use fxhash::FxHashSet;
 use hashbag::HashBag;
 use itertools::Itertools;
@@ -28,7 +31,7 @@ pub fn simplify_type(
 fn _simplify_type(
     mut t: IncompleteType,
 ) -> Option<(IncompleteType, bool)> {
-    use Type::*;
+    use TypeUnit::*;
     let mut updated = false;
     let subtype_relationship =
         t.requirements.subtype_relation.clone();
@@ -38,8 +41,10 @@ fn _simplify_type(
         let (eq_variable, eq_cons): (Vec<_>, Vec<_>) = eqs
             .into_iter()
             .map(|ts| {
-                if let Variable(n) = ts {
-                    Ok(*n)
+                if let TypeMatchableRef::Variable(n) =
+                    ts.matchable_ref()
+                {
+                    Ok(n)
                 } else {
                     Err(ts)
                 }
@@ -54,7 +59,7 @@ fn _simplify_type(
             for a in &eq_variable[1..] {
                 t = t.replace_num_option(
                     *a,
-                    &Variable(eq_variable[0]),
+                    &Variable(eq_variable[0]).into(),
                 )?;
             }
         } else {
@@ -115,8 +120,11 @@ fn _simplify_type(
                 t = t.replace_num_option(*a, &st)?;
                 updated = true;
             }
-            (_, Some(Type::Empty)) => {
-                t = t.replace_num_option(*a, &Type::Empty)?;
+            (_, Some(we)) if we.len() == 0 => {
+                t = t.replace_num_option(
+                    *a,
+                    &TypeMatchable::Empty.into(),
+                )?;
                 updated = true;
             }
             // (Some(st), _)
@@ -148,10 +156,10 @@ fn _simplify_type(
         .subtype_relation
         .into_iter()
         .filter(|(_, a)| {
-            if let Variable(a) = a {
-                let b = contravariant_candidates.contains(a)
-                    || covariant_candidates.contains(a)
-                    || type_variables_in_sub_rel.contains(a) >= 2;
+            if let TypeMatchableRef::Variable(a) = a.matchable_ref() {
+                let b = contravariant_candidates.contains(&a)
+                    || covariant_candidates.contains(&a)
+                    || type_variables_in_sub_rel.contains(&a) >= 2;
                 if !b {
                     updated = true;
                 }
@@ -168,18 +176,20 @@ fn simplify_subtype_rel(
     sub: Type,
     sup: Type,
 ) -> Option<Vec<(Type, Type)>> {
-    use Type::*;
-    match (sub, sup) {
+    use TypeMatchable::*;
+    match (sub.matchable(), sup.matchable()) {
         (Union(cs), b) => Some(
             cs.into_iter()
-                .map(|c| simplify_subtype_rel(c, b.clone()))
+                .map(|c| {
+                    simplify_subtype_rel(c.into(), b.clone().into())
+                })
                 .collect::<Option<Vec<_>>>()?
                 .concat(),
         ),
         (Fn(a1, r1), Fn(a2, r2)) => Some(
             [
-                simplify_subtype_rel(*r1, *r2)?,
-                simplify_subtype_rel(*a2, *a1)?,
+                simplify_subtype_rel(r1, r2)?,
+                simplify_subtype_rel(a2, a1)?,
             ]
             .concat(),
         ),
@@ -204,20 +214,18 @@ fn simplify_subtype_rel(
         | (Normal(_, _), Empty) => None,
         (sub, sup) if sub == sup => Some(Vec::new()),
         (Empty, _) => Some(Vec::new()),
-        (a, Union(u)) if u.contains(&a) => Some(Vec::new()),
+        (a, Union(u)) if u.contains(&a.clone().into()) => {
+            Some(Vec::new())
+        }
         (a, RecursiveAlias { alias: _, body })
-            if (if let Union(u) = &*body {
-                u.contains(&a)
-            } else {
-                false
-            }) =>
+            if body.contains(&a.clone().into()) =>
         {
             Some(Vec::new())
         }
         (Normal(name, cs), RecursiveAlias { alias, body }) => {
             simplify_subtype_rel(
-                Normal(name, cs),
-                unwrap_recursive_alias(alias, *body),
+                Normal(name, cs).into(),
+                unwrap_recursive_alias(alias, body),
             )
         }
         (
@@ -229,34 +237,43 @@ fn simplify_subtype_rel(
                 alias: alias2,
                 body: body2,
             },
-        ) if *body1
-            == body2
-                .clone()
-                .replace_num(alias2, &Type::Variable(alias1)) =>
+        ) if body1
+            == body2.clone().replace_num(
+                alias2,
+                &TypeUnit::Variable(alias1).into(),
+            ) =>
         {
             Some(Vec::new())
         }
-        (a, Union(cs)) if a.is_singleton() => {
+        (a, Union(cs))
+            if ast1::Type::from(a.clone()).is_singleton() =>
+        {
             let new_cs = cs
                 .into_iter()
-                .filter(|c| !(c.is_singleton() && a != *c))
+                .filter(|c| {
+                    !(c.is_singleton()
+                        && ast1::Type::from(a.clone())
+                            != ast1::Type::from(c.clone()))
+                })
                 .collect();
-            Some(vec![(a, new_cs)])
+            Some(vec![(a.into(), new_cs)])
         }
         (Normal(name, cs), Union(u)) => {
-            let new_u: Type = u
+            let new_u: ast1::Type = u
                 .into_iter()
                 .filter(|c| {
-                    if let Normal(c_name, _) = c {
+                    if let TypeUnit::Normal(c_name, _) = c {
                         *c_name == name
                     } else {
                         true
                     }
                 })
                 .collect();
-            Some(vec![(Normal(name, cs), new_u)])
+            Some(vec![(TypeUnit::Normal(name, cs).into(), new_u)])
         }
         (sub, sup) => {
+            let sub: ast1::Type = sub.into();
+            let sup: ast1::Type = sup.into();
             let subl = lift_recursive_alias(sub.clone());
             let supl = lift_recursive_alias(sup.clone());
             if subl != sub || supl != sup {
@@ -269,14 +286,14 @@ fn simplify_subtype_rel(
 }
 
 fn lift_recursive_alias(t: Type) -> Type {
-    if let Some((alias, body)) = find_recursive_alias(&t) {
-        let r = &Type::RecursiveAlias {
+    if let Some((alias, body)) = t.find_recursive_alias() {
+        let r = &TypeUnit::RecursiveAlias {
             alias,
-            body: Box::new(body.clone()),
+            body: body.clone(),
         };
-        let t = t.replace_type(r, &Type::Variable(alias));
-        let t = t.replace_type(&body, &Type::Variable(alias));
-        t.replace_num(alias, r)
+        let t = t.replace_type(r, &TypeUnit::Variable(alias));
+        let t = t.replace_type_union(&body, &TypeUnit::Variable(alias));
+        t.replace_num(alias, &r.clone().into())
     } else {
         t
     }
@@ -285,27 +302,31 @@ fn lift_recursive_alias(t: Type) -> Type {
 fn unwrap_recursive_alias(alias: usize, body: Type) -> Type {
     body.clone().replace_num(
         alias,
-        &Type::RecursiveAlias {
-            alias,
-            body: Box::new(body),
-        },
+        &(TypeUnit::RecursiveAlias { alias, body }).into(),
     )
 }
 
-fn find_recursive_alias(t: &Type) -> Option<(usize, Type)> {
-    match t {
-        Type::Normal(_, cs) => {
-            cs.iter().find_map(find_recursive_alias)
+impl TypeUnit {
+    fn find_recursive_alias(&self) -> Option<(usize, Type)> {
+        match self {
+            TypeUnit::Normal(_, cs) => {
+                cs.iter().find_map(Type::find_recursive_alias)
+            }
+            TypeUnit::Fn(a, r) => {
+                a.find_recursive_alias()?;
+                r.find_recursive_alias()
+            }
+            TypeUnit::Variable(_) => None,
+            TypeUnit::RecursiveAlias { alias, body } => {
+                Some((*alias, body.clone()))
+            }
         }
-        Type::Fn(a, r) => {
-            [a, r].iter().find_map(|c| find_recursive_alias(c))
-        }
-        Type::Union(u) => u.iter().find_map(find_recursive_alias),
-        Type::Variable(_) => None,
-        Type::Empty => None,
-        Type::RecursiveAlias { alias, body } => {
-            Some((*alias, (**body).clone()))
-        }
+    }
+}
+
+impl Type {
+    fn find_recursive_alias(&self) -> Option<(usize, Type)> {
+        self.iter().find_map(TypeUnit::find_recursive_alias)
     }
 }
 
@@ -317,7 +338,7 @@ fn possible_weakest(
     for (sub, sup) in subtype_relation {
         if contravariant_type_variables(sup).contains(&t) {
             return None;
-        } else if *sub == Type::Variable(t) {
+        } else if *sub == TypeUnit::Variable(t).into() {
             up.insert(sup);
         } else if covariant_type_variables(sub).contains(&t) {
             return None;
@@ -325,12 +346,13 @@ fn possible_weakest(
     }
     if up.len() == 1 {
         let up = up.into_iter().next().unwrap().clone();
-        Some(if up.contains(t) {
-            let v = Type::new_variable_num();
-            Type::RecursiveAlias {
+        Some(if up.contains_num(t) {
+            let v = TypeUnit::new_variable_num();
+            TypeUnit::RecursiveAlias {
                 alias: v,
-                body: Box::new(up.replace_num(t, &Type::Variable(v))),
+                body: up.replace_num(t, &TypeUnit::Variable(v).into()),
             }
+            .into()
         } else {
             up
         })
@@ -345,12 +367,19 @@ fn possible_weakest(
     } else {
         let up_fs: FxHashSet<_> = up
             .iter()
-            .filter(|t| matches!(t, Type::Fn(_, _)))
+            .filter(|t| {
+                matches!(
+                    t.matchable_ref(),
+                    TypeMatchableRef::Fn(_, _)
+                )
+            })
             .collect();
         let up_ns: FxHashSet<_> = up
             .iter()
             .filter_map(|t| {
-                if let Type::Normal(name, _) = t {
+                if let TypeMatchableRef::Normal(name, _) =
+                    t.matchable_ref()
+                {
                     Some(name)
                 } else {
                     None
@@ -358,7 +387,7 @@ fn possible_weakest(
             })
             .collect();
         if !up_fs.is_empty() && !up_ns.is_empty() || up_ns.len() > 1 {
-            Some(Type::Empty)
+            Some(TypeMatchable::Empty.into())
         } else {
             None
         }
@@ -373,7 +402,7 @@ fn possible_strongest(
     for (sub, sup) in subtype_relation {
         if contravariant_type_variables(sub).contains(&t) {
             return None;
-        } else if *sup == Type::Variable(t) {
+        } else if *sup == TypeUnit::Variable(t).into() {
             down.push(sub);
         } else if covariant_type_variables(sup).contains(&t) {
             return None;
@@ -383,16 +412,20 @@ fn possible_strongest(
     let result = if down.len() == 1 {
         down[0].clone()
     } else if down.is_empty() {
-        Type::Empty
+        TypeMatchable::Empty.into()
     } else {
-        down.iter().copied().cloned().collect()
+        down.iter().copied().cloned().flatten().collect()
     };
-    if down.iter().any(|d| d.contains(t)) {
-        let v = Type::new_variable_num();
-        Some(Type::RecursiveAlias {
-            alias: v,
-            body: Box::new(result.replace_num(t, &Type::Variable(v))),
-        })
+    if down.iter().any(|d| d.contains_num(t)) {
+        let v = TypeUnit::new_variable_num();
+        Some(
+            TypeUnit::RecursiveAlias {
+                alias: v,
+                body: result
+                    .replace_num(t, &TypeUnit::Variable(v).into()),
+            }
+            .into(),
+        )
     } else {
         Some(result)
     }
@@ -423,23 +456,26 @@ fn mk_covariant_candidates(t: &IncompleteType) -> FxHashSet<usize> {
 }
 
 fn covariant_type_variables(t: &Type) -> FxHashSet<usize> {
-    match t {
-        Type::Fn(a, r) => marge_hashset(
+    match t.matchable_ref() {
+        TypeMatchableRef::Fn(a, r) => marge_hashset(
             covariant_type_variables(r),
             contravariant_type_variables(a),
         ),
-        Type::Normal(_, cs) => cs
+        TypeMatchableRef::Normal(_, cs) => cs
             .iter()
             .flat_map(|c| covariant_type_variables(c))
             .collect(),
-        Type::Union(cs) => {
-            cs.iter().map(|c| covariant_type_variables(c)).concat()
+        TypeMatchableRef::Union(cs) => cs
+            .iter()
+            .map(|c| covariant_type_variables(&c.clone().into()))
+            .concat(),
+        TypeMatchableRef::Variable(n) => {
+            [n].iter().copied().collect()
         }
-        Type::Variable(n) => [*n].iter().copied().collect(),
-        Type::Empty => FxHashSet::default(),
-        Type::RecursiveAlias { alias, body } => {
+        TypeMatchableRef::Empty => FxHashSet::default(),
+        TypeMatchableRef::RecursiveAlias { alias, body } => {
             let mut vs = covariant_type_variables(body);
-            vs.remove(alias);
+            vs.remove(&alias);
             vs
         }
     }
@@ -457,23 +493,25 @@ where
 }
 
 fn contravariant_type_variables(t: &Type) -> FxHashSet<usize> {
-    match t {
-        Type::Fn(a, r) => marge_hashset(
+    match t.matchable_ref() {
+        TypeMatchableRef::Fn(a, r) => marge_hashset(
             covariant_type_variables(a),
             contravariant_type_variables(r),
         ),
-        Type::Normal(_, cs) => cs
+        TypeMatchableRef::Normal(_, cs) => cs
             .iter()
             .map(|c| contravariant_type_variables(c))
             .concat(),
-        Type::Union(cs) => cs
+        TypeMatchableRef::Union(cs) => cs
             .iter()
-            .map(|c| contravariant_type_variables(c))
+            .map(|c| contravariant_type_variables(&c.clone().into()))
             .concat(),
-        Type::Variable(_) | Type::Empty => FxHashSet::default(),
-        Type::RecursiveAlias { alias, body } => {
+        TypeMatchableRef::Variable(_) | TypeMatchableRef::Empty => {
+            FxHashSet::default()
+        }
+        TypeMatchableRef::RecursiveAlias { alias, body } => {
             let mut vs = contravariant_type_variables(body);
-            vs.remove(alias);
+            vs.remove(&alias);
             vs
         }
     }
@@ -534,17 +572,20 @@ fn mk_graph(
 
 #[test]
 fn replace_type_test0() {
-    use Type::*;
-    assert_eq!(Variable(0).replace_num(0, &Variable(1)), Variable(1));
+    use TypeUnit::*;
+    assert_eq!(
+        Variable(0).replace_num(0, &Variable(1).into()),
+        Variable(1).into()
+    );
 }
 
 #[test]
 fn replace_type_test1() {
-    use Type::*;
+    use TypeUnit::*;
     assert_eq!(
-        Fn(Box::new(Variable(0)), Box::new(Variable(2)))
-            .replace_num(0, &Variable(1)),
-        Fn(Box::new(Variable(1)), Box::new(Variable(2)))
+        Fn(Variable(0).into(), Variable(2).into())
+            .replace_num(0, &Variable(1).into()),
+        Fn(Variable(1).into(), Variable(2).into()).into()
     );
 }
 
@@ -566,7 +607,57 @@ impl Display for Type {
         &self,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
-        use Type::*;
+        use TypeMatchableRef::*;
+        match self.matchable_ref() {
+            Normal(name, cs) => {
+                if cs.is_empty() {
+                    write!(f, "{}", name)
+                } else {
+                    write!(
+                        f,
+                        "{}({})",
+                        name,
+                        cs.iter()
+                            .map(|c| format!("{}", c))
+                            .join(", ")
+                    )
+                }
+            }
+            Fn(arg, rtn) => {
+                if let Fn(_, _) = arg.matchable_ref() {
+                    write!(f, "({}) -> {}", arg, rtn)
+                } else {
+                    write!(f, "{} -> {}", arg, rtn)
+                }
+            }
+            Union(a) => write!(
+                f,
+                "{{{}}}",
+                a.iter()
+                    .map(|t| {
+                        if let TypeUnit::Fn(_, _) = t {
+                            format!("({})", t)
+                        } else {
+                            format!("{}", t)
+                        }
+                    })
+                    .join(" | ")
+            ),
+            Variable(n) => write!(f, "t{}", n),
+            Empty => write!(f, "∅"),
+            RecursiveAlias { alias, body } => {
+                write!(f, "rec[t{} = {}]", alias, *body)
+            }
+        }
+    }
+}
+
+impl Display for TypeUnit {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        use TypeUnit::*;
         match self {
             Normal(name, cs) => {
                 if cs.is_empty() {
@@ -583,27 +674,15 @@ impl Display for Type {
                 }
             }
             Fn(arg, rtn) => {
-                if let Fn(_, _) = **arg {
+                if let TypeMatchableRef::Fn(_, _) =
+                    arg.matchable_ref()
+                {
                     write!(f, "({}) -> {}", arg, rtn)
                 } else {
                     write!(f, "{} -> {}", arg, rtn)
                 }
             }
-            Union(a) => write!(
-                f,
-                "{{{}}}",
-                a.iter()
-                    .map(|t| {
-                        if let Fn(_, _) = t {
-                            format!("({})", t)
-                        } else {
-                            format!("{}", t)
-                        }
-                    })
-                    .join(" | ")
-            ),
             Variable(n) => write!(f, "t{}", n),
-            Empty => write!(f, "∅"),
             RecursiveAlias { alias, body } => {
                 write!(f, "rec[t{} = {}]", alias, *body)
             }

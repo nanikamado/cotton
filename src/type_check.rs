@@ -2,10 +2,12 @@ mod intrinsics;
 mod simplify;
 mod type_util;
 
+use self::type_util::construct_type;
 use crate::ast0::{DataDeclaration, Pattern};
+use crate::ast1;
 use crate::ast1::{
     ident_id::IdentId, Ast, Expr, FnArm, IncompleteType,
-    Requirements, Type,
+    Requirements, TypeUnit,
 };
 use fxhash::FxHashMap;
 use intrinsics::INTRINSIC_VARIABLES;
@@ -27,7 +29,7 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, usize> {
             .collect();
     }
     for d in &ast.data_declarations {
-        let d_type = constructor_type(d.clone());
+        let d_type: ast1::Type = constructor_type(d.clone()).into();
         toplevels.entry(d.name.clone()).or_default().push(Toplevel {
             incomplete: d_type.into(),
             face: None,
@@ -220,12 +222,15 @@ fn resolve_names(
     toplevels
 }
 
-fn constructor_type(d: DataDeclaration) -> Type {
+fn constructor_type(d: DataDeclaration) -> TypeUnit {
     let field_types: Vec<_> =
-        (0..d.field_len).map(|_| Type::new_variable()).collect();
-    let mut t = Type::Normal(d.name, field_types.clone());
+        (0..d.field_len).map(|_| TypeUnit::new_variable()).collect();
+    let mut t = TypeUnit::Normal(
+        d.name,
+        field_types.iter().map(|t| t.clone().into()).collect(),
+    );
     for field in field_types.into_iter().rev() {
-        t = Type::Fn(Box::new(field), Box::new(t))
+        t = TypeUnit::Fn(field.into(), t.into())
     }
     t
 }
@@ -239,32 +244,28 @@ fn min_type_incomplite(expr: &Expr) -> IncompleteType {
         Expr::Lambda(arms) => {
             let (arm_types, requirements): (Vec<_>, Vec<_>) =
                 arms.iter().map(|a| arm_min_type(a)).unzip();
-            let (args, rtns): (Vec<Type>, Vec<Type>) =
+            let (args, rtns): (Vec<ast1::Type>, Vec<ast1::Type>) =
                 arm_types.into_iter().unzip();
             let constructor = if args.len() == 1 {
-                Type::Fn(
-                    Box::new(args.into_iter().next().unwrap()),
-                    Box::new(rtns.into_iter().next().unwrap()),
+                TypeUnit::Fn(
+                    args.into_iter().next().unwrap(),
+                    rtns.into_iter().next().unwrap(),
                 )
             } else {
-                Type::Fn(
-                    Box::new(Type::union_from(args.into_iter())),
-                    Box::new(Type::union_from(rtns.into_iter())),
+                TypeUnit::Fn(
+                    args.into_iter().flatten().collect(),
+                    rtns.into_iter().flatten().collect(),
                 )
             };
             IncompleteType {
-                constructor,
+                constructor: constructor.into(),
                 requirements: marge_requirements(requirements),
             }
         }
-        Expr::Number(_) => {
-            Type::Normal("Num".to_string(), Vec::new()).into()
-        }
-        Expr::StrLiteral(_) => {
-            Type::Normal("String".to_string(), Vec::new()).into()
-        }
+        Expr::Number(_) => construct_type("Num").into(),
+        Expr::StrLiteral(_) => construct_type("String").into(),
         Expr::Identifier(n, id) => {
-            let t = Type::new_variable();
+            let t: ast1::Type = TypeUnit::new_variable().into();
             IncompleteType {
                 constructor: t.clone(),
                 requirements: Requirements {
@@ -277,22 +278,19 @@ fn min_type_incomplite(expr: &Expr) -> IncompleteType {
                 },
             }
         }
-        Expr::Declaration(_) => {
-            Type::Normal("()".to_string(), Vec::new()).into()
-        }
+        Expr::Declaration(_) => construct_type("()").into(),
         Expr::Call(f, a) => {
             let f_t = min_type_incomplite(f);
             let a_t = min_type_incomplite(a);
-            let b = Type::new_variable();
-            let c = Type::new_variable();
+            let b: ast1::Type = TypeUnit::new_variable().into();
+            let c: ast1::Type = TypeUnit::new_variable().into();
             // c -> b
-            let cb_fn =
-                Type::Fn(Box::new(c.clone()), Box::new(b.clone()));
+            let cb_fn = TypeUnit::Fn(c.clone(), b.clone());
             // f < c -> b
             let f_sub_cb = Requirements {
                 variable_requirements: Vec::new(),
                 subtype_relation: {
-                    [(f_t.constructor, cb_fn)]
+                    [(f_t.constructor, cb_fn.into())]
                         .iter()
                         .cloned()
                         .collect()
@@ -316,9 +314,7 @@ fn min_type_incomplite(expr: &Expr) -> IncompleteType {
                 ]),
             }
         }
-        Expr::Unit => {
-            Type::Normal("()".to_string(), Vec::new()).into()
-        }
+        Expr::Unit => construct_type("()").into(),
     }
 }
 
@@ -354,18 +350,18 @@ fn marge_requirements(
     rst
 }
 
-fn arm_min_type(arm: &FnArm) -> ((Type, Type), Requirements) {
+fn arm_min_type(
+    arm: &FnArm,
+) -> ((ast1::Type, ast1::Type), Requirements) {
     let body_type = multi_expr_min_type(&arm.exprs);
     let (types, bindings): (Vec<_>, Vec<_>) =
         arm.pattern.iter().map(|p| pattern_to_type(p)).unzip();
     let mut arm_type = body_type.constructor;
     for pattern_type in types[1..].iter().rev() {
-        arm_type = Type::Fn(
-            Box::new(pattern_type.clone()),
-            Box::new(arm_type),
-        )
+        arm_type =
+            TypeUnit::Fn(pattern_type.clone().into(), arm_type).into()
     }
-    let bindings: FxHashMap<String, Type> =
+    let bindings: FxHashMap<String, ast1::Type> =
         bindings.into_iter().flatten().collect();
     let (variable_requirements, subtype_requirement): (
         Vec<_>,
@@ -400,24 +396,28 @@ fn arm_min_type(arm: &FnArm) -> ((Type, Type), Requirements) {
     )
 }
 
-fn pattern_to_type(p: &Pattern) -> (Type, Vec<(String, Type)>) {
+fn pattern_to_type(
+    p: &Pattern,
+) -> (ast1::Type, Vec<(String, ast1::Type)>) {
     match p {
-        Pattern::Number(_) => {
-            (Type::Normal("Num".to_string(), Vec::new()), Vec::new())
+        Pattern::Number(_) => (construct_type("Num"), Vec::new()),
+        Pattern::StrLiteral(_) => {
+            (construct_type("String"), Vec::new())
         }
-        Pattern::StrLiteral(_) => (
-            Type::Normal("String".to_string(), Vec::new()),
-            Vec::new(),
-        ),
         Pattern::Constructor(name, cs) => {
             let (types, bindings): (Vec<_>, Vec<_>) =
                 cs.iter().map(|c| pattern_to_type(c)).unzip();
-            (Type::Normal(name.clone(), types), bindings.concat())
+            (
+                TypeUnit::Normal(name.clone(), types).into(),
+                bindings.concat(),
+            )
         }
         Pattern::Binder(name) => {
-            let t = Type::new_variable();
+            let t: ast1::Type = TypeUnit::new_variable().into();
             (t.clone(), vec![(name.to_string(), t)])
         }
-        Pattern::Underscore => (Type::new_variable(), Vec::new()),
+        Pattern::Underscore => {
+            (TypeUnit::new_variable().into(), Vec::new())
+        }
     }
 }

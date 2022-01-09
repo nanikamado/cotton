@@ -133,7 +133,7 @@ fn type_expr(input: &str) -> IResult<&str, Datatype> {
     ))(input)
 }
 
-fn infix_type_sequence(
+pub fn infix_type_sequence(
     input: &str,
 ) -> IResult<&str, InfixTypeSequence> {
     let (input, (_, e, eo, _)) = tuple((

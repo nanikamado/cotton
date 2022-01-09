@@ -1,128 +1,173 @@
-use crate::ast1::{IncompleteType, Requirements, Type};
+use crate::ast1::{
+    IncompleteType, Requirements, TypeUnit, TypeMatchableRef, Type,
+};
 use itertools::Itertools;
 use std::collections::HashSet;
-use Type::{Empty, Fn, Normal, RecursiveAlias, Union, Variable};
+use TypeMatchableRef::{Fn, Normal};
 
-impl Type {
-    pub fn all_type_variables(&self) -> HashSet<usize> {
+impl TypeUnit {
+    pub fn all_type_variables(&self) -> Vec<usize> {
         match self {
-            Fn(a, r) => {
-                let mut a = a.all_type_variables();
-                a.extend(r.all_type_variables());
-                a
-            }
-            Normal(_, cs) => cs
+            TypeUnit::Normal(_, u) => u
                 .iter()
-                .flat_map(|c| c.all_type_variables())
+                .flat_map(|t| t.all_type_variables())
                 .collect(),
-            Union(cs) => cs
-                .iter()
-                .flat_map(|c| c.all_type_variables())
+            TypeUnit::Fn(arg, ret) => arg
+                .all_type_variables()
+                .into_iter()
+                .chain(ret.all_type_variables().into_iter())
                 .collect(),
-            Variable(n) => [*n].iter().copied().collect(),
-            Empty => HashSet::new(),
-            RecursiveAlias { alias, body } => {
-                let mut vs = body.all_type_variables();
-                vs.remove(alias);
-                vs
+            TypeUnit::Variable(i) => std::iter::once(*i).collect(),
+            TypeUnit::RecursiveAlias { alias, body } => {
+                let mut s = body.all_type_variables();
+                s.remove(alias);
+                s.into_iter().collect()
             }
         }
     }
 
-    pub fn replace_num(self, from: usize, to: &Self) -> Self {
+    pub fn replace_num(self, from: usize, to: &Type) -> Type {
         match self {
-            Fn(args, rtn) => Fn(
-                args.replace_num(from, to).into(),
-                rtn.replace_num(from, to).into(),
-            ),
-            Union(m) => Type::union_from(
-                m.into_iter().map(|t| t.replace_num(from, to)),
-            ),
-            Normal(name, cs) => {
+            Self::Fn(args, rtn) => Self::Fn(
+                args.replace_num(from, to),
+                rtn.replace_num(from, to),
+            )
+            .into(),
+            Self::Normal(name, cs) => {
                 let cs = cs
                     .into_iter()
                     .map(|t| t.replace_num(from, to))
                     .collect_vec();
-                if cs.contains(&Empty) {
-                    Empty
+                if cs.iter().any(|c| c.len() == 0) {
+                    Default::default()
                 } else {
-                    Normal(name, cs)
+                    Self::Normal(name, cs).into()
                 }
             }
-            Variable(n) => {
+            Self::Variable(n) => {
                 if n == from {
                     to.clone()
                 } else {
-                    Variable(n)
+                    Self::Variable(n).into()
                 }
             }
-            Empty => Empty,
-            RecursiveAlias { alias, body } => RecursiveAlias {
-                alias,
-                body: Box::new(body.replace_num(from, to)),
-            },
+            Self::RecursiveAlias { alias, body } => {
+                (Self::RecursiveAlias {
+                    alias,
+                    body: body.replace_num(from, to),
+                })
+                .into()
+            }
         }
     }
 
-    pub fn replace_type(self, from: &Type, to: &Type) -> Self {
+    pub fn replace_type(self, from: &TypeUnit, to: &TypeUnit) -> Self {
         match self {
             t if t == *from => to.clone(),
-            Fn(args, rtn) => Fn(
+            Self::Fn(args, rtn) => Self::Fn(
                 args.replace_type(from, to).into(),
                 rtn.replace_type(from, to).into(),
             ),
-            Union(m) => Type::union_from(
-                m.into_iter().map(|t| t.replace_type(from, to)),
-            ),
-            Normal(name, cs) => Normal(
+            Self::Normal(name, cs) => Self::Normal(
                 name,
                 cs.into_iter()
                     .map(|t| t.replace_type(from, to))
                     .collect(),
             ),
-            Variable(n) => Variable(n),
-            Empty => Empty,
-            RecursiveAlias { alias, body } => RecursiveAlias {
-                alias,
-                body: Box::new(body.replace_type(from, to)),
-            },
+            Self::Variable(n) => Self::Variable(n),
+            Self::RecursiveAlias { alias, body } => {
+                Self::RecursiveAlias {
+                    alias,
+                    body: body.replace_type(from, to),
+                }
+            }
+        }
+    }
+
+    pub fn replace_type_union(self, from: &Type, to: &TypeUnit) -> Self {
+        match self {
+            Self::Fn(args, rtn) => Self::Fn(
+                args.replace_type_union(from, to).into(),
+                rtn.replace_type_union(from, to).into(),
+            ),
+            Self::Normal(name, cs) => Self::Normal(
+                name,
+                cs.into_iter()
+                    .map(|t| t.replace_type_union(from, to))
+                    .collect(),
+            ),
+            Self::Variable(n) => Self::Variable(n),
+            Self::RecursiveAlias { alias, body } => {
+                Self::RecursiveAlias {
+                    alias,
+                    body: body.replace_type_union(from, to),
+                }
+            }
+        }
+    }
+
+    pub fn contains_num(&self, variable_num: usize) -> bool {
+        match self {
+            Self::Normal(_, cs) => {
+                cs.iter().any(|c| c.contains_num(variable_num))
+            }
+            Self::Fn(a, r) => {
+                a.contains_num(variable_num)
+                    || r.contains_num(variable_num)
+            }
+            Self::Variable(n) => *n == variable_num,
+            Self::RecursiveAlias { alias: _, body } => {
+                body.contains_num(variable_num)
+            }
         }
     }
 
     pub fn is_singleton(&self) -> bool {
         match self {
+            TypeUnit::Normal(_, cs) => {
+                cs.iter().all(|c| c.is_singleton())
+            }
+            TypeUnit::Fn(a, b) => a.is_singleton() && b.is_singleton(),
+            _ => false,
+        }
+    }
+}
+
+impl Type {
+    pub fn all_type_variables(&self) -> HashSet<usize> {
+        self.iter().flat_map(|t| t.all_type_variables()).collect()
+    }
+
+    pub fn replace_num(self, from: usize, to: &Self) -> Self {
+        self.into_iter()
+            .flat_map(|t| t.replace_num(from, to).into_iter())
+            .collect()
+    }
+
+    pub fn replace_type(self, from: &TypeUnit, to: &TypeUnit) -> Self {
+        self.into_iter().map(|t| t.replace_type(from, to)).collect()
+    }
+
+    pub fn replace_type_union(self, from: &Type, to: &TypeUnit) -> Self {
+        if self == *from {
+            to.clone().into()
+        } else {
+            self.into_iter()
+                .map(|t| t.replace_type_union(from, to))
+                .collect()
+        }
+    }
+
+    pub fn is_singleton(&self) -> bool {
+        match self.matchable_ref() {
             Normal(_, cs) => cs.iter().all(|c| c.is_singleton()),
             Fn(a, b) => a.is_singleton() && b.is_singleton(),
             _ => false,
         }
     }
 
-    pub fn union_with(self, other: Type) -> Type {
-        Type::union_from(vec![self, other].into_iter())
-    }
-
-    pub fn union_from(it: impl Iterator<Item = Type>) -> Self {
-        it.collect()
-    }
-
-    #[allow(unused)]
-    pub fn contains(&self, variable_num: usize) -> bool {
-        match self {
-            Normal(_, cs) => {
-                cs.iter().any(|c| c.contains(variable_num))
-            }
-            Fn(a, r) => {
-                a.contains(variable_num) || r.contains(variable_num)
-            }
-            Union(cs) => {
-                cs.iter().any(|cs| cs.contains(variable_num))
-            }
-            Variable(n) => *n == variable_num,
-            Empty => false,
-            RecursiveAlias { alias, body } => {
-                body.contains(variable_num)
-            }
-        }
+    pub fn contains_num(&self, variable_num: usize) -> bool {
+        self.iter().any(|t| t.contains_num(variable_num))
     }
 }
 
@@ -151,7 +196,7 @@ impl IncompleteType {
     pub fn change_variable_num(mut self) -> Self {
         let anos = self.all_type_variables();
         for a in anos {
-            self = self.replace_num(a, &Type::new_variable())
+            self = self.replace_num(a, &TypeUnit::new_variable().into())
         }
         self
     }
@@ -203,4 +248,10 @@ impl Requirements {
             },
         }
     }
+}
+
+pub fn construct_type(s: &str) -> Type {
+    let (_, type_seq) = crate::parse::infix_type_sequence(s).unwrap();
+    let inc_t: IncompleteType = (type_seq, Default::default()).into();
+    inc_t.constructor
 }

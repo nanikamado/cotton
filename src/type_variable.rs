@@ -1,7 +1,7 @@
-use crate::ast1::Type;
+use crate::ast1::TypeUnit;
 use std::cell::Cell;
 
-impl Type {
+impl TypeUnit {
     pub fn new_variable() -> Self {
         Self::Variable(Self::new_variable_num())
     }

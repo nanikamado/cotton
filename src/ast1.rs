@@ -1,3 +1,4 @@
+use self::ident_id::{new_ident_id, IdentId};
 use crate::ast0;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
@@ -5,7 +6,6 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet, VecDeque},
     iter::FromIterator,
 };
-use self::ident_id::{new_ident_id, IdentId};
 
 #[derive(Debug, PartialEq)]
 pub struct Ast {
@@ -14,20 +14,40 @@ pub struct Ast {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Type {
+pub enum TypeMatchable {
     Normal(String, Vec<Type>),
-    Fn(Box<Type>, Box<Type>),
-    Union(Union),
+    Fn(Type, Type),
+    Union(Type),
     Variable(usize),
     Empty,
-    RecursiveAlias { alias: usize, body: Box<Type> },
+    RecursiveAlias { alias: usize, body: Type },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Union(BTreeSet<Type>);
+pub enum TypeMatchableRef<'a> {
+    Normal(&'a str, &'a Vec<Type>),
+    Fn(&'a Type, &'a Type),
+    Union(&'a BTreeSet<TypeUnit>),
+    Variable(usize),
+    Empty,
+    RecursiveAlias { alias: usize, body: &'a Type },
+}
 
-impl IntoIterator for Union {
-    type Item = Type;
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TypeUnit {
+    Normal(String, Vec<Type>),
+    Fn(Type, Type),
+    Variable(usize),
+    RecursiveAlias { alias: usize, body: Type },
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
+)]
+pub struct Type(BTreeSet<TypeUnit>);
+
+impl IntoIterator for Type {
+    type Item = TypeUnit;
 
     type IntoIter = std::collections::btree_set::IntoIter<Self::Item>;
 
@@ -36,34 +56,88 @@ impl IntoIterator for Union {
     }
 }
 
-impl Union {
+impl Type {
     pub fn iter(
         &self,
-    ) -> std::collections::btree_set::Iter<'_, Type> {
+    ) -> std::collections::btree_set::Iter<'_, TypeUnit> {
         self.0.iter()
     }
 
     pub fn contains(&self, value: &Type) -> bool {
-        self.0.contains(value)
+        self.0.is_superset(&value.0)
+    }
+
+    pub fn merge(self, other: Self) -> Self {
+        let mut u = self.0;
+        u.extend(other.0);
+        Type(u)
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn matchable(self) -> TypeMatchable {
+        use TypeMatchable::*;
+        match self.0.len() {
+            0 => Empty,
+            1 => match self.0.into_iter().next().unwrap() {
+                TypeUnit::Normal(name, ts) => Normal(name, ts),
+                TypeUnit::Fn(arg, ret) => Fn(arg, ret),
+                TypeUnit::Variable(i) => Variable(i),
+                TypeUnit::RecursiveAlias { alias, body } => {
+                    RecursiveAlias { alias, body }
+                }
+            },
+            _ => TypeMatchable::Union(self),
+        }
+    }
+
+    pub fn matchable_ref(&self) -> TypeMatchableRef {
+        use TypeMatchableRef::*;
+        match self.0.len() {
+            0 => Empty,
+            1 => match self.0.iter().next().unwrap() {
+                TypeUnit::Normal(name, ts) => Normal(name, &ts),
+                TypeUnit::Fn(arg, ret) => Fn(&arg, &ret),
+                TypeUnit::Variable(i) => Variable(*i),
+                TypeUnit::RecursiveAlias { alias, body } => {
+                    RecursiveAlias {
+                        alias: *alias,
+                        body: &body,
+                    }
+                }
+            },
+            _ => Union(&self.0),
+        }
     }
 }
 
-impl FromIterator<Type> for Type {
-    fn from_iter<T: IntoIterator<Item = Type>>(iter: T) -> Self {
-        let mut u = BTreeSet::new();
-        for t in iter {
-            match t {
-                Type::Union(Union(a)) => u.extend(a),
-                Type::Empty => (),
-                other => {
-                    u.insert(other);
-                }
+impl FromIterator<TypeUnit> for Type {
+    fn from_iter<T: IntoIterator<Item = TypeUnit>>(iter: T) -> Self {
+        Type(iter.into_iter().collect())
+    }
+}
+
+impl From<TypeUnit> for Type {
+    fn from(t: TypeUnit) -> Self {
+        Type(std::iter::once(t).collect())
+    }
+}
+
+impl From<TypeMatchable> for Type {
+    fn from(m: TypeMatchable) -> Self {
+        match m {
+            TypeMatchable::Normal(name, cs) => {
+                TypeUnit::Normal(name, cs).into()
             }
-        }
-        match u.len() {
-            0 => Type::Empty,
-            1 => u.into_iter().next().unwrap(),
-            _ => Type::Union(Union(u)),
+            TypeMatchable::Fn(a, b) => TypeUnit::Fn(a, b).into(),
+            TypeMatchable::Union(u) => u,
+            TypeMatchable::Variable(i) => TypeUnit::Variable(i).into(),
+            TypeMatchable::Empty => Default::default(),
+            TypeMatchable::RecursiveAlias { alias, body } => {
+                TypeUnit::RecursiveAlias { alias, body }.into()
+            }
         }
     }
 }
@@ -106,8 +180,8 @@ impl From<(ast0::InfixTypeSequence, ast0::Forall)>
         let mut t: Type = t.into();
         for v in forall.type_variable_names {
             t = t.replace_type(
-                &Type::Normal(v, Vec::new()),
-                &Type::new_variable(),
+                &TypeUnit::Normal(v, Vec::new()),
+                &TypeUnit::new_variable(),
             );
         }
         t.into()
@@ -376,7 +450,7 @@ impl From<ast0::Datatype> for Type {
     fn from(t: ast0::Datatype) -> Self {
         match t {
             ast0::Datatype::Identifier(s) => {
-                Type::Normal(s, Vec::new())
+                TypeUnit::Normal(s, Vec::new()).into()
             }
             ast0::Datatype::Paren(s) => s.into(),
         }
@@ -424,9 +498,9 @@ fn type_op_apply_right(
             let new_elm = if op == "type_call" {
                 unimplemented!()
             } else if op == "->" {
-                Type::Fn(Box::new(last_), Box::new(last))
+                TypeUnit::Fn(last_, last).into()
             } else {
-                Type::Normal(op, vec![last_, last])
+                TypeUnit::Normal(op, vec![last_, last]).into()
             };
             operands.push_back(new_elm);
             type_op_apply_right(operators, operands, precedence)
@@ -452,18 +526,20 @@ fn type_op_apply_left(
         if OP_PRECEDENCE[&op[..]] == precedence {
             let head_ = operands.pop_front().unwrap();
             let new_elm = if op == "type_call" {
-                if let Type::Normal(n, mut args) = head {
+                if let TypeMatchable::Normal(n, mut args) =
+                    head.matchable()
+                {
                     args.push(head_);
-                    Type::Normal(n, args)
+                    TypeUnit::Normal(n, args).into()
                 } else {
                     unimplemented!()
                 }
             } else if op == "->" {
-                Type::Fn(Box::new(head), Box::new(head_))
+                TypeUnit::Fn(head, head_).into()
             } else if op == "|" {
-                head.union_with(head_)
+                head.merge(head_)
             } else {
-                Type::Normal(op, vec![head, head_])
+                TypeUnit::Normal(op, vec![head, head_]).into()
             };
             operands.push_front(new_elm);
             type_op_apply_left(operators, operands, precedence)
