@@ -17,9 +17,9 @@ pub fn compile(ast: Ast) -> String {
         |let $mod = a => b => a % b;
         |let $neq = a => b => $$bool(a !== b);
         |let $lt = a => b => $$bool(a < b);
-        |let $$bool = a => a ? True : False;
-        |let True = {name: 'True'};
-        |let False = {name: 'False'};
+        |let $$bool = a => a ? $$True : $$False;
+        |let $$True = {name: 'True'};
+        |let $$False = {name: 'False'};
         |let $unicode_28_29 = {name: 'unicode_28_29'};
         |"#
         .strip_margin(),
@@ -79,6 +79,10 @@ static PRIMITIVES_DEF: Lazy<HashMap<&str, &str>> = Lazy::new(|| {
         ("+", "a => b => a + b;"),
         ("print", "a => process.stdout.write(a);"),
         ("println", "a => console.log(a);"),
+        ("True", "{name: 'True'};"),
+        ("False", "{name: 'False'};"),
+        ("%", "a => b => a % b;"),
+        ("!=", "a => b => $$bool(a !== b);"),
     ]
     .iter()
     .copied()
