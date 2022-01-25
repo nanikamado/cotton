@@ -1,4 +1,6 @@
-use std::{collections::BTreeSet, iter::FromIterator};
+pub use self::type_type::Type;
+use itertools::Itertools;
+use std::{collections::BTreeSet, fmt::Display};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeMatchable {
@@ -28,90 +30,96 @@ pub enum TypeUnit {
     RecursiveAlias { alias: usize, body: Type },
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
-)]
-pub struct Type(BTreeSet<TypeUnit>);
+pub mod type_type {
+    use std::{collections::BTreeSet, iter::FromIterator};
 
-impl IntoIterator for Type {
-    type Item = TypeUnit;
+    use super::{TypeMatchable, TypeMatchableRef, TypeUnit};
 
-    type IntoIter =
-        std::collections::btree_set::IntoIter<Self::Item>;
+    #[derive(
+        Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
+    )]
+    pub struct Type(BTreeSet<TypeUnit>);
 
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
+    impl IntoIterator for Type {
+        type Item = TypeUnit;
 
-impl Type {
-    pub fn iter(
-        &self,
-    ) -> std::collections::btree_set::Iter<'_, TypeUnit> {
-        self.0.iter()
-    }
+        type IntoIter =
+            std::collections::btree_set::IntoIter<Self::Item>;
 
-    pub fn contains(&self, value: &Type) -> bool {
-        self.0.is_superset(&value.0)
-    }
-
-    pub fn merge(self, other: Self) -> Self {
-        let mut u = self.0;
-        u.extend(other.0);
-        Type(u)
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-
-    pub fn matchable(self) -> TypeMatchable {
-        use TypeMatchable::*;
-        match self.0.len() {
-            0 => Empty,
-            1 => match self.0.into_iter().next().unwrap() {
-                TypeUnit::Normal(name, ts) => Normal(name, ts),
-                TypeUnit::Fn(arg, ret) => Fn(arg, ret),
-                TypeUnit::Variable(i) => Variable(i),
-                TypeUnit::RecursiveAlias { alias, body } => {
-                    RecursiveAlias { alias, body }
-                }
-            },
-            _ => TypeMatchable::Union(self),
+        fn into_iter(self) -> Self::IntoIter {
+            self.0.into_iter()
         }
     }
 
-    pub fn matchable_ref(&self) -> TypeMatchableRef {
-        use TypeMatchableRef::*;
-        match self.0.len() {
-            0 => Empty,
-            1 => match self.0.iter().next().unwrap() {
-                TypeUnit::Normal(name, ts) => Normal(name, &ts),
-                TypeUnit::Fn(arg, ret) => Fn(&arg, &ret),
-                TypeUnit::Variable(i) => Variable(*i),
-                TypeUnit::RecursiveAlias { alias, body } => {
-                    RecursiveAlias {
-                        alias: *alias,
-                        body: &body,
+    impl Type {
+        pub fn iter(
+            &self,
+        ) -> std::collections::btree_set::Iter<'_, TypeUnit> {
+            self.0.iter()
+        }
+
+        pub fn contains(&self, value: &Type) -> bool {
+            self.0.is_superset(&value.0)
+        }
+
+        pub fn merge(self, other: Self) -> Self {
+            let mut u = self.0;
+            u.extend(other.0);
+            Type(u)
+        }
+
+        pub fn len(&self) -> usize {
+            self.0.len()
+        }
+
+        pub fn matchable(self) -> TypeMatchable {
+            use TypeMatchable::*;
+            match self.0.len() {
+                0 => Empty,
+                1 => match self.0.into_iter().next().unwrap() {
+                    TypeUnit::Normal(name, ts) => Normal(name, ts),
+                    TypeUnit::Fn(arg, ret) => Fn(arg, ret),
+                    TypeUnit::Variable(i) => Variable(i),
+                    TypeUnit::RecursiveAlias { alias, body } => {
+                        RecursiveAlias { alias, body }
                     }
-                }
-            },
-            _ => Union(&self.0),
+                },
+                _ => TypeMatchable::Union(self),
+            }
+        }
+
+        pub fn matchable_ref(&self) -> TypeMatchableRef {
+            use TypeMatchableRef::*;
+            match self.0.len() {
+                0 => Empty,
+                1 => match self.0.iter().next().unwrap() {
+                    TypeUnit::Normal(name, ts) => Normal(name, &ts),
+                    TypeUnit::Fn(arg, ret) => Fn(&arg, &ret),
+                    TypeUnit::Variable(i) => Variable(*i),
+                    TypeUnit::RecursiveAlias { alias, body } => {
+                        RecursiveAlias {
+                            alias: *alias,
+                            body: &body,
+                        }
+                    }
+                },
+                _ => Union(&self.0),
+            }
         }
     }
-}
 
-impl FromIterator<TypeUnit> for Type {
-    fn from_iter<T: IntoIterator<Item = TypeUnit>>(
-        iter: T,
-    ) -> Self {
-        Type(iter.into_iter().collect())
+    impl FromIterator<TypeUnit> for Type {
+        fn from_iter<T: IntoIterator<Item = TypeUnit>>(
+            iter: T,
+        ) -> Self {
+            Type(iter.into_iter().collect())
+        }
     }
-}
 
-impl From<TypeUnit> for Type {
-    fn from(t: TypeUnit) -> Self {
-        Type(std::iter::once(t).collect())
+    impl From<TypeUnit> for Type {
+        fn from(t: TypeUnit) -> Self {
+            Type(std::iter::once(t).collect())
+        }
     }
 }
 
@@ -129,6 +137,94 @@ impl From<TypeMatchable> for Type {
             TypeMatchable::Empty => Default::default(),
             TypeMatchable::RecursiveAlias { alias, body } => {
                 TypeUnit::RecursiveAlias { alias, body }.into()
+            }
+        }
+    }
+}
+
+impl Display for Type {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        use TypeMatchableRef::*;
+        match self.matchable_ref() {
+            Normal(name, cs) => {
+                if cs.is_empty() {
+                    write!(f, "{}", name)
+                } else {
+                    write!(
+                        f,
+                        "{}({})",
+                        name,
+                        cs.iter()
+                            .map(|c| format!("{}", c))
+                            .join(", ")
+                    )
+                }
+            }
+            Fn(arg, rtn) => {
+                if let Fn(_, _) = arg.matchable_ref() {
+                    write!(f, "({}) -> {}", arg, rtn)
+                } else {
+                    write!(f, "{} -> {}", arg, rtn)
+                }
+            }
+            Union(a) => write!(
+                f,
+                "{{{}}}",
+                a.iter()
+                    .map(|t| {
+                        if let TypeUnit::Fn(_, _) = t {
+                            format!("({})", t)
+                        } else {
+                            format!("{}", t)
+                        }
+                    })
+                    .join(" | ")
+            ),
+            Variable(n) => write!(f, "t{}", n),
+            Empty => write!(f, "∅"),
+            RecursiveAlias { alias, body } => {
+                write!(f, "rec[t{} = {}]", alias, *body)
+            }
+        }
+    }
+}
+
+impl Display for TypeUnit {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        use TypeUnit::*;
+        match self {
+            Normal(name, cs) => {
+                if cs.is_empty() {
+                    write!(f, "{}", name)
+                } else {
+                    write!(
+                        f,
+                        "{}({})",
+                        name,
+                        cs.iter()
+                            .map(|c| format!("{}", c))
+                            .join(", ")
+                    )
+                }
+            }
+            Fn(arg, rtn) => {
+                if let TypeMatchableRef::Fn(_, _) =
+                    arg.matchable_ref()
+                {
+                    write!(f, "({}) -> {}", arg, rtn)
+                } else {
+                    write!(f, "{} -> {}", arg, rtn)
+                }
+            }
+            Variable(n) => write!(f, "t{}", n),
+            RecursiveAlias { alias, body } => {
+                write!(f, "rec[t{} = {}]", alias, *body)
             }
         }
     }
