@@ -1,4 +1,4 @@
-(.) : a -> (a -> b) -> b
+(.) : a -> (a -> b) -> b forall a, b --
 = fn
 | a, f => f(a)
 --
@@ -6,7 +6,7 @@
 data Next(a)
 data End(a)
 
-loop : a -> (a -> Next[a] | End[a]) -> a
+loop : a -> (a -> Next[a] | End[b]) -> b forall a, b --
 = fn
 | init, f =>
     init.f.fn
