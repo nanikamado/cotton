@@ -1,9 +1,9 @@
-(.) : a -> (a -> b) -> b
+(.) : a -> (a -> b) -> b forall a, b --
 = fn
 | a, f => f(a)
 --
 
-($) : (a -> b) -> a -> b
+($) : (a -> b) -> a -> b forall a, b --
 = fn
 | f, a => f(a)
 --
@@ -66,8 +66,12 @@ filter = fn
     Filter(l, f)
 --
 
+print_num = fn
+| n => n.num_to_string.println
+--
+
 main : () -> ()
 = fn
 | () =>
-    (2..100).filter(is_prime).each(println)
+    (2..100).filter(is_prime).each(print_num)
 --
