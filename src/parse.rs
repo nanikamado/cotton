@@ -1,5 +1,5 @@
 use crate::ast0::{
-    Ast, DataDeclaration, Type, Dec, Declaration, Expr, FnArm,
+    Ast, DataDeclaration, Type, Decl, VariableDecl, Expr, FnArm,
     Forall, InfixConstructorSequence, InfixTypeSequence, OpSequence,
     Pattern,
 };
@@ -23,11 +23,11 @@ pub fn parse(source: &str) -> IResult<&str, Ast> {
     Ok((input, Ast { declarations }))
 }
 
-fn dec(input: &str) -> IResult<&str, Dec> {
+fn dec(input: &str) -> IResult<&str, Decl> {
     pad(alt((
-        declaration.map(Dec::Variable),
-        infix_constructor_declaration.map(Dec::Data),
-        data_declaration.map(Dec::Data),
+        declaration.map(Decl::Variable),
+        infix_constructor_declaration.map(Decl::Data),
+        data_declaration.map(Decl::Data),
     )))(input)
 }
 
@@ -40,7 +40,7 @@ where
     delimited(separator0, f, separator0)
 }
 
-fn declaration(input: &str) -> IResult<&str, Declaration> {
+fn declaration(input: &str) -> IResult<&str, VariableDecl> {
     let (input, (identifier, _, data_type, _, _, value)) =
         tuple((
             identifier,
@@ -52,7 +52,7 @@ fn declaration(input: &str) -> IResult<&str, Declaration> {
         ))(input)?;
     Ok((
         input,
-        Declaration {
+        VariableDecl {
             identifier,
             type_annotation: data_type.map(|(_, t, forall)| {
                 (t, forall.unwrap_or_default())

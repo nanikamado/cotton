@@ -173,8 +173,8 @@ pub struct Declaration {
     pub decl_id: DeclId,
 }
 
-impl From<ast0::Declaration> for Declaration {
-    fn from(d: ast0::Declaration) -> Self {
+impl From<ast0::VariableDecl> for Declaration {
+    fn from(d: ast0::VariableDecl) -> Self {
         Self {
             identifier: d.identifier,
             type_annotation: d.type_annotation.map(|t| t.into()),
@@ -434,8 +434,8 @@ impl From<ast0::Ast> for Ast {
             .declarations
             .into_iter()
             .map(|d| match d {
-                ast0::Dec::Variable(a) => Ok(declaration(a)),
-                ast0::Dec::Data(a) => Err(DataDeclaration {
+                ast0::Decl::Variable(a) => Ok(declaration(a)),
+                ast0::Decl::Data(a) => Err(DataDeclaration {
                     name: a.name,
                     field_len: a.field_len,
                     decl_id: new_decl_id(),
@@ -450,7 +450,7 @@ impl From<ast0::Ast> for Ast {
     }
 }
 
-fn declaration(d: ast0::Declaration) -> Declaration {
+fn declaration(d: ast0::VariableDecl) -> Declaration {
     Declaration {
         identifier: d.identifier,
         type_annotation: d.type_annotation.map(|t| t.into()),

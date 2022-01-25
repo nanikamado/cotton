@@ -1,16 +1,16 @@
 #[derive(Debug, PartialEq, Eq)]
 pub struct Ast {
-    pub declarations: Vec<Dec>,
+    pub declarations: Vec<Decl>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Dec {
-    Variable(Declaration),
+pub enum Decl {
+    Variable(VariableDecl),
     Data(DataDeclaration),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Declaration {
+pub struct VariableDecl {
     pub identifier: String,
     pub type_annotation: Option<(InfixTypeSequence, Forall)>,
     pub value: OpSequence,
@@ -45,7 +45,7 @@ pub enum Expr {
     Number(String),
     StrLiteral(String),
     Identifier(String),
-    Declaration(Box<Declaration>),
+    Declaration(Box<VariableDecl>),
     Unit,
     Paren(OpSequence),
 }
