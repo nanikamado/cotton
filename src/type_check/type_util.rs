@@ -1,8 +1,8 @@
 use crate::{
     ast0::Forall,
     ast1::{
-        IncompleteType, Requirements, Type, TypeMatchableRef,
-        TypeUnit,
+        types::{Type, TypeMatchableRef, TypeUnit},
+        IncompleteType, Requirements,
     },
 };
 use itertools::Itertools;

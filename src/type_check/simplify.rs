@@ -1,6 +1,6 @@
 use crate::ast1::{
-    self, IncompleteType, Requirements, Type, TypeMatchable,
-    TypeMatchableRef, TypeUnit,
+    types::{Type, TypeMatchable, TypeMatchableRef, TypeUnit},
+    IncompleteType, Requirements,
 };
 use fxhash::FxHashSet;
 use hashbag::HashBag;
@@ -245,21 +245,19 @@ fn simplify_subtype_rel(
         {
             Some(Vec::new())
         }
-        (a, Union(cs))
-            if ast1::Type::from(a.clone()).is_singleton() =>
-        {
+        (a, Union(cs)) if Type::from(a.clone()).is_singleton() => {
             let new_cs = cs
                 .into_iter()
                 .filter(|c| {
                     !(c.is_singleton()
-                        && ast1::Type::from(a.clone())
-                            != ast1::Type::from(c.clone()))
+                        && Type::from(a.clone())
+                            != Type::from(c.clone()))
                 })
                 .collect();
             Some(vec![(a.into(), new_cs)])
         }
         (Normal(name, cs), Union(u)) => {
-            let new_u: ast1::Type = u
+            let new_u: Type = u
                 .into_iter()
                 .filter(|c| {
                     if let TypeUnit::Normal(c_name, _) = c {
@@ -272,8 +270,8 @@ fn simplify_subtype_rel(
             Some(vec![(TypeUnit::Normal(name, cs).into(), new_u)])
         }
         (sub, sup) => {
-            let sub: ast1::Type = sub.into();
-            let sup: ast1::Type = sup.into();
+            let sub: Type = sub.into();
+            let sup: Type = sup.into();
             let subl = lift_recursive_alias(sub.clone());
             let supl = lift_recursive_alias(sup.clone());
             if subl != sub || supl != sup {

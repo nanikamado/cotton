@@ -3,11 +3,10 @@ mod simplify;
 mod type_util;
 
 use self::type_util::construct_type;
-use crate::ast1;
-use crate::ast1::decl_id::DeclId;
 use crate::ast1::{
-    ident_id::IdentId, Ast, DataDeclaration, Expr, FnArm,
-    IncompleteType, Pattern, Requirements, TypeUnit,
+    decl_id::DeclId, ident_id::IdentId, types, types::TypeUnit, Ast,
+    DataDeclaration, Expr, FnArm, IncompleteType, Pattern,
+    Requirements,
 };
 use fxhash::FxHashMap;
 use intrinsics::INTRINSIC_VARIABLES;
@@ -32,7 +31,7 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, DeclId> {
             .collect();
     }
     for d in &ast.data_declarations {
-        let d_type: ast1::Type = constructor_type(d.clone()).into();
+        let d_type: types::Type = constructor_type(d.clone()).into();
         toplevels.entry(d.name.clone()).or_default().push(Toplevel {
             incomplete: d_type.into(),
             face: None,
@@ -254,7 +253,7 @@ fn min_type_incomplite(expr: &Expr) -> (IncompleteType, Resolved) {
             ) = multiunzip(arms.iter().map(|a| arm_min_type(a)));
             let resolved_idents =
                 resolved_idents.into_iter().flatten().collect();
-            let (args, rtns): (Vec<ast1::Type>, Vec<ast1::Type>) =
+            let (args, rtns): (Vec<types::Type>, Vec<types::Type>) =
                 arm_types.into_iter().unzip();
             let constructor = if args.len() == 1 {
                 TypeUnit::Fn(
@@ -282,7 +281,7 @@ fn min_type_incomplite(expr: &Expr) -> (IncompleteType, Resolved) {
             (construct_type("String").into(), Default::default())
         }
         Expr::Identifier { info, ident_id, .. } => {
-            let t: ast1::Type = TypeUnit::new_variable().into();
+            let t: types::Type = TypeUnit::new_variable().into();
             (
                 IncompleteType {
                     constructor: t.clone(),
@@ -304,8 +303,8 @@ fn min_type_incomplite(expr: &Expr) -> (IncompleteType, Resolved) {
         Expr::Call(f, a) => {
             let (f_t, resolved1) = min_type_incomplite(f);
             let (a_t, resolved2) = min_type_incomplite(a);
-            let b: ast1::Type = TypeUnit::new_variable().into();
-            let c: ast1::Type = TypeUnit::new_variable().into();
+            let b: types::Type = TypeUnit::new_variable().into();
+            let c: types::Type = TypeUnit::new_variable().into();
             // c -> b
             let cb_fn = TypeUnit::Fn(c.clone(), b.clone());
             // f < c -> b
@@ -384,7 +383,7 @@ fn marge_requirements(
 
 fn arm_min_type(
     arm: &FnArm,
-) -> ((ast1::Type, ast1::Type), Requirements, Resolved) {
+) -> ((types::Type, types::Type), Requirements, Resolved) {
     let (body_type, mut resolved_idents) =
         multi_expr_min_type(&arm.exprs);
     let (types, bindings): (Vec<_>, Vec<_>) =
@@ -394,7 +393,7 @@ fn arm_min_type(
         arm_type =
             TypeUnit::Fn(pattern_type.clone().into(), arm_type).into()
     }
-    let bindings: FxHashMap<String, (DeclId, ast1::Type)> = bindings
+    let bindings: FxHashMap<String, (DeclId, types::Type)> = bindings
         .into_iter()
         .flatten()
         .map(|(n, i, t)| (n, (i, t)))
@@ -429,7 +428,7 @@ fn arm_min_type(
 
 fn pattern_to_type(
     p: &Pattern,
-) -> (ast1::Type, Vec<(String, DeclId, ast1::Type)>) {
+) -> (types::Type, Vec<(String, DeclId, types::Type)>) {
     match p {
         Pattern::Number(_) => (construct_type("Num"), Vec::new()),
         Pattern::StrLiteral(_) => {
@@ -444,7 +443,7 @@ fn pattern_to_type(
             )
         }
         Pattern::Binder(name, decl_id) => {
-            let t: ast1::Type = TypeUnit::new_variable().into();
+            let t: types::Type = TypeUnit::new_variable().into();
             (t.clone(), vec![(name.to_string(), *decl_id, t)])
         }
         Pattern::Underscore => {
@@ -458,8 +457,10 @@ mod tests {
     use super::Toplevel;
     use crate::{
         ast1::{
-            decl_id::new_decl_id, ident_id::new_ident_id,
-            IncompleteType, Requirements, Type, TypeUnit,
+            decl_id::new_decl_id,
+            ident_id::new_ident_id,
+            types::{Type, TypeUnit},
+            IncompleteType, Requirements,
         },
         parse::infix_type_sequence,
         type_check::resolve_names,

@@ -1,5 +1,5 @@
 use crate::ast1::decl_id::{new_decl_id, DeclId};
-use crate::ast1::Type;
+use crate::ast1::types::Type;
 use crate::type_check::type_util::construct_type;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
