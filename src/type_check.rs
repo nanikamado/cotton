@@ -112,7 +112,6 @@ fn resolve_names(
             usize,
             IncompleteType,
             IdentId,
-            usize,
             DeclId,
         )> = None;
         'outer: for (name, types) in &toplevels {
@@ -126,20 +125,16 @@ fn resolve_names(
                         .enumerate()
                     {
                         let candidates = &toplevels[&req_name[..]];
-                        if candidates.iter().enumerate().all(
-                            |(i, c)| {
-                                c.face.is_none()
-                                    && !c.incomplete.resolved()
-                                    && !(name == req_name
-                                        && t_index == i)
-                            },
-                        ) {
+                        if candidates.iter().all(|c| {
+                            c.face.is_none()
+                                && !c.incomplete.resolved()
+                                && !(t.decl_id == c.decl_id)
+                        }) {
                             continue;
                         }
                         let successes: Vec<_> = candidates
                             .iter()
-                            .enumerate()
-                            .filter_map(|(i, cand)| {
+                            .filter_map(|cand| {
                                 let mut cand_t =
                                     if let Some(face) = &cand.face {
                                         face.clone()
@@ -147,7 +142,7 @@ fn resolve_names(
                                         cand.incomplete.clone()
                                     };
                                 let is_recursive =
-                                    name == req_name && t_index == i;
+                                    t.decl_id == cand.decl_id;
                                 if !is_recursive {
                                     cand_t =
                                         cand_t.change_variable_num();
@@ -190,7 +185,6 @@ fn resolve_names(
                                             cand_resolved
                                                 || is_recursive,
                                             removed_req.2,
-                                            i,
                                             cand.decl_id,
                                         )
                                     })
@@ -202,8 +196,7 @@ fn resolve_names(
                                 t_index,
                                 successes[0].0.clone(),
                                 successes[0].2.clone(),
-                                successes[0].3.clone(),
-                                successes[0].4,
+                                successes[0].3,
                             ));
                             break 'outer;
                         } else if successes.is_empty() {
@@ -212,15 +205,13 @@ fn resolve_names(
                                 req_name, name, t_index
                             );
                             eprintln!("req_t: {}", req_t);
-                            eprintln!("req_i: {}", req_i);
                             eprintln!("t -> {}", t.incomplete);
                         }
                     }
                 }
             }
         }
-        if let Some((name, v_index, r, ident_id, _, decl_id)) =
-            resolved
+        if let Some((name, v_index, r, ident_id, decl_id)) = resolved
         {
             let name = name.clone();
             let topl =
