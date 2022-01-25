@@ -73,8 +73,8 @@ impl TypeUnit {
         match self {
             t if t == *from => to.clone(),
             Self::Fn(args, rtn) => Self::Fn(
-                args.replace_type(from, to).into(),
-                rtn.replace_type(from, to).into(),
+                args.replace_type(from, to),
+                rtn.replace_type(from, to),
             ),
             Self::Normal(name, cs) => Self::Normal(
                 name,
@@ -99,8 +99,8 @@ impl TypeUnit {
     ) -> Self {
         match self {
             Self::Fn(args, rtn) => Self::Fn(
-                args.replace_type_union(from, to).into(),
-                rtn.replace_type_union(from, to).into(),
+                args.replace_type_union(from, to),
+                rtn.replace_type_union(from, to),
             ),
             Self::Normal(name, cs) => Self::Normal(
                 name,

@@ -11,7 +11,7 @@ use unic_ucd_category::GeneralCategory;
 
 pub fn compile(ast: Ast) -> String {
     format!(
-        "{}{}{}{}{}",
+        "{}{}{}{}${}$main($unicode_28_29);}}",
         r#"{
         |let $$unexpected = () => {throw new Error("unexpected")};
         |let $mod = a => b => a % b;
@@ -43,10 +43,7 @@ pub fn compile(ast: Ast) -> String {
             .map(data_declaration)
             .join(""),
         ast.declarations.iter().map(declaration).join(""),
-        format!(
-            "${}$main($unicode_28_29);}}",
-            ast.entry_point.unwrap()
-        ),
+        ast.entry_point.unwrap()
     )
 }
 

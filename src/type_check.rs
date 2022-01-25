@@ -127,7 +127,7 @@ fn resolve_names(
                         if candidates.iter().all(|c| {
                             c.face.is_none()
                                 && !c.incomplete.resolved()
-                                && !(t.decl_id == c.decl_id)
+                                && t.decl_id != c.decl_id
                         }) {
                             continue;
                         }
@@ -194,7 +194,7 @@ fn resolve_names(
                                 name,
                                 t_index,
                                 successes[0].0.clone(),
-                                successes[0].2.clone(),
+                                successes[0].2,
                                 successes[0].3,
                             ));
                             break 'outer;
@@ -250,7 +250,7 @@ fn min_type_incomplite(expr: &Expr) -> (IncompleteType, Resolved) {
                 Vec<_>,
                 Vec<_>,
                 Vec<_>,
-            ) = multiunzip(arms.iter().map(|a| arm_min_type(a)));
+            ) = multiunzip(arms.iter().map(arm_min_type));
             let resolved_idents =
                 resolved_idents.into_iter().flatten().collect();
             let (args, rtns): (Vec<types::Type>, Vec<types::Type>) =
@@ -387,11 +387,10 @@ fn arm_min_type(
     let (body_type, mut resolved_idents) =
         multi_expr_min_type(&arm.exprs);
     let (types, bindings): (Vec<_>, Vec<_>) =
-        arm.pattern.iter().map(|p| pattern_to_type(p)).unzip();
+        arm.pattern.iter().map(pattern_to_type).unzip();
     let mut arm_type = body_type.constructor;
     for pattern_type in types[1..].iter().rev() {
-        arm_type =
-            TypeUnit::Fn(pattern_type.clone().into(), arm_type).into()
+        arm_type = TypeUnit::Fn(pattern_type.clone(), arm_type).into()
     }
     let bindings: FxHashMap<String, (DeclId, types::Type)> = bindings
         .into_iter()
@@ -436,7 +435,7 @@ fn pattern_to_type(
         }
         Pattern::Constructor(name, cs) => {
             let (types, bindings): (Vec<_>, Vec<_>) =
-                cs.iter().map(|c| pattern_to_type(c)).unzip();
+                cs.iter().map(pattern_to_type).unzip();
             (
                 TypeUnit::Normal(name.clone(), types).into(),
                 bindings.concat(),

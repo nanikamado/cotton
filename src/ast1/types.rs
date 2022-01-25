@@ -93,13 +93,13 @@ pub mod type_type {
             match self.0.len() {
                 0 => Empty,
                 1 => match self.0.iter().next().unwrap() {
-                    TypeUnit::Normal(name, ts) => Normal(name, &ts),
-                    TypeUnit::Fn(arg, ret) => Fn(&arg, &ret),
+                    TypeUnit::Normal(name, ts) => Normal(name, ts),
+                    TypeUnit::Fn(arg, ret) => Fn(arg, ret),
                     TypeUnit::Variable(i) => Variable(*i),
                     TypeUnit::RecursiveAlias { alias, body } => {
                         RecursiveAlias {
                             alias: *alias,
-                            body: &body,
+                            body,
                         }
                     }
                 },
