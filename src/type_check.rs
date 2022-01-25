@@ -87,7 +87,7 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, DeclId> {
         eprintln!("{} : ", name);
         for t in top {
             eprintln!("{}", t.incomplete);
-            eprintln!("resolved: {:?}", t.resolved_idents);
+            eprintln!("resolved: {:?}\n", t.resolved_idents);
             resolved_idents.extend(t.resolved_idents)
         }
     }
@@ -215,6 +215,10 @@ fn resolve_names(
             let name = name.clone();
             let topl =
                 &mut toplevels.get_mut(&name).unwrap()[v_index];
+            debug_assert_eq!(
+                simplify::simplify_type(r.clone()).unwrap(),
+                r.clone()
+            );
             topl.incomplete = r;
             topl.resolved_idents.insert(ident_id, decl_id);
         } else {

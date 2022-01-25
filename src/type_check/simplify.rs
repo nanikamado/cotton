@@ -18,6 +18,7 @@ pub fn simplify_type(
         t = r.0;
         let updated = r.1;
         if !updated {
+            debug_assert_eq!(t, _simplify_type(t.clone()).unwrap().0);
             break;
         } else if i > 10 {
             eprintln!("loop count reached the limit.");
@@ -32,7 +33,7 @@ fn _simplify_type(
     mut t: IncompleteType,
 ) -> Option<(IncompleteType, bool)> {
     use TypeUnit::*;
-    let mut updated = false;
+    let hash_before_simplify = fxhash::hash(&t);
     let subtype_relationship =
         t.requirements.subtype_relation.clone();
     let g = mk_graph(&subtype_relationship);
@@ -50,11 +51,6 @@ fn _simplify_type(
                 }
             })
             .partition_result();
-        if eq_variable.len() >= 2
-            || !eq_variable.is_empty() && !eq_cons.is_empty()
-        {
-            updated = true;
-        }
         if eq_cons.is_empty() {
             for a in &eq_variable[1..] {
                 t = t.replace_num_option(
@@ -85,7 +81,6 @@ fn _simplify_type(
                 &t.requirements.subtype_relation,
             ) {
                 t = t.replace_num_option(cov, &s)?;
-                updated = true;
             }
         }
     }
@@ -96,7 +91,6 @@ fn _simplify_type(
                 &t.requirements.subtype_relation,
             ) {
                 t = t.replace_num_option(cont, &s)?;
-                updated = true;
             }
         }
     }
@@ -118,14 +112,12 @@ fn _simplify_type(
         match (st, we) {
             (Some(st), Some(we)) if st == we => {
                 t = t.replace_num_option(*a, &st)?;
-                updated = true;
             }
             (_, Some(we)) if we.len() == 0 => {
                 t = t.replace_num_option(
                     *a,
                     &TypeMatchable::Empty.into(),
                 )?;
-                updated = true;
             }
             // (Some(st), _)
             //     if !covariant_candidates.contains(a)
@@ -157,18 +149,15 @@ fn _simplify_type(
         .into_iter()
         .filter(|(_, a)| {
             if let TypeMatchableRef::Variable(a) = a.matchable_ref() {
-                let b = contravariant_candidates.contains(&a)
+                contravariant_candidates.contains(&a)
                     || covariant_candidates.contains(&a)
-                    || type_variables_in_sub_rel.contains(&a) >= 2;
-                if !b {
-                    updated = true;
-                }
-                b
+                    || type_variables_in_sub_rel.contains(&a) >= 2
             } else {
                 true
             }
         })
         .collect();
+    let updated = fxhash::hash(&t) != hash_before_simplify;
     Some((t, updated))
 }
 
