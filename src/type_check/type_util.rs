@@ -1,5 +1,9 @@
-use crate::ast1::{
-    IncompleteType, Requirements, TypeUnit, TypeMatchableRef, Type,
+use crate::{
+    ast0::Forall,
+    ast1::{
+        IncompleteType, Requirements, Type, TypeMatchableRef,
+        TypeUnit,
+    },
 };
 use itertools::Itertools;
 use std::collections::HashSet;
@@ -61,7 +65,11 @@ impl TypeUnit {
         }
     }
 
-    pub fn replace_type(self, from: &TypeUnit, to: &TypeUnit) -> Self {
+    pub fn replace_type(
+        self,
+        from: &TypeUnit,
+        to: &TypeUnit,
+    ) -> Self {
         match self {
             t if t == *from => to.clone(),
             Self::Fn(args, rtn) => Self::Fn(
@@ -84,7 +92,11 @@ impl TypeUnit {
         }
     }
 
-    pub fn replace_type_union(self, from: &Type, to: &TypeUnit) -> Self {
+    pub fn replace_type_union(
+        self,
+        from: &Type,
+        to: &TypeUnit,
+    ) -> Self {
         match self {
             Self::Fn(args, rtn) => Self::Fn(
                 args.replace_type_union(from, to).into(),
@@ -127,7 +139,9 @@ impl TypeUnit {
             TypeUnit::Normal(_, cs) => {
                 cs.iter().all(|c| c.is_singleton())
             }
-            TypeUnit::Fn(a, b) => a.is_singleton() && b.is_singleton(),
+            TypeUnit::Fn(a, b) => {
+                a.is_singleton() && b.is_singleton()
+            }
             _ => false,
         }
     }
@@ -144,11 +158,19 @@ impl Type {
             .collect()
     }
 
-    pub fn replace_type(self, from: &TypeUnit, to: &TypeUnit) -> Self {
+    pub fn replace_type(
+        self,
+        from: &TypeUnit,
+        to: &TypeUnit,
+    ) -> Self {
         self.into_iter().map(|t| t.replace_type(from, to)).collect()
     }
 
-    pub fn replace_type_union(self, from: &Type, to: &TypeUnit) -> Self {
+    pub fn replace_type_union(
+        self,
+        from: &Type,
+        to: &TypeUnit,
+    ) -> Self {
         if self == *from {
             to.clone().into()
         } else {
@@ -196,7 +218,8 @@ impl IncompleteType {
     pub fn change_variable_num(mut self) -> Self {
         let anos = self.all_type_variables();
         for a in anos {
-            self = self.replace_num(a, &TypeUnit::new_variable().into())
+            self =
+                self.replace_num(a, &TypeUnit::new_variable().into())
         }
         self
     }
@@ -253,5 +276,25 @@ impl Requirements {
 pub fn construct_type(s: &str) -> Type {
     let (_, type_seq) = crate::parse::infix_type_sequence(s).unwrap();
     let inc_t: IncompleteType = (type_seq, Default::default()).into();
+    inc_t.constructor
+}
+
+#[allow(unused)]
+pub fn construct_type_with_variables(
+    s: &str,
+    type_variable_names: &[&str],
+) -> Type {
+    let (_, type_seq) = crate::parse::infix_type_sequence(s).unwrap();
+    let inc_t: IncompleteType = (
+        type_seq,
+        Forall {
+            type_variable_names: type_variable_names
+                .iter()
+                .copied()
+                .map(|s| s.to_string())
+                .collect(),
+        },
+    )
+        .into();
     inc_t.constructor
 }

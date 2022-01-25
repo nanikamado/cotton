@@ -1,6 +1,6 @@
+pub(crate) mod intrinsics;
 mod simplify;
 mod type_util;
-pub(crate) mod intrinsics;
 
 use self::type_util::construct_type;
 use crate::ast1;
@@ -98,7 +98,7 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, DeclId> {
 struct Toplevel {
     incomplete: IncompleteType,
     face: Option<IncompleteType>,
-    resolved_idents: HashMap<IdentId, DeclId>,
+    resolved_idents: FxHashMap<IdentId, DeclId>,
     decl_id: DeclId,
 }
 

@@ -1,6 +1,6 @@
 use crate::ast1::{
-    self, IncompleteType, Requirements, TypeUnit, TypeMatchable,
-    TypeMatchableRef, Type,
+    self, IncompleteType, Requirements, Type, TypeMatchable,
+    TypeMatchableRef, TypeUnit,
 };
 use fxhash::FxHashSet;
 use hashbag::HashBag;
@@ -292,7 +292,8 @@ fn lift_recursive_alias(t: Type) -> Type {
             body: body.clone(),
         };
         let t = t.replace_type(r, &TypeUnit::Variable(alias));
-        let t = t.replace_type_union(&body, &TypeUnit::Variable(alias));
+        let t =
+            t.replace_type_union(&body, &TypeUnit::Variable(alias));
         t.replace_num(alias, &r.clone().into())
     } else {
         t
@@ -350,7 +351,8 @@ fn possible_weakest(
             let v = TypeUnit::new_variable_num();
             TypeUnit::RecursiveAlias {
                 alias: v,
-                body: up.replace_num(t, &TypeUnit::Variable(v).into()),
+                body: up
+                    .replace_num(t, &TypeUnit::Variable(v).into()),
             }
             .into()
         } else {
@@ -702,5 +704,52 @@ impl Display for Requirements {
             writeln!(f, "    ?{} : {},", a, b)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use stripmargin::StripMargin;
+
+    use crate::{
+        ast1::{IncompleteType, Requirements},
+        type_check::{
+            simplify::simplify_type,
+            type_util::{
+                construct_type, construct_type_with_variables,
+            },
+        },
+    };
+
+    #[test]
+    fn simplify1() {
+        let req_t_s = "Num /\\ Num -> \
+                   ((Num /\\ Num | Num /\\ t1 | t2 /\\ Num | t3 /\\ t4) -> Num | String)\
+                   -> Num | String";
+        let req_t = construct_type_with_variables(
+            req_t_s,
+            &["t1", "t2", "t3", "t4"],
+        );
+        let dot = construct_type_with_variables(
+            "a -> (a -> b) -> b",
+            &["a", "b"],
+        );
+        let t = IncompleteType {
+            constructor: construct_type("Num -> Num | String"),
+            requirements: Requirements {
+                variable_requirements: Vec::new(),
+                subtype_relation: vec![(dot, req_t)]
+                    .into_iter()
+                    .collect(),
+            },
+        };
+        let st = simplify_type(t).unwrap();
+        assert_eq!(
+            format!("{}", st.requirements),
+            r"|    /\(Num, Num) < t4,
+              |    t4 < {/\(Num, Num) | /\(Num, t0) | /\(t1, Num) | /\(t2, t3)},
+              |"
+            .strip_margin()
+        );
     }
 }
