@@ -28,13 +28,19 @@ fizzbuzz : Num -> String | Num
     --
 --
 
+to_string
+= fn
+| n => n.num_to_string
+| s => s
+--
+
 main : () -> ()
 = fn
 | () =>
     1.loop(fn
     | 101 => End(())
     | i =>
-        i.fizzbuzz.println
+        i.fizzbuzz.to_string.println
         Next(i + 1)
     --
     )
