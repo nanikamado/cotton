@@ -12,7 +12,7 @@ use crate::ast1::{
 use fxhash::FxHashMap;
 use intrinsics::INTRINSIC_VARIABLES;
 use itertools::multiunzip;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::vec;
 
 type Resolved = Vec<(IdentId, DeclId)>;
@@ -537,7 +537,7 @@ mod tests {
         assert_eq!(
             s,
             "main : 
-            |resolved: {IdentId(0): 0, IdentId(1): 1}
+            |resolved: {IdentId(0): DeclId(1), IdentId(1): DeclId(2)}
             |not face: () forall
             |--
             |default : 
@@ -616,7 +616,7 @@ mod tests {
         assert_eq!(
             s,
             r#"main : 
-            |resolved: {IdentId(0): 0, IdentId(1): 1}
+            |resolved: {IdentId(0): DeclId(1), IdentId(1): DeclId(2)}
             |not face: () forall
             |--
             |greet : 
