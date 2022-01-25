@@ -1,7 +1,7 @@
 use crate::ast0::{
-    Ast, DataDeclaration, Type, Decl, VariableDecl, Expr, FnArm,
-    Forall, InfixConstructorSequence, InfixTypeSequence, OpSequence,
-    Pattern,
+    Ast, DataDeclaration, Decl, Expr, FnArm, Forall,
+    InfixConstructorSequence, InfixTypeSequence, OpSequence, Pattern,
+    Type, VariableDecl,
 };
 use nom::{
     branch::alt,

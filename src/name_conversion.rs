@@ -1,6 +1,5 @@
 use crate::ast1::{
-    decl_id::DeclId, ident_id::IdentId, Ast,
-    Declaration, Expr, FnArm,
+    decl_id::DeclId, ident_id::IdentId, Ast, Declaration, Expr, FnArm,
 };
 use fxhash::FxHashMap;
 
