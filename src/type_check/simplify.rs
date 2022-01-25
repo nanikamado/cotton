@@ -461,10 +461,9 @@ fn covariant_type_variables(t: &Type) -> FxHashSet<usize> {
             covariant_type_variables(r),
             contravariant_type_variables(a),
         ),
-        TypeMatchableRef::Normal(_, cs) => cs
-            .iter()
-            .flat_map(covariant_type_variables)
-            .collect(),
+        TypeMatchableRef::Normal(_, cs) => {
+            cs.iter().flat_map(covariant_type_variables).collect()
+        }
         TypeMatchableRef::Union(cs) => cs
             .iter()
             .map(|c| covariant_type_variables(&c.clone().into()))
