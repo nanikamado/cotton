@@ -535,13 +535,13 @@ impl From<Type> for IncompleteType {
     }
 }
 
-impl From<ast0::Datatype> for Type {
-    fn from(t: ast0::Datatype) -> Self {
+impl From<ast0::Type> for Type {
+    fn from(t: ast0::Type) -> Self {
         match t {
-            ast0::Datatype::Identifier(s) => {
+            ast0::Type::Identifier(s) => {
                 TypeUnit::Normal(s, Vec::new()).into()
             }
-            ast0::Datatype::Paren(s) => s.into(),
+            ast0::Type::Paren(s) => s.into(),
         }
     }
 }

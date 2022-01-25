@@ -17,7 +17,7 @@ pub struct Declaration {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Datatype {
+pub enum Type {
     Identifier(String),
     Paren(InfixTypeSequence),
 }
@@ -25,7 +25,7 @@ pub enum Datatype {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct InfixTypeSequence {
     pub operators: Vec<String>,
-    pub operands: Vec<Datatype>,
+    pub operands: Vec<Type>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]

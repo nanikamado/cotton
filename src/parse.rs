@@ -1,5 +1,5 @@
 use crate::ast0::{
-    Ast, DataDeclaration, Datatype, Dec, Declaration, Expr, FnArm,
+    Ast, DataDeclaration, Type, Dec, Declaration, Expr, FnArm,
     Forall, InfixConstructorSequence, InfixTypeSequence, OpSequence,
     Pattern,
 };
@@ -124,12 +124,12 @@ fn infix_constructor_declaration(
     Ok((input, DataDeclaration { name, field_len: 2 }))
 }
 
-fn type_expr(input: &str) -> IResult<&str, Datatype> {
+fn type_expr(input: &str) -> IResult<&str, Type> {
     alt((
-        identifier.map(Datatype::Identifier),
-        tag("()").map(|_| Datatype::Identifier("()".to_string())),
+        identifier.map(Type::Identifier),
+        tag("()").map(|_| Type::Identifier("()".to_string())),
         delimited(tag("("), infix_type_sequence, tag(")"))
-            .map(Datatype::Paren),
+            .map(Type::Paren),
     ))(input)
 }
 
@@ -165,7 +165,7 @@ pub fn infix_type_sequence(
     ))
 }
 
-fn type_call(input: &str) -> IResult<&str, Vec<Datatype>> {
+fn type_call(input: &str) -> IResult<&str, Vec<Type>> {
     let (input, (_, a0, a1, _, _)) = tuple((
         tag("["),
         infix_type_sequence,
@@ -173,8 +173,8 @@ fn type_call(input: &str) -> IResult<&str, Vec<Datatype>> {
         opt(tag(",")),
         tag("]"),
     ))(input)?;
-    let mut a0 = vec![Datatype::Paren(a0)];
-    let mut a1 = a1.into_iter().map(Datatype::Paren).collect();
+    let mut a0 = vec![Type::Paren(a0)];
+    let mut a1 = a1.into_iter().map(Type::Paren).collect();
     a0.append(&mut a1);
     Ok((input, a0))
 }
