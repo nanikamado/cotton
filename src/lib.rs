@@ -6,7 +6,7 @@ mod parse;
 mod type_check;
 mod type_variable;
 
-use codegen::compile;
+use codegen::codegen;
 use parse::parse;
 use type_check::type_check;
 
@@ -18,7 +18,7 @@ pub fn run(source: &str) {
         // dbg!(&resolved_idents);
         let ast = name_conversion::run(ast, &resolved_idents);
         // dbg!(&ast);
-        println!("{}", compile(ast));
+        println!("{}", codegen(ast));
     } else {
         eprintln!(
             "unexpected input:\n{}\nast:\n{:?}",

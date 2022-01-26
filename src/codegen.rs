@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use stripmargin::StripMargin;
 use unic_ucd_category::GeneralCategory;
 
-pub fn compile(ast: Ast) -> String {
+pub fn codegen(ast: Ast) -> String {
     format!(
         "{}{}{}{}${}$main($unicode_28_29);}}",
         r#"{
