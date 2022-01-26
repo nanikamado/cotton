@@ -34,13 +34,20 @@ pub fn run(source: &str, output_js: bool, loglevel: LevelFilter) {
         if output_js {
             println!("{}", js);
         } else {
-            Command::new("node")
-                .arg("--eval")
-                .arg(js)
-                .spawn()
-                .expect("faild to run node")
-                .wait()
-                .unwrap();
+            let node =
+                Command::new("node").arg("--eval").arg(js).spawn();
+            match node {
+                Ok(a) => a,
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::NotFound => panic!(
+                        "node command not found. \
+                        You need to install node."
+                    ),
+                    _ => panic!("faild to run node"),
+                },
+            }
+            .wait()
+            .unwrap();
         }
     } else {
         eprintln!(
