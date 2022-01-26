@@ -407,30 +407,26 @@ fn possible_strongest(
 fn mk_contravariant_candidates(
     t: &IncompleteType,
 ) -> FxHashSet<usize> {
-    let mut rst: FxHashSet<usize> =
-        contravariant_type_variables(&t.constructor)
-            .into_iter()
-            .collect();
+    let mut rst: Vec<usize> =
+        contravariant_type_variables(&t.constructor);
     for (_, v, _) in &t.requirements.variable_requirements {
-        rst.extend(covariant_type_variables(v));
+        rst.append(&mut covariant_type_variables(v));
     }
-    rst
+    rst.into_iter().collect()
 }
 
 fn mk_covariant_candidates(t: &IncompleteType) -> FxHashSet<usize> {
-    let mut rst: FxHashSet<usize> =
-        covariant_type_variables(&t.constructor)
-            .into_iter()
-            .collect();
+    let mut rst: Vec<usize> =
+        covariant_type_variables(&t.constructor);
     for (_, v, _) in &t.requirements.variable_requirements {
-        rst.extend(contravariant_type_variables(v));
+        rst.append(&mut contravariant_type_variables(v));
     }
-    rst
+    rst.into_iter().collect()
 }
 
-fn covariant_type_variables(t: &Type) -> FxHashSet<usize> {
+fn covariant_type_variables(t: &Type) -> Vec<usize> {
     match t.matchable_ref() {
-        TypeMatchableRef::Fn(a, r) => marge_hashset(
+        TypeMatchableRef::Fn(a, r) => marge_vec(
             covariant_type_variables(r),
             contravariant_type_variables(a),
         ),
@@ -444,29 +440,23 @@ fn covariant_type_variables(t: &Type) -> FxHashSet<usize> {
         TypeMatchableRef::Variable(n) => {
             [n].iter().copied().collect()
         }
-        TypeMatchableRef::Empty => FxHashSet::default(),
+        TypeMatchableRef::Empty => Default::default(),
         TypeMatchableRef::RecursiveAlias { alias, body } => {
             let mut vs = covariant_type_variables(body);
-            vs.remove(&alias);
+            vs.remove(alias);
             vs
         }
     }
 }
 
-fn marge_hashset<T>(
-    mut a: FxHashSet<T>,
-    b: FxHashSet<T>,
-) -> FxHashSet<T>
-where
-    T: Eq + core::hash::Hash,
-{
-    a.extend(b);
+fn marge_vec<T>(mut a: Vec<T>, mut b: Vec<T>) -> Vec<T> {
+    a.append(&mut b);
     a
 }
 
-fn contravariant_type_variables(t: &Type) -> FxHashSet<usize> {
+fn contravariant_type_variables(t: &Type) -> Vec<usize> {
     match t.matchable_ref() {
-        TypeMatchableRef::Fn(a, r) => marge_hashset(
+        TypeMatchableRef::Fn(a, r) => marge_vec(
             covariant_type_variables(a),
             contravariant_type_variables(r),
         ),
@@ -478,11 +468,11 @@ fn contravariant_type_variables(t: &Type) -> FxHashSet<usize> {
             .map(|c| contravariant_type_variables(&c.clone().into()))
             .concat(),
         TypeMatchableRef::Variable(_) | TypeMatchableRef::Empty => {
-            FxHashSet::default()
+            Default::default()
         }
         TypeMatchableRef::RecursiveAlias { alias, body } => {
             let mut vs = contravariant_type_variables(body);
-            vs.remove(&alias);
+            vs.remove(alias);
             vs
         }
     }
