@@ -442,9 +442,10 @@ fn covariant_type_variables(t: &Type) -> Vec<usize> {
         }
         TypeMatchableRef::Empty => Default::default(),
         TypeMatchableRef::RecursiveAlias { alias, body } => {
-            let mut vs = covariant_type_variables(body);
-            vs.remove(alias);
-            vs
+            let mut vs: FxHashSet<_> =
+                covariant_type_variables(body).into_iter().collect();
+            vs.remove(&alias);
+            vs.into_iter().collect()
         }
     }
 }
@@ -471,9 +472,12 @@ fn contravariant_type_variables(t: &Type) -> Vec<usize> {
             Default::default()
         }
         TypeMatchableRef::RecursiveAlias { alias, body } => {
-            let mut vs = contravariant_type_variables(body);
-            vs.remove(alias);
-            vs
+            let mut vs: FxHashSet<_> =
+                contravariant_type_variables(body)
+                    .into_iter()
+                    .collect();
+            vs.remove(&alias);
+            vs.into_iter().collect()
         }
     }
 }
