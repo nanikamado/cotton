@@ -12,7 +12,10 @@ use parse::parse;
 use simplelog::{
     self, ColorChoice, Config, LevelFilter, TermLogger, TerminalMode,
 };
-use std::process::Command;
+use std::{
+    io::ErrorKind,
+    process::{exit, Command, Stdio},
+};
 use type_check::type_check;
 
 pub fn run(source: &str, output_js: bool, loglevel: LevelFilter) {
@@ -23,6 +26,25 @@ pub fn run(source: &str, output_js: bool, loglevel: LevelFilter) {
         ColorChoice::Auto,
     )
     .unwrap();
+    if !output_js {
+        match Command::new("node")
+            .arg("--version")
+            .stdout(Stdio::null())
+            .spawn()
+        {
+            Ok(_) => (),
+            Err(e) => {
+                match e.kind() {
+                    ErrorKind::NotFound => eprintln!(
+                        "node command not found. \
+                        You need to install node."
+                    ),
+                    _ => eprintln!("faild to run node"),
+                };
+                exit(1)
+            }
+        }
+    }
     let (remaining, ast) = parse(source).unwrap();
     if remaining.is_empty() {
         let ast: ast1::Ast = ast.into();
@@ -34,20 +56,13 @@ pub fn run(source: &str, output_js: bool, loglevel: LevelFilter) {
         if output_js {
             println!("{}", js);
         } else {
-            let node =
-                Command::new("node").arg("--eval").arg(js).spawn();
-            match node {
-                Ok(a) => a,
-                Err(e) => match e.kind() {
-                    std::io::ErrorKind::NotFound => panic!(
-                        "node command not found. \
-                        You need to install node."
-                    ),
-                    _ => panic!("faild to run node"),
-                },
-            }
-            .wait()
-            .unwrap();
+            Command::new("node")
+                .arg("--eval")
+                .arg(js)
+                .spawn()
+                .unwrap()
+                .wait()
+                .unwrap();
         }
     } else {
         eprintln!(
