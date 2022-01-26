@@ -28,7 +28,9 @@ pub struct IncompleteType {
     pub requirements: Requirements,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash,
+)]
 pub struct Requirements {
     pub variable_requirements: Vec<(String, Type, IdentId)>,
     pub subtype_relation: BTreeSet<(Type, Type)>,
