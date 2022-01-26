@@ -14,9 +14,6 @@ pub fn codegen(ast: Ast) -> String {
         "{}{}{}{}${}$main($unicode_28_29);}}",
         r#"{
         |let $$unexpected = () => {throw new Error("unexpected")};
-        |let $mod = a => b => a % b;
-        |let $neq = a => b => $$bool(a !== b);
-        |let $lt = a => b => $$bool(a < b);
         |let $$bool = a => a ? $$True : $$False;
         |let $$True = {name: 'True'};
         |let $$False = {name: 'False'};
