@@ -119,15 +119,6 @@ fn _simplify_type(
                     &TypeMatchable::Empty.into(),
                 )?;
             }
-            // (Some(st), _)
-            //     if !covariant_candidates.contains(a)
-            //         && !contravariant_candidates.contains(a)
-            //         && st != Type::Empty =>
-            // {
-            //     let new_type =
-            //         Type::union_with(st, Type::new_variable());
-            //     t = t.replace_num_option(*a, &new_type)?
-            // }
             _ => (),
         }
     }

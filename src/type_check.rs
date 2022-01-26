@@ -543,7 +543,6 @@ mod tests {
 
     #[test]
     fn resolve_2() {
-        // FxHashMap<String, Vec<Toplevel>>,
         let top_levels: FxHashMap<String, Vec<Toplevel>> = vec![
             (
                 ("main".to_string()),
