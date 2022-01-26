@@ -1,16 +1,17 @@
 use crate::ast1::{
-    decl_id::DeclId, ident_id::IdentId, Ast, Declaration, Expr, FnArm,
+    decl_id::DeclId, ident_id::IdentId, Ast, Expr, FnArm,
+    VariableDecl,
 };
 use fxhash::FxHashMap;
 
 pub fn run(mut ast: Ast, idents: &FxHashMap<IdentId, DeclId>) -> Ast {
     ast.entry_point = ast
-        .declarations
+        .variable_decl
         .iter()
-        .find(|d| d.identifier == "main")
+        .find(|d| d.ident == "main")
         .map(|d| d.decl_id);
-    ast.declarations = ast
-        .declarations
+    ast.variable_decl = ast
+        .variable_decl
         .into_iter()
         .map(|d| declaration(d, idents))
         .collect();
@@ -18,9 +19,9 @@ pub fn run(mut ast: Ast, idents: &FxHashMap<IdentId, DeclId>) -> Ast {
 }
 
 fn declaration(
-    mut d: Declaration,
+    mut d: VariableDecl,
     idents: &FxHashMap<IdentId, DeclId>,
-) -> Declaration {
+) -> VariableDecl {
     d.value = expr(d.value, idents);
     d
 }
@@ -30,12 +31,12 @@ fn expr(e: Expr, idents: &FxHashMap<IdentId, DeclId>) -> Expr {
         Expr::Lambda(arms) => Expr::Lambda(
             arms.into_iter().map(|a| fn_arm(a, idents)).collect(),
         ),
-        Expr::Identifier {
-            info,
+        Expr::Ident {
+            name: info,
             ident_id,
             decl_id: _,
-        } => Expr::Identifier {
-            info,
+        } => Expr::Ident {
+            name: info,
             ident_id,
             decl_id: idents.get(&ident_id).copied(),
         },

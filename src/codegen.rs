@@ -1,6 +1,6 @@
 use crate::ast1::{
-    decl_id::DeclId, Ast, DataDeclaration, Declaration, Expr, FnArm,
-    Pattern,
+    decl_id::DeclId, Ast, DataDecl, Expr, FnArm, Pattern,
+    VariableDecl,
 };
 use crate::type_check::intrinsics::INTRINSIC_VARIABLES;
 use itertools::Itertools;
@@ -35,16 +35,13 @@ pub fn codegen(ast: Ast) -> String {
                 )
             })
             .join(""),
-        ast.data_declarations
-            .into_iter()
-            .map(data_declaration)
-            .join(""),
-        ast.declarations.iter().map(declaration).join(""),
+        ast.data_decl.into_iter().map(data_declaration).join(""),
+        ast.variable_decl.iter().map(declaration).join(""),
         ast.entry_point.unwrap()
     )
 }
 
-fn data_declaration(d: DataDeclaration) -> String {
+fn data_declaration(d: DataDecl) -> String {
     let name = convert_name(&d.name);
     format!(
         "let ${}${}={}({{name:'{}',{}}});",
@@ -56,11 +53,11 @@ fn data_declaration(d: DataDeclaration) -> String {
     )
 }
 
-fn declaration(d: &Declaration) -> String {
+fn declaration(d: &VariableDecl) -> String {
     format!(
         "let ${}${}={};",
         d.decl_id,
-        convert_name(&d.identifier),
+        convert_name(&d.ident),
         expr(&d.value, 0)
     )
 }
@@ -94,7 +91,11 @@ fn expr(e: &Expr, name_count: u32) -> String {
         ),
         Expr::Number(a) => a.clone(),
         Expr::StrLiteral(a) => a.clone(),
-        Expr::Identifier { info, decl_id, .. } => {
+        Expr::Ident {
+            name: info,
+            decl_id,
+            ..
+        } => {
             format!("${}${}", decl_id.unwrap(), convert_name(info))
         }
         Expr::Declaration(a) => declaration(a),

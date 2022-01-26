@@ -5,8 +5,7 @@ mod type_util;
 use self::type_util::construct_type;
 use crate::ast1::{
     decl_id::DeclId, ident_id::IdentId, types, types::TypeUnit, Ast,
-    DataDeclaration, Expr, FnArm, IncompleteType, Pattern,
-    Requirements,
+    DataDecl, Expr, FnArm, IncompleteType, Pattern, Requirements,
 };
 use fxhash::FxHashMap;
 use intrinsics::INTRINSIC_VARIABLES;
@@ -30,7 +29,7 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, DeclId> {
             })
             .collect();
     }
-    for d in &ast.data_declarations {
+    for d in &ast.data_decl {
         let d_type: types::Type = constructor_type(d.clone()).into();
         toplevels.entry(d.name.clone()).or_default().push(Toplevel {
             incomplete: d_type.into(),
@@ -40,7 +39,7 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, DeclId> {
         });
     }
     let mut resolved_idents = FxHashMap::default();
-    for d in &ast.declarations {
+    for d in &ast.variable_decl {
         let (mut t, resolved) = min_type(&d.value).unwrap();
         resolved_idents.extend(resolved);
         let face = if let Some(annotation) = &d.type_annotation {
@@ -59,7 +58,7 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, DeclId> {
         } else {
             None
         };
-        toplevels.entry(d.identifier.clone()).or_default().push(
+        toplevels.entry(d.ident.clone()).or_default().push(
             Toplevel {
                 incomplete: simplify::simplify_type(t.clone())
                     .unwrap(),
@@ -222,7 +221,7 @@ fn resolve_names(
     toplevels
 }
 
-fn constructor_type(d: DataDeclaration) -> TypeUnit {
+fn constructor_type(d: DataDecl) -> TypeUnit {
     let field_types: Vec<_> =
         (0..d.field_len).map(|_| TypeUnit::new_variable()).collect();
     let mut t = TypeUnit::Normal(
@@ -278,7 +277,11 @@ fn min_type_incomplite(expr: &Expr) -> (IncompleteType, Resolved) {
         Expr::StrLiteral(_) => {
             (construct_type("String").into(), Default::default())
         }
-        Expr::Identifier { info, ident_id, .. } => {
+        Expr::Ident {
+            name: info,
+            ident_id,
+            ..
+        } => {
             let t: types::Type = TypeUnit::new_variable().into();
             (
                 IncompleteType {

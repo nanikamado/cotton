@@ -10,13 +10,13 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 #[derive(Debug, PartialEq)]
 pub struct Ast {
-    pub declarations: Vec<Declaration>,
-    pub data_declarations: Vec<DataDeclaration>,
+    pub variable_decl: Vec<VariableDecl>,
+    pub data_decl: Vec<DataDecl>,
     pub entry_point: Option<DeclId>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct DataDeclaration {
+pub struct DataDecl {
     pub name: String,
     pub field_len: usize,
     pub decl_id: DeclId,
@@ -37,17 +37,17 @@ pub struct Requirements {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct Declaration {
-    pub identifier: String,
+pub struct VariableDecl {
+    pub ident: String,
     pub type_annotation: Option<IncompleteType>,
     pub value: Expr,
     pub decl_id: DeclId,
 }
 
-impl From<ast0::VariableDecl> for Declaration {
+impl From<ast0::VariableDecl> for VariableDecl {
     fn from(d: ast0::VariableDecl) -> Self {
         Self {
-            identifier: d.identifier,
+            ident: d.identifier,
             type_annotation: d.type_annotation.map(|t| t.into()),
             value: d.value.into(),
             decl_id: new_decl_id(),
@@ -77,12 +77,12 @@ pub enum Expr {
     Lambda(Vec<FnArm>),
     Number(String),
     StrLiteral(String),
-    Identifier {
-        info: String,
+    Ident {
+        name: String,
         ident_id: IdentId,
         decl_id: Option<DeclId>,
     },
-    Declaration(Box<Declaration>),
+    Declaration(Box<VariableDecl>),
     Call(Box<Expr>, Box<Expr>),
     Unit,
 }
@@ -156,8 +156,8 @@ impl From<ast0::Expr> for Expr {
             }
             ast0::Expr::Number(a) => Number(a),
             ast0::Expr::StrLiteral(a) => StrLiteral(a),
-            ast0::Expr::Identifier(a) => Identifier {
-                info: a,
+            ast0::Expr::Identifier(a) => Ident {
+                name: a,
                 ident_id: new_ident_id(),
                 decl_id: None,
             },
@@ -306,7 +306,7 @@ impl From<ast0::Ast> for Ast {
             .into_iter()
             .map(|d| match d {
                 ast0::Decl::Variable(a) => Ok(declaration(a)),
-                ast0::Decl::Data(a) => Err(DataDeclaration {
+                ast0::Decl::Data(a) => Err(DataDecl {
                     name: a.name,
                     field_len: a.field_len,
                     decl_id: new_decl_id(),
@@ -314,16 +314,16 @@ impl From<ast0::Ast> for Ast {
             })
             .partition_result();
         Ast {
-            declarations: vs,
-            data_declarations: ds,
+            variable_decl: vs,
+            data_decl: ds,
             entry_point: None,
         }
     }
 }
 
-fn declaration(d: ast0::VariableDecl) -> Declaration {
-    Declaration {
-        identifier: d.identifier,
+fn declaration(d: ast0::VariableDecl) -> VariableDecl {
+    VariableDecl {
+        ident: d.identifier,
         type_annotation: d.type_annotation.map(|t| t.into()),
         value: d.value.into(),
         decl_id: new_decl_id(),
@@ -371,8 +371,8 @@ fn value_op_apply_left(
             } else {
                 Expr::Call(
                     Expr::Call(
-                        Expr::Identifier {
-                            info: op,
+                        Expr::Ident {
+                            name: op,
                             ident_id: new_ident_id(),
                             decl_id: None,
                         }
