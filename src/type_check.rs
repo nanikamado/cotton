@@ -70,24 +70,24 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, DeclId> {
         );
     }
     for (name, top) in &toplevels {
-        eprintln!("{} : ", name);
+        log::debug!("{} : ", name);
         for t in top {
-            eprintln!("resolved: {:?}", t.resolved_idents);
+            log::debug!("resolved: {:?}", t.resolved_idents);
             if let Some(f) = &t.face {
-                eprintln!("face: {}", f);
-                eprintln!("incomplete: {}", t.incomplete);
+                log::debug!("face: {}", f);
+                log::debug!("incomplete: {}", t.incomplete);
             } else {
-                eprintln!("not face: {}", t.incomplete);
+                log::debug!("not face: {}", t.incomplete);
             }
         }
     }
     let toplevels = resolve_names(toplevels);
-    eprintln!("------------------------------");
+    log::debug!("------------------------------");
     for (name, top) in toplevels {
-        eprintln!("{} : ", name);
+        log::debug!("{} : ", name);
         for t in top {
-            eprintln!("{}", t.incomplete);
-            eprintln!("resolved: {:?}\n", t.resolved_idents);
+            log::debug!("{}", t.incomplete);
+            log::debug!("resolved: {:?}\n", t.resolved_idents);
             resolved_idents.extend(t.resolved_idents)
         }
     }
@@ -199,12 +199,14 @@ fn resolve_names(
                             ));
                             break 'outer;
                         } else if successes.is_empty() {
-                            eprintln!(
+                            log::debug!(
                                 "all of {} has failed in {}[{}]",
-                                req_name, name, t_index
+                                req_name,
+                                name,
+                                t_index
                             );
-                            eprintln!("req_t: {}", req_t);
-                            eprintln!("t -> {}", t.incomplete);
+                            log::debug!("req_t: {}", req_t);
+                            log::debug!("t -> {}", t.incomplete);
                         }
                     }
                 }

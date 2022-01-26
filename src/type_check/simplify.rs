@@ -21,11 +21,11 @@ pub fn simplify_type(
             debug_assert_eq!(t, _simplify_type(t.clone()).unwrap().0);
             break;
         } else if i > 10 {
-            eprintln!("loop count reached the limit.");
+            log::debug!("loop count reached the limit.");
             break;
         }
     }
-    eprintln!("loop: {}", i);
+    log::debug!("loop: {}", i);
     Some(t)
 }
 
@@ -193,7 +193,6 @@ fn simplify_subtype_rel(
                         .concat(),
                 )
             } else {
-                // eprintln!("{} != {}", n1, n2);
                 None
             }
         }
@@ -346,12 +345,6 @@ fn possible_weakest(
             up
         })
     } else if up.is_empty() {
-        // eprintln!("{} -> Any", t);
-        // if let Type::Variable(n) = Type::new_variable() {
-        //     Some(Type::Variable(n + 10000))
-        // } else {
-        //     unreachable!()
-        // }
         None
     } else {
         let up_fs: FxHashSet<_> = up

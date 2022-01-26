@@ -7,18 +7,29 @@ mod type_check;
 mod type_variable;
 
 use codegen::codegen;
+use log;
 use parse::parse;
+use simplelog::{
+    self, ColorChoice, Config, LevelFilter, TermLogger, TerminalMode,
+};
 use std::process::Command;
 use type_check::type_check;
 
-pub fn run(source: &str, output_js: bool) {
+pub fn run(source: &str, output_js: bool, loglevel: LevelFilter) {
+    TermLogger::init(
+        loglevel,
+        Config::default(),
+        TerminalMode::Stderr,
+        ColorChoice::Auto,
+    )
+    .unwrap();
     let (remaining, ast) = parse(source).unwrap();
     if remaining.is_empty() {
         let ast: ast1::Ast = ast.into();
         let resolved_idents = type_check(&ast);
-        // dbg!(&resolved_idents);
+        log::trace!("{:?}", resolved_idents);
         let ast = name_conversion::run(ast, &resolved_idents);
-        // dbg!(&ast);
+        log::trace!("{:?}", ast);
         let js = codegen(ast);
         if output_js {
             println!("{}", js);
