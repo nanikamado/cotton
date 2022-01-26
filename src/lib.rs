@@ -7,7 +7,6 @@ mod type_check;
 mod type_variable;
 
 use codegen::codegen;
-use log;
 use parse::parse;
 use simplelog::{
     self, ColorChoice, Config, LevelFilter, TermLogger, TerminalMode,
