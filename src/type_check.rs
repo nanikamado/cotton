@@ -104,15 +104,15 @@ struct Toplevel {
 fn resolve_names(
     mut toplevels: FxHashMap<String, Vec<Toplevel>>,
 ) -> FxHashMap<String, Vec<Toplevel>> {
+    struct ResolvedType {
+        name: String,
+        index: usize,
+        incomplete_type: IncompleteType,
+        ident: IdentId,
+        decl: DeclId,
+    }
     loop {
-        // (name, num, variable req num, type)
-        let mut resolved: Option<(
-            &String,
-            usize,
-            IncompleteType,
-            IdentId,
-            DeclId,
-        )> = None;
+        let mut resolved: Option<ResolvedType> = None;
         'outer: for (name, types) in &toplevels {
             for (t_index, t) in types.iter().enumerate() {
                 if !t.incomplete.resolved() {
@@ -160,15 +160,6 @@ fn resolve_names(
                                         cand_t.constructor.clone(),
                                         req_t.clone(),
                                     ));
-                                // if is_recursive {
-                                //     incomplete
-                                //         .requirements
-                                //         .subtype_relation
-                                //         .insert((
-                                //             req_t.clone(),
-                                //             cand_t.constructor,
-                                //         ));
-                                // }
                                 incomplete
                                     .requirements
                                     .subtype_relation
@@ -190,13 +181,15 @@ fn resolve_names(
                             })
                             .collect();
                         if successes.len() == 1 && successes[0].1 {
-                            resolved = Some((
-                                name,
-                                t_index,
-                                successes[0].0.clone(),
-                                successes[0].2,
-                                successes[0].3,
-                            ));
+                            resolved = Some(ResolvedType {
+                                name: name.clone(),
+                                index: t_index,
+                                incomplete_type: successes[0]
+                                    .0
+                                    .clone(),
+                                ident: successes[0].2,
+                                decl: successes[0].3,
+                            });
                             break 'outer;
                         } else if successes.is_empty() {
                             log::debug!(
@@ -212,17 +205,16 @@ fn resolve_names(
                 }
             }
         }
-        if let Some((name, v_index, r, ident_id, decl_id)) = resolved
-        {
-            let name = name.clone();
+        if let Some(r) = resolved {
             let topl =
-                &mut toplevels.get_mut(&name).unwrap()[v_index];
+                &mut toplevels.get_mut(&r.name).unwrap()[r.index];
             debug_assert_eq!(
-                simplify::simplify_type(r.clone()).unwrap(),
-                r.clone()
+                simplify::simplify_type(r.incomplete_type.clone())
+                    .unwrap(),
+                r.incomplete_type
             );
-            topl.incomplete = r;
-            topl.resolved_idents.insert(ident_id, decl_id);
+            topl.incomplete = r.incomplete_type;
+            topl.resolved_idents.insert(r.ident, r.decl);
         } else {
             break;
         }
