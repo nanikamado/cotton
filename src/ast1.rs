@@ -62,9 +62,12 @@ impl From<(ast0::InfixTypeSequence, ast0::Forall)>
         (t, forall): (ast0::InfixTypeSequence, ast0::Forall),
     ) -> Self {
         let mut t: Type = t.into();
-        for v in forall.type_variable_names {
+        for name in forall.type_variable_names {
             t = t.replace_type(
-                &TypeUnit::Normal(v, Vec::new()),
+                &TypeUnit::Normal {
+                    name,
+                    args: Vec::new(),
+                },
                 &TypeUnit::new_variable(),
             );
         }
@@ -409,9 +412,11 @@ impl From<Type> for IncompleteType {
 impl From<ast0::Type> for Type {
     fn from(t: ast0::Type) -> Self {
         match t {
-            ast0::Type::Identifier(s) => {
-                TypeUnit::Normal(s, Vec::new()).into()
+            ast0::Type::Identifier(name) => TypeUnit::Normal {
+                name,
+                args: Vec::new(),
             }
+            .into(),
             ast0::Type::Paren(s) => s.into(),
         }
     }
@@ -460,7 +465,11 @@ fn type_op_apply_right(
             } else if op == "->" {
                 TypeUnit::Fn(last_, last).into()
             } else {
-                TypeUnit::Normal(op, vec![last_, last]).into()
+                TypeUnit::Normal {
+                    name: op,
+                    args: vec![last_, last],
+                }
+                .into()
             };
             operands.push_back(new_elm);
             type_op_apply_right(operators, operands, precedence)
@@ -486,11 +495,11 @@ fn type_op_apply_left(
         if OP_PRECEDENCE[&op[..]] == precedence {
             let head_ = operands.pop_front().unwrap();
             let new_elm = if op == "type_call" {
-                if let TypeMatchable::Normal(n, mut args) =
+                if let TypeMatchable::Normal { name, mut args } =
                     head.matchable()
                 {
                     args.push(head_);
-                    TypeUnit::Normal(n, args).into()
+                    TypeUnit::Normal { name, args }.into()
                 } else {
                     unimplemented!()
                 }
@@ -499,7 +508,11 @@ fn type_op_apply_left(
             } else if op == "|" {
                 head.merge(head_)
             } else {
-                TypeUnit::Normal(op, vec![head, head_]).into()
+                TypeUnit::Normal {
+                    name: op,
+                    args: vec![head, head_],
+                }
+                .into()
             };
             operands.push_front(new_elm);
             type_op_apply_left(operators, operands, precedence)

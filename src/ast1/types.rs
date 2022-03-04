@@ -4,7 +4,7 @@ use std::{collections::BTreeSet, fmt::Display};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeMatchable {
-    Normal(String, Vec<Type>),
+    Normal { name: String, args: Vec<Type> },
     Fn(Type, Type),
     Union(Type),
     Variable(usize),
@@ -14,7 +14,7 @@ pub enum TypeMatchable {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeMatchableRef<'a> {
-    Normal(&'a str, &'a Vec<Type>),
+    Normal { name: &'a str, args: &'a Vec<Type> },
     Fn(&'a Type, &'a Type),
     Union(&'a BTreeSet<TypeUnit>),
     Variable(usize),
@@ -24,7 +24,7 @@ pub enum TypeMatchableRef<'a> {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeUnit {
-    Normal(String, Vec<Type>),
+    Normal { name: String, args: Vec<Type> },
     Fn(Type, Type),
     Variable(usize),
     RecursiveAlias { alias: usize, body: Type },
@@ -77,7 +77,9 @@ pub mod type_type {
             match self.0.len() {
                 0 => Empty,
                 1 => match self.0.into_iter().next().unwrap() {
-                    TypeUnit::Normal(name, ts) => Normal(name, ts),
+                    TypeUnit::Normal { name, args } => {
+                        Normal { name, args }
+                    }
                     TypeUnit::Fn(arg, ret) => Fn(arg, ret),
                     TypeUnit::Variable(i) => Variable(i),
                     TypeUnit::RecursiveAlias { alias, body } => {
@@ -93,7 +95,9 @@ pub mod type_type {
             match self.0.len() {
                 0 => Empty,
                 1 => match self.0.iter().next().unwrap() {
-                    TypeUnit::Normal(name, ts) => Normal(name, ts),
+                    TypeUnit::Normal { name, args } => {
+                        Normal { name, args }
+                    }
                     TypeUnit::Fn(arg, ret) => Fn(arg, ret),
                     TypeUnit::Variable(i) => Variable(*i),
                     TypeUnit::RecursiveAlias { alias, body } => {
@@ -126,8 +130,8 @@ pub mod type_type {
 impl From<TypeMatchable> for Type {
     fn from(m: TypeMatchable) -> Self {
         match m {
-            TypeMatchable::Normal(name, cs) => {
-                TypeUnit::Normal(name, cs).into()
+            TypeMatchable::Normal { name, args } => {
+                TypeUnit::Normal { name, args }.into()
             }
             TypeMatchable::Fn(a, b) => TypeUnit::Fn(a, b).into(),
             TypeMatchable::Union(u) => u,
@@ -149,15 +153,15 @@ impl Display for Type {
     ) -> std::fmt::Result {
         use TypeMatchableRef::*;
         match self.matchable_ref() {
-            Normal(name, cs) => {
-                if cs.is_empty() {
+            Normal { name, args } => {
+                if args.is_empty() {
                     write!(f, "{}", name)
                 } else {
                     write!(
                         f,
                         "{}({})",
                         name,
-                        cs.iter()
+                        args.iter()
                             .map(|c| format!("{}", c))
                             .join(", ")
                     )
@@ -199,15 +203,15 @@ impl Display for TypeUnit {
     ) -> std::fmt::Result {
         use TypeUnit::*;
         match self {
-            Normal(name, cs) => {
-                if cs.is_empty() {
+            Normal { name, args } => {
+                if args.is_empty() {
                     write!(f, "{}", name)
                 } else {
                     write!(
                         f,
                         "{}({})",
                         name,
-                        cs.iter()
+                        args.iter()
                             .map(|c| format!("{}", c))
                             .join(", ")
                     )

@@ -173,7 +173,16 @@ fn simplify_subtype_rel(
             ]
             .concat(),
         ),
-        (Normal(n1, cs1), Normal(n2, cs2)) => {
+        (
+            Normal {
+                name: n1,
+                args: cs1,
+            },
+            Normal {
+                name: n2,
+                args: cs2,
+            },
+        ) => {
             if n1 == n2 {
                 assert_eq!(cs1.len(), cs2.len());
                 Some(
@@ -187,10 +196,10 @@ fn simplify_subtype_rel(
                 None
             }
         }
-        (Fn(_, _), Normal(_, _))
-        | (Normal(_, _), Fn(_, _))
+        (Fn(_, _), Normal { .. })
+        | (Normal { .. }, Fn(_, _))
         | (Fn(_, _), Empty)
-        | (Normal(_, _), Empty) => None,
+        | (Normal { .. }, Empty) => None,
         (sub, sup) if sub == sup => Some(Vec::new()),
         (Empty, _) => Some(Vec::new()),
         (a, Union(u)) if u.contains(&a.clone().into()) => {
@@ -201,9 +210,9 @@ fn simplify_subtype_rel(
         {
             Some(Vec::new())
         }
-        (Normal(name, cs), RecursiveAlias { alias, body }) => {
+        (Normal { name, args }, RecursiveAlias { alias, body }) => {
             simplify_subtype_rel(
-                Normal(name, cs).into(),
+                Normal { name, args }.into(),
                 unwrap_recursive_alias(alias, body),
             )
         }
@@ -235,18 +244,21 @@ fn simplify_subtype_rel(
                 .collect();
             Some(vec![(a.into(), new_cs)])
         }
-        (Normal(name, cs), Union(u)) => {
+        (Normal { name, args }, Union(u)) => {
             let new_u: Type = u
                 .into_iter()
                 .filter(|c| {
-                    if let TypeUnit::Normal(c_name, _) = c {
+                    if let TypeUnit::Normal { name: c_name, .. } = c {
                         *c_name == name
                     } else {
                         true
                     }
                 })
                 .collect();
-            Some(vec![(TypeUnit::Normal(name, cs).into(), new_u)])
+            Some(vec![(
+                TypeUnit::Normal { name, args }.into(),
+                new_u,
+            )])
         }
         (sub, sup) => {
             let sub: Type = sub.into();
@@ -287,8 +299,8 @@ fn unwrap_recursive_alias(alias: usize, body: Type) -> Type {
 impl TypeUnit {
     fn find_recursive_alias(&self) -> Option<(usize, Type)> {
         match self {
-            TypeUnit::Normal(_, cs) => {
-                cs.iter().find_map(Type::find_recursive_alias)
+            TypeUnit::Normal { args, .. } => {
+                args.iter().find_map(Type::find_recursive_alias)
             }
             TypeUnit::Fn(a, r) => {
                 a.find_recursive_alias()?;
@@ -350,7 +362,7 @@ fn possible_weakest(
         let up_ns: FxHashSet<_> = up
             .iter()
             .filter_map(|t| {
-                if let TypeMatchableRef::Normal(name, _) =
+                if let TypeMatchableRef::Normal { name, .. } =
                     t.matchable_ref()
                 {
                     Some(name)
@@ -430,8 +442,8 @@ fn covariant_type_variables(t: &Type) -> Vec<usize> {
             covariant_type_variables(r),
             contravariant_type_variables(a),
         ),
-        TypeMatchableRef::Normal(_, cs) => {
-            cs.iter().flat_map(covariant_type_variables).collect()
+        TypeMatchableRef::Normal { args, .. } => {
+            args.iter().flat_map(covariant_type_variables).collect()
         }
         TypeMatchableRef::Union(cs) => cs
             .iter()
@@ -461,8 +473,8 @@ fn contravariant_type_variables(t: &Type) -> Vec<usize> {
             covariant_type_variables(a),
             contravariant_type_variables(r),
         ),
-        TypeMatchableRef::Normal(_, cs) => {
-            cs.iter().map(contravariant_type_variables).concat()
+        TypeMatchableRef::Normal { args, .. } => {
+            args.iter().map(contravariant_type_variables).concat()
         }
         TypeMatchableRef::Union(cs) => cs
             .iter()

@@ -224,10 +224,10 @@ fn resolve_names(
 fn constructor_type(d: DataDecl) -> TypeUnit {
     let field_types: Vec<_> =
         (0..d.field_len).map(|_| TypeUnit::new_variable()).collect();
-    let mut t = TypeUnit::Normal(
-        d.name,
-        field_types.iter().map(|t| t.clone().into()).collect(),
-    );
+    let mut t = TypeUnit::Normal {
+        name: d.name,
+        args: field_types.iter().map(|t| t.clone().into()).collect(),
+    };
     for field in field_types.into_iter().rev() {
         t = TypeUnit::Fn(field.into(), t.into())
     }
@@ -438,7 +438,11 @@ fn pattern_to_type(
             let (types, bindings): (Vec<_>, Vec<_>) =
                 cs.iter().map(pattern_to_type).unzip();
             (
-                TypeUnit::Normal(name.clone(), types).into(),
+                TypeUnit::Normal {
+                    name: name.clone(),
+                    args: types,
+                }
+                .into(),
                 bindings.concat(),
             )
         }
@@ -653,7 +657,11 @@ mod tests {
     fn construct_type_test_1() {
         assert_eq!(
             construct_type("Foge"),
-            TypeUnit::Normal("Foge".to_string(), Vec::new()).into()
+            TypeUnit::Normal {
+                name: "Foge".to_string(),
+                args: Vec::new()
+            }
+            .into()
         )
     }
 

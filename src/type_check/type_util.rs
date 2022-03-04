@@ -12,7 +12,7 @@ use TypeMatchableRef::{Fn, Normal};
 impl TypeUnit {
     pub fn all_type_variables(&self) -> Vec<usize> {
         match self {
-            TypeUnit::Normal(_, u) => u
+            TypeUnit::Normal { name: _, args } => args
                 .iter()
                 .flat_map(|t| t.all_type_variables())
                 .collect(),
@@ -37,15 +37,15 @@ impl TypeUnit {
                 rtn.replace_num(from, to),
             )
             .into(),
-            Self::Normal(name, cs) => {
-                let cs = cs
+            Self::Normal { name, args } => {
+                let args = args
                     .into_iter()
                     .map(|t| t.replace_num(from, to))
                     .collect_vec();
-                if cs.iter().any(|c| c.len() == 0) {
+                if args.iter().any(|c| c.len() == 0) {
                     Default::default()
                 } else {
-                    Self::Normal(name, cs).into()
+                    Self::Normal { name, args }.into()
                 }
             }
             Self::Variable(n) => {
@@ -76,12 +76,13 @@ impl TypeUnit {
                 args.replace_type(from, to),
                 rtn.replace_type(from, to),
             ),
-            Self::Normal(name, cs) => Self::Normal(
+            Self::Normal { name, args } => Self::Normal {
                 name,
-                cs.into_iter()
+                args: args
+                    .into_iter()
                     .map(|t| t.replace_type(from, to))
                     .collect(),
-            ),
+            },
             Self::Variable(n) => Self::Variable(n),
             Self::RecursiveAlias { alias, body } => {
                 Self::RecursiveAlias {
@@ -102,12 +103,13 @@ impl TypeUnit {
                 args.replace_type_union(from, to),
                 rtn.replace_type_union(from, to),
             ),
-            Self::Normal(name, cs) => Self::Normal(
+            Self::Normal { name, args } => Self::Normal {
                 name,
-                cs.into_iter()
+                args: args
+                    .into_iter()
                     .map(|t| t.replace_type_union(from, to))
                     .collect(),
-            ),
+            },
             Self::Variable(n) => Self::Variable(n),
             Self::RecursiveAlias { alias, body } => {
                 Self::RecursiveAlias {
@@ -120,8 +122,8 @@ impl TypeUnit {
 
     pub fn contains_num(&self, variable_num: usize) -> bool {
         match self {
-            Self::Normal(_, cs) => {
-                cs.iter().any(|c| c.contains_num(variable_num))
+            Self::Normal { name: _, args } => {
+                args.iter().any(|c| c.contains_num(variable_num))
             }
             Self::Fn(a, r) => {
                 a.contains_num(variable_num)
@@ -136,8 +138,8 @@ impl TypeUnit {
 
     pub fn is_singleton(&self) -> bool {
         match self {
-            TypeUnit::Normal(_, cs) => {
-                cs.iter().all(|c| c.is_singleton())
+            TypeUnit::Normal { name: _, args } => {
+                args.iter().all(|c| c.is_singleton())
             }
             TypeUnit::Fn(a, b) => {
                 a.is_singleton() && b.is_singleton()
@@ -182,7 +184,9 @@ impl Type {
 
     pub fn is_singleton(&self) -> bool {
         match self.matchable_ref() {
-            Normal(_, cs) => cs.iter().all(|c| c.is_singleton()),
+            Normal { name: _, args } => {
+                args.iter().all(|c| c.is_singleton())
+            }
             Fn(a, b) => a.is_singleton() && b.is_singleton(),
             _ => false,
         }
