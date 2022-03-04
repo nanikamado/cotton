@@ -227,6 +227,7 @@ fn constructor_type(d: DataDecl) -> TypeUnit {
     let mut t = TypeUnit::Normal {
         name: d.name,
         args: field_types.iter().map(|t| t.clone().into()).collect(),
+        id: None,
     };
     for field in field_types.into_iter().rev() {
         t = TypeUnit::Fn(field.into(), t.into())
@@ -441,6 +442,7 @@ fn pattern_to_type(
                 TypeUnit::Normal {
                     name: name.clone(),
                     args: types,
+                    id: None,
                 }
                 .into(),
                 bindings.concat(),
@@ -659,7 +661,8 @@ mod tests {
             construct_type("Foge"),
             TypeUnit::Normal {
                 name: "Foge".to_string(),
-                args: Vec::new()
+                args: Vec::new(),
+                id: None
             }
             .into()
         )

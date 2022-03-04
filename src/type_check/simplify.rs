@@ -177,10 +177,12 @@ fn simplify_subtype_rel(
             Normal {
                 name: n1,
                 args: cs1,
+                ..
             },
             Normal {
                 name: n2,
                 args: cs2,
+                ..
             },
         ) => {
             if n1 == n2 {
@@ -210,12 +212,13 @@ fn simplify_subtype_rel(
         {
             Some(Vec::new())
         }
-        (Normal { name, args }, RecursiveAlias { alias, body }) => {
-            simplify_subtype_rel(
-                Normal { name, args }.into(),
-                unwrap_recursive_alias(alias, body),
-            )
-        }
+        (
+            Normal { name, args, id },
+            RecursiveAlias { alias, body },
+        ) => simplify_subtype_rel(
+            Normal { name, args, id }.into(),
+            unwrap_recursive_alias(alias, body),
+        ),
         (
             RecursiveAlias {
                 alias: alias1,
@@ -244,7 +247,7 @@ fn simplify_subtype_rel(
                 .collect();
             Some(vec![(a.into(), new_cs)])
         }
-        (Normal { name, args }, Union(u)) => {
+        (Normal { name, args, id }, Union(u)) => {
             let new_u: Type = u
                 .into_iter()
                 .filter(|c| {
@@ -256,7 +259,7 @@ fn simplify_subtype_rel(
                 })
                 .collect();
             Some(vec![(
-                TypeUnit::Normal { name, args }.into(),
+                TypeUnit::Normal { name, args, id }.into(),
                 new_u,
             )])
         }

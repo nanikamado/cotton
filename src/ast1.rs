@@ -67,6 +67,7 @@ impl From<(ast0::InfixTypeSequence, ast0::Forall)>
                 &TypeUnit::Normal {
                     name,
                     args: Vec::new(),
+                    id: None,
                 },
                 &TypeUnit::new_variable(),
             );
@@ -415,6 +416,7 @@ impl From<ast0::Type> for Type {
             ast0::Type::Identifier(name) => TypeUnit::Normal {
                 name,
                 args: Vec::new(),
+                id: None,
             }
             .into(),
             ast0::Type::Paren(s) => s.into(),
@@ -468,6 +470,7 @@ fn type_op_apply_right(
                 TypeUnit::Normal {
                     name: op,
                     args: vec![last_, last],
+                    id: None,
                 }
                 .into()
             };
@@ -495,11 +498,11 @@ fn type_op_apply_left(
         if OP_PRECEDENCE[&op[..]] == precedence {
             let head_ = operands.pop_front().unwrap();
             let new_elm = if op == "type_call" {
-                if let TypeMatchable::Normal { name, mut args } =
+                if let TypeMatchable::Normal { name, mut args, id } =
                     head.matchable()
                 {
                     args.push(head_);
-                    TypeUnit::Normal { name, args }.into()
+                    TypeUnit::Normal { name, args, id }.into()
                 } else {
                     unimplemented!()
                 }
@@ -511,6 +514,7 @@ fn type_op_apply_left(
                 TypeUnit::Normal {
                     name: op,
                     args: vec![head, head_],
+                    id: None,
                 }
                 .into()
             };
