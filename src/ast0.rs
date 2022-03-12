@@ -56,15 +56,6 @@ pub struct OpSequence {
     pub operands: Vec<Expr>,
 }
 
-impl From<Expr> for OpSequence {
-    fn from(e: Expr) -> Self {
-        OpSequence {
-            operators: Vec::new(),
-            operands: vec![e],
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FnArm {
     pub pattern: Vec<InfixConstructorSequence>,
