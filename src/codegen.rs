@@ -35,13 +35,13 @@ pub fn codegen(ast: Ast) -> String {
                 )
             })
             .join(""),
-        ast.data_decl.into_iter().map(data_declaration).join(""),
-        ast.variable_decl.iter().map(declaration).join(""),
+        ast.data_decl.into_iter().map(data_decl).join(""),
+        ast.variable_decl.iter().map(variable_decl).join(""),
         ast.entry_point.unwrap()
     )
 }
 
-fn data_declaration(d: DataDecl) -> String {
+fn data_decl(d: DataDecl) -> String {
     let name = convert_name(&d.name);
     format!(
         "let ${}${}={}({{name:'{}',{}}});",
@@ -53,7 +53,7 @@ fn data_declaration(d: DataDecl) -> String {
     )
 }
 
-fn declaration(d: &VariableDecl) -> String {
+fn variable_decl(d: &VariableDecl) -> String {
     format!(
         "let ${}${}={};",
         d.decl_id,
@@ -105,7 +105,7 @@ fn expr(e: &Expr, name_count: u32) -> String {
                 convert_name(info)
             )
         }
-        Expr::Declaration(a) => declaration(a),
+        Expr::Decl(a) => variable_decl(a),
         Expr::Call(f, a) => format!(
             "{}({})",
             expr(&*f, name_count),

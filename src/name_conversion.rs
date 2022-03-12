@@ -13,12 +13,12 @@ pub fn run(mut ast: Ast, idents: &FxHashMap<IdentId, DeclId>) -> Ast {
     ast.variable_decl = ast
         .variable_decl
         .into_iter()
-        .map(|d| declaration(d, idents))
+        .map(|d| decl(d, idents))
         .collect();
     ast
 }
 
-fn declaration(
+fn decl(
     mut d: VariableDecl,
     idents: &FxHashMap<IdentId, DeclId>,
 ) -> VariableDecl {
@@ -40,9 +40,7 @@ fn expr(e: Expr, idents: &FxHashMap<IdentId, DeclId>) -> Expr {
             ident_id,
             decl_id: idents.get(&ident_id).copied(),
         },
-        Expr::Declaration(d) => {
-            Expr::Declaration(Box::new(declaration(*d, idents)))
-        }
+        Expr::Decl(d) => Expr::Decl(Box::new(decl(*d, idents))),
         Expr::Call(a, b) => Expr::Call(
             Box::new(expr(*a, idents)),
             Box::new(expr(*b, idents)),

@@ -1,5 +1,5 @@
 use crate::ast0::{
-    Ast, DataDeclaration, Decl, Expr, FnArm, Forall,
+    Ast, DataDecl, Decl, Expr, FnArm, Forall,
     InfixConstructorSequence, InfixTypeSequence, OpSequence, Pattern,
     Type, VariableDecl,
 };
@@ -19,15 +19,15 @@ fn separator0(input: &str) -> IResult<&str, Vec<char>> {
 }
 
 pub fn parse(source: &str) -> IResult<&str, Ast> {
-    let (input, declarations) = many1(dec)(source)?;
-    Ok((input, Ast { declarations }))
+    let (input, decls) = many1(dec)(source)?;
+    Ok((input, Ast { decls }))
 }
 
 fn dec(input: &str) -> IResult<&str, Decl> {
     pad(alt((
-        declaration.map(Decl::Variable),
-        infix_constructor_declaration.map(Decl::Data),
-        data_declaration.map(Decl::Data),
+        decl.map(Decl::Variable),
+        infix_constructor_decl.map(Decl::Data),
+        data_decl.map(Decl::Data),
     )))(input)
 }
 
@@ -40,7 +40,7 @@ where
     delimited(separator0, f, separator0)
 }
 
-fn declaration(input: &str) -> IResult<&str, VariableDecl> {
+fn decl(input: &str) -> IResult<&str, VariableDecl> {
     let (input, (identifier, _, data_type, _, _, value)) =
         tuple((
             identifier,
@@ -83,7 +83,7 @@ fn identifier_separators(input: &str) -> IResult<&str, String> {
     pad(identifier)(input)
 }
 
-fn data_declaration(input: &str) -> IResult<&str, DataDeclaration> {
+fn data_decl(input: &str) -> IResult<&str, DataDecl> {
     let (input, (_, _, name, fields)) = tuple((
         tag("data"),
         separator0,
@@ -105,23 +105,21 @@ fn data_declaration(input: &str) -> IResult<&str, DataDeclaration> {
     };
     Ok((
         input,
-        DataDeclaration {
+        DataDecl {
             name,
             field_len: fields.len(),
         },
     ))
 }
 
-fn infix_constructor_declaration(
-    input: &str,
-) -> IResult<&str, DataDeclaration> {
+fn infix_constructor_decl(input: &str) -> IResult<&str, DataDecl> {
     let (input, (_, _l, name, _r)) = tuple((
         tag("data"),
         identifier_separators,
         op,
         identifier_separators,
     ))(input)?;
-    Ok((input, DataDeclaration { name, field_len: 2 }))
+    Ok((input, DataDecl { name, field_len: 2 }))
 }
 
 fn type_expr(input: &str) -> IResult<&str, Type> {
@@ -217,7 +215,7 @@ fn expr(input: &str) -> IResult<&str, Expr> {
         num_literal.map(|s| Expr::Number(s.to_string())),
         unit,
         lambda,
-        declaration.map(|d| Expr::Declaration(Box::new(d))),
+        decl.map(|d| Expr::Decl(Box::new(d))),
         identifier.map(Expr::Identifier),
         paren,
     ))(input)

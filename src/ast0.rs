@@ -1,12 +1,12 @@
 #[derive(Debug, PartialEq, Eq)]
 pub struct Ast {
-    pub declarations: Vec<Decl>,
+    pub decls: Vec<Decl>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Decl {
     Variable(VariableDecl),
-    Data(DataDeclaration),
+    Data(DataDecl),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -34,7 +34,7 @@ pub struct Forall {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct DataDeclaration {
+pub struct DataDecl {
     pub name: String,
     pub field_len: usize,
 }
@@ -45,7 +45,7 @@ pub enum Expr {
     Number(String),
     StrLiteral(String),
     Identifier(String),
-    Declaration(Box<VariableDecl>),
+    Decl(Box<VariableDecl>),
     Unit,
     Paren(OpSequence),
 }

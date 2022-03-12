@@ -300,7 +300,7 @@ fn min_type_incomplite(expr: &Expr) -> (IncompleteType, Resolved) {
                 Default::default(),
             )
         }
-        Expr::Declaration(_) => {
+        Expr::Decl(_) => {
             (construct_type("()").into(), Default::default())
         }
         Expr::Call(f, a) => {

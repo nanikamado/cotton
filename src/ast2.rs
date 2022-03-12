@@ -72,7 +72,7 @@ pub enum Expr {
         ident_id: IdentId,
         decl_id: Option<DeclId>,
     },
-    Declaration(Box<VariableDecl>),
+    Decl(Box<VariableDecl>),
     Call(Box<Expr>, Box<Expr>),
     Unit,
 }
@@ -151,9 +151,7 @@ impl From<ast1::Expr> for Expr {
                 ident_id: new_ident_id(),
                 decl_id: None,
             },
-            ast1::Expr::Declaration(a) => {
-                Declaration(Box::new((*a).into()))
-            }
+            ast1::Expr::Decl(a) => Decl(Box::new((*a).into())),
             ast1::Expr::Unit => Unit,
             ast1::Expr::Paren(a) => a.into(),
         }
@@ -294,8 +292,7 @@ impl PartialOrd for Operator {
 
 impl From<ast1::Ast> for Ast {
     fn from(ast: ast1::Ast) -> Self {
-        let vs =
-            ast.variable_decl.into_iter().map(declaration).collect();
+        let vs = ast.variable_decl.into_iter().map(decl).collect();
         let ds = ast
             .data_decl
             .into_iter()
@@ -313,7 +310,7 @@ impl From<ast1::Ast> for Ast {
     }
 }
 
-fn declaration(d: ast1::VariableDecl) -> VariableDecl {
+fn decl(d: ast1::VariableDecl) -> VariableDecl {
     VariableDecl {
         ident: d.identifier,
         type_annotation: d.type_annotation.map(|t| t.into()),

@@ -63,7 +63,7 @@ pub enum Expr {
     Number(String),
     StrLiteral(String),
     Identifier(String),
-    Declaration(Box<VariableDecl>),
+    Decl(Box<VariableDecl>),
     Unit,
     Paren(OpSequence),
 }
@@ -134,7 +134,7 @@ impl From<ConstructorIdent> for TypeIdent {
 impl From<ast0::Ast> for Ast {
     fn from(ast: ast0::Ast) -> Self {
         let (vs, ds): (Vec<_>, Vec<_>) = ast
-            .declarations
+            .decls
             .into_iter()
             .map(|d| match d {
                 ast0::Decl::Variable(a) => Ok(a),
@@ -260,8 +260,8 @@ fn expr(
         ast0::Expr::Number(a) => Number(a),
         ast0::Expr::StrLiteral(a) => StrLiteral(a),
         ast0::Expr::Identifier(a) => Identifier(a),
-        ast0::Expr::Declaration(a) => {
-            Declaration(Box::new(variable_decl(*a, data_decl_map)))
+        ast0::Expr::Decl(a) => {
+            Decl(Box::new(variable_decl(*a, data_decl_map)))
         }
         ast0::Expr::Unit => Unit,
         ast0::Expr::Paren(a) => Paren(op_sequence(a, data_decl_map)),
