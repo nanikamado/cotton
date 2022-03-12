@@ -96,7 +96,14 @@ fn expr(e: &Expr, name_count: u32) -> String {
             decl_id,
             ..
         } => {
-            format!("${}${}", decl_id.unwrap(), convert_name(info))
+            format!(
+                "${}${}",
+                decl_id.expect(&format!(
+                    "decl_id of {:?} is None",
+                    info
+                )),
+                convert_name(info)
+            )
         }
         Expr::Declaration(a) => declaration(a),
         Expr::Call(f, a) => format!(
@@ -161,7 +168,7 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
             Pattern::Constructor(a, ps) => {
                 let mut v = vec![format!(
                     "'{}'==={}.name",
-                    convert_name(a),
+                    convert_name(a.name()),
                     n
                 )];
                 v.append(&mut _condition(

@@ -1,11 +1,14 @@
 mod ast0;
+mod ast0_5;
 mod ast1;
 mod codegen;
 mod name_conversion;
 mod parse;
+mod resolve_type_names;
 mod type_check;
 mod type_variable;
 
+use crate::resolve_type_names::resolve_type_names;
 use codegen::codegen;
 use parse::parse;
 use simplelog::{
@@ -46,7 +49,9 @@ pub fn run(source: &str, output_js: bool, loglevel: LevelFilter) {
     }
     let (remaining, ast) = parse(source).unwrap();
     if remaining.is_empty() {
+        let ast: ast0_5::Ast = ast.into();
         let ast: ast1::Ast = ast.into();
+        let ast = resolve_type_names(ast);
         let resolved_idents = type_check(&ast);
         log::trace!("{:?}", resolved_idents);
         let ast = name_conversion::run(ast, &resolved_idents);

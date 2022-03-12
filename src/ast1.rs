@@ -3,8 +3,8 @@ pub mod types;
 use self::decl_id::{new_decl_id, DeclId};
 use self::ident_id::{new_ident_id, IdentId};
 use self::types::{Type, TypeMatchable, TypeUnit};
-use crate::ast0;
-use itertools::Itertools;
+use crate::ast0_5::{self, ConstructorIdent, TypeIdent};
+use crate::type_check::intrinsics::IntrinsicType;
 use once_cell::sync::Lazy;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
@@ -44,8 +44,8 @@ pub struct VariableDecl {
     pub decl_id: DeclId,
 }
 
-impl From<ast0::VariableDecl> for VariableDecl {
-    fn from(d: ast0::VariableDecl) -> Self {
+impl From<ast0_5::VariableDecl> for VariableDecl {
+    fn from(d: ast0_5::VariableDecl) -> Self {
         Self {
             ident: d.identifier,
             type_annotation: d.type_annotation.map(|t| t.into()),
@@ -55,23 +55,9 @@ impl From<ast0::VariableDecl> for VariableDecl {
     }
 }
 
-impl From<(ast0::InfixTypeSequence, ast0::Forall)>
-    for IncompleteType
-{
-    fn from(
-        (t, forall): (ast0::InfixTypeSequence, ast0::Forall),
-    ) -> Self {
-        let mut t: Type = t.into();
-        for name in forall.type_variable_names {
-            t = t.replace_type(
-                &TypeUnit::Normal {
-                    name,
-                    args: Vec::new(),
-                    id: None,
-                },
-                &TypeUnit::new_variable(),
-            );
-        }
+impl From<ast0_5::InfixTypeSequence> for IncompleteType {
+    fn from(t: ast0_5::InfixTypeSequence) -> Self {
+        let t: Type = t.into();
         t.into()
     }
 }
@@ -151,25 +137,25 @@ pub mod decl_id {
     }
 }
 
-impl From<ast0::Expr> for Expr {
-    fn from(ast_expr: ast0::Expr) -> Self {
+impl From<ast0_5::Expr> for Expr {
+    fn from(ast_expr: ast0_5::Expr) -> Self {
         use Expr::*;
         match ast_expr {
-            ast0::Expr::Lambda(a) => {
+            ast0_5::Expr::Lambda(a) => {
                 Lambda(a.into_iter().map(|f| f.into()).collect())
             }
-            ast0::Expr::Number(a) => Number(a),
-            ast0::Expr::StrLiteral(a) => StrLiteral(a),
-            ast0::Expr::Identifier(a) => Ident {
+            ast0_5::Expr::Number(a) => Number(a),
+            ast0_5::Expr::StrLiteral(a) => StrLiteral(a),
+            ast0_5::Expr::Identifier(a) => Ident {
                 name: a,
                 ident_id: new_ident_id(),
                 decl_id: None,
             },
-            ast0::Expr::Declaration(a) => {
+            ast0_5::Expr::Declaration(a) => {
                 Declaration(Box::new((*a).into()))
             }
-            ast0::Expr::Unit => Unit,
-            ast0::Expr::Paren(a) => a.into(),
+            ast0_5::Expr::Unit => Unit,
+            ast0_5::Expr::Paren(a) => a.into(),
         }
     }
 }
@@ -185,16 +171,19 @@ pub struct FnArm {
 pub enum Pattern {
     Number(String),
     StrLiteral(String),
-    Constructor(String, Vec<Pattern>),
+    Constructor(ConstructorIdent, Vec<Pattern>),
     Binder(String, DeclId),
     Underscore,
 }
 
 fn infix_constructor_sequence_to_pattern(
-    s: ast0::InfixConstructorSequence,
+    s: ast0_5::InfixConstructorSequence,
 ) -> Pattern {
-    let op_list: BTreeSet<_> =
-        s.operators.iter().map(|s| OP_PRECEDENCE[&s[..]]).collect();
+    let op_list: BTreeSet<_> = s
+        .operators
+        .iter()
+        .map(|s| OP_PRECEDENCE[s.name()])
+        .collect();
     let mut operators = s.operators;
     let mut operands: Vec<Pattern> =
         s.operands.into_iter().map(Pattern::from).collect();
@@ -202,7 +191,7 @@ fn infix_constructor_sequence_to_pattern(
         let mut operand_head = 0;
         for i in 0..operators.len() {
             let op = operators[i].clone();
-            if a == OP_PRECEDENCE[&op[..]] {
+            if a == OP_PRECEDENCE[op.name()] {
                 operands[operand_head] = Pattern::Constructor(
                     op,
                     vec![
@@ -215,32 +204,32 @@ fn infix_constructor_sequence_to_pattern(
                 operands[operand_head] = operands[i + 1].clone();
             }
         }
-        operators.retain(|o| OP_PRECEDENCE[&o[..]] != a);
+        operators.retain(|o| OP_PRECEDENCE[o.name()] != a);
     }
     operands[0].clone()
 }
 
-impl From<ast0::Pattern> for Pattern {
-    fn from(p: ast0::Pattern) -> Self {
+impl From<ast0_5::Pattern> for Pattern {
+    fn from(p: ast0_5::Pattern) -> Self {
         match p {
-            ast0::Pattern::Number(n) => Pattern::Number(n),
-            ast0::Pattern::StrLiteral(s) => Pattern::StrLiteral(s),
-            ast0::Pattern::Constructor(name, cs) => {
+            ast0_5::Pattern::Number(n) => Pattern::Number(n),
+            ast0_5::Pattern::StrLiteral(s) => Pattern::StrLiteral(s),
+            ast0_5::Pattern::Constructor { id, args, .. } => {
                 Pattern::Constructor(
-                    name,
-                    cs.into_iter().map(Pattern::from).collect(),
+                    id,
+                    args.into_iter().map(Pattern::from).collect(),
                 )
             }
-            ast0::Pattern::Binder(name) => {
+            ast0_5::Pattern::Binder(name) => {
                 Pattern::Binder(name, new_decl_id())
             }
-            ast0::Pattern::Underscore => Pattern::Underscore,
+            ast0_5::Pattern::Underscore => Pattern::Underscore,
         }
     }
 }
 
-impl From<ast0::FnArm> for FnArm {
-    fn from(ast_fn_arm: ast0::FnArm) -> Self {
+impl From<ast0_5::FnArm> for FnArm {
+    fn from(ast_fn_arm: ast0_5::FnArm) -> Self {
         Self {
             pattern: ast_fn_arm
                 .pattern
@@ -303,20 +292,19 @@ impl PartialOrd for Operator {
     }
 }
 
-impl From<ast0::Ast> for Ast {
-    fn from(ast: ast0::Ast) -> Self {
-        let (vs, ds) = ast
-            .declarations
+impl From<ast0_5::Ast> for Ast {
+    fn from(ast: ast0_5::Ast) -> Self {
+        let vs =
+            ast.variable_decl.into_iter().map(declaration).collect();
+        let ds = ast
+            .data_decl
             .into_iter()
-            .map(|d| match d {
-                ast0::Decl::Variable(a) => Ok(declaration(a)),
-                ast0::Decl::Data(a) => Err(DataDecl {
-                    name: a.name,
-                    field_len: a.field_len,
-                    decl_id: new_decl_id(),
-                }),
+            .map(|a| DataDecl {
+                name: a.name,
+                field_len: a.field_len,
+                decl_id: new_decl_id(),
             })
-            .partition_result();
+            .collect();
         Ast {
             variable_decl: vs,
             data_decl: ds,
@@ -325,7 +313,7 @@ impl From<ast0::Ast> for Ast {
     }
 }
 
-fn declaration(d: ast0::VariableDecl) -> VariableDecl {
+fn declaration(d: ast0_5::VariableDecl) -> VariableDecl {
     VariableDecl {
         ident: d.identifier,
         type_annotation: d.type_annotation.map(|t| t.into()),
@@ -334,8 +322,8 @@ fn declaration(d: ast0::VariableDecl) -> VariableDecl {
     }
 }
 
-impl From<ast0::OpSequence> for Expr {
-    fn from(s: ast0::OpSequence) -> Self {
+impl From<ast0_5::OpSequence> for Expr {
+    fn from(s: ast0_5::OpSequence) -> Self {
         let op_list: BTreeSet<_> = s
             .operators
             .iter()
@@ -410,29 +398,35 @@ impl From<Type> for IncompleteType {
     }
 }
 
-impl From<ast0::Type> for Type {
-    fn from(t: ast0::Type) -> Self {
+impl From<ast0_5::Type> for Type {
+    fn from(t: ast0_5::Type) -> Self {
         match t {
-            ast0::Type::Identifier(name) => TypeUnit::Normal {
-                name,
+            ast0_5::Type::Identifier(ident) => TypeUnit::Normal {
+                name: ident.name().to_string(),
                 args: Vec::new(),
-                id: None,
+                id: ident,
             }
             .into(),
-            ast0::Type::Paren(s) => s.into(),
+            ast0_5::Type::Paren(s) => s.into(),
+            ast0_5::Type::Variable(a) => TypeUnit::Variable(a).into(),
         }
     }
 }
 
-impl From<ast0::InfixTypeSequence> for Type {
-    fn from(s: ast0::InfixTypeSequence) -> Self {
+impl From<ast0_5::InfixTypeSequence> for Type {
+    fn from(s: ast0_5::InfixTypeSequence) -> Self {
         let op_list: BTreeSet<_> = s
             .operators
             .iter()
             .map(|s| {
-                *OP_PRECEDENCE.get(&s[..]).unwrap_or_else(|| {
-                    panic!("no entry found for key: {}", s)
-                })
+                *OP_PRECEDENCE.get(&s.name()[..]).unwrap_or_else(
+                    || {
+                        panic!(
+                            "no entry found for key: {:?}",
+                            s.name()
+                        )
+                    },
+                )
             })
             .collect();
         let mut operators = s.operators.into_iter().collect();
@@ -454,23 +448,26 @@ impl From<ast0::InfixTypeSequence> for Type {
 }
 
 fn type_op_apply_right(
-    mut operators: VecDeque<String>,
+    mut operators: VecDeque<TypeIdent>,
     mut operands: VecDeque<Type>,
     precedence: i32,
-) -> (VecDeque<String>, VecDeque<Type>) {
+) -> (VecDeque<TypeIdent>, VecDeque<Type>) {
     if let Some(op) = operators.pop_back() {
         let last = operands.pop_back().unwrap();
-        if OP_PRECEDENCE[&op[..]] == precedence {
+        if OP_PRECEDENCE[op.name()] == precedence {
             let last_ = operands.pop_back().unwrap();
-            let new_elm = if op == "type_call" {
+            let new_elm = if op
+                == TypeIdent::Intrinsic(IntrinsicType::Call)
+            {
                 unimplemented!()
-            } else if op == "->" {
+            } else if op == TypeIdent::Intrinsic(IntrinsicType::Arrow)
+            {
                 TypeUnit::Fn(last_, last).into()
             } else {
                 TypeUnit::Normal {
-                    name: op,
+                    name: op.name().to_string(),
                     args: vec![last_, last],
-                    id: None,
+                    id: op,
                 }
                 .into()
             };
@@ -489,15 +486,17 @@ fn type_op_apply_right(
 }
 
 fn type_op_apply_left(
-    mut operators: VecDeque<String>,
+    mut operators: VecDeque<TypeIdent>,
     mut operands: VecDeque<Type>,
     precedence: i32,
-) -> (VecDeque<String>, VecDeque<Type>) {
+) -> (VecDeque<TypeIdent>, VecDeque<Type>) {
     if let Some(op) = operators.pop_front() {
         let head = operands.pop_front().unwrap();
-        if OP_PRECEDENCE[&op[..]] == precedence {
+        if OP_PRECEDENCE[op.name()] == precedence {
             let head_ = operands.pop_front().unwrap();
-            let new_elm = if op == "type_call" {
+            let new_elm = if op
+                == TypeIdent::Intrinsic(IntrinsicType::Call)
+            {
                 if let TypeMatchable::Normal { name, mut args, id } =
                     head.matchable()
                 {
@@ -506,15 +505,16 @@ fn type_op_apply_left(
                 } else {
                     unimplemented!()
                 }
-            } else if op == "->" {
+            } else if op == TypeIdent::Intrinsic(IntrinsicType::Call)
+            {
                 TypeUnit::Fn(head, head_).into()
-            } else if op == "|" {
+            } else if op == TypeIdent::Intrinsic(IntrinsicType::Bar) {
                 head.merge(head_)
             } else {
                 TypeUnit::Normal {
-                    name: op,
+                    name: op.name().to_string(),
                     args: vec![head, head_],
-                    id: None,
+                    id: op,
                 }
                 .into()
             };

@@ -1,5 +1,5 @@
 pub use self::type_type::Type;
-use super::decl_id::DeclId;
+use crate::ast0_5::TypeIdent;
 use itertools::Itertools;
 use std::{collections::BTreeSet, fmt::Display};
 
@@ -8,7 +8,7 @@ pub enum TypeMatchable {
     Normal {
         name: String,
         args: Vec<Type>,
-        id: Option<DeclId>,
+        id: TypeIdent,
     },
     Fn(Type, Type),
     Union(Type),
@@ -25,7 +25,7 @@ pub enum TypeMatchableRef<'a> {
     Normal {
         name: &'a str,
         args: &'a Vec<Type>,
-        id: Option<DeclId>,
+        id: TypeIdent,
     },
     Fn(&'a Type, &'a Type),
     Union(&'a BTreeSet<TypeUnit>),
@@ -42,7 +42,7 @@ pub enum TypeUnit {
     Normal {
         name: String,
         args: Vec<Type>,
-        id: Option<DeclId>,
+        id: TypeIdent,
     },
     Fn(Type, Type),
     Variable(usize),
@@ -120,7 +120,7 @@ pub mod type_type {
                     TypeUnit::Normal { name, args, id } => Normal {
                         name,
                         args,
-                        id: *id,
+                        id: id.clone(),
                     },
                     TypeUnit::Fn(arg, ret) => Fn(arg, ret),
                     TypeUnit::Variable(i) => Variable(*i),

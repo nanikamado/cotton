@@ -1,10 +1,13 @@
 use crate::{
-    ast0::Forall,
+    ast0_5,
     ast1::{
+        self,
         types::{Type, TypeMatchableRef, TypeUnit},
         IncompleteType, Requirements,
     },
+    resolve_type_names,
 };
+use fxhash::FxHashMap;
 use itertools::Itertools;
 use std::collections::HashSet;
 use TypeMatchableRef::{Fn, Normal};
@@ -281,26 +284,38 @@ impl Requirements {
 
 pub fn construct_type(s: &str) -> Type {
     let (_, type_seq) = crate::parse::infix_type_sequence(s).unwrap();
-    let inc_t: IncompleteType = (type_seq, Default::default()).into();
-    inc_t.constructor
+    let type_seq: ast0_5::InfixTypeSequence =
+        ast0_5::infix_type_sequence(
+            type_seq,
+            &Default::default(),
+            &Default::default(),
+        );
+    let inc_t: IncompleteType = type_seq.into();
+    resolve_type_names::type_resolve(
+        inc_t.constructor,
+        &Default::default(),
+    )
 }
 
 #[allow(unused)]
 pub fn construct_type_with_variables(
     s: &str,
     type_variable_names: &[&str],
+    data_decl_map: &FxHashMap<&str, ast1::decl_id::DeclId>,
 ) -> Type {
     let (_, type_seq) = crate::parse::infix_type_sequence(s).unwrap();
-    let inc_t: IncompleteType = (
-        type_seq,
-        Forall {
-            type_variable_names: type_variable_names
+    let type_seq: ast0_5::InfixTypeSequence =
+        ast0_5::infix_type_sequence(
+            type_seq,
+            &type_variable_names
                 .iter()
                 .copied()
-                .map(|s| s.to_string())
+                .map(|s| {
+                    (s.to_string(), TypeUnit::new_variable_num())
+                })
                 .collect(),
-        },
-    )
-        .into();
-    inc_t.constructor
+            data_decl_map,
+        );
+    let inc_t: IncompleteType = type_seq.into();
+    resolve_type_names::type_resolve(inc_t.constructor, data_decl_map)
 }

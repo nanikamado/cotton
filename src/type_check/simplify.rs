@@ -599,10 +599,13 @@ impl Display for Requirements {
 
 #[cfg(test)]
 mod tests {
+    use fxhash::FxHashMap;
     use stripmargin::StripMargin;
 
     use crate::{
-        ast1::{IncompleteType, Requirements},
+        ast0_5,
+        ast1::{self, IncompleteType, Requirements},
+        parse,
         type_check::{
             simplify::simplify_type,
             type_util::{
@@ -613,16 +616,25 @@ mod tests {
 
     #[test]
     fn simplify1() {
+        let ast: ast0_5::Ast =
+            parse::parse(r"data a /\ b").unwrap().1.into();
+        let data_decl_map: FxHashMap<&str, ast1::decl_id::DeclId> =
+            ast.data_decl
+                .iter()
+                .map(|d| (&d.name[..], d.decl_id))
+                .collect();
         let req_t_s = "Num /\\ Num -> \
                    ((Num /\\ Num | Num /\\ t1 | t2 /\\ Num | t3 /\\ t4) -> Num | String)\
                    -> Num | String";
         let req_t = construct_type_with_variables(
             req_t_s,
             &["t1", "t2", "t3", "t4"],
+            &data_decl_map,
         );
         let dot = construct_type_with_variables(
             "a -> (a -> b) -> b",
             &["a", "b"],
+            &data_decl_map,
         );
         let t = IncompleteType {
             constructor: construct_type("Num -> Num | String"),
