@@ -1,6 +1,6 @@
 mod ast0;
-mod ast0_5;
 mod ast1;
+mod ast2;
 mod codegen;
 mod name_conversion;
 mod parse;
@@ -49,8 +49,8 @@ pub fn run(source: &str, output_js: bool, loglevel: LevelFilter) {
     }
     let (remaining, ast) = parse(source).unwrap();
     if remaining.is_empty() {
-        let ast: ast0_5::Ast = ast.into();
         let ast: ast1::Ast = ast.into();
+        let ast: ast2::Ast = ast.into();
         let ast = resolve_type_names(ast);
         let resolved_idents = type_check(&ast);
         log::trace!("{:?}", resolved_idents);

@@ -1,4 +1,4 @@
-use crate::ast1::{
+use crate::ast2::{
     types::{Type, TypeMatchable, TypeMatchableRef, TypeUnit},
     IncompleteType, Requirements,
 };
@@ -603,8 +603,8 @@ mod tests {
     use stripmargin::StripMargin;
 
     use crate::{
-        ast0_5,
-        ast1::{self, IncompleteType, Requirements},
+        ast1,
+        ast2::{self, IncompleteType, Requirements},
         parse,
         type_check::{
             simplify::simplify_type,
@@ -616,9 +616,9 @@ mod tests {
 
     #[test]
     fn simplify1() {
-        let ast: ast0_5::Ast =
+        let ast: ast1::Ast =
             parse::parse(r"data a /\ b").unwrap().1.into();
-        let data_decl_map: FxHashMap<&str, ast1::decl_id::DeclId> =
+        let data_decl_map: FxHashMap<&str, ast2::decl_id::DeclId> =
             ast.data_decl
                 .iter()
                 .map(|d| (&d.name[..], d.decl_id))

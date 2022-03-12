@@ -1,4 +1,4 @@
-use crate::ast1::types::TypeUnit;
+use crate::ast2::types::TypeUnit;
 use std::cell::Cell;
 
 impl TypeUnit {

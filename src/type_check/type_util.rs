@@ -1,6 +1,6 @@
 use crate::{
-    ast0_5,
-    ast1::{
+    ast1,
+    ast2::{
         self,
         types::{Type, TypeMatchableRef, TypeUnit},
         IncompleteType, Requirements,
@@ -284,12 +284,11 @@ impl Requirements {
 
 pub fn construct_type(s: &str) -> Type {
     let (_, type_seq) = crate::parse::infix_type_sequence(s).unwrap();
-    let type_seq: ast0_5::InfixTypeSequence =
-        ast0_5::infix_type_sequence(
-            type_seq,
-            &Default::default(),
-            &Default::default(),
-        );
+    let type_seq: ast1::InfixTypeSequence = ast1::infix_type_sequence(
+        type_seq,
+        &Default::default(),
+        &Default::default(),
+    );
     let inc_t: IncompleteType = type_seq.into();
     resolve_type_names::type_resolve(
         inc_t.constructor,
@@ -301,21 +300,18 @@ pub fn construct_type(s: &str) -> Type {
 pub fn construct_type_with_variables(
     s: &str,
     type_variable_names: &[&str],
-    data_decl_map: &FxHashMap<&str, ast1::decl_id::DeclId>,
+    data_decl_map: &FxHashMap<&str, ast2::decl_id::DeclId>,
 ) -> Type {
     let (_, type_seq) = crate::parse::infix_type_sequence(s).unwrap();
-    let type_seq: ast0_5::InfixTypeSequence =
-        ast0_5::infix_type_sequence(
-            type_seq,
-            &type_variable_names
-                .iter()
-                .copied()
-                .map(|s| {
-                    (s.to_string(), TypeUnit::new_variable_num())
-                })
-                .collect(),
-            data_decl_map,
-        );
+    let type_seq: ast1::InfixTypeSequence = ast1::infix_type_sequence(
+        type_seq,
+        &type_variable_names
+            .iter()
+            .copied()
+            .map(|s| (s.to_string(), TypeUnit::new_variable_num()))
+            .collect(),
+        data_decl_map,
+    );
     let inc_t: IncompleteType = type_seq.into();
     resolve_type_names::type_resolve(inc_t.constructor, data_decl_map)
 }

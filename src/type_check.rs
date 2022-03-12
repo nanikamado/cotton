@@ -3,8 +3,8 @@ mod simplify;
 mod type_util;
 
 use self::type_util::construct_type;
-use crate::ast0_5::TypeIdent;
-use crate::ast1::{
+use crate::ast1::TypeIdent;
+use crate::ast2::{
     decl_id::DeclId, ident_id::IdentId, types, types::TypeUnit, Ast,
     DataDecl, Expr, FnArm, IncompleteType, Pattern, Requirements,
 };
@@ -463,8 +463,8 @@ fn pattern_to_type(
 mod tests {
     use super::Toplevel;
     use crate::{
-        ast0_5,
-        ast1::{
+        ast1,
+        ast2::{
             decl_id::{self, new_decl_id},
             ident_id::new_ident_id,
             types::{Type, TypeUnit},
@@ -480,7 +480,7 @@ mod tests {
 
     #[test]
     fn resolve_1() {
-        let ast: ast0_5::Ast =
+        let ast: ast1::Ast =
             parse::parse("data Hoge\ndata Fuga").unwrap().1.into();
         let data_decl_map: FxHashMap<&str, decl_id::DeclId> = ast
             .data_decl
@@ -576,7 +576,7 @@ mod tests {
 
     #[test]
     fn resolve_2() {
-        let ast: ast0_5::Ast =
+        let ast: ast1::Ast =
             parse::parse("data Hoge\ndata Fuga").unwrap().1.into();
         let data_decl_map: FxHashMap<&str, decl_id::DeclId> = ast
             .data_decl
@@ -695,7 +695,7 @@ mod tests {
         data_decl_map: &FxHashMap<&str, decl_id::DeclId>,
     ) -> Type {
         let (_, type_seq) = parse::infix_type_sequence(s).unwrap();
-        let type_seq = ast0_5::infix_type_sequence(
+        let type_seq = ast1::infix_type_sequence(
             type_seq,
             &Default::default(),
             &data_decl_map,
@@ -706,7 +706,7 @@ mod tests {
 
     #[test]
     fn construct_type_test_1() {
-        let ast: ast0_5::Ast =
+        let ast: ast1::Ast =
             parse::parse("data Foge").unwrap().1.into();
         let data_decl_map: FxHashMap<&str, decl_id::DeclId> = ast
             .data_decl
@@ -727,7 +727,7 @@ mod tests {
 
     #[test]
     fn construct_type_test_2() {
-        let ast: ast0_5::Ast =
+        let ast: ast1::Ast =
             parse::parse("data Foge").unwrap().1.into();
         let data_decl_map: FxHashMap<&str, decl_id::DeclId> = ast
             .data_decl

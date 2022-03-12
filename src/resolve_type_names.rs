@@ -1,6 +1,6 @@
 use crate::{
-    ast0_5::TypeIdent,
-    ast1::{decl_id::DeclId, types::Type, Ast, DataDecl},
+    ast1::TypeIdent,
+    ast2::{decl_id::DeclId, types::Type, Ast, DataDecl},
     type_check::intrinsics::INTRINSIC_TYPES,
 };
 use fxhash::FxHashMap;
@@ -74,7 +74,7 @@ pub fn type_resolve(
 ) -> Type {
     t.into_iter()
         .map(|t| {
-            use crate::ast1::types::TypeUnit::*;
+            use crate::ast2::types::TypeUnit::*;
             match t {
                 Normal { name, args, .. } => {
                     let id = get_type_id(&name[..], data_decl_map);

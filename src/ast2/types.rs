@@ -1,5 +1,5 @@
 pub use self::type_type::Type;
-use crate::ast0_5::TypeIdent;
+use crate::ast1::TypeIdent;
 use itertools::Itertools;
 use std::{collections::BTreeSet, fmt::Display};
 

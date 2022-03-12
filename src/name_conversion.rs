@@ -1,4 +1,4 @@
-use crate::ast1::{
+use crate::ast2::{
     decl_id::DeclId, ident_id::IdentId, Ast, Expr, FnArm,
     VariableDecl,
 };
