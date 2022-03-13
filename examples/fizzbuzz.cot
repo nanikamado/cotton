@@ -3,6 +3,8 @@
 | a, f => f(a)
 --
 
+infixl 10 .
+
 data Next(a)
 data End(a)
 
@@ -16,6 +18,8 @@ loop : a -> (a -> Next[a] | End[b]) -> b forall a, b --
 --
 
 data a /\ b
+
+infixl 3 /\
 
 fizzbuzz : Num -> String | Num
 = fn

@@ -3,14 +3,22 @@
 | a, f => f(a)
 --
 
+infixl 10 .
+
 ($) : (a -> b) -> a -> b forall a, b --
 = fn
 | f, a => f(a)
 --
 
+infixr 0 $
+
 data a /\ b
 
+infixl 3 /\
+
 data a .. b
+
+infixl 4 ..
 
 pop
 = fn

@@ -1,5 +1,5 @@
 use crate::{
-    ast0,
+    ast0::{self, Associativity, OperatorPrecedence},
     ast2::{
         decl_id::{new_decl_id, DeclId},
         types::TypeUnit,
@@ -10,12 +10,13 @@ use crate::{
     },
 };
 use fxhash::FxHashMap;
-use itertools::Itertools;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Ast {
     pub variable_decl: Vec<VariableDecl>,
     pub data_decl: Vec<DataDecl>,
+    pub operator_precedence_map:
+        FxHashMap<String, (Associativity, i32)>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -133,18 +134,27 @@ impl From<ConstructorIdent> for TypeIdent {
 
 impl From<ast0::Ast> for Ast {
     fn from(ast: ast0::Ast) -> Self {
-        let (vs, ds): (Vec<_>, Vec<_>) = ast
-            .decls
-            .into_iter()
-            .map(|d| match d {
-                ast0::Decl::Variable(a) => Ok(a),
-                ast0::Decl::Data(a) => Err(DataDecl {
+        let mut vs = Vec::new();
+        let mut ds = Vec::new();
+        let mut precedence_map = FxHashMap::default();
+        for d in ast.decls {
+            match d {
+                ast0::Decl::Variable(a) => vs.push(a),
+                ast0::Decl::Data(a) => ds.push(DataDecl {
                     name: a.name,
                     field_len: a.field_len,
                     decl_id: new_decl_id(),
                 }),
-            })
-            .partition_result();
+                ast0::Decl::Precedence(OperatorPrecedence {
+                    name,
+                    associativity,
+                    precedence,
+                }) => {
+                    precedence_map
+                        .insert(name, (associativity, precedence));
+                }
+            }
+        }
         let data_decl_map: FxHashMap<&str, DeclId> =
             ds.iter().map(|d| (&d.name[..], d.decl_id)).collect();
         Ast {
@@ -153,6 +163,7 @@ impl From<ast0::Ast> for Ast {
                 .map(|v| variable_decl(v, &data_decl_map))
                 .collect(),
             data_decl: ds,
+            operator_precedence_map: precedence_map,
         }
     }
 }

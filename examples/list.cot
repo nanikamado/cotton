@@ -3,9 +3,15 @@
 | a, f => f(a)
 --
 
+infixl 10 .
+
 data a /\ b
 
+infixl 3 /\
+
 data a .. b
+
+infixl 4 ..
 
 range_to_list
 = fn

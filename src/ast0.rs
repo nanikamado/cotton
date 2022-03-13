@@ -7,6 +7,7 @@ pub struct Ast {
 pub enum Decl {
     Variable(VariableDecl),
     Data(DataDecl),
+    Precedence(OperatorPrecedence),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -76,4 +77,17 @@ pub enum Pattern {
     Constructor(String, Vec<Pattern>),
     Binder(String),
     Underscore,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct OperatorPrecedence {
+    pub name: String,
+    pub associativity: Associativity,
+    pub precedence: i32,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Associativity {
+    Left,
+    Right,
 }

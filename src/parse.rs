@@ -1,12 +1,12 @@
 use crate::ast0::{
-    Ast, DataDecl, Decl, Expr, FnArm, Forall,
-    InfixConstructorSequence, InfixTypeSequence, OpSequence, Pattern,
-    Type, VariableDecl,
+    Associativity, Ast, DataDecl, Decl, Expr, FnArm, Forall,
+    InfixConstructorSequence, InfixTypeSequence, OpSequence,
+    OperatorPrecedence, Pattern, Type, VariableDecl,
 };
 use nom::{
     branch::alt,
     bytes::complete::{is_not, tag, take_while1},
-    character::complete::{anychar, digit1, one_of},
+    character::complete::{self, anychar, digit1, one_of},
     combinator::{opt, recognize, verify},
     multi::{many0, many1},
     sequence::{delimited, pair, preceded, tuple},
@@ -16,6 +16,10 @@ use unic_ucd_category::GeneralCategory;
 
 fn separator0(input: &str) -> IResult<&str, Vec<char>> {
     many0(one_of("\r\n\t "))(input)
+}
+
+fn separator1(input: &str) -> IResult<&str, Vec<char>> {
+    many1(one_of("\r\n\t "))(input)
 }
 
 pub fn parse(source: &str) -> IResult<&str, Ast> {
@@ -28,6 +32,7 @@ fn dec(input: &str) -> IResult<&str, Decl> {
         decl.map(Decl::Variable),
         infix_constructor_decl.map(Decl::Data),
         data_decl.map(Decl::Data),
+        operator_precedence_decl.map(Decl::Precedence),
     )))(input)
 }
 
@@ -407,4 +412,40 @@ fn op(input: &str) -> IResult<&str, String> {
 
 fn type_op(input: &str) -> IResult<&str, String> {
     alt((op, tag("|").map(|_| "|".to_string())))(input)
+}
+
+fn operator_precedence_decl(
+    input: &str,
+) -> IResult<&str, OperatorPrecedence> {
+    alt((
+        tuple((
+            tag("infixl"),
+            separator1,
+            complete::i64,
+            separator1,
+            op,
+        ))
+        .map(|(_, _, precedence, _, name)| {
+            OperatorPrecedence {
+                name,
+                associativity: Associativity::Left,
+                precedence: precedence as i32,
+            }
+        }),
+        tuple((
+            tag("infixr"),
+            separator1,
+            complete::i64,
+            separator1,
+            op,
+        ))
+        .map(|(_, _, precedence, _, name)| {
+            OperatorPrecedence {
+                name,
+                associativity: Associativity::Right,
+                precedence: precedence as i32,
+            }
+        }),
+    ))
+    .parse(input)
 }
