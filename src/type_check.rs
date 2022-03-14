@@ -8,27 +8,60 @@ use crate::ast2::{
     decl_id::DeclId, ident_id::IdentId, types, types::TypeUnit, Ast,
     DataDecl, Expr, FnArm, IncompleteType, Pattern, Requirements,
 };
+use crate::type_check::intrinsics::IntrinsicVariable;
 use fxhash::FxHashMap;
-use intrinsics::INTRINSIC_VARIABLES;
 use itertools::multiunzip;
 use std::collections::BTreeSet;
+use std::fmt::Display;
 use std::vec;
+use strum::IntoEnumIterator;
 
-type Resolved = Vec<(IdentId, DeclId)>;
+type Resolved = Vec<(IdentId, VariableId)>;
 
-pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, DeclId> {
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub enum VariableId {
+    Decl(DeclId),
+    Intrinsic(IntrinsicVariable),
+}
+
+impl Display for VariableId {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        match self {
+            VariableId::Decl(a) => a.fmt(f),
+            VariableId::Intrinsic(a) => a.fmt(f),
+        }
+    }
+}
+
+impl std::fmt::Debug for VariableId {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        match self {
+            VariableId::Decl(a) => write!(f, "VariableId({})", a),
+            VariableId::Intrinsic(a) => {
+                write!(f, "VariableId({})", a)
+            }
+        }
+    }
+}
+
+pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, VariableId> {
     let mut toplevels: FxHashMap<String, Vec<Toplevel>> =
         FxHashMap::default();
-    for (name, ts) in &*INTRINSIC_VARIABLES {
-        *toplevels.entry(name.clone()).or_default() = ts
-            .iter()
-            .map(|(t, decl_id)| Toplevel {
-                incomplete: t.clone().into(),
+    for v in IntrinsicVariable::iter() {
+        toplevels.entry(v.to_str().to_string()).or_default().push(
+            Toplevel {
+                incomplete: v.to_type().clone().into(),
                 face: None,
                 resolved_idents: Default::default(),
-                decl_id: *decl_id,
-            })
-            .collect();
+                decl_id: VariableId::Intrinsic(v),
+            },
+        );
     }
     for d in &ast.data_decl {
         let d_type: types::Type = constructor_type(d.clone()).into();
@@ -36,7 +69,7 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, DeclId> {
             incomplete: d_type.into(),
             face: None,
             resolved_idents: Default::default(),
-            decl_id: d.decl_id,
+            decl_id: VariableId::Decl(d.decl_id),
         });
     }
     let mut resolved_idents = FxHashMap::default();
@@ -65,7 +98,7 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, DeclId> {
                     .unwrap(),
                 face,
                 resolved_idents: Default::default(),
-                decl_id: d.decl_id,
+                decl_id: VariableId::Decl(d.decl_id),
             },
         );
     }
@@ -97,8 +130,8 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, DeclId> {
 struct Toplevel {
     incomplete: IncompleteType,
     face: Option<IncompleteType>,
-    resolved_idents: FxHashMap<IdentId, DeclId>,
-    decl_id: DeclId,
+    resolved_idents: FxHashMap<IdentId, VariableId>,
+    decl_id: VariableId,
 }
 
 fn resolve_names(
@@ -109,7 +142,7 @@ fn resolve_names(
         index: usize,
         incomplete_type: IncompleteType,
         ident: IdentId,
-        decl: DeclId,
+        decl: VariableId,
     }
     loop {
         let mut resolved: Option<ResolvedType> = None;
@@ -407,7 +440,7 @@ fn arm_min_type(
         if let Some(a) = bindings.get(&p.0) {
             subtype_requirement.push((a.1.clone(), p.1.clone()));
             subtype_requirement.push((p.1, a.1.clone()));
-            resolved_idents.push((p.2, a.0));
+            resolved_idents.push((p.2, VariableId::Decl(a.0)));
         } else {
             variable_requirements.push(p);
         }
@@ -471,7 +504,7 @@ mod tests {
             IncompleteType, Requirements,
         },
         parse,
-        type_check::resolve_names,
+        type_check::{resolve_names, VariableId},
     };
     use fxhash::FxHashMap;
     use itertools::Itertools;
@@ -520,7 +553,7 @@ mod tests {
                     },
                     face: None,
                     resolved_idents: Default::default(),
-                    decl_id: new_decl_id(),
+                    decl_id: VariableId::Decl(new_decl_id()),
                 }],
             ),
             (
@@ -536,7 +569,7 @@ mod tests {
                         },
                         face: None,
                         resolved_idents: Default::default(),
-                        decl_id: new_decl_id(),
+                        decl_id: VariableId::Decl(new_decl_id()),
                     }),
                     (Toplevel {
                         incomplete: IncompleteType {
@@ -548,7 +581,7 @@ mod tests {
                         },
                         face: None,
                         resolved_idents: Default::default(),
-                        decl_id: new_decl_id(),
+                        decl_id: VariableId::Decl(new_decl_id()),
                     }),
                 ],
             ),
@@ -559,7 +592,7 @@ mod tests {
         assert_eq!(
             s,
             "main : 
-            |resolved: {IdentId(0): DeclId(3), IdentId(1): DeclId(4)}
+            |resolved: {IdentId(0): VariableId(3), IdentId(1): VariableId(4)}
             |not face: () forall
             |--
             |default : 
@@ -616,7 +649,7 @@ mod tests {
                     },
                     face: None,
                     resolved_idents: Default::default(),
-                    decl_id: new_decl_id(),
+                    decl_id: VariableId::Decl(new_decl_id()),
                 }],
             ),
             (
@@ -632,7 +665,7 @@ mod tests {
                         },
                         face: None,
                         resolved_idents: Default::default(),
-                        decl_id: new_decl_id(),
+                        decl_id: VariableId::Decl(new_decl_id()),
                     }),
                     (Toplevel {
                         incomplete: IncompleteType {
@@ -644,7 +677,7 @@ mod tests {
                         },
                         face: None,
                         resolved_idents: Default::default(),
-                        decl_id: new_decl_id(),
+                        decl_id: VariableId::Decl(new_decl_id()),
                     }),
                 ],
             ),
@@ -655,7 +688,7 @@ mod tests {
         assert_eq!(
             s,
             r#"main : 
-            |resolved: {IdentId(0): DeclId(3), IdentId(1): DeclId(4)}
+            |resolved: {IdentId(0): VariableId(3), IdentId(1): VariableId(4)}
             |not face: () forall
             |--
             |greet : 

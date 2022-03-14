@@ -1,8 +1,10 @@
-use crate::ast2::{
-    decl_id::DeclId, Ast, DataDecl, Expr, FnArm, Pattern,
-    VariableDecl,
+use crate::{
+    ast2::{
+        decl_id::DeclId, Ast, DataDecl, Expr, FnArm, Pattern,
+        VariableDecl,
+    },
+    type_check::intrinsics::IntrinsicVariable,
 };
-use crate::type_check::intrinsics::INTRINSIC_VARIABLES;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
@@ -22,16 +24,12 @@ pub fn codegen(ast: Ast) -> String {
         .strip_margin(),
         PRIMITIVES_DEF
             .iter()
-            .flat_map(|(name, def)| {
-                (*INTRINSIC_VARIABLES)[*name].iter().map(
-                    move |(_, id)| {
-                        format!(
-                            "let ${}${}={}",
-                            id,
-                            convert_name(name),
-                            def
-                        )
-                    },
+            .map(|(variable, def)| {
+                format!(
+                    "let ${}${}={}",
+                    variable,
+                    convert_name(variable.to_str()),
+                    def
                 )
             })
             .join(""),
@@ -62,23 +60,25 @@ fn variable_decl(d: &VariableDecl) -> String {
     )
 }
 
-static PRIMITIVES_DEF: Lazy<HashMap<&str, &str>> = Lazy::new(|| {
-    [
-        ("num_to_string", "a => String(a);"),
-        ("<", "a => b => $$bool(a < b);"),
-        ("-", "a => b => a - b;"),
-        ("+", "a => b => a + b;"),
-        ("print", "a => process.stdout.write(a);"),
-        ("println", "a => console.log(a);"),
-        ("True", "{name: 'True'};"),
-        ("False", "{name: 'False'};"),
-        ("%", "a => b => a % b;"),
-        ("!=", "a => b => $$bool(a !== b);"),
-    ]
-    .iter()
-    .copied()
-    .collect()
-});
+static PRIMITIVES_DEF: Lazy<HashMap<IntrinsicVariable, &str>> =
+    Lazy::new(|| {
+        use IntrinsicVariable::*;
+        [
+            (NumToString, "a => String(a);"),
+            (Lt, "a => b => $$bool(a < b);"),
+            (Minus, "a => b => a - b;"),
+            (Plus, "a => b => a + b;"),
+            (Print, "a => process.stdout.write(a);"),
+            (Println, "a => console.log(a);"),
+            (True, "{name: 'True'};"),
+            (False, "{name: 'False'};"),
+            (Percent, "a => b => a % b;"),
+            (Neq, "a => b => $$bool(a !== b);"),
+        ]
+        .iter()
+        .copied()
+        .collect()
+    });
 
 fn expr(e: &Expr, name_count: u32) -> String {
     match e {

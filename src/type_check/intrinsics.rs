@@ -1,32 +1,73 @@
-use crate::ast2::decl_id::{new_decl_id, DeclId};
 use crate::ast2::types::Type;
 use crate::type_check::type_util::construct_type;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use std::fmt::Display;
+use strum::EnumIter;
 
-pub static INTRINSIC_VARIABLES: Lazy<
-    HashMap<String, Vec<(Type, DeclId)>>,
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumIter,
+)]
+pub enum IntrinsicVariable {
+    Minus,
+    Plus,
+    Percent,
+    Lt,
+    Neq,
+    Println,
+    Print,
+    NumToString,
+    True,
+    False,
+}
+
+impl Display for IntrinsicVariable {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self, f)
+    }
+}
+
+impl IntrinsicVariable {
+    pub fn to_str(self) -> &'static str {
+        match self {
+            IntrinsicVariable::Minus => "-",
+            IntrinsicVariable::Plus => "+",
+            IntrinsicVariable::Percent => "%",
+            IntrinsicVariable::Lt => "<",
+            IntrinsicVariable::Neq => "!=",
+            IntrinsicVariable::Println => "println",
+            IntrinsicVariable::Print => "print",
+            IntrinsicVariable::NumToString => "num_to_string",
+            IntrinsicVariable::True => "True",
+            IntrinsicVariable::False => "False",
+        }
+    }
+
+    pub fn to_type(self) -> &'static Type {
+        &INTRINSIC_VARIABLES_TYPES[&self]
+    }
+}
+
+pub static INTRINSIC_VARIABLES_TYPES: Lazy<
+    HashMap<IntrinsicVariable, Type>,
 > = Lazy::new(|| {
     [
-        ("-", ["Num -> Num -> Num"]),
-        ("+", ["Num -> Num -> Num"]),
-        ("%", ["Num -> Num -> Num"]),
-        ("<", ["Num -> Num -> True | False"]),
-        ("!=", ["Num -> Num -> True | False"]),
-        ("println", ["String -> ()"]),
-        ("print", ["String -> ()"]),
-        ("num_to_string", ["Num -> String"]),
-        ("True", ["True"]),
-        ("False", ["False"]),
+        (IntrinsicVariable::Minus, "Num -> Num -> Num"),
+        (IntrinsicVariable::Plus, "Num -> Num -> Num"),
+        (IntrinsicVariable::Percent, "Num -> Num -> Num"),
+        (IntrinsicVariable::Lt, "Num -> Num -> True | False"),
+        (IntrinsicVariable::Neq, "Num -> Num -> True | False"),
+        (IntrinsicVariable::Println, "String -> ()"),
+        (IntrinsicVariable::Print, "String -> ()"),
+        (IntrinsicVariable::NumToString, "Num -> String"),
+        (IntrinsicVariable::True, "True"),
+        (IntrinsicVariable::False, "False"),
     ]
-    .map(|(n, t)| {
-        (
-            n.to_string(),
-            t.map(|s| (construct_type(s), new_decl_id())).to_vec(),
-        )
-    })
     .iter()
-    .cloned()
+    .map(|(n, t)| (*n, construct_type(t)))
     .collect()
 });
 

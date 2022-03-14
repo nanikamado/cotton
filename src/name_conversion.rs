@@ -1,10 +1,13 @@
-use crate::ast2::{
-    decl_id::DeclId, ident_id::IdentId, Ast, Expr, FnArm,
-    VariableDecl,
+use crate::{
+    ast2::{ident_id::IdentId, Ast, Expr, FnArm, VariableDecl},
+    type_check::VariableId,
 };
 use fxhash::FxHashMap;
 
-pub fn run(mut ast: Ast, idents: &FxHashMap<IdentId, DeclId>) -> Ast {
+pub fn run(
+    mut ast: Ast,
+    idents: &FxHashMap<IdentId, VariableId>,
+) -> Ast {
     ast.entry_point = ast
         .variable_decl
         .iter()
@@ -20,13 +23,13 @@ pub fn run(mut ast: Ast, idents: &FxHashMap<IdentId, DeclId>) -> Ast {
 
 fn decl(
     mut d: VariableDecl,
-    idents: &FxHashMap<IdentId, DeclId>,
+    idents: &FxHashMap<IdentId, VariableId>,
 ) -> VariableDecl {
     d.value = expr(d.value, idents);
     d
 }
 
-fn expr(e: Expr, idents: &FxHashMap<IdentId, DeclId>) -> Expr {
+fn expr(e: Expr, idents: &FxHashMap<IdentId, VariableId>) -> Expr {
     match e {
         Expr::Lambda(arms) => Expr::Lambda(
             arms.into_iter().map(|a| fn_arm(a, idents)).collect(),
@@ -51,7 +54,7 @@ fn expr(e: Expr, idents: &FxHashMap<IdentId, DeclId>) -> Expr {
 
 fn fn_arm(
     mut arm: FnArm,
-    idents: &FxHashMap<IdentId, DeclId>,
+    idents: &FxHashMap<IdentId, VariableId>,
 ) -> FnArm {
     arm.exprs =
         arm.exprs.into_iter().map(|e| expr(e, idents)).collect();

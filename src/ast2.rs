@@ -5,6 +5,7 @@ use self::ident_id::{new_ident_id, IdentId};
 use self::types::{Type, TypeMatchable, TypeUnit};
 use crate::ast1::{self, ConstructorIdent, TypeIdent};
 use crate::type_check::intrinsics::IntrinsicType;
+use crate::type_check::VariableId;
 use once_cell::sync::Lazy;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
@@ -70,7 +71,7 @@ pub enum Expr {
     Ident {
         name: String,
         ident_id: IdentId,
-        decl_id: Option<DeclId>,
+        decl_id: Option<VariableId>,
     },
     Decl(Box<VariableDecl>),
     Call(Box<Expr>, Box<Expr>),
