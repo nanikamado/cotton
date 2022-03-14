@@ -41,7 +41,7 @@ pub fn run(source: &str, output_js: bool, loglevel: LevelFilter) {
                         "node command not found. \
                         You need to install node."
                     ),
-                    _ => eprintln!("faild to run node"),
+                    _ => eprintln!("failed to run node"),
                 };
                 exit(1)
             }
