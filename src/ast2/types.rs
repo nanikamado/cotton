@@ -1,5 +1,5 @@
 pub use self::type_type::Type;
-use crate::ast1::TypeIdent;
+use crate::ast2::TypeIdent;
 use itertools::Itertools;
 use std::{collections::BTreeSet, fmt::Display};
 
@@ -84,11 +84,11 @@ pub mod type_type {
             self.0.is_superset(&value.0)
         }
 
-        pub fn merge(self, other: Self) -> Self {
-            let mut u = self.0;
-            u.extend(other.0);
-            Type(u)
-        }
+        // pub fn merge(self, other: Self) -> Self {
+        //     let mut u = self.0;
+        //     u.extend(other.0);
+        //     Type(u)
+        // }
 
         pub fn len(&self) -> usize {
             self.0.len()

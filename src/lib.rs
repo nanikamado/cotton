@@ -1,14 +1,12 @@
 mod ast0;
 mod ast1;
 mod ast2;
+mod ast3;
 mod codegen;
-mod name_conversion;
 mod parse;
-mod resolve_type_names;
 mod type_check;
 mod type_variable;
 
-use crate::resolve_type_names::resolve_type_names;
 use codegen::codegen;
 use parse::parse;
 use simplelog::{
@@ -18,7 +16,6 @@ use std::{
     io::ErrorKind,
     process::{exit, Command, Stdio},
 };
-use type_check::type_check;
 
 pub fn run(source: &str, output_js: bool, loglevel: LevelFilter) {
     TermLogger::init(
@@ -51,10 +48,7 @@ pub fn run(source: &str, output_js: bool, loglevel: LevelFilter) {
     if remaining.is_empty() {
         let ast: ast1::Ast = ast.into();
         let ast: ast2::Ast = ast.into();
-        let ast = resolve_type_names(ast);
-        let resolved_idents = type_check(&ast);
-        log::trace!("{:?}", resolved_idents);
-        let ast = name_conversion::run(ast, &resolved_idents);
+        let ast: ast3::Ast = ast.into();
         log::trace!("{:?}", ast);
         let js = codegen(ast);
         if output_js {

@@ -1,5 +1,7 @@
+use crate::ast0::Associativity;
 use crate::ast2::types::Type;
 use crate::type_check::type_util::construct_type;
+use fxhash::FxHashMap;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::fmt::Display;
@@ -146,7 +148,7 @@ pub static INTRINSIC_CONSTRUCTORS: Lazy<
 });
 
 impl IntrinsicConstructor {
-    pub fn to_str(&self) -> &str {
+    pub fn to_str(self) -> &'static str {
         match self {
             IntrinsicConstructor::Unit => "()",
             IntrinsicConstructor::True => "True",
@@ -164,3 +166,21 @@ impl From<IntrinsicConstructor> for IntrinsicType {
         }
     }
 }
+
+pub static OP_PRECEDENCE: Lazy<
+    FxHashMap<String, (Associativity, i32)>,
+> = Lazy::new(|| {
+    use Associativity::*;
+    [
+        ("%", (Left, 7)),
+        ("+", (Left, 6)),
+        ("-", (Left, 6)),
+        ("<", (Left, 5)),
+        ("!=", (Left, 5)),
+        ("|", (Left, 2)),
+        ("->", (Right, 1)),
+    ]
+    .iter()
+    .map(|(s, p)| (s.to_string(), *p))
+    .collect()
+});

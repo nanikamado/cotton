@@ -1,8 +1,7 @@
 use crate::{
-    ast2::{
-        decl_id::DeclId, Ast, DataDecl, Expr, FnArm, Pattern,
-        VariableDecl,
-    },
+    ast2::decl_id::DeclId,
+    ast2::{DataDecl, Pattern},
+    ast3::{Ast, Expr, FnArm, VariableDecl},
     type_check::intrinsics::IntrinsicVariable,
 };
 use itertools::Itertools;
@@ -35,7 +34,7 @@ pub fn codegen(ast: Ast) -> String {
             .join(""),
         ast.data_decl.into_iter().map(data_decl).join(""),
         ast.variable_decl.iter().map(variable_decl).join(""),
-        ast.entry_point.unwrap()
+        ast.entry_point
     )
 }
 
@@ -93,17 +92,10 @@ fn expr(e: &Expr, name_count: u32) -> String {
         Expr::StrLiteral(a) => a.clone(),
         Expr::Ident {
             name: info,
-            decl_id,
+            variable_id,
             ..
         } => {
-            format!(
-                "${}${}",
-                decl_id.expect(&format!(
-                    "decl_id of {:?} is None",
-                    info
-                )),
-                convert_name(info)
-            )
+            format!("${}${}", variable_id, convert_name(info))
         }
         Expr::Decl(a) => variable_decl(a),
         Expr::Call(f, a) => format!(
@@ -165,15 +157,15 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
             Pattern::Number(a) | Pattern::StrLiteral(a) => {
                 vec![format!("{}==={}", a, n)]
             }
-            Pattern::Constructor(a, ps) => {
+            Pattern::Constructor { id, args } => {
                 let mut v = vec![format!(
                     "'{}'==={}.name",
-                    convert_name(a.name()),
+                    convert_name(id.name()),
                     n
                 )];
                 v.append(&mut _condition(
-                    ps,
-                    &(0..ps.len())
+                    args,
+                    &(0..args.len())
                         .map(|i| format!("{}[{}]", n, i))
                         .collect_vec(),
                 ));
@@ -205,9 +197,9 @@ fn _bindings(
         .zip(names)
         .flat_map(|(p, n)| match p {
             Pattern::Binder(a, id) => vec![(&a[..], n, *id)],
-            Pattern::Constructor(_, ps) => _bindings(
-                ps,
-                (0..ps.len())
+            Pattern::Constructor { args, .. } => _bindings(
+                args,
+                (0..args.len())
                     .map(|i| format!("{}[{}]", n, i))
                     .collect(),
             ),

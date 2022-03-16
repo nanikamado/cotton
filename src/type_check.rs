@@ -3,11 +3,11 @@ mod simplify;
 mod type_util;
 
 use self::type_util::construct_type;
-use crate::ast1::TypeIdent;
 use crate::ast2::{
-    decl_id::DeclId, ident_id::IdentId, types, types::TypeUnit, Ast,
-    DataDecl, Expr, FnArm, IncompleteType, Pattern, Requirements,
+    decl_id::DeclId, ident_id::IdentId, types, types::TypeUnit,
 };
+use crate::ast2::{Ast, DataDecl, Expr, FnArm, Pattern, TypeIdent};
+use crate::ast2::{IncompleteType, Requirements};
 use crate::type_check::intrinsics::IntrinsicVariable;
 use fxhash::FxHashMap;
 use itertools::multiunzip;
@@ -469,14 +469,14 @@ fn pattern_to_type(
         Pattern::StrLiteral(_) => {
             (construct_type("String"), Vec::new())
         }
-        Pattern::Constructor(ident, cs) => {
+        Pattern::Constructor { id, args } => {
             let (types, bindings): (Vec<_>, Vec<_>) =
-                cs.iter().map(pattern_to_type).unzip();
+                args.iter().map(pattern_to_type).unzip();
             (
                 TypeUnit::Normal {
-                    name: ident.name().to_string(),
+                    name: id.name().to_string(),
                     args: types,
-                    id: ident.clone().into(),
+                    id: id.clone().into(),
                 }
                 .into(),
                 bindings.concat(),
@@ -496,25 +496,30 @@ fn pattern_to_type(
 mod tests {
     use super::Toplevel;
     use crate::{
-        ast1,
+        ast1, ast2,
         ast2::{
             decl_id::{self, new_decl_id},
             ident_id::new_ident_id,
-            types::{Type, TypeUnit},
             IncompleteType, Requirements,
         },
         parse,
-        type_check::{resolve_names, VariableId},
+        type_check::{
+            resolve_names, type_util::construct_type_with_variables,
+            VariableId,
+        },
     };
     use fxhash::FxHashMap;
-    use itertools::Itertools;
     use std::collections::BTreeSet;
     use stripmargin::StripMargin;
 
     #[test]
     fn resolve_1() {
         let ast: ast1::Ast =
-            parse::parse("data Hoge\ndata Fuga").unwrap().1.into();
+            parse::parse("data Hoge\ndata Fuga\nmain = ()")
+                .unwrap()
+                .1
+                .into();
+        let ast: ast2::Ast = ast.into();
         let data_decl_map: FxHashMap<&str, decl_id::DeclId> = ast
             .data_decl
             .iter()
@@ -525,24 +530,27 @@ mod tests {
                 ("main".to_string()),
                 vec![Toplevel {
                     incomplete: IncompleteType {
-                        constructor: construct_type(
+                        constructor: construct_type_with_variables(
                             "()",
+                            &[],
                             &data_decl_map,
                         ),
                         requirements: Requirements {
                             variable_requirements: vec![
                                 (
                                     "default".to_string(),
-                                    construct_type(
+                                    construct_type_with_variables(
                                         "Hoge",
+                                        &[],
                                         &data_decl_map,
                                     ),
                                     new_ident_id(),
                                 ),
                                 (
                                     "default".to_string(),
-                                    construct_type(
+                                    construct_type_with_variables(
                                         "Fuga",
+                                        &[],
                                         &data_decl_map,
                                     ),
                                     new_ident_id(),
@@ -561,10 +569,12 @@ mod tests {
                 vec![
                     (Toplevel {
                         incomplete: IncompleteType {
-                            constructor: construct_type(
-                                "Hoge",
-                                &data_decl_map,
-                            ),
+                            constructor:
+                                construct_type_with_variables(
+                                    "Hoge",
+                                    &[],
+                                    &data_decl_map,
+                                ),
                             requirements: Default::default(),
                         },
                         face: None,
@@ -573,10 +583,12 @@ mod tests {
                     }),
                     (Toplevel {
                         incomplete: IncompleteType {
-                            constructor: construct_type(
-                                "Fuga",
-                                &data_decl_map,
-                            ),
+                            constructor:
+                                construct_type_with_variables(
+                                    "Fuga",
+                                    &[],
+                                    &data_decl_map,
+                                ),
                             requirements: Default::default(),
                         },
                         face: None,
@@ -592,7 +604,7 @@ mod tests {
         assert_eq!(
             s,
             "main : 
-            |resolved: {IdentId(0): VariableId(3), IdentId(1): VariableId(4)}
+            |resolved: {IdentId(0): VariableId(4), IdentId(1): VariableId(5)}
             |not face: () forall
             |--
             |default : 
@@ -610,7 +622,11 @@ mod tests {
     #[test]
     fn resolve_2() {
         let ast: ast1::Ast =
-            parse::parse("data Hoge\ndata Fuga").unwrap().1.into();
+            parse::parse("data Hoge\ndata Fuga\nmain = ()")
+                .unwrap()
+                .1
+                .into();
+        let ast: ast2::Ast = ast.into();
         let data_decl_map: FxHashMap<&str, decl_id::DeclId> = ast
             .data_decl
             .iter()
@@ -621,24 +637,27 @@ mod tests {
                 ("main".to_string()),
                 vec![Toplevel {
                     incomplete: IncompleteType {
-                        constructor: construct_type(
+                        constructor: construct_type_with_variables(
                             "()",
+                            &[],
                             &data_decl_map,
                         ),
                         requirements: Requirements {
                             variable_requirements: vec![
                                 (
                                     "greet".to_string(),
-                                    construct_type(
+                                    construct_type_with_variables(
                                         "Hoge -> String",
+                                        &[],
                                         &data_decl_map,
                                     ),
                                     new_ident_id(),
                                 ),
                                 (
                                     "greet".to_string(),
-                                    construct_type(
+                                    construct_type_with_variables(
                                         "Fuga -> String",
+                                        &[],
                                         &data_decl_map,
                                     ),
                                     new_ident_id(),
@@ -657,10 +676,12 @@ mod tests {
                 vec![
                     (Toplevel {
                         incomplete: IncompleteType {
-                            constructor: construct_type(
-                                "Hoge -> String",
-                                &data_decl_map,
-                            ),
+                            constructor:
+                                construct_type_with_variables(
+                                    "Hoge -> String",
+                                    &[],
+                                    &data_decl_map,
+                                ),
                             requirements: Default::default(),
                         },
                         face: None,
@@ -669,10 +690,12 @@ mod tests {
                     }),
                     (Toplevel {
                         incomplete: IncompleteType {
-                            constructor: construct_type(
-                                "Fuga -> String",
-                                &data_decl_map,
-                            ),
+                            constructor:
+                                construct_type_with_variables(
+                                    "Fuga -> String",
+                                    &[],
+                                    &data_decl_map,
+                                ),
                             requirements: Default::default(),
                         },
                         face: None,
@@ -688,7 +711,7 @@ mod tests {
         assert_eq!(
             s,
             r#"main : 
-            |resolved: {IdentId(0): VariableId(3), IdentId(1): VariableId(4)}
+            |resolved: {IdentId(0): VariableId(4), IdentId(1): VariableId(5)}
             |not face: () forall
             |--
             |greet : 
@@ -721,59 +744,5 @@ mod tests {
             }
         }
         ret
-    }
-
-    fn construct_type(
-        s: &str,
-        data_decl_map: &FxHashMap<&str, decl_id::DeclId>,
-    ) -> Type {
-        let (_, type_seq) = parse::infix_type_sequence(s).unwrap();
-        let type_seq = ast1::infix_type_sequence(
-            type_seq,
-            &Default::default(),
-            &data_decl_map,
-        );
-        let inc_t: IncompleteType = type_seq.into();
-        inc_t.constructor
-    }
-
-    #[test]
-    fn construct_type_test_1() {
-        let ast: ast1::Ast =
-            parse::parse("data Foge").unwrap().1.into();
-        let data_decl_map: FxHashMap<&str, decl_id::DeclId> = ast
-            .data_decl
-            .iter()
-            .map(|d| (&d.name[..], d.decl_id))
-            .collect();
-        let ts = construct_type("Foge", &data_decl_map)
-            .into_iter()
-            .collect_vec();
-        assert_eq!(ts.len(), 1);
-        if let TypeUnit::Normal { name, args, .. } = &ts[0] {
-            assert_eq!(name, "Foge");
-            assert!(args.is_empty());
-        } else {
-            panic!()
-        }
-    }
-
-    #[test]
-    fn construct_type_test_2() {
-        let ast: ast1::Ast =
-            parse::parse("data Foge").unwrap().1.into();
-        let data_decl_map: FxHashMap<&str, decl_id::DeclId> = ast
-            .data_decl
-            .iter()
-            .map(|d| (&d.name[..], d.decl_id))
-            .collect();
-        assert_eq!(
-            construct_type("Foge -> String", &data_decl_map),
-            TypeUnit::Fn(
-                construct_type("Foge", &data_decl_map).into(),
-                construct_type("String", &data_decl_map).into()
-            )
-            .into()
-        )
     }
 }

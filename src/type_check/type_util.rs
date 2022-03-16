@@ -1,16 +1,17 @@
 use crate::{
-    ast1,
+    ast1::{self, OpPrecedenceMap},
     ast2::{
         self,
         types::{Type, TypeMatchableRef, TypeUnit},
         IncompleteType, Requirements,
     },
-    resolve_type_names,
 };
 use fxhash::FxHashMap;
 use itertools::Itertools;
 use std::collections::HashSet;
 use TypeMatchableRef::{Fn, Normal};
+
+use super::intrinsics::OP_PRECEDENCE;
 
 impl TypeUnit {
     pub fn all_type_variables(&self) -> Vec<usize> {
@@ -283,35 +284,28 @@ impl Requirements {
 }
 
 pub fn construct_type(s: &str) -> Type {
-    let (_, type_seq) = crate::parse::infix_type_sequence(s).unwrap();
-    let type_seq: ast1::InfixTypeSequence = ast1::infix_type_sequence(
-        type_seq,
-        &Default::default(),
-        &Default::default(),
-    );
-    let inc_t: IncompleteType = type_seq.into();
-    resolve_type_names::type_resolve(
-        inc_t.constructor,
-        &Default::default(),
-    )
+    construct_type_with_variables(s, &[], &Default::default())
 }
 
-#[allow(unused)]
 pub fn construct_type_with_variables(
     s: &str,
     type_variable_names: &[&str],
     data_decl_map: &FxHashMap<&str, ast2::decl_id::DeclId>,
 ) -> Type {
     let (_, type_seq) = crate::parse::infix_type_sequence(s).unwrap();
-    let type_seq: ast1::InfixTypeSequence = ast1::infix_type_sequence(
+    let type_seq: ast1::TypeOperatorSequence = ast1::op_sequence(
         type_seq,
+        &OpPrecedenceMap::new(OP_PRECEDENCE.clone()),
+    );
+    let t = ast1::infix_op_sequence(type_seq);
+    crate::ast2::type_to_type(
+        t,
+        data_decl_map,
         &type_variable_names
             .iter()
-            .copied()
-            .map(|s| (s.to_string(), TypeUnit::new_variable_num()))
+            .map(|&name| {
+                (name.to_string(), TypeUnit::new_variable_num())
+            })
             .collect(),
-        data_decl_map,
-    );
-    let inc_t: IncompleteType = type_seq.into();
-    resolve_type_names::type_resolve(inc_t.constructor, data_decl_map)
+    )
 }

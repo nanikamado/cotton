@@ -2,18 +2,35 @@ pub mod types;
 
 use self::decl_id::{new_decl_id, DeclId};
 use self::ident_id::{new_ident_id, IdentId};
-use self::types::{Type, TypeMatchable, TypeUnit};
-use crate::ast1::{self, ConstructorIdent, TypeIdent};
-use crate::type_check::intrinsics::IntrinsicType;
-use crate::type_check::VariableId;
-use once_cell::sync::Lazy;
-use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
+use self::types::{Type, TypeUnit};
+use crate::type_check::intrinsics::INTRINSIC_TYPES_NAMES;
+use crate::{
+    ast1,
+    type_check::intrinsics::{
+        IntrinsicConstructor, IntrinsicType, INTRINSIC_CONSTRUCTORS,
+        INTRINSIC_TYPES,
+    },
+};
+use fxhash::FxHashMap;
+use std::collections::BTreeSet;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ConstructorIdent {
+    DeclId(DeclId, String),
+    Intrinsic(IntrinsicConstructor),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TypeIdent {
+    DeclId(DeclId, String),
+    Intrinsic(IntrinsicType),
+}
 
 #[derive(Debug, PartialEq)]
 pub struct Ast {
     pub variable_decl: Vec<VariableDecl>,
     pub data_decl: Vec<DataDecl>,
-    pub entry_point: Option<DeclId>,
+    pub entry_point: DeclId,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -45,37 +62,34 @@ pub struct VariableDecl {
     pub decl_id: DeclId,
 }
 
-impl From<ast1::VariableDecl> for VariableDecl {
-    fn from(d: ast1::VariableDecl) -> Self {
-        Self {
-            ident: d.identifier,
-            type_annotation: d.type_annotation.map(|t| t.into()),
-            value: d.value.into(),
-            decl_id: new_decl_id(),
-        }
-    }
-}
-
-impl From<ast1::InfixTypeSequence> for IncompleteType {
-    fn from(t: ast1::InfixTypeSequence) -> Self {
-        let t: Type = t.into();
-        t.into()
-    }
-}
-
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Lambda(Vec<FnArm>),
     Number(String),
     StrLiteral(String),
-    Ident {
-        name: String,
-        ident_id: IdentId,
-        decl_id: Option<VariableId>,
-    },
+    Ident { name: String, ident_id: IdentId },
     Decl(Box<VariableDecl>),
     Call(Box<Expr>, Box<Expr>),
     Unit,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct FnArm {
+    pub pattern: Vec<Pattern>,
+    pub pattern_type: Vec<Option<Type>>,
+    pub exprs: Vec<Expr>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Pattern {
+    Number(String),
+    StrLiteral(String),
+    Constructor {
+        id: ConstructorIdent,
+        args: Vec<Pattern>,
+    },
+    Binder(String, DeclId),
+    Underscore,
 }
 
 pub mod ident_id {
@@ -138,252 +152,70 @@ pub mod decl_id {
     }
 }
 
-impl From<ast1::Expr> for Expr {
-    fn from(ast_expr: ast1::Expr) -> Self {
-        use Expr::*;
-        match ast_expr {
-            ast1::Expr::Lambda(a) => {
-                Lambda(a.into_iter().map(|f| f.into()).collect())
-            }
-            ast1::Expr::Number(a) => Number(a),
-            ast1::Expr::StrLiteral(a) => StrLiteral(a),
-            ast1::Expr::Identifier(a) => Ident {
-                name: a,
-                ident_id: new_ident_id(),
-                decl_id: None,
-            },
-            ast1::Expr::Decl(a) => Decl(Box::new((*a).into())),
-            ast1::Expr::Unit => Unit,
-            ast1::Expr::Paren(a) => a.into(),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct FnArm {
-    pub pattern: Vec<Pattern>,
-    pub pattern_type: Vec<Option<Type>>,
-    pub exprs: Vec<Expr>,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Pattern {
-    Number(String),
-    StrLiteral(String),
-    Constructor(ConstructorIdent, Vec<Pattern>),
-    Binder(String, DeclId),
-    Underscore,
-}
-
-fn infix_constructor_sequence_to_pattern(
-    s: ast1::InfixConstructorSequence,
-) -> Pattern {
-    let op_list: BTreeSet<_> = s
-        .operators
-        .iter()
-        .map(|s| OP_PRECEDENCE[s.name()])
-        .collect();
-    let mut operators = s.operators;
-    let mut operands: Vec<Pattern> =
-        s.operands.into_iter().map(Pattern::from).collect();
-    for a in op_list.into_iter().rev() {
-        let mut operand_head = 0;
-        for i in 0..operators.len() {
-            let op = operators[i].clone();
-            if a == OP_PRECEDENCE[op.name()] {
-                operands[operand_head] = Pattern::Constructor(
-                    op,
-                    vec![
-                        operands[operand_head].clone(),
-                        operands[i + 1].clone(),
-                    ],
-                );
-            } else {
-                operand_head += 1;
-                operands[operand_head] = operands[i + 1].clone();
-            }
-        }
-        operators.retain(|o| OP_PRECEDENCE[o.name()] != a);
-    }
-    operands[0].clone()
-}
-
-impl From<ast1::Pattern> for Pattern {
-    fn from(p: ast1::Pattern) -> Self {
-        match p {
-            ast1::Pattern::Number(n) => Pattern::Number(n),
-            ast1::Pattern::StrLiteral(s) => Pattern::StrLiteral(s),
-            ast1::Pattern::Constructor { id, args, .. } => {
-                Pattern::Constructor(
-                    id,
-                    args.into_iter().map(Pattern::from).collect(),
-                )
-            }
-            ast1::Pattern::Binder(name) => {
-                Pattern::Binder(name, new_decl_id())
-            }
-            ast1::Pattern::Underscore => Pattern::Underscore,
-        }
-    }
-}
-
-impl From<ast1::FnArm> for FnArm {
-    fn from(ast_fn_arm: ast1::FnArm) -> Self {
-        Self {
-            pattern: ast_fn_arm
-                .pattern
-                .into_iter()
-                .map(infix_constructor_sequence_to_pattern)
-                .collect(),
-            pattern_type: ast_fn_arm
-                .pattern_type
-                .into_iter()
-                .map(|a| a.map(|a| a.into()))
-                .collect(),
-            exprs: ast_fn_arm
-                .exprs
-                .into_iter()
-                .map(Expr::from)
-                .collect(),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct Operator(String);
-
-static OP_PRECEDENCE: Lazy<HashMap<&str, i32>> = Lazy::new(|| {
-    [
-        ("fn_call", 10),
-        ("type_call", 10),
-        (".", 10),
-        ("%", 7),
-        ("+", 6),
-        ("-", 6),
-        ("<", 5),
-        ("!=", 5),
-        ("..", 4),
-        ("/\\", 3),
-        ("|", 2),
-        ("->", 1),
-        ("$", 0),
-    ]
-    .iter()
-    .copied()
-    .collect()
-});
-
-static RIGHT_ASSOCIATIVE: Lazy<HashSet<i32>> =
-    Lazy::new(|| [1].iter().copied().collect());
-
-impl Ord for Operator {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        OP_PRECEDENCE[&self.0[..]].cmp(&OP_PRECEDENCE[&other.0[..]])
-    }
-}
-
-impl PartialOrd for Operator {
-    fn partial_cmp(
-        &self,
-        other: &Self,
-    ) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 impl From<ast1::Ast> for Ast {
     fn from(ast: ast1::Ast) -> Self {
-        let vs = ast.variable_decl.into_iter().map(decl).collect();
-        let ds = ast
+        let data_decl: Vec<_> = ast
             .data_decl
             .into_iter()
-            .map(|a| DataDecl {
-                name: a.name,
-                field_len: a.field_len,
+            .map(|d| DataDecl {
+                name: d.name,
+                field_len: d.field_len,
                 decl_id: new_decl_id(),
             })
             .collect();
-        Ast {
-            variable_decl: vs,
-            data_decl: ds,
-            entry_point: None,
-        }
-    }
-}
-
-fn decl(d: ast1::VariableDecl) -> VariableDecl {
-    VariableDecl {
-        ident: d.identifier,
-        type_annotation: d.type_annotation.map(|t| t.into()),
-        value: d.value.into(),
-        decl_id: new_decl_id(),
-    }
-}
-
-impl From<ast1::OpSequence> for Expr {
-    fn from(s: ast1::OpSequence) -> Self {
-        let op_list: BTreeSet<_> = s
-            .operators
+        let data_decl_map: FxHashMap<&str, DeclId> = data_decl
             .iter()
-            .map(|s| {
-                *OP_PRECEDENCE.get(&s[..]).unwrap_or_else(|| {
-                    panic!("no entry found for key: {}", s)
-                })
+            .map(|d| (&d.name[..], d.decl_id))
+            .collect();
+        let variable_decl: Vec<_> = ast
+            .variable_decl
+            .into_iter()
+            .map(|d| {
+                variable_decl(d, &data_decl_map, &Default::default())
             })
             .collect();
-        let mut operators = s.operators.into_iter().collect();
-        let mut operands: VecDeque<Expr> =
-            s.operands.into_iter().map(|o| o.into()).collect();
-        for a in op_list.into_iter().rev() {
-            if RIGHT_ASSOCIATIVE.contains(&a) {
-                unimplemented!()
-            } else {
-                let os = value_op_apply_left(operators, operands, a);
-                operators = os.0;
-                operands = os.1;
-            }
+        let entry_point = variable_decl
+            .iter()
+            .find(|d| d.ident == "main")
+            .unwrap_or_else(|| panic!("entry point not found"))
+            .decl_id;
+        Self {
+            variable_decl,
+            data_decl,
+            entry_point,
         }
-        operands[0].clone()
     }
 }
 
-fn value_op_apply_left(
-    mut operators: VecDeque<String>,
-    mut operands: VecDeque<Expr>,
-    precedence: i32,
-) -> (VecDeque<String>, VecDeque<Expr>) {
-    if let Some(op) = operators.pop_front() {
-        let head = operands.pop_front().unwrap();
-        if OP_PRECEDENCE[&op[..]] == precedence {
-            let head_ = operands.pop_front().unwrap();
-            let new_elm = if op == "fn_call" {
-                Expr::Call(head.into(), head_.into())
-            } else {
-                Expr::Call(
-                    Expr::Call(
-                        Expr::Ident {
-                            name: op,
-                            ident_id: new_ident_id(),
-                            decl_id: None,
-                        }
-                        .into(),
-                        head.into(),
-                    )
-                    .into(),
-                    head_.into(),
-                )
-            };
-            operands.push_front(new_elm);
-            value_op_apply_left(operators, operands, precedence)
-        } else {
-            let (mut operators, mut operands) =
-                value_op_apply_left(operators, operands, precedence);
-            operators.push_front(op);
-            operands.push_front(head);
-            (operators, operands)
+impl ConstructorIdent {
+    pub fn name(&self) -> &str {
+        match self {
+            ConstructorIdent::DeclId(_, name) => name,
+            ConstructorIdent::Intrinsic(c) => c.to_str(),
         }
-    } else {
-        (operators, operands)
+    }
+}
+
+impl TypeIdent {
+    #[allow(unused)]
+    pub fn name(&self) -> &str {
+        match self {
+            TypeIdent::DeclId(_, name) => name,
+            TypeIdent::Intrinsic(c) => &INTRINSIC_TYPES_NAMES[c][..],
+        }
+    }
+}
+
+impl From<ConstructorIdent> for TypeIdent {
+    fn from(c: ConstructorIdent) -> Self {
+        match c {
+            ConstructorIdent::DeclId(ident, name) => {
+                Self::DeclId(ident, name)
+            }
+            ConstructorIdent::Intrinsic(i) => {
+                Self::Intrinsic(i.into())
+            }
+        }
     }
 }
 
@@ -396,136 +228,208 @@ impl From<Type> for IncompleteType {
     }
 }
 
-impl From<ast1::Type> for Type {
-    fn from(t: ast1::Type) -> Self {
-        match t {
-            ast1::Type::Identifier(ident) => TypeUnit::Normal {
-                name: ident.name().to_string(),
-                args: Vec::new(),
-                id: ident,
-            }
-            .into(),
-            ast1::Type::Paren(s) => s.into(),
-            ast1::Type::Variable(a) => TypeUnit::Variable(a).into(),
-        }
+fn variable_decl(
+    v: ast1::VariableDecl,
+    data_decl_map: &FxHashMap<&str, DeclId>,
+    type_variable_names: &FxHashMap<String, usize>,
+) -> VariableDecl {
+    VariableDecl {
+        ident: v.identifier,
+        type_annotation: v.type_annotation.map(|(t, forall)| {
+            let mut type_variable_names = type_variable_names.clone();
+            type_variable_names.extend(
+                forall
+                    .type_variable_names
+                    .into_iter()
+                    .map(|s| (s, TypeUnit::new_variable_num())),
+            );
+            type_to_type(t, data_decl_map, &type_variable_names)
+                .into()
+        }),
+        value: expr(v.value, data_decl_map, type_variable_names),
+        decl_id: new_decl_id(),
     }
 }
 
-impl From<ast1::InfixTypeSequence> for Type {
-    fn from(s: ast1::InfixTypeSequence) -> Self {
-        let op_list: BTreeSet<_> = s
-            .operators
-            .iter()
-            .map(|s| {
-                *OP_PRECEDENCE.get(&s.name()[..]).unwrap_or_else(
-                    || {
-                        panic!(
-                            "no entry found for key: {:?}",
-                            s.name()
-                        )
-                    },
-                )
+fn expr(
+    e: ast1::Expr,
+    data_decl_map: &FxHashMap<&str, DeclId>,
+    type_variable_names: &FxHashMap<String, usize>,
+) -> Expr {
+    use Expr::*;
+    match e {
+        ast1::Expr::Lambda(arms) => Lambda(
+            arms.into_iter()
+                .map(|arm| {
+                    fn_arm(arm, data_decl_map, type_variable_names)
+                })
+                .collect(),
+        ),
+        ast1::Expr::Number(n) => Number(n),
+        ast1::Expr::StrLiteral(s) => StrLiteral(s),
+        ast1::Expr::Ident(name) => Ident {
+            name,
+            ident_id: new_ident_id(),
+        },
+        ast1::Expr::Decl(d) => Decl(Box::new(variable_decl(
+            *d,
+            data_decl_map,
+            type_variable_names,
+        ))),
+        ast1::Expr::Call(f, a) => Call(
+            Box::new(expr(*f, data_decl_map, type_variable_names)),
+            Box::new(expr(*a, data_decl_map, type_variable_names)),
+        ),
+        ast1::Expr::Unit => Unit,
+    }
+}
+
+fn fn_arm(
+    arm: ast1::FnArm,
+    data_decl_map: &FxHashMap<&str, DeclId>,
+    type_variable_names: &FxHashMap<String, usize>,
+) -> FnArm {
+    FnArm {
+        pattern: arm
+            .pattern
+            .into_iter()
+            .map(|p| pattern(p, data_decl_map))
+            .collect(),
+        pattern_type: arm
+            .pattern_type
+            .into_iter()
+            .map(|o| {
+                o.map(|t| {
+                    type_to_type(
+                        t,
+                        data_decl_map,
+                        type_variable_names,
+                    )
+                })
             })
-            .collect();
-        let mut operators = s.operators.into_iter().collect();
-        let mut operands: VecDeque<Type> =
-            s.operands.into_iter().map(|o| o.into()).collect();
-        for a in op_list.into_iter().rev() {
-            if RIGHT_ASSOCIATIVE.contains(&a) {
-                let os = type_op_apply_right(operators, operands, a);
-                operators = os.0;
-                operands = os.1;
+            .collect(),
+        exprs: arm
+            .exprs
+            .into_iter()
+            .map(|e| expr(e, data_decl_map, type_variable_names))
+            .collect(),
+    }
+}
+
+impl TypeIdent {
+    fn get(
+        name: &str,
+        data_decl_map: &FxHashMap<&str, DeclId>,
+    ) -> TypeIdent {
+        if let Some(id) = data_decl_map.get(name) {
+            TypeIdent::DeclId(*id, name.to_string())
+        } else if let Some(i) = INTRINSIC_TYPES.get(name) {
+            TypeIdent::Intrinsic(*i)
+        } else {
+            panic!("{:?} not fould", name)
+        }
+    }
+}
+
+impl ConstructorIdent {
+    fn get(
+        name: &str,
+        data_decl_map: &FxHashMap<&str, DeclId>,
+    ) -> ConstructorIdent {
+        if let Some(id) = data_decl_map.get(name) {
+            ConstructorIdent::DeclId(*id, name.to_string())
+        } else if let Some(i) = INTRINSIC_CONSTRUCTORS.get(name) {
+            ConstructorIdent::Intrinsic(*i)
+        } else {
+            panic!("{:?} not fould", name)
+        }
+    }
+}
+
+fn pattern(
+    p: ast1::Pattern,
+    data_decl_map: &FxHashMap<&str, DeclId>,
+) -> Pattern {
+    use Pattern::*;
+    match p {
+        ast1::Pattern::Number(n) => Number(n),
+        ast1::Pattern::StrLiteral(s) => StrLiteral(s),
+        ast1::Pattern::Constructor { name, args } => Constructor {
+            id: ConstructorIdent::get(&name, data_decl_map),
+            args: args
+                .into_iter()
+                .map(|arg| pattern(arg, data_decl_map))
+                .collect(),
+        },
+        ast1::Pattern::Binder(name) => Binder(name, new_decl_id()),
+        ast1::Pattern::Underscore => Pattern::Underscore,
+    }
+}
+
+pub fn type_to_type(
+    t: ast1::Type,
+    data_decl_map: &FxHashMap<&str, DeclId>,
+    type_variable_names: &FxHashMap<String, usize>,
+) -> Type {
+    match &t.name[..] {
+        "|" => t
+            .args
+            .into_iter()
+            .flat_map(|a| {
+                type_to_type(a, data_decl_map, type_variable_names)
+            })
+            .collect(),
+        "->" => TypeUnit::Fn(
+            type_to_type(
+                t.args[0].clone(),
+                data_decl_map,
+                type_variable_names,
+            ),
+            type_to_type(
+                t.args[1].clone(),
+                data_decl_map,
+                type_variable_names,
+            ),
+        )
+        .into(),
+        _ => {
+            if let Some(n) = type_variable_names.get(&t.name[..]) {
+                TypeUnit::Variable(*n).into()
+            } else if let Some(i) = INTRINSIC_TYPES.get(&t.name) {
+                TypeUnit::Normal {
+                    name: t.name,
+                    args: t
+                        .args
+                        .into_iter()
+                        .map(|a| {
+                            type_to_type(
+                                a,
+                                data_decl_map,
+                                type_variable_names,
+                            )
+                        })
+                        .collect(),
+                    id: TypeIdent::Intrinsic(*i),
+                }
+                .into()
             } else {
-                let os = type_op_apply_left(operators, operands, a);
-                operators = os.0;
-                operands = os.1;
+                TypeUnit::Normal {
+                    name: t.name.clone(),
+                    args: t
+                        .args
+                        .into_iter()
+                        .map(|a| {
+                            type_to_type(
+                                a,
+                                data_decl_map,
+                                type_variable_names,
+                            )
+                        })
+                        .collect(),
+                    id: TypeIdent::get(&t.name, data_decl_map),
+                }
+                .into()
             }
         }
-        operands[0].clone()
-    }
-}
-
-fn type_op_apply_right(
-    mut operators: VecDeque<TypeIdent>,
-    mut operands: VecDeque<Type>,
-    precedence: i32,
-) -> (VecDeque<TypeIdent>, VecDeque<Type>) {
-    if let Some(op) = operators.pop_back() {
-        let last = operands.pop_back().unwrap();
-        if OP_PRECEDENCE[op.name()] == precedence {
-            let last_ = operands.pop_back().unwrap();
-            let new_elm = if op
-                == TypeIdent::Intrinsic(IntrinsicType::Call)
-            {
-                unimplemented!()
-            } else if op == TypeIdent::Intrinsic(IntrinsicType::Arrow)
-            {
-                TypeUnit::Fn(last_, last).into()
-            } else {
-                TypeUnit::Normal {
-                    name: op.name().to_string(),
-                    args: vec![last_, last],
-                    id: op,
-                }
-                .into()
-            };
-            operands.push_back(new_elm);
-            type_op_apply_right(operators, operands, precedence)
-        } else {
-            let (mut operators, mut operands) =
-                type_op_apply_right(operators, operands, precedence);
-            operators.push_back(op);
-            operands.push_back(last);
-            (operators, operands)
-        }
-    } else {
-        (operators, operands)
-    }
-}
-
-fn type_op_apply_left(
-    mut operators: VecDeque<TypeIdent>,
-    mut operands: VecDeque<Type>,
-    precedence: i32,
-) -> (VecDeque<TypeIdent>, VecDeque<Type>) {
-    if let Some(op) = operators.pop_front() {
-        let head = operands.pop_front().unwrap();
-        if OP_PRECEDENCE[op.name()] == precedence {
-            let head_ = operands.pop_front().unwrap();
-            let new_elm = if op
-                == TypeIdent::Intrinsic(IntrinsicType::Call)
-            {
-                if let TypeMatchable::Normal { name, mut args, id } =
-                    head.matchable()
-                {
-                    args.push(head_);
-                    TypeUnit::Normal { name, args, id }.into()
-                } else {
-                    unimplemented!()
-                }
-            } else if op == TypeIdent::Intrinsic(IntrinsicType::Call)
-            {
-                TypeUnit::Fn(head, head_).into()
-            } else if op == TypeIdent::Intrinsic(IntrinsicType::Bar) {
-                head.merge(head_)
-            } else {
-                TypeUnit::Normal {
-                    name: op.name().to_string(),
-                    args: vec![head, head_],
-                    id: op,
-                }
-                .into()
-            };
-            operands.push_front(new_elm);
-            type_op_apply_left(operators, operands, precedence)
-        } else {
-            let (mut operators, mut operands) =
-                type_op_apply_left(operators, operands, precedence);
-            operators.push_front(op);
-            operands.push_front(head);
-            (operators, operands)
-        }
-    } else {
-        (operators, operands)
     }
 }

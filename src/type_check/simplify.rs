@@ -599,12 +599,9 @@ impl Display for Requirements {
 
 #[cfg(test)]
 mod tests {
-    use fxhash::FxHashMap;
-    use stripmargin::StripMargin;
-
     use crate::{
-        ast1,
-        ast2::{self, IncompleteType, Requirements},
+        ast0, ast1, ast2,
+        ast2::{IncompleteType, Requirements},
         parse,
         type_check::{
             simplify::simplify_type,
@@ -613,28 +610,43 @@ mod tests {
             },
         },
     };
+    use stripmargin::StripMargin;
 
     #[test]
     fn simplify1() {
-        let ast: ast1::Ast =
-            parse::parse(r"data a /\ b").unwrap().1.into();
-        let data_decl_map: FxHashMap<&str, ast2::decl_id::DeclId> =
-            ast.data_decl
-                .iter()
-                .map(|d| (&d.name[..], d.decl_id))
-                .collect();
-        let req_t_s = "Num /\\ Num -> \
-                   ((Num /\\ Num | Num /\\ t1 | t2 /\\ Num | t3 /\\ t4) -> Num | String)\
-                   -> Num | String";
-        let req_t = construct_type_with_variables(
-            req_t_s,
-            &["t1", "t2", "t3", "t4"],
-            &data_decl_map,
-        );
+        let ast: ast0::Ast = parse::parse(
+            r#"data a /\ b
+            infixl 3 /\
+            main : () -> ()
+            = fn | () => () --
+            test : Num /\ Num ->
+            ((Num /\ Num | Num /\ t1 | t2 /\ Num | t3 /\ t4) -> Num | String)
+            -> Num | String forall t1, t2, t3, t4 --
+            = ()
+            "#,
+        )
+        .unwrap()
+        .1;
+        dbg!(&ast);
+        let ast: ast1::Ast = ast.into();
+        dbg!(&ast);
+        let ast: ast2::Ast = ast.into();
+        dbg!(&ast);
+        let req_t = ast
+            .variable_decl
+            .iter()
+            .find(|d| d.ident == "test")
+            .unwrap()
+            .type_annotation
+            .clone()
+            .unwrap()
+            .constructor
+            .clone();
+        dbg!(&req_t);
         let dot = construct_type_with_variables(
             "a -> (a -> b) -> b",
             &["a", "b"],
-            &data_decl_map,
+            &Default::default(),
         );
         let t = IncompleteType {
             constructor: construct_type("Num -> Num | String"),

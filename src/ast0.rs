@@ -23,10 +23,13 @@ pub enum Type {
     Paren(InfixTypeSequence),
 }
 
+pub type InfixTypeSequence = Vec<OpSequenceUnit<Type>>;
+
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct InfixTypeSequence {
-    pub operators: Vec<String>,
-    pub operands: Vec<Type>,
+pub enum OpSequenceUnit<T> {
+    Operand(T),
+    Operator(String),
+    Apply(T),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
@@ -51,11 +54,7 @@ pub enum Expr {
     Paren(OpSequence),
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct OpSequence {
-    pub operators: Vec<String>,
-    pub operands: Vec<Expr>,
-}
+pub type OpSequence = Vec<OpSequenceUnit<Expr>>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FnArm {
@@ -64,11 +63,7 @@ pub struct FnArm {
     pub exprs: Vec<OpSequence>,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct InfixConstructorSequence {
-    pub operators: Vec<String>,
-    pub operands: Vec<Pattern>,
-}
+pub type InfixConstructorSequence = Vec<OpSequenceUnit<Pattern>>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Pattern {
@@ -86,8 +81,9 @@ pub struct OperatorPrecedence {
     pub precedence: i32,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Associativity {
     Left,
     Right,
+    UnaryLeft,
 }

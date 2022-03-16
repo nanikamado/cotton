@@ -1,5 +1,6 @@
 use crate::{
-    ast2::{ident_id::IdentId, Ast, Expr, FnArm, VariableDecl},
+    ast0_2::{Ast, Expr, FnArm, VariableDecl},
+    ast2::ident_id::IdentId,
     type_check::VariableId,
 };
 use fxhash::FxHashMap;
@@ -8,11 +9,6 @@ pub fn run(
     mut ast: Ast,
     idents: &FxHashMap<IdentId, VariableId>,
 ) -> Ast {
-    ast.entry_point = ast
-        .variable_decl
-        .iter()
-        .find(|d| d.ident == "main")
-        .map(|d| d.decl_id);
     ast.variable_decl = ast
         .variable_decl
         .into_iter()

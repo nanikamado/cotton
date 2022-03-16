@@ -1,6 +1,6 @@
 use crate::{
-    ast1::TypeIdent,
     ast2::{decl_id::DeclId, types::Type, Ast, DataDecl},
+    ast_old1::TypeIdent,
     type_check::intrinsics::INTRINSIC_TYPES,
 };
 use fxhash::FxHashMap;

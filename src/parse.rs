@@ -1,7 +1,7 @@
 use crate::ast0::{
     Associativity, Ast, DataDecl, Decl, Expr, FnArm, Forall,
     InfixConstructorSequence, InfixTypeSequence, OpSequence,
-    OperatorPrecedence, Pattern, Type, VariableDecl,
+    OpSequenceUnit, OperatorPrecedence, Pattern, Type, VariableDecl,
 };
 use nom::{
     branch::alt,
@@ -144,28 +144,17 @@ pub fn infix_type_sequence(
         type_expr,
         many0(alt((
             type_call.map(|es| {
-                es.into_iter()
-                    .map(|e| ("type_call".to_string(), e))
-                    .collect()
+                es.into_iter().map(OpSequenceUnit::Apply).collect()
             }),
             tuple((pad(type_op), type_expr))
-                .map(|(s, e)| vec![(s, e)]),
+                .map(|(s, e)| vec![s, OpSequenceUnit::Operand(e)]),
         ))),
         separator0,
     ))(input)?;
-    let (os, mut es): (Vec<_>, Vec<_>) =
-        eo.concat().into_iter().unzip();
-    Ok((
-        input,
-        InfixTypeSequence {
-            operators: os,
-            operands: {
-                let mut e = vec![e];
-                e.append(&mut es);
-                e
-            },
-        },
-    ))
+    let eo = std::iter::once(OpSequenceUnit::Operand(e))
+        .chain(eo.into_iter().flatten())
+        .collect();
+    Ok((input, eo))
 }
 
 fn type_call(input: &str) -> IResult<&str, Vec<Type>> {
@@ -350,21 +339,18 @@ fn infix_constructor_sequence(
     let (input, (_, e, eo, _)) = tuple((
         separator0,
         pattern,
-        many0(tuple((pad(op), pattern))),
+        many0(tuple((pad(op), pattern)).map(|(s, e)| {
+            vec![
+                OpSequenceUnit::Operator(s),
+                OpSequenceUnit::Operand(e),
+            ]
+        })),
         separator0,
     ))(input)?;
-    let (os, mut es): (Vec<_>, Vec<_>) = eo.into_iter().unzip();
-    Ok((
-        input,
-        InfixConstructorSequence {
-            operators: os,
-            operands: {
-                let mut e = vec![e];
-                e.append(&mut es);
-                e
-            },
-        },
-    ))
+    let eo = std::iter::once(OpSequenceUnit::Operand(e))
+        .chain(eo.into_iter().flatten())
+        .collect();
+    Ok((input, eo))
 }
 
 fn op_sequence(input: &str) -> IResult<&str, OpSequence> {
@@ -373,27 +359,21 @@ fn op_sequence(input: &str) -> IResult<&str, OpSequence> {
         expr,
         many0(alt((
             fn_call.map(|es| {
-                es.into_iter()
-                    .map(|e| ("fn_call".to_string(), e))
-                    .collect()
+                es.into_iter().map(OpSequenceUnit::Apply).collect()
             }),
-            tuple((pad(op), expr)).map(|(s, e)| vec![(s, e)]),
+            tuple((pad(op), expr)).map(|(s, e)| {
+                vec![
+                    OpSequenceUnit::Operator(s),
+                    OpSequenceUnit::Operand(e),
+                ]
+            }),
         ))),
         separator0,
     ))(input)?;
-    let (os, mut es): (Vec<_>, Vec<_>) =
-        eo.concat().into_iter().unzip();
-    Ok((
-        input,
-        OpSequence {
-            operators: os,
-            operands: {
-                let mut e = vec![e];
-                e.append(&mut es);
-                e
-            },
-        },
-    ))
+    let eo = std::iter::once(OpSequenceUnit::Operand(e))
+        .chain(eo.into_iter().flatten())
+        .collect();
+    Ok((input, eo))
 }
 
 fn op(input: &str) -> IResult<&str, String> {
@@ -410,8 +390,10 @@ fn op(input: &str) -> IResult<&str, String> {
     .map(|(i, s)| (i, s.to_string()))
 }
 
-fn type_op(input: &str) -> IResult<&str, String> {
-    alt((op, tag("|").map(|_| "|".to_string())))(input)
+fn type_op(input: &str) -> IResult<&str, OpSequenceUnit<Type>> {
+    alt((op, tag("|").map(|_| "|".to_string())))
+        .map(OpSequenceUnit::Operator)
+        .parse(input)
 }
 
 fn operator_precedence_decl(
