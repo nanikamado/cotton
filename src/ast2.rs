@@ -17,90 +17,90 @@ use fxhash::FxHashMap;
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ConstructorIdent {
-    DeclId(DeclId, String),
+pub enum ConstructorIdent<'a> {
+    DeclId(DeclId, &'a str),
     Intrinsic(IntrinsicConstructor),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum TypeIdent {
-    DeclId(DeclId, String),
+pub enum TypeIdent<'a> {
+    DeclId(DeclId, &'a str),
     Intrinsic(IntrinsicType),
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Ast {
-    pub variable_decl: Vec<VariableDecl>,
-    pub data_decl: Vec<DataDecl>,
+pub struct Ast<'a> {
+    pub variable_decl: Vec<VariableDecl<'a>>,
+    pub data_decl: Vec<DataDecl<'a>>,
     pub entry_point: DeclId,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct DataDecl {
-    pub name: String,
+pub struct DataDecl<'a> {
+    pub name: &'a str,
     pub field_len: usize,
     pub decl_id: DeclId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct IncompleteType {
-    pub constructor: Type,
-    pub requirements: Requirements,
+pub struct IncompleteType<'a> {
+    pub constructor: Type<'a>,
+    pub requirements: Requirements<'a>,
 }
 
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash,
 )]
-pub struct Requirements {
-    pub variable_requirements: Vec<(String, Type, IdentId)>,
-    pub subtype_relation: BTreeSet<(Type, Type)>,
+pub struct Requirements<'a> {
+    pub variable_requirements: Vec<(&'a str, Type<'a>, IdentId)>,
+    pub subtype_relation: BTreeSet<(Type<'a>, Type<'a>)>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct VariableDecl {
-    pub ident: String,
-    pub type_annotation: Option<IncompleteType>,
-    pub value: Expr,
+pub struct VariableDecl<'a> {
+    pub ident: &'a str,
+    pub type_annotation: Option<IncompleteType<'a>>,
+    pub value: Expr<'a>,
     pub decl_id: DeclId,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Expr {
-    Lambda(Vec<FnArm>),
-    Number(String),
-    StrLiteral(String),
-    Ident { name: String, ident_id: IdentId },
-    Decl(Box<VariableDecl>),
-    Call(Box<Expr>, Box<Expr>),
+pub enum Expr<'a> {
+    Lambda(Vec<FnArm<'a>>),
+    Number(&'a str),
+    StrLiteral(&'a str),
+    Ident { name: &'a str, ident_id: IdentId },
+    Decl(Box<VariableDecl<'a>>),
+    Call(Box<Expr<'a>>, Box<Expr<'a>>),
     Unit,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct FnArm {
-    pub pattern: Vec<Pattern>,
-    pub pattern_type: Vec<Option<Type>>,
-    pub exprs: Vec<Expr>,
+pub struct FnArm<'a> {
+    pub pattern: Vec<Pattern<'a>>,
+    pub pattern_type: Vec<Option<Type<'a>>>,
+    pub exprs: Vec<Expr<'a>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Pattern {
-    Number(String),
-    StrLiteral(String),
+pub enum Pattern<'a> {
+    Number(&'a str),
+    StrLiteral(&'a str),
     Constructor {
-        id: ConstructorIdent,
-        args: Vec<Pattern>,
+        id: ConstructorIdent<'a>,
+        args: Vec<Pattern<'a>>,
     },
-    Binder(String, DeclId),
+    Binder(&'a str, DeclId),
     Underscore,
 }
 
-impl From<ast1::Ast> for Ast {
-    fn from(ast: ast1::Ast) -> Self {
+impl<'a> From<ast1::Ast<'a>> for Ast<'a> {
+    fn from(ast: ast1::Ast<'a>) -> Self {
         let data_decl: Vec<_> = ast
             .data_decl
             .into_iter()
             .map(|d| DataDecl {
-                name: d.name,
+                name: &d.name,
                 field_len: d.field_len,
                 decl_id: new_decl_id(),
             })
@@ -129,7 +129,7 @@ impl From<ast1::Ast> for Ast {
     }
 }
 
-impl ConstructorIdent {
+impl ConstructorIdent<'_> {
     pub fn name(&self) -> &str {
         match self {
             ConstructorIdent::DeclId(_, name) => name,
@@ -138,7 +138,7 @@ impl ConstructorIdent {
     }
 }
 
-impl TypeIdent {
+impl TypeIdent<'_> {
     #[allow(unused)]
     pub fn name(&self) -> &str {
         match self {
@@ -148,8 +148,8 @@ impl TypeIdent {
     }
 }
 
-impl From<ConstructorIdent> for TypeIdent {
-    fn from(c: ConstructorIdent) -> Self {
+impl<'a> From<ConstructorIdent<'a>> for TypeIdent<'a> {
+    fn from(c: ConstructorIdent<'a>) -> Self {
         match c {
             ConstructorIdent::DeclId(ident, name) => {
                 Self::DeclId(ident, name)
@@ -161,8 +161,8 @@ impl From<ConstructorIdent> for TypeIdent {
     }
 }
 
-impl From<Type> for IncompleteType {
-    fn from(t: Type) -> Self {
+impl<'a> From<Type<'a>> for IncompleteType<'a> {
+    fn from(t: Type<'a>) -> Self {
         Self {
             constructor: t,
             requirements: Requirements::default(),
@@ -170,15 +170,15 @@ impl From<Type> for IncompleteType {
     }
 }
 
-fn variable_decl(
-    v: ast1::VariableDecl,
-    data_decl_map: &FxHashMap<&str, DeclId>,
-    type_variable_names: &FxHashMap<String, usize>,
-) -> VariableDecl {
+fn variable_decl<'a>(
+    v: ast1::VariableDecl<'a>,
+    data_decl_map: &FxHashMap<&'a str, DeclId>,
+    type_variable_names: &FxHashMap<&'a str, usize>,
+) -> VariableDecl<'a> {
+    let mut type_variable_names = type_variable_names.clone();
     VariableDecl {
         ident: v.identifier,
         type_annotation: v.type_annotation.map(|(t, forall)| {
-            let mut type_variable_names = type_variable_names.clone();
             type_variable_names.extend(
                 forall
                     .type_variable_names
@@ -188,21 +188,21 @@ fn variable_decl(
             type_to_type(t, data_decl_map, &type_variable_names)
                 .into()
         }),
-        value: expr(v.value, data_decl_map, type_variable_names),
+        value: expr(v.value, data_decl_map, &type_variable_names),
         decl_id: new_decl_id(),
     }
 }
 
-fn expr(
-    e: ast1::Expr,
-    data_decl_map: &FxHashMap<&str, DeclId>,
-    type_variable_names: &FxHashMap<String, usize>,
-) -> Expr {
+fn expr<'a>(
+    e: ast1::Expr<'a>,
+    data_decl_map: &FxHashMap<&'a str, DeclId>,
+    type_variable_names: &FxHashMap<&'a str, usize>,
+) -> Expr<'a> {
     use Expr::*;
     match e {
         ast1::Expr::Lambda(arms) => Lambda(
             arms.into_iter()
-                .map(|arm| {
+                .map(move |arm| {
                     fn_arm(arm, data_decl_map, type_variable_names)
                 })
                 .collect(),
@@ -226,11 +226,11 @@ fn expr(
     }
 }
 
-fn fn_arm(
-    arm: ast1::FnArm,
-    data_decl_map: &FxHashMap<&str, DeclId>,
-    type_variable_names: &FxHashMap<String, usize>,
-) -> FnArm {
+fn fn_arm<'a>(
+    arm: ast1::FnArm<'a>,
+    data_decl_map: &FxHashMap<&'a str, DeclId>,
+    type_variable_names: &FxHashMap<&'a str, usize>,
+) -> FnArm<'a> {
     FnArm {
         pattern: arm
             .pattern
@@ -258,13 +258,13 @@ fn fn_arm(
     }
 }
 
-impl TypeIdent {
-    fn get(
-        name: &str,
+impl TypeIdent<'_> {
+    fn get<'a>(
+        name: &'a str,
         data_decl_map: &FxHashMap<&str, DeclId>,
-    ) -> TypeIdent {
+    ) -> TypeIdent<'a> {
         if let Some(id) = data_decl_map.get(name) {
-            TypeIdent::DeclId(*id, name.to_string())
+            TypeIdent::DeclId(*id, name)
         } else if let Some(i) = INTRINSIC_TYPES.get(name) {
             TypeIdent::Intrinsic(*i)
         } else {
@@ -273,13 +273,13 @@ impl TypeIdent {
     }
 }
 
-impl ConstructorIdent {
-    fn get(
-        name: &str,
+impl ConstructorIdent<'_> {
+    fn get<'a>(
+        name: &'a str,
         data_decl_map: &FxHashMap<&str, DeclId>,
-    ) -> ConstructorIdent {
+    ) -> ConstructorIdent<'a> {
         if let Some(id) = data_decl_map.get(name) {
-            ConstructorIdent::DeclId(*id, name.to_string())
+            ConstructorIdent::DeclId(*id, name)
         } else if let Some(i) = INTRINSIC_CONSTRUCTORS.get(name) {
             ConstructorIdent::Intrinsic(*i)
         } else {
@@ -288,10 +288,10 @@ impl ConstructorIdent {
     }
 }
 
-fn pattern(
-    p: ast1::Pattern,
+fn pattern<'a>(
+    p: ast1::Pattern<'a>,
     data_decl_map: &FxHashMap<&str, DeclId>,
-) -> Pattern {
+) -> Pattern<'a> {
     use Pattern::*;
     match p {
         ast1::Pattern::Number(n) => Number(n),
@@ -308,11 +308,11 @@ fn pattern(
     }
 }
 
-pub fn type_to_type(
-    t: ast1::Type,
-    data_decl_map: &FxHashMap<&str, DeclId>,
-    type_variable_names: &FxHashMap<String, usize>,
-) -> Type {
+pub fn type_to_type<'a>(
+    t: ast1::Type<'a>,
+    data_decl_map: &FxHashMap<&'a str, DeclId>,
+    type_variable_names: &FxHashMap<&'a str, usize>,
+) -> Type<'a> {
     match &t.name[..] {
         "|" => t
             .args

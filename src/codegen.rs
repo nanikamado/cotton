@@ -88,8 +88,8 @@ fn expr(e: &Expr, name_count: u32) -> String {
                 .join(""),
             a.iter().map(|e| fn_arm(e, name_count)).join("")
         ),
-        Expr::Number(a) => a.clone(),
-        Expr::StrLiteral(a) => a.clone(),
+        Expr::Number(a) => a.to_string(),
+        Expr::StrLiteral(a) => a.to_string(),
         Expr::Ident {
             name: info,
             variable_id,
@@ -176,10 +176,10 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn bindings(
-    pattern: &[Pattern],
+fn bindings<'a>(
+    pattern: &'a [Pattern],
     name_count: u32,
-) -> Vec<(&str, String, DeclId)> {
+) -> Vec<(&'a str, String, DeclId)> {
     _bindings(
         pattern,
         (0..pattern.len())
@@ -188,10 +188,10 @@ fn bindings(
     )
 }
 
-fn _bindings(
-    pattern: &[Pattern],
+fn _bindings<'a>(
+    pattern: &'a [Pattern],
     names: Vec<String>,
-) -> Vec<(&str, String, DeclId)> {
+) -> Vec<(&'a str, String, DeclId)> {
     pattern
         .iter()
         .zip(names)

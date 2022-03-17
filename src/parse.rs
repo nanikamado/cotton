@@ -45,7 +45,7 @@ where
     delimited(separator0, f, separator0)
 }
 
-fn decl(input: &str) -> IResult<&str, VariableDecl> {
+fn decl<'a>(input: &'a str) -> IResult<&'a str, VariableDecl<'a>> {
     let (input, (identifier, _, data_type, _, _, value)) =
         tuple((
             identifier,
@@ -84,7 +84,7 @@ fn forall(input: &str) -> IResult<&str, Forall> {
     ))
 }
 
-fn identifier_separators(input: &str) -> IResult<&str, String> {
+fn identifier_separators(input: &str) -> IResult<&str, &str> {
     pad(identifier)(input)
 }
 
@@ -130,7 +130,7 @@ fn infix_constructor_decl(input: &str) -> IResult<&str, DataDecl> {
 fn type_expr(input: &str) -> IResult<&str, Type> {
     alt((
         identifier.map(Type::Identifier),
-        tag("()").map(|_| Type::Identifier("()".to_string())),
+        tag("()").map(|_| Type::Identifier("()")),
         delimited(tag("("), infix_type_sequence, tag(")"))
             .map(Type::Paren),
     ))(input)
@@ -171,20 +171,16 @@ fn type_call(input: &str) -> IResult<&str, Vec<Type>> {
     Ok((input, a0))
 }
 
-fn identifier(input: &str) -> IResult<&str, String> {
+fn identifier(input: &str) -> IResult<&str, &str> {
     let head = verify(anychar, |c| {
         is_identifier_char(*c) && !c.is_dec_digit() || *c == '_'
     });
     let tail = verify(anychar, |c| is_identifier_char(*c));
     let op = delimited(tag("("), op, tag(")"));
-    alt((
-        recognize(pair(head, many0(tail)))
-            .map(|s: &str| s.to_string()),
-        op,
-    ))(input)
+    alt((recognize(pair(head, many0(tail))), op))(input)
 }
 
-fn capital_head_identifier(input: &str) -> IResult<&str, String> {
+fn capital_head_identifier(input: &str) -> IResult<&str, &str> {
     let head = verify(anychar, |c| {
         c.is_uppercase()
             && is_identifier_char(*c)
@@ -192,21 +188,17 @@ fn capital_head_identifier(input: &str) -> IResult<&str, String> {
     });
     let tail = verify(anychar, |c| is_identifier_char(*c));
     let op = delimited(tag("("), op, tag(")"));
-    alt((
-        recognize(pair(head, many0(tail)))
-            .map(|s: &str| s.to_string()),
-        op,
-    ))(input)
+    alt((recognize(pair(head, many0(tail))), op))(input)
 }
 
 fn is_identifier_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-fn expr(input: &str) -> IResult<&str, Expr> {
+fn expr<'a>(input: &'a str) -> IResult<&'a str, Expr<'a>> {
     alt((
-        str_literal.map(|s| Expr::StrLiteral(s.to_string())),
-        num_literal.map(|s| Expr::Number(s.to_string())),
+        str_literal.map(|s| Expr::StrLiteral(s)),
+        num_literal.map(|s| Expr::Number(s)),
         unit,
         lambda,
         decl.map(|d| Expr::Decl(Box::new(d))),
@@ -215,13 +207,13 @@ fn expr(input: &str) -> IResult<&str, Expr> {
     ))(input)
 }
 
-fn paren(input: &str) -> IResult<&str, Expr> {
+fn paren<'a>(input: &'a str) -> IResult<&'a str, Expr<'a>> {
     let (input, s) =
         delimited(tag("("), op_sequence, tag(")"))(input)?;
     Ok((input, Expr::Paren(s)))
 }
 
-fn lambda(input: &str) -> IResult<&str, Expr> {
+fn lambda<'a>(input: &'a str) -> IResult<&'a str, Expr<'a>> {
     let (input, (_, _, arms, _)) =
         tuple((tag("fn"), separator0, many1(fn_arm), tag("--")))(
             input,
@@ -229,7 +221,7 @@ fn lambda(input: &str) -> IResult<&str, Expr> {
     Ok((input, Expr::Lambda(arms)))
 }
 
-fn fn_arm(input: &str) -> IResult<&str, FnArm> {
+fn fn_arm<'a>(input: &'a str) -> IResult<&'a str, FnArm<'a>> {
     let (
         input,
         (_, pattern0, type0, pattern1_type1, _, _, arguments),
@@ -270,11 +262,9 @@ fn fn_arm(input: &str) -> IResult<&str, FnArm> {
 
 fn pattern(input: &str) -> IResult<&str, Pattern> {
     pad(alt((
-        str_literal.map(|s| Pattern::StrLiteral(s.to_string())),
-        num_literal.map(|s| Pattern::Number(s.to_string())),
-        tag("()").map(|_| {
-            Pattern::Constructor("()".to_string(), Vec::new())
-        }),
+        str_literal.map(|s| Pattern::StrLiteral(s)),
+        num_literal.map(|s| Pattern::Number(s)),
+        tag("()").map(|_| Pattern::Constructor("()", Vec::new())),
         tag("_").map(|_| Pattern::Underscore),
         constructor_pattern,
         identifier.map(Pattern::Binder),
@@ -314,7 +304,7 @@ fn num_literal(input: &str) -> IResult<&str, &str> {
     digit1(input).map(|(i, s)| (i, s))
 }
 
-fn fn_call(input: &str) -> IResult<&str, Vec<Expr>> {
+fn fn_call<'a>(input: &'a str) -> IResult<&'a str, Vec<Expr<'a>>> {
     let (input, (_, a0, a1, _, _)) = tuple((
         tag("("),
         op_sequence,
@@ -376,7 +366,7 @@ fn op_sequence(input: &str) -> IResult<&str, OpSequence> {
     Ok((input, eo))
 }
 
-fn op(input: &str) -> IResult<&str, String> {
+fn op(input: &str) -> IResult<&str, &str> {
     verify(
         take_while1(|c| {
             (GeneralCategory::of(c).is_punctuation()
@@ -387,11 +377,10 @@ fn op(input: &str) -> IResult<&str, String> {
         }),
         |s: &str| !["=", "=>", "|", "--", ",", ":"].contains(&s),
     )(input)
-    .map(|(i, s)| (i, s.to_string()))
 }
 
 fn type_op(input: &str) -> IResult<&str, OpSequenceUnit<Type>> {
-    alt((op, tag("|").map(|_| "|".to_string())))
+    alt((op, tag("|")))
         .map(OpSequenceUnit::Operator)
         .parse(input)
 }

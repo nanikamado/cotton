@@ -1,82 +1,83 @@
 #[derive(Debug, PartialEq, Eq)]
-pub struct Ast {
-    pub decls: Vec<Decl>,
+pub struct Ast<'a> {
+    pub decls: Vec<Decl<'a>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Decl {
-    Variable(VariableDecl),
-    Data(DataDecl),
-    Precedence(OperatorPrecedence),
+pub enum Decl<'a> {
+    Variable(VariableDecl<'a>),
+    Data(DataDecl<'a>),
+    Precedence(OperatorPrecedence<'a>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct VariableDecl {
-    pub identifier: String,
-    pub type_annotation: Option<(InfixTypeSequence, Forall)>,
-    pub value: OpSequence,
+pub struct VariableDecl<'a> {
+    pub identifier: &'a str,
+    pub type_annotation: Option<(InfixTypeSequence<'a>, Forall<'a>)>,
+    pub value: OpSequence<'a>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Type {
-    Identifier(String),
-    Paren(InfixTypeSequence),
+pub enum Type<'a> {
+    Identifier(&'a str),
+    Paren(InfixTypeSequence<'a>),
 }
 
-pub type InfixTypeSequence = Vec<OpSequenceUnit<Type>>;
+pub type InfixTypeSequence<'a> = Vec<OpSequenceUnit<'a, Type<'a>>>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum OpSequenceUnit<T> {
+pub enum OpSequenceUnit<'a, T> {
     Operand(T),
-    Operator(String),
+    Operator(&'a str),
     Apply(T),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub struct Forall {
-    pub type_variable_names: Vec<String>,
+pub struct Forall<'a> {
+    pub type_variable_names: Vec<&'a str>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct DataDecl {
-    pub name: String,
+pub struct DataDecl<'a> {
+    pub name: &'a str,
     pub field_len: usize,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Expr {
-    Lambda(Vec<FnArm>),
-    Number(String),
-    StrLiteral(String),
-    Identifier(String),
-    Decl(Box<VariableDecl>),
+pub enum Expr<'a> {
+    Lambda(Vec<FnArm<'a>>),
+    Number(&'a str),
+    StrLiteral(&'a str),
+    Identifier(&'a str),
+    Decl(Box<VariableDecl<'a>>),
     Unit,
-    Paren(OpSequence),
+    Paren(OpSequence<'a>),
 }
 
-pub type OpSequence = Vec<OpSequenceUnit<Expr>>;
+pub type OpSequence<'a> = Vec<OpSequenceUnit<'a, Expr<'a>>>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct FnArm {
-    pub pattern: Vec<InfixConstructorSequence>,
-    pub pattern_type: Vec<Option<InfixTypeSequence>>,
-    pub exprs: Vec<OpSequence>,
+pub struct FnArm<'a> {
+    pub pattern: Vec<InfixConstructorSequence<'a>>,
+    pub pattern_type: Vec<Option<InfixTypeSequence<'a>>>,
+    pub exprs: Vec<OpSequence<'a>>,
 }
 
-pub type InfixConstructorSequence = Vec<OpSequenceUnit<Pattern>>;
+pub type InfixConstructorSequence<'a> =
+    Vec<OpSequenceUnit<'a, Pattern<'a>>>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Pattern {
-    Number(String),
-    StrLiteral(String),
-    Constructor(String, Vec<Pattern>),
-    Binder(String),
+pub enum Pattern<'a> {
+    Number(&'a str),
+    StrLiteral(&'a str),
+    Constructor(&'a str, Vec<Pattern<'a>>),
+    Binder(&'a str),
     Underscore,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct OperatorPrecedence {
-    pub name: String,
+pub struct OperatorPrecedence<'a> {
+    pub name: &'a str,
     pub associativity: Associativity,
     pub precedence: i32,
 }

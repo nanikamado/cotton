@@ -29,9 +29,9 @@ pub fn simplify_type(
     Some(t)
 }
 
-fn _simplify_type(
-    mut t: IncompleteType,
-) -> Option<(IncompleteType, bool)> {
+fn _simplify_type<'a>(
+    mut t: IncompleteType<'a>,
+) -> Option<(IncompleteType<'a>, bool)> {
     use TypeUnit::*;
     let hash_before_simplify = fxhash::hash(&t);
     let subtype_relationship =
@@ -152,10 +152,10 @@ fn _simplify_type(
     Some((t, updated))
 }
 
-fn simplify_subtype_rel(
-    sub: Type,
-    sup: Type,
-) -> Option<Vec<(Type, Type)>> {
+fn simplify_subtype_rel<'a>(
+    sub: Type<'a>,
+    sup: Type<'a>,
+) -> Option<Vec<(Type<'a>, Type<'a>)>> {
     use TypeMatchable::*;
     match (sub.matchable(), sup.matchable()) {
         (Union(cs), b) => Some(
@@ -277,7 +277,7 @@ fn simplify_subtype_rel(
     }
 }
 
-fn lift_recursive_alias(t: Type) -> Type {
+fn lift_recursive_alias<'a>(t: Type<'a>) -> Type<'a> {
     if let Some((alias, body)) = t.find_recursive_alias() {
         let r = &TypeUnit::RecursiveAlias {
             alias,
@@ -299,8 +299,8 @@ fn unwrap_recursive_alias(alias: usize, body: Type) -> Type {
     )
 }
 
-impl TypeUnit {
-    fn find_recursive_alias(&self) -> Option<(usize, Type)> {
+impl<'a> TypeUnit<'a> {
+    fn find_recursive_alias(&self) -> Option<(usize, Type<'a>)> {
         match self {
             TypeUnit::Normal { args, .. } => {
                 args.iter().find_map(Type::find_recursive_alias)
@@ -317,16 +317,16 @@ impl TypeUnit {
     }
 }
 
-impl Type {
-    fn find_recursive_alias(&self) -> Option<(usize, Type)> {
+impl<'a> Type<'a> {
+    fn find_recursive_alias(&self) -> Option<(usize, Type<'a>)> {
         self.iter().find_map(TypeUnit::find_recursive_alias)
     }
 }
 
-fn possible_weakest(
+fn possible_weakest<'a>(
     t: usize,
-    subtype_relation: &BTreeSet<(Type, Type)>,
-) -> Option<Type> {
+    subtype_relation: &BTreeSet<(Type<'a>, Type<'a>)>,
+) -> Option<Type<'a>> {
     let mut up = FxHashSet::default();
     for (sub, sup) in subtype_relation {
         if contravariant_type_variables(sup).contains(&t) {
@@ -382,10 +382,10 @@ fn possible_weakest(
     }
 }
 
-fn possible_strongest(
+fn possible_strongest<'a>(
     t: usize,
-    subtype_relation: &BTreeSet<(Type, Type)>,
-) -> Option<Type> {
+    subtype_relation: &BTreeSet<(Type<'a>, Type<'a>)>,
+) -> Option<Type<'a>> {
     let mut down = Vec::new();
     for (sub, sup) in subtype_relation {
         if contravariant_type_variables(sub).contains(&t) {
@@ -497,11 +497,11 @@ fn contravariant_type_variables(t: &Type) -> Vec<usize> {
     }
 }
 
-impl IncompleteType {
+impl<'a> IncompleteType<'a> {
     pub fn replace_num_option(
         self,
         from: usize,
-        to: &Type,
+        to: &Type<'a>,
     ) -> Option<Self> {
         let IncompleteType {
             constructor,
@@ -540,9 +540,9 @@ impl IncompleteType {
     }
 }
 
-fn mk_graph(
-    subtype_relationship: &BTreeSet<(Type, Type)>,
-) -> DiGraphMap<&Type, ()> {
+fn mk_graph<'a, 'b>(
+    subtype_relationship: &'b BTreeSet<(Type<'a>, Type<'a>)>,
+) -> DiGraphMap<&'b Type<'a>, ()> {
     let mut g = DiGraphMap::new();
     for (a, b) in subtype_relationship {
         g.add_edge(a, b, ());
@@ -569,7 +569,7 @@ fn replace_type_test1() {
     );
 }
 
-impl Display for IncompleteType {
+impl Display for IncompleteType<'_> {
     fn fmt(
         &self,
         f: &mut std::fmt::Formatter<'_>,
@@ -582,7 +582,7 @@ impl Display for IncompleteType {
     }
 }
 
-impl Display for Requirements {
+impl Display for Requirements<'_> {
     fn fmt(
         &self,
         f: &mut std::fmt::Formatter<'_>,

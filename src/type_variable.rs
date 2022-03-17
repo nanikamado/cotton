@@ -1,7 +1,7 @@
 use crate::ast2::types::TypeUnit;
 use std::cell::Cell;
 
-impl TypeUnit {
+impl TypeUnit<'_> {
     pub fn new_variable() -> Self {
         Self::Variable(Self::new_variable_num())
     }

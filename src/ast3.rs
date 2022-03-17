@@ -9,50 +9,50 @@ use crate::{
 use fxhash::FxHashMap;
 
 #[derive(Debug, PartialEq)]
-pub struct Ast {
-    pub variable_decl: Vec<VariableDecl>,
-    pub data_decl: Vec<DataDecl>,
+pub struct Ast<'a> {
+    pub variable_decl: Vec<VariableDecl<'a>>,
+    pub data_decl: Vec<DataDecl<'a>>,
     pub entry_point: DeclId,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct VariableDecl {
-    pub ident: String,
-    pub type_annotation: Option<IncompleteType>,
-    pub value: Expr,
+pub struct VariableDecl<'a> {
+    pub ident: &'a str,
+    pub type_annotation: Option<IncompleteType<'a>>,
+    pub value: Expr<'a>,
     pub decl_id: DeclId,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Expr {
-    Lambda(Vec<FnArm>),
-    Number(String),
-    StrLiteral(String),
+pub enum Expr<'a> {
+    Lambda(Vec<FnArm<'a>>),
+    Number(&'a str),
+    StrLiteral(&'a str),
     Ident {
-        name: String,
+        name: &'a str,
         variable_id: VariableId,
     },
-    Decl(Box<VariableDecl>),
-    Call(Box<Expr>, Box<Expr>),
+    Decl(Box<VariableDecl<'a>>),
+    Call(Box<Expr<'a>>, Box<Expr<'a>>),
     Unit,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct FnArm {
-    pub pattern: Vec<Pattern>,
-    pub pattern_type: Vec<Option<Type>>,
-    pub exprs: Vec<Expr>,
+pub struct FnArm<'a> {
+    pub pattern: Vec<Pattern<'a>>,
+    pub pattern_type: Vec<Option<Type<'a>>>,
+    pub exprs: Vec<Expr<'a>>,
 }
 
-impl From<ast2::Ast> for Ast {
-    fn from(ast: ast2::Ast) -> Self {
+impl<'a> From<ast2::Ast<'a>> for Ast<'a> {
+    fn from(ast: ast2::Ast<'a>) -> Self {
         let resolved_idents = type_check(&ast);
         log::trace!("{:?}", resolved_idents);
         Self {
             variable_decl: ast
                 .variable_decl
                 .into_iter()
-                .map(|d| variable_decl(d, &resolved_idents))
+                .map(move |d| variable_decl(d, &resolved_idents))
                 .collect(),
             data_decl: ast.data_decl,
             entry_point: ast.entry_point,
@@ -60,10 +60,10 @@ impl From<ast2::Ast> for Ast {
     }
 }
 
-fn variable_decl(
-    d: ast2::VariableDecl,
+fn variable_decl<'a>(
+    d: ast2::VariableDecl<'a>,
     resolved_idents: &FxHashMap<IdentId, VariableId>,
-) -> VariableDecl {
+) -> VariableDecl<'a> {
     VariableDecl {
         ident: d.ident,
         type_annotation: d.type_annotation,
@@ -72,10 +72,10 @@ fn variable_decl(
     }
 }
 
-fn expr(
-    e: ast2::Expr,
+fn expr<'a>(
+    e: ast2::Expr<'a>,
     resolved_idents: &FxHashMap<IdentId, VariableId>,
-) -> Expr {
+) -> Expr<'a> {
     use Expr::*;
     match e {
         ast2::Expr::Lambda(a) => Lambda(
@@ -100,10 +100,10 @@ fn expr(
     }
 }
 
-fn fn_arm(
-    arm: ast2::FnArm,
+fn fn_arm<'a>(
+    arm: ast2::FnArm<'a>,
     resolved_idents: &FxHashMap<IdentId, VariableId>,
-) -> FnArm {
+) -> FnArm<'a> {
     FnArm {
         pattern: arm.pattern,
         pattern_type: arm.pattern_type,

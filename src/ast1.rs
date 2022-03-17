@@ -10,71 +10,76 @@ use std::{
 };
 
 #[derive(Debug, PartialEq, Eq)]
-pub struct Ast {
-    pub variable_decl: Vec<VariableDecl>,
-    pub data_decl: Vec<DataDecl>,
+pub struct Ast<'a> {
+    pub variable_decl: Vec<VariableDecl<'a>>,
+    pub data_decl: Vec<DataDecl<'a>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct VariableDecl {
-    pub identifier: String,
-    pub type_annotation: Option<(Type, Forall)>,
-    pub value: Expr,
+pub struct VariableDecl<'a> {
+    pub identifier: &'a str,
+    pub type_annotation: Option<(Type<'a>, Forall<'a>)>,
+    pub value: Expr<'a>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Type {
-    pub name: String,
-    pub args: Vec<Type>,
+pub struct Type<'a> {
+    pub name: &'a str,
+    pub args: Vec<Type<'a>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct DataDecl {
-    pub name: String,
+pub struct DataDecl<'a> {
+    pub name: &'a str,
     pub field_len: usize,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Expr {
-    Lambda(Vec<FnArm>),
-    Number(String),
-    StrLiteral(String),
-    Ident(String),
-    Decl(Box<VariableDecl>),
-    Call(Box<Expr>, Box<Expr>),
+pub enum Expr<'a> {
+    Lambda(Vec<FnArm<'a>>),
+    Number(&'a str),
+    StrLiteral(&'a str),
+    Ident(&'a str),
+    Decl(Box<VariableDecl<'a>>),
+    Call(Box<Expr<'a>>, Box<Expr<'a>>),
     Unit,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct FnArm {
-    pub pattern: Vec<Pattern>,
-    pub pattern_type: Vec<Option<Type>>,
-    pub exprs: Vec<Expr>,
+pub struct FnArm<'a> {
+    pub pattern: Vec<Pattern<'a>>,
+    pub pattern_type: Vec<Option<Type<'a>>>,
+    pub exprs: Vec<Expr<'a>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Pattern {
-    Number(String),
-    StrLiteral(String),
-    Constructor { name: String, args: Vec<Pattern> },
-    Binder(String),
+pub enum Pattern<'a> {
+    Number(&'a str),
+    StrLiteral(&'a str),
+    Constructor {
+        name: &'a str,
+        args: Vec<Pattern<'a>>,
+    },
+    Binder(&'a str),
     Underscore,
 }
 
-pub type TypeOperatorSequence = Vec<OpSequenceUnit<Type>>;
+pub type TypeOperatorSequence<'a> = Vec<OpSequenceUnit<'a, Type<'a>>>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum OpSequenceUnit<T> {
+pub enum OpSequenceUnit<'a, T> {
     Operand(T),
-    Operator(String, Associativity, i32),
+    Operator(&'a str, Associativity, i32),
     Apply(T),
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct OpPrecedenceMap(FxHashMap<String, (Associativity, i32)>);
+pub struct OpPrecedenceMap<'a>(
+    FxHashMap<&'a str, (Associativity, i32)>,
+);
 
-impl OpPrecedenceMap {
-    pub fn new(m: FxHashMap<String, (Associativity, i32)>) -> Self {
+impl<'a> OpPrecedenceMap<'a> {
+    pub fn new(m: FxHashMap<&'a str, (Associativity, i32)>) -> Self {
         OpPrecedenceMap(m)
     }
 
@@ -86,19 +91,19 @@ impl OpPrecedenceMap {
 }
 
 pub trait InfixOpCall {
-    fn infix_op_call(op_name: String, e1: Self, e2: Self) -> Self;
+    fn infix_op_call(op_name: &str, e1: Self, e2: Self) -> Self;
 }
 
-pub trait IdentFromString {
-    fn ident_from_string(s: String) -> Self;
+pub trait IdentFromStr<'a> {
+    fn ident_from_str(s: &'a str) -> Self;
 }
 
 pub trait AddArgument {
     fn add_argument(self, arg: Self) -> Self;
 }
 
-impl IdentFromString for Type {
-    fn ident_from_string(s: String) -> Self {
+impl<'a> IdentFromStr<'a> for Type<'a> {
+    fn ident_from_str(s: &'a str) -> Self {
         Self {
             name: s,
             args: Vec::new(),
@@ -106,27 +111,27 @@ impl IdentFromString for Type {
     }
 }
 
-impl AddArgument for Type {
+impl<'a> AddArgument for Type<'a> {
     fn add_argument(mut self, arg: Self) -> Self {
         self.args.push(arg);
         self
     }
 }
 
-impl IdentFromString for Expr {
-    fn ident_from_string(s: String) -> Self {
-        Self::Ident(s)
+impl<'a> IdentFromStr<'a> for Expr<'a> {
+    fn ident_from_str(s: &'a str) -> Self {
+        Self::Ident(&s)
     }
 }
 
-impl AddArgument for Expr {
+impl<'a> AddArgument for Expr<'a> {
     fn add_argument(self, arg: Self) -> Self {
         Self::Call(self.into(), arg.into())
     }
 }
 
-impl IdentFromString for Pattern {
-    fn ident_from_string(name: String) -> Self {
+impl<'a> IdentFromStr<'a> for Pattern<'a> {
+    fn ident_from_str(name: &'a str) -> Self {
         Self::Constructor {
             name,
             args: Vec::new(),
@@ -134,7 +139,7 @@ impl IdentFromString for Pattern {
     }
 }
 
-impl AddArgument for Pattern {
+impl AddArgument for Pattern<'_> {
     fn add_argument(self, arg: Self) -> Self {
         if let Pattern::Constructor { name, mut args } = self {
             args.push(arg);
@@ -145,7 +150,7 @@ impl AddArgument for Pattern {
     }
 }
 
-impl<T> OpSequenceUnit<T> {
+impl<T> OpSequenceUnit<'_, T> {
     pub fn operator_precedence(&self) -> Option<i32> {
         match self {
             OpSequenceUnit::Operand(_) => None,
@@ -155,8 +160,8 @@ impl<T> OpSequenceUnit<T> {
     }
 }
 
-impl From<ast0::Ast> for Ast {
-    fn from(ast: ast0::Ast) -> Self {
+impl<'a> From<ast0::Ast<'a>> for Ast<'a> {
+    fn from(ast: ast0::Ast<'a>) -> Self {
         let mut vs = Vec::new();
         let mut ds = Vec::new();
         let mut precedence_map = OP_PRECEDENCE.clone();
@@ -188,12 +193,12 @@ impl From<ast0::Ast> for Ast {
     }
 }
 
-fn variable_decl(
-    v: ast0::VariableDecl,
+fn variable_decl<'a>(
+    v: ast0::VariableDecl<'a>,
     op_precedence_map: &OpPrecedenceMap,
-) -> VariableDecl {
+) -> VariableDecl<'a> {
     VariableDecl {
-        identifier: v.identifier,
+        identifier: &v.identifier,
         type_annotation: v.type_annotation.map(|(s, forall)| {
             (
                 infix_op_sequence(op_sequence(s, op_precedence_map)),
@@ -207,8 +212,11 @@ fn variable_decl(
     }
 }
 
-fn apply_type_op<T: AddArgument + IdentFromString + Clone + Debug>(
-    mut sequence: IndexList<OpSequenceUnit<T>>,
+fn apply_type_op<
+    'a,
+    T: AddArgument + IdentFromStr<'a> + Clone + Debug,
+>(
+    mut sequence: IndexList<OpSequenceUnit<'a, T>>,
     i: Index,
 ) -> IndexList<OpSequenceUnit<T>> {
     let i_prev = sequence.prev_index(i);
@@ -222,7 +230,7 @@ fn apply_type_op<T: AddArgument + IdentFromString + Clone + Debug>(
                     if let OpSequenceUnit::Operand(e2) =
                         s_i_next.unwrap()
                     {
-                        *e1 = T::ident_from_string(name)
+                        *e1 = T::ident_from_str(name)
                             .add_argument(e1.clone())
                             .add_argument(e2);
                     } else {
@@ -259,8 +267,11 @@ fn apply_type_op<T: AddArgument + IdentFromString + Clone + Debug>(
     sequence
 }
 
-fn op_apply_left<T: AddArgument + IdentFromString + Clone + Debug>(
-    mut sequence: Vec<OpSequenceUnit<T>>,
+fn op_apply_left<
+    'a,
+    T: AddArgument + IdentFromStr<'a> + Clone + Debug,
+>(
+    mut sequence: Vec<OpSequenceUnit<'a, T>>,
     precedence: i32,
 ) -> Vec<OpSequenceUnit<T>> {
     let mut sequence = IndexList::from(&mut sequence);
@@ -284,9 +295,10 @@ fn op_apply_left<T: AddArgument + IdentFromString + Clone + Debug>(
 }
 
 fn op_apply_right<
-    T: AddArgument + IdentFromString + Clone + Debug,
+    'a,
+    T: AddArgument + IdentFromStr<'a> + Clone + Debug,
 >(
-    mut sequence: Vec<OpSequenceUnit<T>>,
+    mut sequence: Vec<OpSequenceUnit<'a, T>>,
     precedence: i32,
 ) -> Vec<OpSequenceUnit<T>> {
     let mut sequence = IndexList::from(&mut sequence);
@@ -309,9 +321,10 @@ fn op_apply_right<
 }
 
 pub fn infix_op_sequence<
-    T: AddArgument + IdentFromString + Clone + fmt::Debug,
+    'a,
+    T: AddArgument + IdentFromStr<'a> + Clone + fmt::Debug,
 >(
-    mut s: Vec<OpSequenceUnit<T>>,
+    mut s: Vec<OpSequenceUnit<'a, T>>,
 ) -> T {
     let mut precedence_list = BTreeMap::new();
     for op in s.clone() {
@@ -365,8 +378,8 @@ pub fn infix_op_sequence<
     }
 }
 
-impl ConvertWithOpPrecedenceMap for ast0::Type {
-    type T = Type;
+impl<'a> ConvertWithOpPrecedenceMap for ast0::Type<'a> {
+    type T = Type<'a>;
 
     fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T {
         match self {
@@ -381,10 +394,10 @@ impl ConvertWithOpPrecedenceMap for ast0::Type {
     }
 }
 
-pub fn op_sequence<U: ConvertWithOpPrecedenceMap>(
-    s: Vec<ast0::OpSequenceUnit<U>>,
+pub fn op_sequence<'a, U: ConvertWithOpPrecedenceMap>(
+    s: Vec<ast0::OpSequenceUnit<'a, U>>,
     op_precedence_map: &OpPrecedenceMap,
-) -> Vec<OpSequenceUnit<<U as ConvertWithOpPrecedenceMap>::T>> {
+) -> Vec<OpSequenceUnit<'a, <U as ConvertWithOpPrecedenceMap>::T>> {
     use OpSequenceUnit::*;
     s.into_iter()
         .map(|u| match u {
@@ -407,8 +420,8 @@ pub trait ConvertWithOpPrecedenceMap {
     fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T;
 }
 
-impl ConvertWithOpPrecedenceMap for ast0::Expr {
-    type T = Expr;
+impl<'a> ConvertWithOpPrecedenceMap for ast0::Expr<'a> {
+    type T = Expr<'a>;
 
     fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T {
         use Expr::*;
@@ -432,10 +445,10 @@ impl ConvertWithOpPrecedenceMap for ast0::Expr {
     }
 }
 
-fn fn_arm(
-    a: ast0::FnArm,
+fn fn_arm<'a>(
+    a: ast0::FnArm<'a>,
     op_precedence_map: &OpPrecedenceMap,
-) -> FnArm {
+) -> FnArm<'a> {
     FnArm {
         pattern: a
             .pattern
@@ -466,8 +479,8 @@ fn fn_arm(
     }
 }
 
-impl ConvertWithOpPrecedenceMap for ast0::Pattern {
-    type T = Pattern;
+impl<'a> ConvertWithOpPrecedenceMap for ast0::Pattern<'a> {
+    type T = Pattern<'a>;
 
     fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T {
         match self {

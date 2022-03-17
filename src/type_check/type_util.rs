@@ -13,7 +13,7 @@ use TypeMatchableRef::{Fn, Normal};
 
 use super::intrinsics::OP_PRECEDENCE;
 
-impl TypeUnit {
+impl<'a> TypeUnit<'a> {
     pub fn all_type_variables(&self) -> Vec<usize> {
         match self {
             TypeUnit::Normal { args, .. } => args
@@ -34,7 +34,7 @@ impl TypeUnit {
         }
     }
 
-    pub fn replace_num(self, from: usize, to: &Type) -> Type {
+    pub fn replace_num(self, from: usize, to: &Type<'a>) -> Type<'a> {
         match self {
             Self::Fn(args, rtn) => Self::Fn(
                 args.replace_num(from, to),
@@ -71,8 +71,8 @@ impl TypeUnit {
 
     pub fn replace_type(
         self,
-        from: &TypeUnit,
-        to: &TypeUnit,
+        from: &TypeUnit<'a>,
+        to: &TypeUnit<'a>,
     ) -> Self {
         match self {
             t if t == *from => to.clone(),
@@ -101,7 +101,7 @@ impl TypeUnit {
     pub fn replace_type_union(
         self,
         from: &Type,
-        to: &TypeUnit,
+        to: &TypeUnit<'a>,
     ) -> Self {
         match self {
             Self::Fn(args, rtn) => Self::Fn(
@@ -155,7 +155,7 @@ impl TypeUnit {
     }
 }
 
-impl Type {
+impl<'a> Type<'a> {
     pub fn all_type_variables(&self) -> HashSet<usize> {
         self.iter().flat_map(|t| t.all_type_variables()).collect()
     }
@@ -168,8 +168,8 @@ impl Type {
 
     pub fn replace_type(
         self,
-        from: &TypeUnit,
-        to: &TypeUnit,
+        from: &TypeUnit<'a>,
+        to: &TypeUnit<'a>,
     ) -> Self {
         self.into_iter().map(|t| t.replace_type(from, to)).collect()
     }
@@ -177,7 +177,7 @@ impl Type {
     pub fn replace_type_union(
         self,
         from: &Type,
-        to: &TypeUnit,
+        to: &TypeUnit<'a>,
     ) -> Self {
         if self == *from {
             to.clone().into()
@@ -203,7 +203,7 @@ impl Type {
     }
 }
 
-impl IncompleteType {
+impl<'a> IncompleteType<'a> {
     fn all_type_variables(&self) -> HashSet<usize> {
         let IncompleteType {
             constructor,
@@ -234,7 +234,7 @@ impl IncompleteType {
         self
     }
 
-    pub fn replace_num(self, from: usize, to: &Type) -> Self {
+    pub fn replace_num(self, from: usize, to: &Type<'a>) -> Self {
         let IncompleteType {
             constructor,
             requirements:
@@ -266,7 +266,7 @@ impl IncompleteType {
     }
 }
 
-impl Requirements {
+impl<'a> Requirements<'a> {
     pub fn merge(self, other: Self) -> Self {
         Self {
             variable_requirements: [
@@ -283,15 +283,15 @@ impl Requirements {
     }
 }
 
-pub fn construct_type(s: &str) -> Type {
+pub fn construct_type<'a>(s: &'a str) -> Type<'a> {
     construct_type_with_variables(s, &[], &Default::default())
 }
 
-pub fn construct_type_with_variables(
-    s: &str,
-    type_variable_names: &[&str],
-    data_decl_map: &FxHashMap<&str, ast2::decl_id::DeclId>,
-) -> Type {
+pub fn construct_type_with_variables<'a>(
+    s: &'a str,
+    type_variable_names: &[&'a str],
+    data_decl_map: &FxHashMap<&'a str, ast2::decl_id::DeclId>,
+) -> Type<'a> {
     let (_, type_seq) = crate::parse::infix_type_sequence(s).unwrap();
     let type_seq: ast1::TypeOperatorSequence = ast1::op_sequence(
         type_seq,
@@ -303,9 +303,7 @@ pub fn construct_type_with_variables(
         data_decl_map,
         &type_variable_names
             .iter()
-            .map(|&name| {
-                (name.to_string(), TypeUnit::new_variable_num())
-            })
+            .map(|&name| (name, TypeUnit::new_variable_num()))
             .collect(),
     )
 }

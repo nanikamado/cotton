@@ -4,19 +4,19 @@ use itertools::Itertools;
 use std::{collections::BTreeSet, fmt::Display};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum TypeMatchable {
+pub enum TypeMatchable<'a> {
     Normal {
-        name: String,
-        args: Vec<Type>,
-        id: TypeIdent,
+        name: &'a str,
+        args: Vec<Type<'a>>,
+        id: TypeIdent<'a>,
     },
-    Fn(Type, Type),
-    Union(Type),
+    Fn(Type<'a>, Type<'a>),
+    Union(Type<'a>),
     Variable(usize),
     Empty,
     RecursiveAlias {
         alias: usize,
-        body: Type,
+        body: Type<'a>,
     },
 }
 
@@ -24,31 +24,31 @@ pub enum TypeMatchable {
 pub enum TypeMatchableRef<'a> {
     Normal {
         name: &'a str,
-        args: &'a Vec<Type>,
-        id: TypeIdent,
+        args: &'a Vec<Type<'a>>,
+        id: TypeIdent<'a>,
     },
-    Fn(&'a Type, &'a Type),
-    Union(&'a BTreeSet<TypeUnit>),
+    Fn(&'a Type<'a>, &'a Type<'a>),
+    Union(&'a BTreeSet<TypeUnit<'a>>),
     Variable(usize),
     Empty,
     RecursiveAlias {
         alias: usize,
-        body: &'a Type,
+        body: &'a Type<'a>,
     },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum TypeUnit {
+pub enum TypeUnit<'a> {
     Normal {
-        name: String,
-        args: Vec<Type>,
-        id: TypeIdent,
+        name: &'a str,
+        args: Vec<Type<'a>>,
+        id: TypeIdent<'a>,
     },
-    Fn(Type, Type),
+    Fn(Type<'a>, Type<'a>),
     Variable(usize),
     RecursiveAlias {
         alias: usize,
-        body: Type,
+        body: Type<'a>,
     },
 }
 
@@ -60,10 +60,10 @@ pub mod type_type {
     #[derive(
         Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
     )]
-    pub struct Type(BTreeSet<TypeUnit>);
+    pub struct Type<'a>(BTreeSet<TypeUnit<'a>>);
 
-    impl IntoIterator for Type {
-        type Item = TypeUnit;
+    impl<'a> IntoIterator for Type<'a> {
+        type Item = TypeUnit<'a>;
 
         type IntoIter =
             std::collections::btree_set::IntoIter<Self::Item>;
@@ -73,10 +73,11 @@ pub mod type_type {
         }
     }
 
-    impl Type {
+    impl<'a> Type<'a> {
         pub fn iter(
             &self,
-        ) -> std::collections::btree_set::Iter<'_, TypeUnit> {
+        ) -> std::collections::btree_set::Iter<'_, TypeUnit<'a>>
+        {
             self.0.iter()
         }
 
@@ -94,7 +95,7 @@ pub mod type_type {
             self.0.len()
         }
 
-        pub fn matchable(self) -> TypeMatchable {
+        pub fn matchable(self) -> TypeMatchable<'a> {
             use TypeMatchable::*;
             match self.0.len() {
                 0 => Empty,
@@ -136,23 +137,23 @@ pub mod type_type {
         }
     }
 
-    impl FromIterator<TypeUnit> for Type {
-        fn from_iter<T: IntoIterator<Item = TypeUnit>>(
+    impl<'a> FromIterator<TypeUnit<'a>> for Type<'a> {
+        fn from_iter<T: IntoIterator<Item = TypeUnit<'a>>>(
             iter: T,
         ) -> Self {
             Type(iter.into_iter().collect())
         }
     }
 
-    impl From<TypeUnit> for Type {
-        fn from(t: TypeUnit) -> Self {
+    impl<'a> From<TypeUnit<'a>> for Type<'a> {
+        fn from(t: TypeUnit<'a>) -> Self {
             Type(std::iter::once(t).collect())
         }
     }
 }
 
-impl From<TypeMatchable> for Type {
-    fn from(m: TypeMatchable) -> Self {
+impl<'a> From<TypeMatchable<'a>> for Type<'a> {
+    fn from(m: TypeMatchable<'a>) -> Self {
         match m {
             TypeMatchable::Normal { name, args, id } => {
                 TypeUnit::Normal { name, args, id }.into()
@@ -170,7 +171,7 @@ impl From<TypeMatchable> for Type {
     }
 }
 
-impl Display for Type {
+impl Display for Type<'_> {
     fn fmt(
         &self,
         f: &mut std::fmt::Formatter<'_>,
@@ -220,7 +221,7 @@ impl Display for Type {
     }
 }
 
-impl Display for TypeUnit {
+impl Display for TypeUnit<'_> {
     fn fmt(
         &self,
         f: &mut std::fmt::Formatter<'_>,

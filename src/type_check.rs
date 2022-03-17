@@ -51,21 +51,19 @@ impl std::fmt::Debug for VariableId {
 }
 
 pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, VariableId> {
-    let mut toplevels: FxHashMap<String, Vec<Toplevel>> =
+    let mut toplevels: FxHashMap<&str, Vec<Toplevel>> =
         FxHashMap::default();
     for v in IntrinsicVariable::iter() {
-        toplevels.entry(v.to_str().to_string()).or_default().push(
-            Toplevel {
-                incomplete: v.to_type().clone().into(),
-                face: None,
-                resolved_idents: Default::default(),
-                decl_id: VariableId::Intrinsic(v),
-            },
-        );
+        toplevels.entry(v.to_str()).or_default().push(Toplevel {
+            incomplete: v.to_type().clone().into(),
+            face: None,
+            resolved_idents: Default::default(),
+            decl_id: VariableId::Intrinsic(v),
+        });
     }
     for d in &ast.data_decl {
         let d_type: types::Type = constructor_type(d.clone()).into();
-        toplevels.entry(d.name.clone()).or_default().push(Toplevel {
+        toplevels.entry(d.name).or_default().push(Toplevel {
             incomplete: d_type.into(),
             face: None,
             resolved_idents: Default::default(),
@@ -92,15 +90,12 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, VariableId> {
         } else {
             None
         };
-        toplevels.entry(d.ident.clone()).or_default().push(
-            Toplevel {
-                incomplete: simplify::simplify_type(t.clone())
-                    .unwrap(),
-                face,
-                resolved_idents: Default::default(),
-                decl_id: VariableId::Decl(d.decl_id),
-            },
-        );
+        toplevels.entry(d.ident).or_default().push(Toplevel {
+            incomplete: simplify::simplify_type(t.clone()).unwrap(),
+            face,
+            resolved_idents: Default::default(),
+            decl_id: VariableId::Decl(d.decl_id),
+        });
     }
     for (name, top) in &toplevels {
         log::debug!("{} : ", name);
@@ -127,20 +122,20 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, VariableId> {
     resolved_idents
 }
 
-struct Toplevel {
-    incomplete: IncompleteType,
-    face: Option<IncompleteType>,
+struct Toplevel<'a> {
+    incomplete: IncompleteType<'a>,
+    face: Option<IncompleteType<'a>>,
     resolved_idents: FxHashMap<IdentId, VariableId>,
     decl_id: VariableId,
 }
 
-fn resolve_names(
-    mut toplevels: FxHashMap<String, Vec<Toplevel>>,
-) -> FxHashMap<String, Vec<Toplevel>> {
-    struct ResolvedType {
-        name: String,
+fn resolve_names<'a>(
+    mut toplevels: FxHashMap<&'a str, Vec<Toplevel<'a>>>,
+) -> FxHashMap<&'a str, Vec<Toplevel<'a>>> {
+    struct ResolvedType<'a> {
+        name: &'a str,
         index: usize,
-        incomplete_type: IncompleteType,
+        incomplete_type: IncompleteType<'a>,
         ident: IdentId,
         decl: VariableId,
     }
@@ -255,13 +250,13 @@ fn resolve_names(
     toplevels
 }
 
-fn constructor_type(d: DataDecl) -> TypeUnit {
+fn constructor_type<'a>(d: DataDecl<'a>) -> TypeUnit<'a> {
     let field_types: Vec<_> =
         (0..d.field_len).map(|_| TypeUnit::new_variable()).collect();
     let mut t = TypeUnit::Normal {
-        name: d.name.clone(),
+        name: d.name,
         args: field_types.iter().map(|t| t.clone().into()).collect(),
-        id: TypeIdent::DeclId(d.decl_id, d.name),
+        id: TypeIdent::DeclId(d.decl_id, &d.name),
     };
     for field in field_types.into_iter().rev() {
         t = TypeUnit::Fn(field.into(), t.into())
@@ -269,13 +264,15 @@ fn constructor_type(d: DataDecl) -> TypeUnit {
     t
 }
 
-fn min_type(
-    expr: &Expr,
-) -> Result<(IncompleteType, Resolved), &'static str> {
+fn min_type<'a>(
+    expr: &'a Expr,
+) -> Result<(IncompleteType<'a>, Resolved), &'a str> {
     Ok(min_type_incomplite(expr))
 }
 
-fn min_type_incomplite(expr: &Expr) -> (IncompleteType, Resolved) {
+fn min_type_incomplite<'a>(
+    expr: &'a Expr,
+) -> (IncompleteType<'a>, Resolved) {
     match expr {
         Expr::Lambda(arms) => {
             let (arm_types, requirements, resolved_idents): (
@@ -323,9 +320,7 @@ fn min_type_incomplite(expr: &Expr) -> (IncompleteType, Resolved) {
                     constructor: t.clone(),
                     requirements: Requirements {
                         variable_requirements: vec![(
-                            info.to_string(),
-                            t,
-                            *ident_id,
+                            info, t, *ident_id,
                         )],
                         subtype_relation: BTreeSet::new(),
                     },
@@ -380,7 +375,9 @@ fn min_type_incomplite(expr: &Expr) -> (IncompleteType, Resolved) {
     }
 }
 
-fn multi_expr_min_type(exprs: &[Expr]) -> (IncompleteType, Resolved) {
+fn multi_expr_min_type<'a>(
+    exprs: &'a [Expr],
+) -> (IncompleteType<'a>, Resolved) {
     let mut req = Requirements::default();
     let mut resolved_idents = Vec::default();
     let t = exprs
@@ -417,9 +414,13 @@ fn marge_requirements(
     rst
 }
 
-fn arm_min_type(
-    arm: &FnArm,
-) -> ((types::Type, types::Type), Requirements, Resolved) {
+fn arm_min_type<'a>(
+    arm: &'a FnArm,
+) -> (
+    (types::Type<'a>, types::Type<'a>),
+    Requirements<'a>,
+    Resolved,
+) {
     let (body_type, mut resolved_idents) =
         multi_expr_min_type(&arm.exprs);
     let (types, bindings): (Vec<_>, Vec<_>) =
@@ -428,7 +429,7 @@ fn arm_min_type(
     for pattern_type in types[1..].iter().rev() {
         arm_type = TypeUnit::Fn(pattern_type.clone(), arm_type).into()
     }
-    let bindings: FxHashMap<String, (DeclId, types::Type)> = bindings
+    let bindings: FxHashMap<&str, (DeclId, types::Type)> = bindings
         .into_iter()
         .flatten()
         .map(|(n, i, t)| (n, (i, t)))
@@ -461,9 +462,9 @@ fn arm_min_type(
     )
 }
 
-fn pattern_to_type(
-    p: &Pattern,
-) -> (types::Type, Vec<(String, DeclId, types::Type)>) {
+fn pattern_to_type<'a>(
+    p: &'a Pattern,
+) -> (types::Type<'a>, Vec<(&'a str, DeclId, types::Type<'a>)>) {
     match p {
         Pattern::Number(_) => (construct_type("Num"), Vec::new()),
         Pattern::StrLiteral(_) => {
@@ -474,7 +475,7 @@ fn pattern_to_type(
                 args.iter().map(pattern_to_type).unzip();
             (
                 TypeUnit::Normal {
-                    name: id.name().to_string(),
+                    name: id.name(),
                     args: types,
                     id: id.clone().into(),
                 }
@@ -484,7 +485,7 @@ fn pattern_to_type(
         }
         Pattern::Binder(name, decl_id) => {
             let t: types::Type = TypeUnit::new_variable().into();
-            (t.clone(), vec![(name.to_string(), *decl_id, t)])
+            (t.clone(), vec![(name, *decl_id, t)])
         }
         Pattern::Underscore => {
             (TypeUnit::new_variable().into(), Vec::new())
@@ -525,9 +526,9 @@ mod tests {
             .iter()
             .map(|d| (&d.name[..], d.decl_id))
             .collect();
-        let top_levels: FxHashMap<String, Vec<Toplevel>> = vec![
+        let top_levels: FxHashMap<&str, Vec<Toplevel>> = vec![
             (
-                ("main".to_string()),
+                ("main"),
                 vec![Toplevel {
                     incomplete: IncompleteType {
                         constructor: construct_type_with_variables(
@@ -538,7 +539,7 @@ mod tests {
                         requirements: Requirements {
                             variable_requirements: vec![
                                 (
-                                    "default".to_string(),
+                                    "default",
                                     construct_type_with_variables(
                                         "Hoge",
                                         &[],
@@ -547,7 +548,7 @@ mod tests {
                                     new_ident_id(),
                                 ),
                                 (
-                                    "default".to_string(),
+                                    "default",
                                     construct_type_with_variables(
                                         "Fuga",
                                         &[],
@@ -565,7 +566,7 @@ mod tests {
                 }],
             ),
             (
-                ("default".to_string()),
+                ("default"),
                 vec![
                     (Toplevel {
                         incomplete: IncompleteType {
@@ -632,9 +633,9 @@ mod tests {
             .iter()
             .map(|d| (&d.name[..], d.decl_id))
             .collect();
-        let top_levels: FxHashMap<String, Vec<Toplevel>> = vec![
+        let top_levels: FxHashMap<&str, Vec<Toplevel>> = vec![
             (
-                ("main".to_string()),
+                ("main"),
                 vec![Toplevel {
                     incomplete: IncompleteType {
                         constructor: construct_type_with_variables(
@@ -645,7 +646,7 @@ mod tests {
                         requirements: Requirements {
                             variable_requirements: vec![
                                 (
-                                    "greet".to_string(),
+                                    "greet",
                                     construct_type_with_variables(
                                         "Hoge -> String",
                                         &[],
@@ -654,7 +655,7 @@ mod tests {
                                     new_ident_id(),
                                 ),
                                 (
-                                    "greet".to_string(),
+                                    "greet",
                                     construct_type_with_variables(
                                         "Fuga -> String",
                                         &[],
@@ -672,7 +673,7 @@ mod tests {
                 }],
             ),
             (
-                ("greet".to_string()),
+                ("greet"),
                 vec![
                     (Toplevel {
                         incomplete: IncompleteType {
@@ -727,7 +728,7 @@ mod tests {
     }
 
     fn debug_toplevels(
-        toplevels: FxHashMap<String, Vec<Toplevel>>,
+        toplevels: FxHashMap<&str, Vec<Toplevel>>,
     ) -> String {
         let mut ret = String::new();
         for (name, top) in &toplevels {

@@ -48,7 +48,7 @@ impl IntrinsicVariable {
         }
     }
 
-    pub fn to_type(self) -> &'static Type {
+    pub fn to_type(self) -> &'static Type<'static> {
         &INTRINSIC_VARIABLES_TYPES[&self]
     }
 }
@@ -87,26 +87,27 @@ pub enum IntrinsicType {
     Bar,
 }
 
-pub static INTRINSIC_TYPES: Lazy<HashMap<String, IntrinsicType>> =
-    Lazy::new(|| {
-        [
-            ("String", IntrinsicType::String),
-            ("Num", IntrinsicType::Num),
-            ("()", IntrinsicType::Unit),
-            ("True", IntrinsicType::True),
-            ("False", IntrinsicType::False),
-            ("->", IntrinsicType::Arrow),
-            ("type_call", IntrinsicType::Call),
-            ("|", IntrinsicType::Bar),
-        ]
-        .map(|(n, t)| (n.to_string(), t))
-        .iter()
-        .cloned()
-        .collect()
-    });
+pub static INTRINSIC_TYPES: Lazy<
+    HashMap<&'static str, IntrinsicType>,
+> = Lazy::new(|| {
+    [
+        ("String", IntrinsicType::String),
+        ("Num", IntrinsicType::Num),
+        ("()", IntrinsicType::Unit),
+        ("True", IntrinsicType::True),
+        ("False", IntrinsicType::False),
+        ("->", IntrinsicType::Arrow),
+        ("type_call", IntrinsicType::Call),
+        ("|", IntrinsicType::Bar),
+    ]
+    .map(|(n, t)| (n, t))
+    .iter()
+    .cloned()
+    .collect()
+});
 
 pub static INTRINSIC_TYPES_NAMES: Lazy<
-    HashMap<IntrinsicType, String>,
+    HashMap<IntrinsicType, &'static str>,
 > = Lazy::new(|| {
     [
         (IntrinsicType::String, "String"),
@@ -118,7 +119,7 @@ pub static INTRINSIC_TYPES_NAMES: Lazy<
         (IntrinsicType::Arrow, "->"),
         (IntrinsicType::Bar, "|"),
     ]
-    .map(|(t, n)| (t, n.to_string()))
+    .map(|(t, n)| (t, n))
     .iter()
     .cloned()
     .collect()
@@ -168,7 +169,7 @@ impl From<IntrinsicConstructor> for IntrinsicType {
 }
 
 pub static OP_PRECEDENCE: Lazy<
-    FxHashMap<String, (Associativity, i32)>,
+    FxHashMap<&'static str, (Associativity, i32)>,
 > = Lazy::new(|| {
     use Associativity::*;
     [
@@ -181,6 +182,6 @@ pub static OP_PRECEDENCE: Lazy<
         ("->", (Right, 1)),
     ]
     .iter()
-    .map(|(s, p)| (s.to_string(), *p))
+    .copied()
     .collect()
 });
