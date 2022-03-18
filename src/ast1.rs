@@ -327,12 +327,12 @@ pub fn infix_op_sequence<
     mut s: Vec<OpSequenceUnit<'a, T>>,
 ) -> T {
     let mut precedence_list = BTreeMap::new();
-    for op in s.clone() {
+    for op in &s {
         match op {
             OpSequenceUnit::Operand(_) => (),
             OpSequenceUnit::Operator(_, Associativity::Left, p) => {
                 if let Some(Associativity::Right) =
-                    precedence_list.insert(p, Associativity::Left)
+                    precedence_list.insert(*p, Associativity::Left)
                 {
                     panic!(
                         "cannot mix infixl {} and infixr {}",
@@ -342,7 +342,7 @@ pub fn infix_op_sequence<
             }
             OpSequenceUnit::Operator(_, Associativity::Right, p) => {
                 if let Some(Associativity::Left) =
-                    precedence_list.insert(p, Associativity::Right)
+                    precedence_list.insert(*p, Associativity::Right)
                 {
                     panic!(
                         "cannot mix infixl {} and infixr {}",
@@ -355,7 +355,7 @@ pub fn infix_op_sequence<
                 Associativity::UnaryLeft,
                 p,
             ) => {
-                precedence_list.insert(p, Associativity::Right);
+                precedence_list.insert(*p, Associativity::Right);
             }
             OpSequenceUnit::Apply(_) => {
                 precedence_list.insert(10, Associativity::UnaryLeft);

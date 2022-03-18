@@ -16,13 +16,17 @@ use crate::{
 use fxhash::FxHashMap;
 use std::collections::BTreeSet;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
 pub enum ConstructorIdent<'a> {
     DeclId(DeclId, &'a str),
     Intrinsic(IntrinsicConstructor),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
+)]
 pub enum TypeIdent<'a> {
     DeclId(DeclId, &'a str),
     Intrinsic(IntrinsicType),
@@ -35,7 +39,7 @@ pub struct Ast<'a> {
     pub entry_point: DeclId,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct DataDecl<'a> {
     pub name: &'a str,
     pub field_len: usize,
@@ -356,7 +360,7 @@ pub fn type_to_type<'a>(
                 .into()
             } else {
                 TypeUnit::Normal {
-                    name: t.name.clone(),
+                    name: t.name,
                     args: t
                         .args
                         .into_iter()

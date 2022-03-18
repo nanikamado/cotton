@@ -62,7 +62,7 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, VariableId> {
         });
     }
     for d in &ast.data_decl {
-        let d_type: types::Type = constructor_type(d.clone()).into();
+        let d_type: types::Type = constructor_type(*d).into();
         toplevels.entry(d.name).or_default().push(Toplevel {
             incomplete: d_type.into(),
             face: None,
@@ -210,7 +210,7 @@ fn resolve_names<'a>(
                             .collect();
                         if successes.len() == 1 && successes[0].1 {
                             resolved = Some(ResolvedType {
-                                name: name.clone(),
+                                name,
                                 index: t_index,
                                 incomplete_type: successes[0]
                                     .0
@@ -477,7 +477,7 @@ fn pattern_to_type<'a>(
                 TypeUnit::Normal {
                     name: id.name(),
                     args: types,
-                    id: id.clone().into(),
+                    id: (*id).into(),
                 }
                 .into(),
                 bindings.concat(),

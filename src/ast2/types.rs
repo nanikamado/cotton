@@ -121,7 +121,7 @@ pub mod type_type {
                     TypeUnit::Normal { name, args, id } => Normal {
                         name,
                         args,
-                        id: id.clone(),
+                        id: *id,
                     },
                     TypeUnit::Fn(arg, ret) => Fn(arg, ret),
                     TypeUnit::Variable(i) => Variable(*i),
