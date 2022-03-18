@@ -375,3 +375,17 @@ pub fn type_to_type<'a>(
         }
     }
 }
+
+impl std::fmt::Display for ConstructorIdent<'_> {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        match self {
+            ConstructorIdent::Intrinsic(a) => {
+                std::fmt::Debug::fmt(a, f)
+            }
+            ConstructorIdent::DeclId(a, _) => a.fmt(f),
+        }
+    }
+}

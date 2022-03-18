@@ -6,7 +6,7 @@ use crate::{
 };
 use itertools::Itertools;
 use once_cell::sync::Lazy;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use stripmargin::StripMargin;
 use unic_ucd_category::GeneralCategory;
 
@@ -40,10 +40,11 @@ pub fn codegen(ast: Ast) -> String {
 fn data_decl(d: DataDecl) -> String {
     let name = convert_name(d.name);
     format!(
-        "let ${}${}={}({{name:'{}',{}}});",
+        "let ${}${}={}({{name:'${}${}',{}}});",
         d.decl_id,
         name,
         (0..d.field_len).map(|i| format!("${}=>", i)).join(""),
+        d.decl_id,
         name,
         (0..d.field_len).map(|i| format!("{0}:${0}", i)).join(", "),
     )
@@ -68,11 +69,11 @@ static PRIMITIVES_DEF: Lazy<HashMap<IntrinsicVariable, &str>> =
             (Plus, "a => b => a + b"),
             (Print, "a => process.stdout.write(a)"),
             (Println, "a => console.log(a)"),
-            (True, "{name: 'True'}"),
-            (False, "{name: 'False'}"),
+            (True, "{name: '$True$True'}"),
+            (False, "{name: '$False$False'}"),
             (Percent, "a => b => a % b"),
             (Neq, "a => b => $$bool(a !== b)"),
-            (Unit, "{name: 'unicode_28_29'}"),
+            (Unit, "{name: '$Unit$unicode_28_29'}"),
         ]
         .iter()
         .copied()
@@ -158,7 +159,8 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
             }
             Pattern::Constructor { id, args } => {
                 let mut v = vec![format!(
-                    "'{}'==={}.name",
+                    "'${}${}'==={}.name",
+                    id,
                     convert_name(id.name()),
                     n
                 )];
@@ -208,7 +210,7 @@ fn _bindings<'a>(
 }
 
 fn convert_name(name: &str) -> String {
-    if is_valid_js_name(name) {
+    if is_valid_name(name) {
         name.to_string()
     } else {
         "unicode".to_string()
@@ -219,86 +221,17 @@ fn convert_name(name: &str) -> String {
     }
 }
 
-fn is_valid_js_name_head(c: char) -> bool {
-    GeneralCategory::of(c).is_letter()
-        || c == '$'
-        || c == '_'
-        || GeneralCategory::of(c) == GeneralCategory::LetterNumber
-}
-
-static UNUSABLE_NAMES: Lazy<HashSet<&str>> = Lazy::new(|| {
-    [
-        "do",
-        "if",
-        "in",
-        "for",
-        "let",
-        "new",
-        "try",
-        "var",
-        "case",
-        "else",
-        "enum",
-        "eval",
-        "false",
-        "null",
-        "undefined",
-        "NaN",
-        "this",
-        "true",
-        "void",
-        "with",
-        "break",
-        "catch",
-        "class",
-        "const",
-        "super",
-        "throw",
-        "while",
-        "yield",
-        "delete",
-        "export",
-        "import",
-        "public",
-        "return",
-        "static",
-        "switch",
-        "typeof",
-        "default",
-        "extends",
-        "finally",
-        "package",
-        "private",
-        "continue",
-        "debugger",
-        "function",
-        "arguments",
-        "interface",
-        "protected",
-        "implements",
-        "instanceof",
-    ]
-    .iter()
-    .copied()
-    .collect()
-});
-
-fn is_valid_js_name(name: &str) -> bool {
-    let mut cs = name.chars();
-    if let Some(h) = cs.next() {
-        is_valid_js_name_head(h)
-            && cs.all(|c| {
-                is_valid_js_name_head(c)
-                    || matches!(
-                        GeneralCategory::of(c),
-                        GeneralCategory::DecimalNumber
-                            | GeneralCategory::NonspacingMark
-                            | GeneralCategory::SpacingMark
-                            | GeneralCategory::ConnectorPunctuation
-                    )
-            })
-            && !UNUSABLE_NAMES.contains(name)
-    } else {
-        false
-    }
+fn is_valid_name(name: &str) -> bool {
+    name.chars().all(|c| {
+        GeneralCategory::of(c).is_letter()
+            || matches!(
+                GeneralCategory::of(c),
+                GeneralCategory::DecimalNumber
+                    | GeneralCategory::NonspacingMark
+                    | GeneralCategory::SpacingMark
+                    | GeneralCategory::ConnectorPunctuation
+                    | GeneralCategory::LetterNumber
+            )
+            || c == '_'
+    }) && !(name.len() >= 8 && name[0..8] == *"unicode_")
 }
