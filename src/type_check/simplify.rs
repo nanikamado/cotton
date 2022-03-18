@@ -627,11 +627,8 @@ mod tests {
         )
         .unwrap()
         .1;
-        dbg!(&ast);
         let ast: ast1::Ast = ast.into();
-        dbg!(&ast);
         let ast: ast2::Ast = ast.into();
-        dbg!(&ast);
         let req_t = ast
             .variable_decl
             .iter()
@@ -642,7 +639,6 @@ mod tests {
             .unwrap()
             .constructor
             .clone();
-        dbg!(&req_t);
         let dot = construct_type_with_variables(
             "a -> (a -> b) -> b",
             &["a", "b"],
