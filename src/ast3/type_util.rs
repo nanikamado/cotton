@@ -5,13 +5,12 @@ use crate::{
         types::{Type, TypeMatchableRef, TypeUnit},
         IncompleteType, Requirements,
     },
+    intrinsics::OP_PRECEDENCE,
 };
 use fxhash::FxHashMap;
 use itertools::Itertools;
 use std::collections::HashSet;
 use TypeMatchableRef::{Fn, Normal};
-
-use super::intrinsics::OP_PRECEDENCE;
 
 impl<'a> TypeUnit<'a> {
     pub fn all_type_variables(&self) -> Vec<usize> {

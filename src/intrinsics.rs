@@ -1,6 +1,6 @@
 use crate::ast0::Associativity;
 use crate::ast2::types::Type;
-use crate::type_check::type_util::construct_type;
+use crate::ast3::type_util::construct_type;
 use fxhash::FxHashMap;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;

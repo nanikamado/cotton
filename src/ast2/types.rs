@@ -52,7 +52,7 @@ pub enum TypeUnit<'a> {
     },
 }
 
-pub mod type_type {
+mod type_type {
     use std::{collections::BTreeSet, iter::FromIterator};
 
     use super::{TypeMatchable, TypeMatchableRef, TypeUnit};

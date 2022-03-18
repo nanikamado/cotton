@@ -5,13 +5,10 @@ pub mod types;
 use self::decl_id::{new_decl_id, DeclId};
 use self::ident_id::{new_ident_id, IdentId};
 use self::types::{Type, TypeUnit};
-use crate::type_check::intrinsics::INTRINSIC_TYPES_NAMES;
-use crate::{
-    ast1,
-    type_check::intrinsics::{
-        IntrinsicConstructor, IntrinsicType, INTRINSIC_CONSTRUCTORS,
-        INTRINSIC_TYPES,
-    },
+use crate::ast1;
+use crate::intrinsics::{
+    IntrinsicConstructor, IntrinsicType, INTRINSIC_CONSTRUCTORS,
+    INTRINSIC_TYPES, INTRINSIC_TYPES_NAMES,
 };
 use fxhash::FxHashMap;
 use std::collections::BTreeSet;

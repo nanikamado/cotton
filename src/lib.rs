@@ -3,8 +3,8 @@ mod ast1;
 mod ast2;
 mod ast3;
 mod codegen;
+mod intrinsics;
 mod parse;
-mod type_check;
 mod type_variable;
 
 use codegen::codegen;

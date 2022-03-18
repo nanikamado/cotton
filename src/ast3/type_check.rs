@@ -1,20 +1,19 @@
-pub(crate) mod intrinsics;
 mod simplify;
-mod type_util;
 
-use self::type_util::construct_type;
 use crate::ast2::{
     decl_id::DeclId, ident_id::IdentId, types, types::TypeUnit,
 };
 use crate::ast2::{Ast, DataDecl, Expr, FnArm, Pattern, TypeId};
 use crate::ast2::{IncompleteType, Requirements};
-use crate::type_check::intrinsics::IntrinsicVariable;
+use crate::intrinsics::IntrinsicVariable;
 use fxhash::FxHashMap;
 use itertools::multiunzip;
 use std::collections::BTreeSet;
 use std::fmt::Display;
 use std::vec;
 use strum::IntoEnumIterator;
+
+use super::type_util::construct_type;
 
 type Resolved = Vec<(IdentId, VariableId)>;
 
@@ -500,11 +499,11 @@ mod tests {
             ident_id::new_ident_id,
             IncompleteType, Requirements,
         },
-        parse,
-        type_check::{
-            resolve_names, type_util::construct_type_with_variables,
-            VariableId,
+        ast3::{
+            type_check::{resolve_names, VariableId},
+            type_util::construct_type_with_variables,
         },
+        parse,
     };
     use fxhash::FxHashMap;
     use std::collections::BTreeSet;

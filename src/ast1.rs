@@ -1,6 +1,6 @@
 use crate::{
     ast0::{self, Associativity, Forall, OperatorPrecedence},
-    type_check::intrinsics::OP_PRECEDENCE,
+    intrinsics::OP_PRECEDENCE,
 };
 use fxhash::FxHashMap;
 use index_list::{Index, IndexList};

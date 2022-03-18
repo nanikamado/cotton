@@ -2,7 +2,7 @@ use crate::{
     ast2::decl_id::DeclId,
     ast2::{DataDecl, Pattern},
     ast3::{Ast, Expr, FnArm, VariableDecl},
-    type_check::intrinsics::IntrinsicVariable,
+    intrinsics::IntrinsicVariable,
 };
 use itertools::Itertools;
 use once_cell::sync::Lazy;

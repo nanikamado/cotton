@@ -602,13 +602,13 @@ mod tests {
     use crate::{
         ast0, ast1, ast2,
         ast2::{IncompleteType, Requirements},
-        parse,
-        type_check::{
-            simplify::simplify_type,
+        ast3::{
+            type_check::simplify::simplify_type,
             type_util::{
                 construct_type, construct_type_with_variables,
             },
         },
+        parse,
     };
     use stripmargin::StripMargin;
 

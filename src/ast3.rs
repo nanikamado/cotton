@@ -1,10 +1,13 @@
+mod type_check;
+pub mod type_util;
+
+use self::type_check::{type_check, VariableId};
 use crate::{
     ast2::{self, DataDecl, Pattern},
     ast2::{
         decl_id::DeclId, ident_id::IdentId, types::Type,
         IncompleteType,
     },
-    type_check::{type_check, VariableId},
 };
 use fxhash::FxHashMap;
 
