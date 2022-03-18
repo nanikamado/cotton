@@ -250,13 +250,13 @@ fn resolve_names<'a>(
     toplevels
 }
 
-fn constructor_type<'a>(d: DataDecl<'a>) -> TypeUnit<'a> {
+fn constructor_type(d: DataDecl) -> TypeUnit {
     let field_types: Vec<_> =
         (0..d.field_len).map(|_| TypeUnit::new_variable()).collect();
     let mut t = TypeUnit::Normal {
         name: d.name,
         args: field_types.iter().map(|t| t.clone().into()).collect(),
-        id: TypeIdent::DeclId(d.decl_id, &d.name),
+        id: TypeIdent::DeclId(d.decl_id, d.name),
     };
     for field in field_types.into_iter().rev() {
         t = TypeUnit::Fn(field.into(), t.into())

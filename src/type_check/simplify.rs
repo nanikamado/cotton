@@ -29,9 +29,9 @@ pub fn simplify_type(
     Some(t)
 }
 
-fn _simplify_type<'a>(
-    mut t: IncompleteType<'a>,
-) -> Option<(IncompleteType<'a>, bool)> {
+fn _simplify_type(
+    mut t: IncompleteType,
+) -> Option<(IncompleteType, bool)> {
     use TypeUnit::*;
     let hash_before_simplify = fxhash::hash(&t);
     let subtype_relationship =
@@ -277,7 +277,7 @@ fn simplify_subtype_rel<'a>(
     }
 }
 
-fn lift_recursive_alias<'a>(t: Type<'a>) -> Type<'a> {
+fn lift_recursive_alias(t: Type) -> Type {
     if let Some((alias, body)) = t.find_recursive_alias() {
         let r = &TypeUnit::RecursiveAlias {
             alias,

@@ -283,7 +283,7 @@ impl<'a> Requirements<'a> {
     }
 }
 
-pub fn construct_type<'a>(s: &'a str) -> Type<'a> {
+pub fn construct_type(s: &str) -> Type {
     construct_type_with_variables(s, &[], &Default::default())
 }
 

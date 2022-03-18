@@ -120,7 +120,7 @@ impl<'a> AddArgument for Type<'a> {
 
 impl<'a> IdentFromStr<'a> for Expr<'a> {
     fn ident_from_str(s: &'a str) -> Self {
-        Self::Ident(&s)
+        Self::Ident(s)
     }
 }
 
@@ -198,7 +198,7 @@ fn variable_decl<'a>(
     op_precedence_map: &OpPrecedenceMap,
 ) -> VariableDecl<'a> {
     VariableDecl {
-        identifier: &v.identifier,
+        identifier: v.identifier,
         type_annotation: v.type_annotation.map(|(s, forall)| {
             (
                 infix_op_sequence(op_sequence(s, op_precedence_map)),
@@ -405,7 +405,7 @@ pub fn op_sequence<'a, U: ConvertWithOpPrecedenceMap>(
                 Operand(e.convert(op_precedence_map))
             }
             ast0::OpSequenceUnit::Operator(a) => {
-                let (ass, p) = op_precedence_map.get(&a);
+                let (ass, p) = op_precedence_map.get(a);
                 Operator(a, ass, p)
             }
             ast0::OpSequenceUnit::Apply(a) => {

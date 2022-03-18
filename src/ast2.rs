@@ -104,15 +104,13 @@ impl<'a> From<ast1::Ast<'a>> for Ast<'a> {
             .data_decl
             .into_iter()
             .map(|d| DataDecl {
-                name: &d.name,
+                name: d.name,
                 field_len: d.field_len,
                 decl_id: new_decl_id(),
             })
             .collect();
-        let data_decl_map: FxHashMap<&str, DeclId> = data_decl
-            .iter()
-            .map(|d| (&d.name[..], d.decl_id))
-            .collect();
+        let data_decl_map: FxHashMap<&str, DeclId> =
+            data_decl.iter().map(|d| (d.name, d.decl_id)).collect();
         let variable_decl: Vec<_> = ast
             .variable_decl
             .into_iter()
@@ -147,7 +145,7 @@ impl TypeIdent<'_> {
     pub fn name(&self) -> &str {
         match self {
             TypeIdent::DeclId(_, name) => name,
-            TypeIdent::Intrinsic(c) => &INTRINSIC_TYPES_NAMES[c][..],
+            TypeIdent::Intrinsic(c) => INTRINSIC_TYPES_NAMES[c],
         }
     }
 }
@@ -301,7 +299,7 @@ fn pattern<'a>(
         ast1::Pattern::Number(n) => Number(n),
         ast1::Pattern::StrLiteral(s) => StrLiteral(s),
         ast1::Pattern::Constructor { name, args } => Constructor {
-            id: ConstructorIdent::get(&name, data_decl_map),
+            id: ConstructorIdent::get(name, data_decl_map),
             args: args
                 .into_iter()
                 .map(|arg| pattern(arg, data_decl_map))
@@ -317,7 +315,7 @@ pub fn type_to_type<'a>(
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, usize>,
 ) -> Type<'a> {
-    match &t.name[..] {
+    match t.name {
         "|" => t
             .args
             .into_iter()
@@ -339,7 +337,7 @@ pub fn type_to_type<'a>(
         )
         .into(),
         _ => {
-            if let Some(n) = type_variable_names.get(&t.name[..]) {
+            if let Some(n) = type_variable_names.get(t.name) {
                 TypeUnit::Variable(*n).into()
             } else if let Some(i) = INTRINSIC_TYPES.get(&t.name) {
                 TypeUnit::Normal {
@@ -372,7 +370,7 @@ pub fn type_to_type<'a>(
                             )
                         })
                         .collect(),
-                    id: TypeIdent::get(&t.name, data_decl_map),
+                    id: TypeIdent::get(t.name, data_decl_map),
                 }
                 .into()
             }

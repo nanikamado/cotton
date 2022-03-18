@@ -39,7 +39,7 @@ pub fn codegen(ast: Ast) -> String {
 }
 
 fn data_decl(d: DataDecl) -> String {
-    let name = convert_name(&d.name);
+    let name = convert_name(d.name);
     format!(
         "let ${}${}={}({{name:'{}',{}}});",
         d.decl_id,
@@ -54,7 +54,7 @@ fn variable_decl(d: &VariableDecl) -> String {
     format!(
         "let ${}${}={};",
         d.decl_id,
-        convert_name(&d.ident),
+        convert_name(d.ident),
         expr(&d.value, 0)
     )
 }

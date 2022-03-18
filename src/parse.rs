@@ -45,7 +45,7 @@ where
     delimited(separator0, f, separator0)
 }
 
-fn decl<'a>(input: &'a str) -> IResult<&'a str, VariableDecl<'a>> {
+fn decl(input: &str) -> IResult<&str, VariableDecl> {
     let (input, (identifier, _, data_type, _, _, value)) =
         tuple((
             identifier,
@@ -195,10 +195,10 @@ fn is_identifier_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-fn expr<'a>(input: &'a str) -> IResult<&'a str, Expr<'a>> {
+fn expr(input: &str) -> IResult<&str, Expr<'_>> {
     alt((
-        str_literal.map(|s| Expr::StrLiteral(s)),
-        num_literal.map(|s| Expr::Number(s)),
+        str_literal.map(Expr::StrLiteral),
+        num_literal.map(Expr::Number),
         unit,
         lambda,
         decl.map(|d| Expr::Decl(Box::new(d))),
@@ -207,13 +207,13 @@ fn expr<'a>(input: &'a str) -> IResult<&'a str, Expr<'a>> {
     ))(input)
 }
 
-fn paren<'a>(input: &'a str) -> IResult<&'a str, Expr<'a>> {
+fn paren(input: &str) -> IResult<&str, Expr> {
     let (input, s) =
         delimited(tag("("), op_sequence, tag(")"))(input)?;
     Ok((input, Expr::Paren(s)))
 }
 
-fn lambda<'a>(input: &'a str) -> IResult<&'a str, Expr<'a>> {
+fn lambda(input: &str) -> IResult<&str, Expr> {
     let (input, (_, _, arms, _)) =
         tuple((tag("fn"), separator0, many1(fn_arm), tag("--")))(
             input,
@@ -221,7 +221,7 @@ fn lambda<'a>(input: &'a str) -> IResult<&'a str, Expr<'a>> {
     Ok((input, Expr::Lambda(arms)))
 }
 
-fn fn_arm<'a>(input: &'a str) -> IResult<&'a str, FnArm<'a>> {
+fn fn_arm(input: &str) -> IResult<&str, FnArm> {
     let (
         input,
         (_, pattern0, type0, pattern1_type1, _, _, arguments),
@@ -262,8 +262,8 @@ fn fn_arm<'a>(input: &'a str) -> IResult<&'a str, FnArm<'a>> {
 
 fn pattern(input: &str) -> IResult<&str, Pattern> {
     pad(alt((
-        str_literal.map(|s| Pattern::StrLiteral(s)),
-        num_literal.map(|s| Pattern::Number(s)),
+        str_literal.map(Pattern::StrLiteral),
+        num_literal.map(Pattern::Number),
         tag("()").map(|_| Pattern::Constructor("()", Vec::new())),
         tag("_").map(|_| Pattern::Underscore),
         constructor_pattern,
@@ -304,7 +304,7 @@ fn num_literal(input: &str) -> IResult<&str, &str> {
     digit1(input).map(|(i, s)| (i, s))
 }
 
-fn fn_call<'a>(input: &'a str) -> IResult<&'a str, Vec<Expr<'a>>> {
+fn fn_call(input: &str) -> IResult<&str, Vec<Expr>> {
     let (input, (_, a0, a1, _, _)) = tuple((
         tag("("),
         op_sequence,
