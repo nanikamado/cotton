@@ -17,7 +17,7 @@ pub struct Ast<'a> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct VariableDecl<'a> {
-    pub ident: &'a str,
+    pub name: &'a str,
     pub type_annotation: Option<IncompleteType<'a>>,
     pub value: Expr<'a>,
     pub decl_id: DeclId,
@@ -64,7 +64,7 @@ fn variable_decl<'a>(
     resolved_idents: &FxHashMap<IdentId, VariableId>,
 ) -> VariableDecl<'a> {
     VariableDecl {
-        ident: d.ident,
+        name: d.name,
         type_annotation: d.type_annotation,
         value: expr(d.value, resolved_idents),
         decl_id: d.decl_id,

@@ -17,7 +17,7 @@ pub struct Ast<'a> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VariableDecl<'a> {
-    pub identifier: &'a str,
+    pub name: &'a str,
     pub type_annotation: Option<(Type<'a>, Forall<'a>)>,
     pub value: Expr<'a>,
 }
@@ -197,7 +197,7 @@ fn variable_decl<'a>(
     op_precedence_map: &OpPrecedenceMap,
 ) -> VariableDecl<'a> {
     VariableDecl {
-        identifier: v.identifier,
+        name: v.name,
         type_annotation: v.type_annotation.map(|(s, forall)| {
             (
                 infix_op_sequence(op_sequence(s, op_precedence_map)),
@@ -382,7 +382,7 @@ impl<'a> ConvertWithOpPrecedenceMap for ast0::Type<'a> {
 
     fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T {
         match self {
-            ast0::Type::Identifier(name) => Type {
+            ast0::Type::Ident(name) => Type {
                 name,
                 args: Vec::new(),
             },
@@ -432,7 +432,7 @@ impl<'a> ConvertWithOpPrecedenceMap for ast0::Expr<'a> {
             ),
             ast0::Expr::Number(a) => Number(a),
             ast0::Expr::StrLiteral(a) => StrLiteral(a),
-            ast0::Expr::Identifier(a) => Ident(a),
+            ast0::Expr::Ident(a) => Ident(a),
             ast0::Expr::Decl(a) => {
                 Decl(Box::new(variable_decl(*a, op_precedence_map)))
             }

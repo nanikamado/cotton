@@ -58,7 +58,7 @@ fn decl(input: &str) -> IResult<&str, VariableDecl> {
     Ok((
         input,
         VariableDecl {
-            identifier,
+            name: identifier,
             type_annotation: data_type.map(|(_, t, forall)| {
                 (t, forall.unwrap_or_default())
             }),
@@ -129,8 +129,8 @@ fn infix_constructor_decl(input: &str) -> IResult<&str, DataDecl> {
 
 fn type_expr(input: &str) -> IResult<&str, Type> {
     alt((
-        identifier.map(Type::Identifier),
-        tag("()").map(|_| Type::Identifier("()")),
+        identifier.map(Type::Ident),
+        tag("()").map(|_| Type::Ident("()")),
         delimited(tag("("), infix_type_sequence, tag(")"))
             .map(Type::Paren),
     ))(input)
@@ -202,7 +202,7 @@ fn expr(input: &str) -> IResult<&str, Expr<'_>> {
         unit,
         lambda,
         decl.map(|d| Expr::Decl(Box::new(d))),
-        identifier.map(Expr::Identifier),
+        identifier.map(Expr::Ident),
         paren,
     ))(input)
 }
@@ -320,7 +320,7 @@ fn fn_call(input: &str) -> IResult<&str, Vec<Expr>> {
 
 fn unit(input: &str) -> IResult<&str, Expr> {
     let (input, _) = tag("()")(input)?;
-    Ok((input, Expr::Identifier("()")))
+    Ok((input, Expr::Ident("()")))
 }
 
 fn infix_constructor_sequence(

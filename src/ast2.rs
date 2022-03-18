@@ -19,7 +19,7 @@ use std::collections::BTreeSet;
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
-pub enum ConstructorIdent<'a> {
+pub enum ConstructorId<'a> {
     DeclId(DeclId, &'a str),
     Intrinsic(IntrinsicConstructor),
 }
@@ -27,7 +27,7 @@ pub enum ConstructorIdent<'a> {
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
-pub enum TypeIdent<'a> {
+pub enum TypeId<'a> {
     DeclId(DeclId, &'a str),
     Intrinsic(IntrinsicType),
 }
@@ -62,7 +62,7 @@ pub struct Requirements<'a> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct VariableDecl<'a> {
-    pub ident: &'a str,
+    pub name: &'a str,
     pub type_annotation: Option<IncompleteType<'a>>,
     pub value: Expr<'a>,
     pub decl_id: DeclId,
@@ -90,7 +90,7 @@ pub enum Pattern<'a> {
     Number(&'a str),
     StrLiteral(&'a str),
     Constructor {
-        id: ConstructorIdent<'a>,
+        id: ConstructorId<'a>,
         args: Vec<Pattern<'a>>,
     },
     Binder(&'a str, DeclId),
@@ -119,7 +119,7 @@ impl<'a> From<ast1::Ast<'a>> for Ast<'a> {
             .collect();
         let entry_point = variable_decl
             .iter()
-            .find(|d| d.ident == "main")
+            .find(|d| d.name == "main")
             .unwrap_or_else(|| panic!("entry point not found"))
             .decl_id;
         Self {
@@ -130,34 +130,32 @@ impl<'a> From<ast1::Ast<'a>> for Ast<'a> {
     }
 }
 
-impl ConstructorIdent<'_> {
+impl ConstructorId<'_> {
     pub fn name(&self) -> &str {
         match self {
-            ConstructorIdent::DeclId(_, name) => name,
-            ConstructorIdent::Intrinsic(c) => c.to_str(),
+            ConstructorId::DeclId(_, name) => name,
+            ConstructorId::Intrinsic(c) => c.to_str(),
         }
     }
 }
 
-impl TypeIdent<'_> {
+impl TypeId<'_> {
     #[allow(unused)]
     pub fn name(&self) -> &str {
         match self {
-            TypeIdent::DeclId(_, name) => name,
-            TypeIdent::Intrinsic(c) => INTRINSIC_TYPES_NAMES[c],
+            TypeId::DeclId(_, name) => name,
+            TypeId::Intrinsic(c) => INTRINSIC_TYPES_NAMES[c],
         }
     }
 }
 
-impl<'a> From<ConstructorIdent<'a>> for TypeIdent<'a> {
-    fn from(c: ConstructorIdent<'a>) -> Self {
+impl<'a> From<ConstructorId<'a>> for TypeId<'a> {
+    fn from(c: ConstructorId<'a>) -> Self {
         match c {
-            ConstructorIdent::DeclId(ident, name) => {
+            ConstructorId::DeclId(ident, name) => {
                 Self::DeclId(ident, name)
             }
-            ConstructorIdent::Intrinsic(i) => {
-                Self::Intrinsic(i.into())
-            }
+            ConstructorId::Intrinsic(i) => Self::Intrinsic(i.into()),
         }
     }
 }
@@ -178,7 +176,7 @@ fn variable_decl<'a>(
 ) -> VariableDecl<'a> {
     let mut type_variable_names = type_variable_names.clone();
     VariableDecl {
-        ident: v.identifier,
+        name: v.name,
         type_annotation: v.type_annotation.map(|(t, forall)| {
             type_variable_names.extend(
                 forall
@@ -258,30 +256,30 @@ fn fn_arm<'a>(
     }
 }
 
-impl TypeIdent<'_> {
+impl TypeId<'_> {
     fn get<'a>(
         name: &'a str,
         data_decl_map: &FxHashMap<&str, DeclId>,
-    ) -> TypeIdent<'a> {
+    ) -> TypeId<'a> {
         if let Some(id) = data_decl_map.get(name) {
-            TypeIdent::DeclId(*id, name)
+            TypeId::DeclId(*id, name)
         } else if let Some(i) = INTRINSIC_TYPES.get(name) {
-            TypeIdent::Intrinsic(*i)
+            TypeId::Intrinsic(*i)
         } else {
             panic!("{:?} not fould", name)
         }
     }
 }
 
-impl ConstructorIdent<'_> {
+impl ConstructorId<'_> {
     fn get<'a>(
         name: &'a str,
         data_decl_map: &FxHashMap<&str, DeclId>,
-    ) -> ConstructorIdent<'a> {
+    ) -> ConstructorId<'a> {
         if let Some(id) = data_decl_map.get(name) {
-            ConstructorIdent::DeclId(*id, name)
+            ConstructorId::DeclId(*id, name)
         } else if let Some(i) = INTRINSIC_CONSTRUCTORS.get(name) {
-            ConstructorIdent::Intrinsic(*i)
+            ConstructorId::Intrinsic(*i)
         } else {
             panic!("{:?} not fould", name)
         }
@@ -297,7 +295,7 @@ fn pattern<'a>(
         ast1::Pattern::Number(n) => Number(n),
         ast1::Pattern::StrLiteral(s) => StrLiteral(s),
         ast1::Pattern::Constructor { name, args } => Constructor {
-            id: ConstructorIdent::get(name, data_decl_map),
+            id: ConstructorId::get(name, data_decl_map),
             args: args
                 .into_iter()
                 .map(|arg| pattern(arg, data_decl_map))
@@ -351,7 +349,7 @@ pub fn type_to_type<'a>(
                             )
                         })
                         .collect(),
-                    id: TypeIdent::Intrinsic(*i),
+                    id: TypeId::Intrinsic(*i),
                 }
                 .into()
             } else {
@@ -368,7 +366,7 @@ pub fn type_to_type<'a>(
                             )
                         })
                         .collect(),
-                    id: TypeIdent::get(t.name, data_decl_map),
+                    id: TypeId::get(t.name, data_decl_map),
                 }
                 .into()
             }
@@ -376,16 +374,14 @@ pub fn type_to_type<'a>(
     }
 }
 
-impl std::fmt::Display for ConstructorIdent<'_> {
+impl std::fmt::Display for ConstructorId<'_> {
     fn fmt(
         &self,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
         match self {
-            ConstructorIdent::Intrinsic(a) => {
-                std::fmt::Debug::fmt(a, f)
-            }
-            ConstructorIdent::DeclId(a, _) => a.fmt(f),
+            ConstructorId::Intrinsic(a) => std::fmt::Debug::fmt(a, f),
+            ConstructorId::DeclId(a, _) => a.fmt(f),
         }
     }
 }

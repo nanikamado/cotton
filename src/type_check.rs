@@ -6,7 +6,7 @@ use self::type_util::construct_type;
 use crate::ast2::{
     decl_id::DeclId, ident_id::IdentId, types, types::TypeUnit,
 };
-use crate::ast2::{Ast, DataDecl, Expr, FnArm, Pattern, TypeIdent};
+use crate::ast2::{Ast, DataDecl, Expr, FnArm, Pattern, TypeId};
 use crate::ast2::{IncompleteType, Requirements};
 use crate::type_check::intrinsics::IntrinsicVariable;
 use fxhash::FxHashMap;
@@ -90,7 +90,7 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, VariableId> {
         } else {
             None
         };
-        toplevels.entry(d.ident).or_default().push(Toplevel {
+        toplevels.entry(d.name).or_default().push(Toplevel {
             incomplete: simplify::simplify_type(t.clone()).unwrap(),
             face,
             resolved_idents: Default::default(),
@@ -256,7 +256,7 @@ fn constructor_type(d: DataDecl) -> TypeUnit {
     let mut t = TypeUnit::Normal {
         name: d.name,
         args: field_types.iter().map(|t| t.clone().into()).collect(),
-        id: TypeIdent::DeclId(d.decl_id, d.name),
+        id: TypeId::DeclId(d.decl_id, d.name),
     };
     for field in field_types.into_iter().rev() {
         t = TypeUnit::Fn(field.into(), t.into())

@@ -54,7 +54,7 @@ fn variable_decl(d: &VariableDecl) -> String {
     format!(
         "let ${}${}={};",
         d.decl_id,
-        convert_name(d.ident),
+        convert_name(d.name),
         expr(&d.value, 0)
     )
 }

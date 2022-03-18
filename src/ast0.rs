@@ -12,14 +12,14 @@ pub enum Decl<'a> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VariableDecl<'a> {
-    pub identifier: &'a str,
+    pub name: &'a str,
     pub type_annotation: Option<(InfixTypeSequence<'a>, Forall<'a>)>,
     pub value: OpSequence<'a>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Type<'a> {
-    Identifier(&'a str),
+    Ident(&'a str),
     Paren(InfixTypeSequence<'a>),
 }
 
@@ -48,7 +48,7 @@ pub enum Expr<'a> {
     Lambda(Vec<FnArm<'a>>),
     Number(&'a str),
     StrLiteral(&'a str),
-    Identifier(&'a str),
+    Ident(&'a str),
     Decl(Box<VariableDecl<'a>>),
     Paren(OpSequence<'a>),
 }

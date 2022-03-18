@@ -632,7 +632,7 @@ mod tests {
         let req_t = ast
             .variable_decl
             .iter()
-            .find(|d| d.ident == "test")
+            .find(|d| d.name == "test")
             .unwrap()
             .type_annotation
             .clone()

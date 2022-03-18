@@ -1,5 +1,5 @@
 pub use self::type_type::Type;
-use crate::ast2::TypeIdent;
+use crate::ast2::TypeId;
 use itertools::Itertools;
 use std::{collections::BTreeSet, fmt::Display};
 
@@ -8,7 +8,7 @@ pub enum TypeMatchable<'a> {
     Normal {
         name: &'a str,
         args: Vec<Type<'a>>,
-        id: TypeIdent<'a>,
+        id: TypeId<'a>,
     },
     Fn(Type<'a>, Type<'a>),
     Union(Type<'a>),
@@ -25,7 +25,7 @@ pub enum TypeMatchableRef<'a> {
     Normal {
         name: &'a str,
         args: &'a Vec<Type<'a>>,
-        id: TypeIdent<'a>,
+        id: TypeId<'a>,
     },
     Fn(&'a Type<'a>, &'a Type<'a>),
     Union(&'a BTreeSet<TypeUnit<'a>>),
@@ -42,7 +42,7 @@ pub enum TypeUnit<'a> {
     Normal {
         name: &'a str,
         args: Vec<Type<'a>>,
-        id: TypeIdent<'a>,
+        id: TypeId<'a>,
     },
     Fn(Type<'a>, Type<'a>),
     Variable(usize),
