@@ -369,9 +369,6 @@ fn min_type_incomplite<'a>(
                 [resolved1, resolved2].concat(),
             )
         }
-        Expr::Unit => {
-            (construct_type("()").into(), Default::default())
-        }
     }
 }
 
@@ -605,7 +602,7 @@ mod tests {
         assert_eq!(
             s,
             "main : 
-            |resolved: {IdentId(0): VariableId(4), IdentId(1): VariableId(5)}
+            |resolved: {IdentId(1): VariableId(4), IdentId(2): VariableId(5)}
             |not face: () forall
             |--
             |default : 
@@ -712,7 +709,7 @@ mod tests {
         assert_eq!(
             s,
             r#"main : 
-            |resolved: {IdentId(0): VariableId(4), IdentId(1): VariableId(5)}
+            |resolved: {IdentId(1): VariableId(4), IdentId(2): VariableId(5)}
             |not face: () forall
             |--
             |greet : 

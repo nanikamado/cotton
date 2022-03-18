@@ -320,7 +320,7 @@ fn fn_call(input: &str) -> IResult<&str, Vec<Expr>> {
 
 fn unit(input: &str) -> IResult<&str, Expr> {
     let (input, _) = tag("()")(input)?;
-    Ok((input, Expr::Unit))
+    Ok((input, Expr::Identifier("()")))
 }
 
 fn infix_constructor_sequence(

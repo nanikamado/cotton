@@ -34,7 +34,6 @@ pub enum Expr<'a> {
     },
     Decl(Box<VariableDecl<'a>>),
     Call(Box<Expr<'a>>, Box<Expr<'a>>),
-    Unit,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -96,7 +95,6 @@ fn expr<'a>(
             expr(*f, resolved_idents).into(),
             expr(*a, resolved_idents).into(),
         ),
-        ast2::Expr::Unit => Unit,
     }
 }
 

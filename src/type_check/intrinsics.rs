@@ -21,6 +21,7 @@ pub enum IntrinsicVariable {
     NumToString,
     True,
     False,
+    Unit,
 }
 
 impl Display for IntrinsicVariable {
@@ -45,6 +46,7 @@ impl IntrinsicVariable {
             IntrinsicVariable::NumToString => "num_to_string",
             IntrinsicVariable::True => "True",
             IntrinsicVariable::False => "False",
+            IntrinsicVariable::Unit => "()",
         }
     }
 
@@ -67,6 +69,7 @@ pub static INTRINSIC_VARIABLES_TYPES: Lazy<
         (IntrinsicVariable::NumToString, "Num -> String"),
         (IntrinsicVariable::True, "True"),
         (IntrinsicVariable::False, "False"),
+        (IntrinsicVariable::Unit, "()"),
     ]
     .iter()
     .map(|(n, t)| (*n, construct_type(t)))

@@ -42,7 +42,6 @@ pub enum Expr<'a> {
     Ident(&'a str),
     Decl(Box<VariableDecl<'a>>),
     Call(Box<Expr<'a>>, Box<Expr<'a>>),
-    Unit,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -437,7 +436,6 @@ impl<'a> ConvertWithOpPrecedenceMap for ast0::Expr<'a> {
             ast0::Expr::Decl(a) => {
                 Decl(Box::new(variable_decl(*a, op_precedence_map)))
             }
-            ast0::Expr::Unit => Unit,
             ast0::Expr::Paren(a) => {
                 infix_op_sequence(op_sequence(a, op_precedence_map))
             }

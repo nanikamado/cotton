@@ -50,7 +50,6 @@ pub enum Expr<'a> {
     StrLiteral(&'a str),
     Identifier(&'a str),
     Decl(Box<VariableDecl<'a>>),
-    Unit,
     Paren(OpSequence<'a>),
 }
 

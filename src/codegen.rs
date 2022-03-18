@@ -12,20 +12,18 @@ use unic_ucd_category::GeneralCategory;
 
 pub fn codegen(ast: Ast) -> String {
     format!(
-        "{}{}{}{}${}$main($unicode_28_29);}}",
+        "let $$bool=a=>a?{}:{};{}{}{}{}${}$main({});}}",
+        PRIMITIVES_DEF[&IntrinsicVariable::True],
+        PRIMITIVES_DEF[&IntrinsicVariable::False],
         r#"{
         |let $$unexpected = () => {throw new Error("unexpected")};
-        |let $$bool = a => a ? $$True : $$False;
-        |let $$True = {name: 'True'};
-        |let $$False = {name: 'False'};
-        |let $unicode_28_29 = {name: 'unicode_28_29'};
         |"#
         .strip_margin(),
         PRIMITIVES_DEF
             .iter()
             .map(|(variable, def)| {
                 format!(
-                    "let ${}${}={}",
+                    "let ${}${}={};",
                     variable,
                     convert_name(variable.to_str()),
                     def
@@ -34,7 +32,8 @@ pub fn codegen(ast: Ast) -> String {
             .join(""),
         ast.data_decl.into_iter().map(data_decl).join(""),
         ast.variable_decl.iter().map(variable_decl).join(""),
-        ast.entry_point
+        ast.entry_point,
+        PRIMITIVES_DEF[&IntrinsicVariable::Unit],
     )
 }
 
@@ -63,16 +62,17 @@ static PRIMITIVES_DEF: Lazy<HashMap<IntrinsicVariable, &str>> =
     Lazy::new(|| {
         use IntrinsicVariable::*;
         [
-            (NumToString, "a => String(a);"),
-            (Lt, "a => b => $$bool(a < b);"),
-            (Minus, "a => b => a - b;"),
-            (Plus, "a => b => a + b;"),
-            (Print, "a => process.stdout.write(a);"),
-            (Println, "a => console.log(a);"),
-            (True, "{name: 'True'};"),
-            (False, "{name: 'False'};"),
-            (Percent, "a => b => a % b;"),
-            (Neq, "a => b => $$bool(a !== b);"),
+            (NumToString, "a => String(a)"),
+            (Lt, "a => b => $$bool(a < b)"),
+            (Minus, "a => b => a - b"),
+            (Plus, "a => b => a + b"),
+            (Print, "a => process.stdout.write(a)"),
+            (Println, "a => console.log(a)"),
+            (True, "{name: 'True'}"),
+            (False, "{name: 'False'}"),
+            (Percent, "a => b => a % b"),
+            (Neq, "a => b => $$bool(a !== b)"),
+            (Unit, "{name: 'unicode_28_29'}"),
         ]
         .iter()
         .copied()
@@ -103,7 +103,6 @@ fn expr(e: &Expr, name_count: u32) -> String {
             expr(&*f, name_count),
             expr(&*a, name_count)
         ),
-        Expr::Unit => "$unicode_28_29".to_string(),
     }
 }
 

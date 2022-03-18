@@ -76,7 +76,6 @@ pub enum Expr<'a> {
     Ident { name: &'a str, ident_id: IdentId },
     Decl(Box<VariableDecl<'a>>),
     Call(Box<Expr<'a>>, Box<Expr<'a>>),
-    Unit,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -224,7 +223,6 @@ fn expr<'a>(
             Box::new(expr(*f, data_decl_map, type_variable_names)),
             Box::new(expr(*a, data_decl_map, type_variable_names)),
         ),
-        ast1::Expr::Unit => Unit,
     }
 }
 
