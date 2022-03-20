@@ -1,5 +1,6 @@
 mod simplify;
 
+use crate::ast2::types::Type;
 use crate::ast2::{
     decl_id::DeclId, ident_id::IdentId, types, types::TypeUnit,
 };
@@ -127,95 +128,60 @@ struct Toplevel<'a> {
     resolved_idents: FxHashMap<IdentId, VariableId>,
     decl_id: VariableId,
 }
-
+struct ResolvedType<'a> {
+    name: &'a str,
+    index: usize,
+    incomplete_type: IncompleteType<'a>,
+    ident: IdentId,
+    decl: VariableId,
+}
 fn resolve_names<'a>(
     mut toplevels: FxHashMap<&'a str, Vec<Toplevel<'a>>>,
 ) -> FxHashMap<&'a str, Vec<Toplevel<'a>>> {
-    struct ResolvedType<'a> {
-        name: &'a str,
-        index: usize,
-        incomplete_type: IncompleteType<'a>,
-        ident: IdentId,
-        decl: VariableId,
-    }
     loop {
         let mut resolved: Option<ResolvedType> = None;
-        'outer: for (name, types) in &toplevels {
-            for (t_index, t) in types.iter().enumerate() {
-                if !t.incomplete.resolved() {
-                    for (req_i, (req_name, req_t, _)) in t
+        'outer: for (name, toplevel_decls) in &toplevels {
+            for (t_index, toplevel_decl) in
+                toplevel_decls.iter().enumerate()
+            {
+                if !toplevel_decl.incomplete.resolved() {
+                    for (
+                        req_i,
+                        (req_name, req_t, id_of_requiring_ident),
+                    ) in toplevel_decl
                         .incomplete
                         .requirements
                         .variable_requirements
                         .iter()
                         .enumerate()
                     {
-                        let candidates = &toplevels[&req_name[..]];
+                        let candidates = &toplevels[req_name];
                         if candidates.iter().all(|c| {
                             c.face.is_none()
                                 && !c.incomplete.resolved()
-                                && t.decl_id != c.decl_id
+                                && toplevel_decl.decl_id != c.decl_id
                         }) {
                             continue;
                         }
-                        let successes: Vec<_> = candidates
-                            .iter()
-                            .filter_map(|cand| {
-                                let mut cand_t =
-                                    if let Some(face) = &cand.face {
-                                        face.clone()
-                                    } else {
-                                        cand.incomplete.clone()
-                                    };
-                                let is_recursive =
-                                    t.decl_id == cand.decl_id;
-                                if !is_recursive {
-                                    cand_t =
-                                        cand_t.change_variable_num();
-                                }
-                                let cand_resolved = cand_t.resolved();
-                                let mut incomplete =
-                                    t.incomplete.clone();
-                                let removed_req = incomplete
-                                    .requirements
-                                    .variable_requirements
-                                    .remove(req_i);
-                                incomplete
-                                    .requirements
-                                    .subtype_relation
-                                    .insert((
-                                        cand_t.constructor.clone(),
-                                        req_t.clone(),
-                                    ));
-                                incomplete
-                                    .requirements
-                                    .subtype_relation
-                                    .extend(
-                                        cand_t
-                                            .requirements
-                                            .subtype_relation,
-                                    );
-                                simplify::simplify_type(incomplete)
-                                    .map(|t| {
-                                        (
-                                            t,
-                                            cand_resolved
-                                                || is_recursive,
-                                            removed_req.2,
-                                            cand.decl_id,
-                                        )
-                                    })
-                            })
-                            .collect();
-                        if successes.len() == 1 && successes[0].1 {
+                        let successes: Vec<_> = find_satisfied_types(
+                            &toplevel_decl.incomplete,
+                            toplevel_decl.decl_id,
+                            req_t,
+                            req_i,
+                            candidates,
+                        );
+                        if successes.len() == 1
+                            && successes[0].can_be_used_for_resolving
+                        {
                             resolved = Some(ResolvedType {
                                 name,
                                 index: t_index,
                                 incomplete_type: successes[0]
-                                    .0
+                                    .type_of_statisfied_variable
                                     .clone(),
-                                ident: successes[0].2,
-                                decl: successes[0].3,
+                                ident: *id_of_requiring_ident,
+                                decl: successes[0]
+                                    .id_of_satisfied_variable,
                             });
                             break 'outer;
                         } else if successes.is_empty() {
@@ -226,7 +192,10 @@ fn resolve_names<'a>(
                                 t_index
                             );
                             log::debug!("req_t: {}", req_t);
-                            log::debug!("t -> {}", t.incomplete);
+                            log::debug!(
+                                "t -> {}",
+                                toplevel_decl.incomplete
+                            );
                         }
                     }
                 }
@@ -247,6 +216,70 @@ fn resolve_names<'a>(
         }
     }
     toplevels
+}
+
+struct SatisfiedType<'a> {
+    id_of_satisfied_variable: VariableId,
+    type_of_statisfied_variable: IncompleteType<'a>,
+    can_be_used_for_resolving: bool,
+}
+
+fn find_satisfied_types<'a>(
+    type_of_unresolved_decl: &IncompleteType<'a>,
+    id_of_unresolved_decl: VariableId,
+    required_type: &Type<'a>,
+    position_of_requirement: usize,
+    candidates: &[Toplevel<'a>],
+) -> Vec<SatisfiedType<'a>> {
+    let subtype_relation_requirements = type_of_unresolved_decl
+        .requirements
+        .subtype_relation
+        .clone();
+    let mut variable_requirements = type_of_unresolved_decl
+        .requirements
+        .variable_requirements
+        .clone();
+    variable_requirements.remove(position_of_requirement);
+    candidates
+        .iter()
+        .filter_map(|candidate| {
+            let mut cand_t = if let Some(face) = &candidate.face {
+                face.clone()
+            } else {
+                candidate.incomplete.clone()
+            };
+            let is_recursive_function =
+                id_of_unresolved_decl == candidate.decl_id;
+            if !is_recursive_function {
+                cand_t = cand_t.change_variable_num();
+            }
+            let cand_resolved = cand_t.resolved();
+            let mut subtype_relation_requirement =
+                subtype_relation_requirements.clone();
+            subtype_relation_requirement.insert((
+                cand_t.constructor.clone(),
+                required_type.clone(),
+            ));
+            subtype_relation_requirement
+                .extend(cand_t.requirements.subtype_relation);
+            simplify::simplify_type(IncompleteType {
+                constructor: type_of_unresolved_decl
+                    .constructor
+                    .clone(),
+                requirements: Requirements {
+                    variable_requirements: variable_requirements
+                        .clone(),
+                    subtype_relation: subtype_relation_requirement,
+                },
+            })
+            .map(|statisfied_type| SatisfiedType {
+                id_of_satisfied_variable: candidate.decl_id,
+                type_of_statisfied_variable: statisfied_type,
+                can_be_used_for_resolving: cand_resolved
+                    || is_recursive_function,
+            })
+        })
+        .collect()
 }
 
 fn constructor_type(d: DataDecl) -> TypeUnit {
