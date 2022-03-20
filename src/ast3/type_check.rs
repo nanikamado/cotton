@@ -1,17 +1,19 @@
 mod simplify;
 
-use crate::ast2::types::Type;
-use crate::ast2::{
-    decl_id::DeclId, ident_id::IdentId, types, types::TypeUnit,
+use crate::{
+    ast2::{
+        decl_id::DeclId,
+        ident_id::IdentId,
+        types,
+        types::{Type, TypeUnit},
+        Ast, DataDecl, Expr, FnArm, IncompleteType, Pattern,
+        Requirements, TypeId,
+    },
+    intrinsics::IntrinsicVariable,
 };
-use crate::ast2::{Ast, DataDecl, Expr, FnArm, Pattern, TypeId};
-use crate::ast2::{IncompleteType, Requirements};
-use crate::intrinsics::IntrinsicVariable;
 use fxhash::FxHashMap;
 use itertools::multiunzip;
-use std::collections::BTreeSet;
-use std::fmt::Display;
-use std::vec;
+use std::{collections::BTreeSet, fmt::Display, vec};
 use strum::IntoEnumIterator;
 
 use super::type_util::construct_type;

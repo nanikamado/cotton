@@ -2,13 +2,17 @@ pub mod decl_id;
 pub mod ident_id;
 pub mod types;
 
-use self::decl_id::{new_decl_id, DeclId};
-use self::ident_id::{new_ident_id, IdentId};
-use self::types::{Type, TypeUnit};
-use crate::ast1;
-use crate::intrinsics::{
-    IntrinsicConstructor, IntrinsicType, INTRINSIC_CONSTRUCTORS,
-    INTRINSIC_TYPES, INTRINSIC_TYPES_NAMES,
+use self::{
+    decl_id::{new_decl_id, DeclId},
+    ident_id::{new_ident_id, IdentId},
+    types::{Type, TypeUnit},
+};
+use crate::{
+    ast1,
+    intrinsics::{
+        IntrinsicConstructor, IntrinsicType, INTRINSIC_CONSTRUCTORS,
+        INTRINSIC_TYPES, INTRINSIC_TYPES_NAMES,
+    },
 };
 use fxhash::FxHashMap;
 use std::collections::BTreeSet;

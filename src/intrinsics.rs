@@ -1,10 +1,10 @@
-use crate::ast0::Associativity;
-use crate::ast2::types::Type;
-use crate::ast3::type_util::construct_type;
+use crate::{
+    ast0::Associativity, ast2::types::Type,
+    ast3::type_util::construct_type,
+};
 use fxhash::FxHashMap;
 use once_cell::sync::Lazy;
-use std::collections::HashMap;
-use std::fmt::Display;
+use std::{collections::HashMap, fmt::Display};
 use strum::EnumIter;
 
 #[derive(

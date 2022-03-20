@@ -1,6 +1,5 @@
 use crate::{
-    ast2::decl_id::DeclId,
-    ast2::{DataDecl, Pattern},
+    ast2::{decl_id::DeclId, DataDecl, Pattern},
     ast3::{Ast, Expr, FnArm, VariableDecl},
     intrinsics::IntrinsicVariable,
 };

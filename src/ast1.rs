@@ -1,13 +1,11 @@
 use crate::{
-    ast0::{self, Associativity, Forall, OperatorPrecedence},
+    ast0,
+    ast0::{Associativity, Forall, OperatorPrecedence},
     intrinsics::OP_PRECEDENCE,
 };
 use fxhash::FxHashMap;
 use index_list::{Index, IndexList};
-use std::{
-    collections::BTreeMap,
-    fmt::{self, Debug},
-};
+use std::{collections::BTreeMap, fmt, fmt::Debug};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Ast<'a> {
