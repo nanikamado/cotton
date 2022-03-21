@@ -179,7 +179,7 @@ fn resolve_names<'a>(
                                 name,
                                 index: t_index,
                                 incomplete_type: successes[0]
-                                    .type_of_statisfied_variable
+                                    .type_of_improved_decl
                                     .clone(),
                                 ident: *id_of_requiring_ident,
                                 decl: successes[0]
@@ -222,7 +222,7 @@ fn resolve_names<'a>(
 
 struct SatisfiedType<'a> {
     id_of_satisfied_variable: VariableId,
-    type_of_statisfied_variable: IncompleteType<'a>,
+    type_of_improved_decl: IncompleteType<'a>,
     can_be_used_for_resolving: bool,
 }
 
@@ -274,11 +274,13 @@ fn find_satisfied_types<'a>(
                     subtype_relation: subtype_relation_requirement,
                 },
             })
-            .map(|statisfied_type| SatisfiedType {
-                id_of_satisfied_variable: candidate.decl_id,
-                type_of_statisfied_variable: statisfied_type,
-                can_be_used_for_resolving: cand_resolved
-                    || is_recursive_function,
+            .map(|type_of_improved_decl| {
+                SatisfiedType {
+                    id_of_satisfied_variable: candidate.decl_id,
+                    type_of_improved_decl,
+                    can_be_used_for_resolving: cand_resolved
+                        || is_recursive_function,
+                }
             })
         })
         .collect()
