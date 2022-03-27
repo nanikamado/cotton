@@ -130,6 +130,7 @@ struct Toplevel<'a> {
     resolved_idents: FxHashMap<IdentId, VariableId>,
     decl_id: VariableId,
 }
+
 struct ResolvedType<'a> {
     name: &'a str,
     index: usize,
@@ -137,73 +138,12 @@ struct ResolvedType<'a> {
     ident: IdentId,
     decl: VariableId,
 }
+
 fn resolve_names<'a>(
     mut toplevels: FxHashMap<&'a str, Vec<Toplevel<'a>>>,
 ) -> FxHashMap<&'a str, Vec<Toplevel<'a>>> {
     loop {
-        let mut resolved: Option<ResolvedType> = None;
-        'outer: for (name, toplevel_decls) in &toplevels {
-            for (t_index, toplevel_decl) in
-                toplevel_decls.iter().enumerate()
-            {
-                if !toplevel_decl.incomplete.resolved() {
-                    for (
-                        req_i,
-                        (req_name, req_t, id_of_requiring_ident),
-                    ) in toplevel_decl
-                        .incomplete
-                        .requirements
-                        .variable_requirements
-                        .iter()
-                        .enumerate()
-                    {
-                        let candidates = &toplevels[req_name];
-                        if candidates.iter().all(|c| {
-                            c.face.is_none()
-                                && !c.incomplete.resolved()
-                                && toplevel_decl.decl_id != c.decl_id
-                        }) {
-                            continue;
-                        }
-                        let successes: Vec<_> = find_satisfied_types(
-                            &toplevel_decl.incomplete,
-                            toplevel_decl.decl_id,
-                            req_t,
-                            req_i,
-                            candidates,
-                        );
-                        if successes.len() == 1
-                            && successes[0].can_be_used_for_resolving
-                        {
-                            resolved = Some(ResolvedType {
-                                name,
-                                index: t_index,
-                                incomplete_type: successes[0]
-                                    .type_of_improved_decl
-                                    .clone(),
-                                ident: *id_of_requiring_ident,
-                                decl: successes[0]
-                                    .id_of_satisfied_variable,
-                            });
-                            break 'outer;
-                        } else if successes.is_empty() {
-                            log::debug!(
-                                "all of {} has failed in {}[{}]",
-                                req_name,
-                                name,
-                                t_index
-                            );
-                            log::debug!("req_t: {}", req_t);
-                            log::debug!(
-                                "t -> {}",
-                                toplevel_decl.incomplete
-                            );
-                        }
-                    }
-                }
-            }
-        }
-        if let Some(r) = resolved {
+        if let Some(r) = resolve_ident_in_toplevels(&toplevels) {
             let topl =
                 &mut toplevels.get_mut(&r.name).unwrap()[r.index];
             debug_assert_eq!(
@@ -218,6 +158,72 @@ fn resolve_names<'a>(
         }
     }
     toplevels
+}
+
+fn resolve_ident_in_toplevels<'a>(
+    toplevels: &FxHashMap<&'a str, Vec<Toplevel<'a>>>,
+) -> Option<ResolvedType<'a>> {
+    for (name, toplevel_decls) in toplevels {
+        for (t_index, toplevel_decl) in
+            toplevel_decls.iter().enumerate()
+        {
+            if !toplevel_decl.incomplete.resolved() {
+                for (
+                    req_i,
+                    (req_name, req_t, id_of_requiring_ident),
+                ) in toplevel_decl
+                    .incomplete
+                    .requirements
+                    .variable_requirements
+                    .iter()
+                    .enumerate()
+                {
+                    let candidates = &toplevels[req_name];
+                    if candidates.iter().all(|c| {
+                        c.face.is_none()
+                            && !c.incomplete.resolved()
+                            && toplevel_decl.decl_id != c.decl_id
+                    }) {
+                        continue;
+                    }
+                    let successes: Vec<_> = find_satisfied_types(
+                        &toplevel_decl.incomplete,
+                        toplevel_decl.decl_id,
+                        req_t,
+                        req_i,
+                        candidates,
+                    );
+                    if successes.len() == 1
+                        && successes[0].can_be_used_for_resolving
+                    {
+                        return Some(ResolvedType {
+                            name,
+                            index: t_index,
+                            incomplete_type: successes[0]
+                                .type_of_improved_decl
+                                .clone(),
+                            ident: *id_of_requiring_ident,
+                            decl: successes[0]
+                                .id_of_satisfied_variable,
+                        });
+                    } else if successes.is_empty() {
+                        log::debug!(
+                            "all of {} has failed in {}[{}]",
+                            req_name,
+                            name,
+                            t_index
+                        );
+                        log::debug!("req_t: {}", req_t);
+                        log::debug!(
+                            "t -> {}",
+                            toplevel_decl.incomplete
+                        );
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 struct SatisfiedType<'a> {
