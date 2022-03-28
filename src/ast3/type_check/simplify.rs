@@ -277,6 +277,7 @@ fn simplify_subtype_rel<'a>(
     }
 }
 
+/// Change `Cons[List[a], a] | Nil` to `List[a]`
 fn lift_recursive_alias(t: Type) -> Type {
     if let Some((alias, body)) = t.find_recursive_alias() {
         let r = &TypeUnit::RecursiveAlias {
