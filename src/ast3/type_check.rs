@@ -1,5 +1,6 @@
 mod simplify;
 
+use super::type_util::construct_type;
 use crate::{
     ast2::{
         decl_id::DeclId,
@@ -11,16 +12,19 @@ use crate::{
     },
     intrinsics::IntrinsicVariable,
 };
-use fxhash::FxHashMap;
-use itertools::multiunzip;
-use std::{collections::BTreeSet, fmt::Display, vec};
+use fxhash::{FxHashMap, FxHashSet};
+use itertools::{multiunzip, Itertools};
+use petgraph::{
+    algo::kosaraju_scc, graph::NodeIndex, visit::IntoNodeReferences,
+    Graph,
+};
+use std::{cmp::Reverse, collections::BTreeSet, fmt::Display};
 use strum::IntoEnumIterator;
-
-use super::type_util::construct_type;
+use types::TypeConstructor;
 
 type Resolved = Vec<(IdentId, VariableId)>;
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
 pub enum VariableId {
     Decl(DeclId),
     Intrinsic(IntrinsicVariable),
@@ -53,30 +57,33 @@ impl std::fmt::Debug for VariableId {
 }
 
 pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, VariableId> {
-    let mut toplevels: FxHashMap<&str, Vec<Toplevel>> =
-        FxHashMap::default();
+    let mut toplevels: Vec<Toplevel> = Default::default();
     for v in IntrinsicVariable::iter() {
-        toplevels.entry(v.to_str()).or_default().push(Toplevel {
+        toplevels.push(Toplevel {
             incomplete: v.to_type().clone().into(),
-            face: None,
+            type_annotation: None,
             resolved_idents: Default::default(),
             decl_id: VariableId::Intrinsic(v),
+            name: v.to_str(),
         });
     }
     for d in &ast.data_decl {
         let d_type: types::Type = constructor_type(*d).into();
-        toplevels.entry(d.name).or_default().push(Toplevel {
+        toplevels.push(Toplevel {
             incomplete: d_type.into(),
-            face: None,
+            type_annotation: None,
             resolved_idents: Default::default(),
             decl_id: VariableId::Decl(d.decl_id),
+            name: d.name,
         });
     }
     let mut resolved_idents = FxHashMap::default();
     for d in &ast.variable_decl {
         let (mut t, resolved) = min_type(&d.value).unwrap();
         resolved_idents.extend(resolved);
-        let face = if let Some(annotation) = &d.type_annotation {
+        let type_annotation = if let Some(annotation) =
+            &d.type_annotation
+        {
             let annotation = annotation.clone().change_variable_num();
             t.requirements.subtype_relation.insert((
                 t.constructor.clone(),
@@ -92,204 +99,393 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, VariableId> {
         } else {
             None
         };
-        toplevels.entry(d.name).or_default().push(Toplevel {
+        toplevels.push(Toplevel {
             incomplete: simplify::simplify_type(t.clone()).unwrap(),
-            face,
+            type_annotation,
             resolved_idents: Default::default(),
             decl_id: VariableId::Decl(d.decl_id),
+            name: d.name,
         });
     }
-    for (name, top) in &toplevels {
-        log::debug!("{} : ", name);
-        for t in top {
-            log::debug!("resolved: {:?}", t.resolved_idents);
-            if let Some(f) = &t.face {
-                log::debug!("face: {}", f);
-                log::debug!("incomplete: {}", t.incomplete);
-            } else {
-                log::debug!("not face: {}", t.incomplete);
-            }
+    for top in &toplevels {
+        log::debug!("{:<3} {} : ", top.decl_id, top.name);
+        log::debug!("resolved: {:?}", top.resolved_idents);
+        if let Some(f) = &top.type_annotation {
+            log::debug!("face: {}", f);
+            log::debug!("incomplete: {}", top.incomplete);
+        } else {
+            log::debug!("not face: {}", top.incomplete);
         }
     }
-    let toplevels = resolve_names(toplevels);
-    log::debug!("------------------------------");
-    for (name, top) in toplevels {
-        log::debug!("{} : ", name);
-        for t in top {
-            log::debug!("{}", t.incomplete);
-            log::debug!("resolved: {:?}\n", t.resolved_idents);
-            resolved_idents.extend(t.resolved_idents)
+    let resolved_names = resolve_names(toplevels);
+    for (ident_id, variable_id) in
+        resolved_names.iter().sorted_unstable()
+    {
+        log::debug!("{ident_id} => {variable_id}");
+    }
+    resolved_idents.extend(resolved_names);
+    resolved_idents
+}
+
+#[derive(Debug, Clone)]
+struct Toplevel<'a> {
+    incomplete: IncompleteType<'a>,
+    type_annotation: Option<IncompleteType<'a>>,
+    resolved_idents: FxHashMap<IdentId, VariableId>,
+    decl_id: VariableId,
+    name: &'a str,
+}
+
+fn resolve_names(
+    toplevels: Vec<Toplevel>,
+) -> Vec<(IdentId, VariableId)> {
+    let mut toplevel_graph = Graph::<Toplevel, ()>::new();
+    for t in toplevels {
+        toplevel_graph.add_node(t);
+    }
+    let mut toplevle_map: FxHashMap<&str, Vec<NodeIndex>> =
+        FxHashMap::default();
+    for (i, t) in toplevel_graph.node_references() {
+        toplevle_map.entry(t.name).or_default().push(i);
+    }
+    let edges = toplevel_graph
+        .node_references()
+        .flat_map(|(from, from_toplevle)| {
+            from_toplevle
+                .incomplete
+                .requirements
+                .variable_requirements
+                .iter()
+                .flat_map(|(to_name, _, _)| &toplevle_map[to_name])
+                .map(move |to| (*to, from))
+        })
+        .collect_vec();
+    for (from, to) in edges {
+        toplevel_graph.add_edge(from, to, ());
+    }
+    let toplevel_sccs = kosaraju_scc(&toplevel_graph);
+    let mut resolved_variable_map = FxHashMap::default();
+    let mut resolved_idents = Vec::new();
+    for scc in toplevel_sccs.into_iter().rev() {
+        let unresolved_variables = scc
+            .into_iter()
+            .map(|i| toplevel_graph[i].clone())
+            .collect_vec();
+        let mut resolved = resolve_scc(
+            unresolved_variables.clone(),
+            &resolved_variable_map,
+        );
+        resolved_idents.append(&mut resolved.0);
+        for (toplevel, improved_type) in
+            unresolved_variables.into_iter().zip(resolved.1)
+        {
+            debug_assert_eq!(
+                improved_type,
+                simplify::simplify_type(improved_type.clone())
+                    .unwrap()
+            );
+            log::debug!(
+                "improved type of {}:\n{}",
+                toplevel.name,
+                improved_type
+            );
+            resolved_variable_map
+                .entry(toplevel.name)
+                .or_default()
+                .push(Toplevel {
+                    incomplete: improved_type,
+                    ..toplevel
+                });
         }
     }
     resolved_idents
 }
 
-struct Toplevel<'a> {
-    incomplete: IncompleteType<'a>,
-    face: Option<IncompleteType<'a>>,
-    resolved_idents: FxHashMap<IdentId, VariableId>,
-    decl_id: VariableId,
+#[derive(Debug, Hash, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct SccTypeConstructor<'a>(Vec<Type<'a>>);
+
+impl Display for SccTypeConstructor<'_> {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        write!(f, "[")?;
+        write!(f, "{}", self.0.iter().join(", "))?;
+        write!(f, "]")
+    }
 }
 
-struct ResolvedType<'a> {
-    name: &'a str,
-    index: usize,
-    incomplete_type: IncompleteType<'a>,
-    ident: IdentId,
-    decl: VariableId,
+impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
+    fn all_type_variables(&self) -> FxHashSet<usize> {
+        self.0
+            .iter()
+            .flat_map(TypeConstructor::all_type_variables)
+            .collect()
+    }
+
+    fn replace_num(self, from: usize, to: &Type<'a>) -> Self {
+        SccTypeConstructor(
+            self.0
+                .into_iter()
+                .map(|t| t.replace_num(from, to))
+                .collect(),
+        )
+    }
+
+    fn covariant_type_variables(&self) -> Vec<usize> {
+        self.0
+            .iter()
+            .flat_map(TypeConstructor::covariant_type_variables)
+            .collect()
+    }
+
+    fn contravariant_type_variables(&self) -> Vec<usize> {
+        self.0
+            .iter()
+            .flat_map(TypeConstructor::contravariant_type_variables)
+            .collect()
+    }
+
+    fn find_recursive_alias(&self) -> Option<(usize, Type<'a>)> {
+        self.0
+            .iter()
+            .find_map(TypeConstructor::find_recursive_alias)
+    }
+
+    fn replace_type(
+        self,
+        from: &TypeUnit<'a>,
+        to: &TypeUnit<'a>,
+    ) -> Self {
+        SccTypeConstructor(
+            self.0
+                .into_iter()
+                .map(|t| t.replace_type(from, to))
+                .collect(),
+        )
+    }
+
+    fn replace_type_union(
+        self,
+        from: &Type,
+        to: &TypeUnit<'a>,
+    ) -> Self {
+        SccTypeConstructor(
+            self.0
+                .into_iter()
+                .map(|t| t.replace_type_union(from, to))
+                .collect(),
+        )
+    }
 }
 
-fn resolve_names<'a>(
-    mut toplevels: FxHashMap<&'a str, Vec<Toplevel<'a>>>,
-) -> FxHashMap<&'a str, Vec<Toplevel<'a>>> {
-    loop {
-        if let Some(r) = resolve_ident_in_toplevels(&toplevels) {
-            let topl =
-                &mut toplevels.get_mut(&r.name).unwrap()[r.index];
-            debug_assert_eq!(
-                simplify::simplify_type(r.incomplete_type.clone())
-                    .unwrap(),
-                r.incomplete_type
-            );
-            topl.incomplete = r.incomplete_type;
-            topl.resolved_idents.insert(r.ident, r.decl);
-        } else {
+/// Resolves names in strongly connected declarations.
+/// Returns the resolved names and improved type of each declaration.
+fn resolve_scc<'a>(
+    scc: Vec<Toplevel<'a>>,
+    resolved_variable_map: &FxHashMap<&str, Vec<Toplevel<'a>>>,
+) -> (
+    Vec<(IdentId, VariableId)>,
+    Vec<IncompleteType<'a, Type<'a>>>,
+    // IncompleteType<'a, SccTypeConstructor<'a>>,
+) {
+    // Merge the declarations in a scc to treate them as if they are one declaration,
+    let mut resolved_idents = Vec::new();
+    let mut name_vec = Vec::new();
+    let mut variable_requirements = Vec::new();
+    let mut subtype_relation = BTreeSet::default();
+    let mut types = Vec::new();
+    for t in &scc {
+        name_vec.push(t.name);
+        variable_requirements.append(
+            &mut t
+                .incomplete
+                .requirements
+                .variable_requirements
+                .clone(),
+        );
+        subtype_relation.extend(
+            t.incomplete.requirements.subtype_relation.clone(),
+        );
+        types.push(t.incomplete.constructor.clone());
+    }
+    let names_in_scc: FxHashSet<_> =
+        name_vec.iter().copied().collect();
+    log::debug!("name of unresolved: {:?}", names_in_scc);
+    // The order of resolving is important.
+    // Requirements that are easier to solve should be solved earlier.
+    variable_requirements.sort_unstable_by_key(|(req_name, _, _)| {
+        (
+            !names_in_scc.contains(req_name),
+            resolved_variable_map
+                .get(req_name)
+                .map(|v| Reverse(v.len())),
+        )
+    });
+    let mut unresolved_type = IncompleteType {
+        constructor: SccTypeConstructor(types),
+        requirements: Requirements {
+            variable_requirements,
+            subtype_relation,
+        },
+    };
+    // Recursions are not resolved in this loop.
+    while let Some((req_name, req_type, ident_id)) =
+        unresolved_type.requirements.variable_requirements.pop()
+    {
+        if names_in_scc.contains(req_name) {
+            unresolved_type
+                .requirements
+                .variable_requirements
+                .push((req_name, req_type, ident_id));
+            // Skipping the resolveing of recursion.
             break;
         }
+        let satisfied = find_satisfied_types(
+            &unresolved_type,
+            &req_type,
+            resolved_variable_map
+                .get(req_name)
+                .unwrap_or_else(|| panic!("req_name: {}", req_name))
+                .clone()
+                .into_iter(),
+            true,
+        );
+        let satisfied = get_one_satisfied(satisfied);
+        resolved_idents
+            .push((ident_id, satisfied.id_of_satisfied_variable));
+        unresolved_type = satisfied.type_of_improved_decl;
     }
-    toplevels
+    // Resolve recursive requirements.
+    let (mut resolved, improved_types) = resolve_recursion_in_scc(
+        unresolved_type,
+        &scc,
+        resolved_variable_map,
+    );
+    resolved_idents.append(&mut resolved);
+    let reqs = improved_types.requirements;
+    (
+        resolved_idents,
+        improved_types
+            .constructor
+            .0
+            .into_iter()
+            .map(|t| IncompleteType {
+                constructor: t,
+                requirements: reqs.clone(),
+            })
+            .collect(),
+    )
 }
 
-fn resolve_ident_in_toplevels<'a>(
-    toplevels: &FxHashMap<&'a str, Vec<Toplevel<'a>>>,
-) -> Option<ResolvedType<'a>> {
-    for (name, toplevel_decls) in toplevels {
-        for (t_index, toplevel_decl) in
-            toplevel_decls.iter().enumerate()
-        {
-            if !toplevel_decl.incomplete.resolved() {
-                for (
-                    req_i,
-                    (req_name, req_t, id_of_requiring_ident),
-                ) in toplevel_decl
-                    .incomplete
-                    .requirements
-                    .variable_requirements
-                    .iter()
-                    .enumerate()
-                {
-                    let candidates = &toplevels[req_name];
-                    if candidates.iter().all(|c| {
-                        c.face.is_none()
-                            && !c.incomplete.resolved()
-                            && toplevel_decl.decl_id != c.decl_id
-                    }) {
-                        continue;
-                    }
-                    let successes: Vec<_> = find_satisfied_types(
-                        &toplevel_decl.incomplete,
-                        toplevel_decl.decl_id,
-                        req_t,
-                        req_i,
-                        candidates,
-                    );
-                    if successes.len() == 1
-                        && successes[0].can_be_used_for_resolving
-                    {
-                        return Some(ResolvedType {
-                            name,
-                            index: t_index,
-                            incomplete_type: successes[0]
-                                .type_of_improved_decl
-                                .clone(),
-                            ident: *id_of_requiring_ident,
-                            decl: successes[0]
-                                .id_of_satisfied_variable,
-                        });
-                    } else if successes.is_empty() {
-                        log::debug!(
-                            "all of {} has failed in {}[{}]",
-                            req_name,
-                            name,
-                            t_index
-                        );
-                        log::debug!("req_t: {}", req_t);
-                        log::debug!(
-                            "t -> {}",
-                            toplevel_decl.incomplete
-                        );
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-struct SatisfiedType<'a> {
+struct SatisfiedType<T> {
     id_of_satisfied_variable: VariableId,
-    type_of_improved_decl: IncompleteType<'a>,
-    can_be_used_for_resolving: bool,
+    type_of_improved_decl: T,
 }
 
-fn find_satisfied_types<'a>(
-    type_of_unresolved_decl: &IncompleteType<'a>,
-    id_of_unresolved_decl: VariableId,
+fn find_satisfied_types<'a, T: TypeConstructor<'a>>(
+    type_of_unresolved_decl: &IncompleteType<'a, T>,
     required_type: &Type<'a>,
-    position_of_requirement: usize,
-    candidates: &[Toplevel<'a>],
-) -> Vec<SatisfiedType<'a>> {
-    let subtype_relation_requirements = type_of_unresolved_decl
-        .requirements
-        .subtype_relation
-        .clone();
-    let mut variable_requirements = type_of_unresolved_decl
-        .requirements
-        .variable_requirements
-        .clone();
-    variable_requirements.remove(position_of_requirement);
+    candidates: impl Iterator<Item = Toplevel<'a>>,
+    replace_variables: bool,
+) -> Vec<SatisfiedType<IncompleteType<'a, T>>> {
+    log::trace!("type_of_unresolved_decl:");
+    log::trace!("{}", type_of_unresolved_decl);
+    log::trace!("required_type : {required_type}");
     candidates
-        .iter()
         .filter_map(|candidate| {
-            let mut cand_t = if let Some(face) = &candidate.face {
-                face.clone()
-            } else {
-                candidate.incomplete.clone()
-            };
-            let is_recursive_function =
-                id_of_unresolved_decl == candidate.decl_id;
-            if !is_recursive_function {
+            let mut t = type_of_unresolved_decl.clone();
+            let mut cand_t =
+                if let Some(face) = candidate.type_annotation {
+                    face
+                } else {
+                    candidate.incomplete
+                };
+            if replace_variables {
                 cand_t = cand_t.change_variable_num();
             }
-            let cand_resolved = cand_t.resolved();
-            let mut subtype_relation_requirement =
-                subtype_relation_requirements.clone();
-            subtype_relation_requirement.insert((
-                cand_t.constructor.clone(),
-                required_type.clone(),
-            ));
-            subtype_relation_requirement
+            t.requirements
+                .subtype_relation
+                .insert((cand_t.constructor, required_type.clone()));
+            t.requirements
+                .subtype_relation
                 .extend(cand_t.requirements.subtype_relation);
-            simplify::simplify_type(IncompleteType {
-                constructor: type_of_unresolved_decl
-                    .constructor
-                    .clone(),
-                requirements: Requirements {
-                    variable_requirements: variable_requirements
-                        .clone(),
-                    subtype_relation: subtype_relation_requirement,
-                },
-            })
-            .map(|type_of_improved_decl| {
+            let decl_id = candidate.decl_id;
+            simplify::simplify_type(t).map(|type_of_improved_decl| {
                 SatisfiedType {
-                    id_of_satisfied_variable: candidate.decl_id,
+                    id_of_satisfied_variable: decl_id,
                     type_of_improved_decl,
-                    can_be_used_for_resolving: cand_resolved
-                        || is_recursive_function,
                 }
             })
         })
-        .collect()
+        .collect_vec()
+}
+
+fn get_one_satisfied<T: Display>(
+    satisfied: Vec<SatisfiedType<T>>,
+) -> SatisfiedType<T> {
+    match satisfied.len() {
+        0 => panic!("name resolve failed"),
+        1 => satisfied.into_iter().next().unwrap(),
+        _ => {
+            panic!(
+                "satisfied:\n{}",
+                satisfied
+                    .iter()
+                    .map(|s| format!(
+                        "{} : {}",
+                        s.id_of_satisfied_variable,
+                        s.type_of_improved_decl
+                    ))
+                    .join("\n")
+            )
+        }
+    }
+}
+
+/// The reterned `IncompleteType` does not contain variable_requirements, but contains subtype relationship.
+fn resolve_recursion_in_scc<'a>(
+    mut scc: IncompleteType<'a, SccTypeConstructor<'a>>,
+    toplevels: &[Toplevel<'a>],
+    resolved_variable_map: &FxHashMap<&str, Vec<Toplevel<'a>>>,
+) -> (
+    Vec<(IdentId, VariableId)>,
+    IncompleteType<'a, SccTypeConstructor<'a>>,
+) {
+    let mut scc_map: FxHashMap<&str, Vec<usize>> =
+        FxHashMap::default();
+    for (i, t) in toplevels.iter().enumerate() {
+        scc_map.entry(t.name).or_default().push(i);
+    }
+    let mut resolved_idents = Vec::new();
+    while let Some((req_name, req_type, ident_id)) =
+        scc.requirements.variable_requirements.pop()
+    {
+        let mut satisfied = find_satisfied_types(
+            &scc,
+            &req_type,
+            resolved_variable_map
+                .get(req_name)
+                .into_iter()
+                .cloned()
+                .flatten(),
+            true,
+        );
+        satisfied.append(&mut find_satisfied_types(
+            &scc,
+            &req_type,
+            scc_map.get(req_name).unwrap().iter().map(|j| Toplevel {
+                incomplete: scc.constructor.0[*j].clone().into(),
+                ..toplevels[*j].clone()
+            }),
+            false,
+        ));
+        let satisfied = get_one_satisfied(satisfied);
+        resolved_idents
+            .push((ident_id, satisfied.id_of_satisfied_variable));
+        scc = satisfied.type_of_improved_decl;
+    }
+    (resolved_idents, scc)
 }
 
 fn constructor_type(d: DataDecl) -> TypeUnit {
@@ -532,257 +728,257 @@ fn pattern_to_type<'a>(
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::Toplevel;
-    use crate::{
-        ast1, ast2,
-        ast2::{
-            decl_id::{self, new_decl_id},
-            ident_id::new_ident_id,
-            IncompleteType, Requirements,
-        },
-        ast3::{
-            type_check::{resolve_names, VariableId},
-            type_util::construct_type_with_variables,
-        },
-        parse,
-    };
-    use fxhash::FxHashMap;
-    use std::collections::BTreeSet;
-    use stripmargin::StripMargin;
+// #[cfg(test)]
+// mod tests {
+//     use super::Toplevel;
+//     use crate::{
+//         ast1, ast2,
+//         ast2::{
+//             decl_id::{self, new_decl_id},
+//             ident_id::new_ident_id,
+//             IncompleteType, Requirements,
+//         },
+//         ast3::{
+//             type_check::{resolve_names, VariableId},
+//             type_util::construct_type_with_variables,
+//         },
+//         parse,
+//     };
+//     use fxhash::FxHashMap;
+//     use std::collections::BTreeSet;
+//     use stripmargin::StripMargin;
 
-    #[test]
-    fn resolve_1() {
-        let ast: ast1::Ast =
-            parse::parse("data Hoge\ndata Fuga\nmain = ()")
-                .unwrap()
-                .1
-                .into();
-        let ast: ast2::Ast = ast.into();
-        let data_decl_map: FxHashMap<&str, decl_id::DeclId> = ast
-            .data_decl
-            .iter()
-            .map(|d| (&d.name[..], d.decl_id))
-            .collect();
-        let top_levels: FxHashMap<&str, Vec<Toplevel>> = vec![
-            (
-                ("main"),
-                vec![Toplevel {
-                    incomplete: IncompleteType {
-                        constructor: construct_type_with_variables(
-                            "()",
-                            &[],
-                            &data_decl_map,
-                        ),
-                        requirements: Requirements {
-                            variable_requirements: vec![
-                                (
-                                    "default",
-                                    construct_type_with_variables(
-                                        "Hoge",
-                                        &[],
-                                        &data_decl_map,
-                                    ),
-                                    new_ident_id(),
-                                ),
-                                (
-                                    "default",
-                                    construct_type_with_variables(
-                                        "Fuga",
-                                        &[],
-                                        &data_decl_map,
-                                    ),
-                                    new_ident_id(),
-                                ),
-                            ],
-                            subtype_relation: BTreeSet::new(),
-                        },
-                    },
-                    face: None,
-                    resolved_idents: Default::default(),
-                    decl_id: VariableId::Decl(new_decl_id()),
-                }],
-            ),
-            (
-                ("default"),
-                vec![
-                    (Toplevel {
-                        incomplete: IncompleteType {
-                            constructor:
-                                construct_type_with_variables(
-                                    "Hoge",
-                                    &[],
-                                    &data_decl_map,
-                                ),
-                            requirements: Default::default(),
-                        },
-                        face: None,
-                        resolved_idents: Default::default(),
-                        decl_id: VariableId::Decl(new_decl_id()),
-                    }),
-                    (Toplevel {
-                        incomplete: IncompleteType {
-                            constructor:
-                                construct_type_with_variables(
-                                    "Fuga",
-                                    &[],
-                                    &data_decl_map,
-                                ),
-                            requirements: Default::default(),
-                        },
-                        face: None,
-                        resolved_idents: Default::default(),
-                        decl_id: VariableId::Decl(new_decl_id()),
-                    }),
-                ],
-            ),
-        ]
-        .into_iter()
-        .collect();
-        let s = debug_toplevels(resolve_names(top_levels));
-        assert_eq!(
-            s,
-            "main : 
-            |resolved: {IdentId(1): VariableId(4), IdentId(2): VariableId(5)}
-            |not face: () forall
-            |--
-            |default : 
-            |resolved: {}
-            |not face: Hoge forall
-            |--
-            |resolved: {}
-            |not face: Fuga forall
-            |--
-            |"
-            .strip_margin()
-        );
-    }
+//     #[test]
+//     fn resolve_1() {
+//         let ast: ast1::Ast =
+//             parse::parse("data Hoge\ndata Fuga\nmain = ()")
+//                 .unwrap()
+//                 .1
+//                 .into();
+//         let ast: ast2::Ast = ast.into();
+//         let data_decl_map: FxHashMap<&str, decl_id::DeclId> = ast
+//             .data_decl
+//             .iter()
+//             .map(|d| (&d.name[..], d.decl_id))
+//             .collect();
+//         let top_levels: FxHashMap<&str, Vec<Toplevel>> = vec![
+//             (
+//                 ("main"),
+//                 vec![Toplevel {
+//                     incomplete: IncompleteType {
+//                         constructor: construct_type_with_variables(
+//                             "()",
+//                             &[],
+//                             &data_decl_map,
+//                         ),
+//                         requirements: Requirements {
+//                             variable_requirements: vec![
+//                                 (
+//                                     "default",
+//                                     construct_type_with_variables(
+//                                         "Hoge",
+//                                         &[],
+//                                         &data_decl_map,
+//                                     ),
+//                                     new_ident_id(),
+//                                 ),
+//                                 (
+//                                     "default",
+//                                     construct_type_with_variables(
+//                                         "Fuga",
+//                                         &[],
+//                                         &data_decl_map,
+//                                     ),
+//                                     new_ident_id(),
+//                                 ),
+//                             ],
+//                             subtype_relation: BTreeSet::new(),
+//                         },
+//                     },
+//                     face: None,
+//                     resolved_idents: Default::default(),
+//                     decl_id: VariableId::Decl(new_decl_id()),
+//                 }],
+//             ),
+//             (
+//                 ("default"),
+//                 vec![
+//                     (Toplevel {
+//                         incomplete: IncompleteType {
+//                             constructor:
+//                                 construct_type_with_variables(
+//                                     "Hoge",
+//                                     &[],
+//                                     &data_decl_map,
+//                                 ),
+//                             requirements: Default::default(),
+//                         },
+//                         face: None,
+//                         resolved_idents: Default::default(),
+//                         decl_id: VariableId::Decl(new_decl_id()),
+//                     }),
+//                     (Toplevel {
+//                         incomplete: IncompleteType {
+//                             constructor:
+//                                 construct_type_with_variables(
+//                                     "Fuga",
+//                                     &[],
+//                                     &data_decl_map,
+//                                 ),
+//                             requirements: Default::default(),
+//                         },
+//                         face: None,
+//                         resolved_idents: Default::default(),
+//                         decl_id: VariableId::Decl(new_decl_id()),
+//                     }),
+//                 ],
+//             ),
+//         ]
+//         .into_iter()
+//         .collect();
+//         let s = debug_toplevels(resolve_names(top_levels));
+//         assert_eq!(
+//             s,
+//             "main :
+//             |resolved: {IdentId(1): VariableId(4), IdentId(2): VariableId(5)}
+//             |not face: () forall
+//             |--
+//             |default :
+//             |resolved: {}
+//             |not face: Hoge forall
+//             |--
+//             |resolved: {}
+//             |not face: Fuga forall
+//             |--
+//             |"
+//             .strip_margin()
+//         );
+//     }
 
-    #[test]
-    fn resolve_2() {
-        let ast: ast1::Ast =
-            parse::parse("data Hoge\ndata Fuga\nmain = ()")
-                .unwrap()
-                .1
-                .into();
-        let ast: ast2::Ast = ast.into();
-        let data_decl_map: FxHashMap<&str, decl_id::DeclId> = ast
-            .data_decl
-            .iter()
-            .map(|d| (&d.name[..], d.decl_id))
-            .collect();
-        let top_levels: FxHashMap<&str, Vec<Toplevel>> = vec![
-            (
-                ("main"),
-                vec![Toplevel {
-                    incomplete: IncompleteType {
-                        constructor: construct_type_with_variables(
-                            "()",
-                            &[],
-                            &data_decl_map,
-                        ),
-                        requirements: Requirements {
-                            variable_requirements: vec![
-                                (
-                                    "greet",
-                                    construct_type_with_variables(
-                                        "Hoge -> String",
-                                        &[],
-                                        &data_decl_map,
-                                    ),
-                                    new_ident_id(),
-                                ),
-                                (
-                                    "greet",
-                                    construct_type_with_variables(
-                                        "Fuga -> String",
-                                        &[],
-                                        &data_decl_map,
-                                    ),
-                                    new_ident_id(),
-                                ),
-                            ],
-                            subtype_relation: BTreeSet::new(),
-                        },
-                    },
-                    face: None,
-                    resolved_idents: Default::default(),
-                    decl_id: VariableId::Decl(new_decl_id()),
-                }],
-            ),
-            (
-                ("greet"),
-                vec![
-                    (Toplevel {
-                        incomplete: IncompleteType {
-                            constructor:
-                                construct_type_with_variables(
-                                    "Hoge -> String",
-                                    &[],
-                                    &data_decl_map,
-                                ),
-                            requirements: Default::default(),
-                        },
-                        face: None,
-                        resolved_idents: Default::default(),
-                        decl_id: VariableId::Decl(new_decl_id()),
-                    }),
-                    (Toplevel {
-                        incomplete: IncompleteType {
-                            constructor:
-                                construct_type_with_variables(
-                                    "Fuga -> String",
-                                    &[],
-                                    &data_decl_map,
-                                ),
-                            requirements: Default::default(),
-                        },
-                        face: None,
-                        resolved_idents: Default::default(),
-                        decl_id: VariableId::Decl(new_decl_id()),
-                    }),
-                ],
-            ),
-        ]
-        .into_iter()
-        .collect();
-        let s = debug_toplevels(resolve_names(top_levels));
-        assert_eq!(
-            s,
-            r#"main : 
-            |resolved: {IdentId(1): VariableId(4), IdentId(2): VariableId(5)}
-            |not face: () forall
-            |--
-            |greet : 
-            |resolved: {}
-            |not face: Hoge -> String forall
-            |--
-            |resolved: {}
-            |not face: Fuga -> String forall
-            |--
-            |"#
-            .strip_margin()
-        );
-    }
+//     #[test]
+//     fn resolve_2() {
+//         let ast: ast1::Ast =
+//             parse::parse("data Hoge\ndata Fuga\nmain = ()")
+//                 .unwrap()
+//                 .1
+//                 .into();
+//         let ast: ast2::Ast = ast.into();
+//         let data_decl_map: FxHashMap<&str, decl_id::DeclId> = ast
+//             .data_decl
+//             .iter()
+//             .map(|d| (&d.name[..], d.decl_id))
+//             .collect();
+//         let top_levels: FxHashMap<&str, Vec<Toplevel>> = vec![
+//             (
+//                 ("main"),
+//                 vec![Toplevel {
+//                     incomplete: IncompleteType {
+//                         constructor: construct_type_with_variables(
+//                             "()",
+//                             &[],
+//                             &data_decl_map,
+//                         ),
+//                         requirements: Requirements {
+//                             variable_requirements: vec![
+//                                 (
+//                                     "greet",
+//                                     construct_type_with_variables(
+//                                         "Hoge -> String",
+//                                         &[],
+//                                         &data_decl_map,
+//                                     ),
+//                                     new_ident_id(),
+//                                 ),
+//                                 (
+//                                     "greet",
+//                                     construct_type_with_variables(
+//                                         "Fuga -> String",
+//                                         &[],
+//                                         &data_decl_map,
+//                                     ),
+//                                     new_ident_id(),
+//                                 ),
+//                             ],
+//                             subtype_relation: BTreeSet::new(),
+//                         },
+//                     },
+//                     face: None,
+//                     resolved_idents: Default::default(),
+//                     decl_id: VariableId::Decl(new_decl_id()),
+//                 }],
+//             ),
+//             (
+//                 ("greet"),
+//                 vec![
+//                     (Toplevel {
+//                         incomplete: IncompleteType {
+//                             constructor:
+//                                 construct_type_with_variables(
+//                                     "Hoge -> String",
+//                                     &[],
+//                                     &data_decl_map,
+//                                 ),
+//                             requirements: Default::default(),
+//                         },
+//                         face: None,
+//                         resolved_idents: Default::default(),
+//                         decl_id: VariableId::Decl(new_decl_id()),
+//                     }),
+//                     (Toplevel {
+//                         incomplete: IncompleteType {
+//                             constructor:
+//                                 construct_type_with_variables(
+//                                     "Fuga -> String",
+//                                     &[],
+//                                     &data_decl_map,
+//                                 ),
+//                             requirements: Default::default(),
+//                         },
+//                         face: None,
+//                         resolved_idents: Default::default(),
+//                         decl_id: VariableId::Decl(new_decl_id()),
+//                     }),
+//                 ],
+//             ),
+//         ]
+//         .into_iter()
+//         .collect();
+//         let s = debug_toplevels(resolve_names(top_levels));
+//         assert_eq!(
+//             s,
+//             r#"main :
+//             |resolved: {IdentId(1): VariableId(4), IdentId(2): VariableId(5)}
+//             |not face: () forall
+//             |--
+//             |greet :
+//             |resolved: {}
+//             |not face: Hoge -> String forall
+//             |--
+//             |resolved: {}
+//             |not face: Fuga -> String forall
+//             |--
+//             |"#
+//             .strip_margin()
+//         );
+//     }
 
-    fn debug_toplevels(
-        toplevels: FxHashMap<&str, Vec<Toplevel>>,
-    ) -> String {
-        let mut ret = String::new();
-        for (name, top) in &toplevels {
-            ret += &format!("{} : \n", name);
-            for t in top {
-                ret +=
-                    &format!("resolved: {:?}\n", t.resolved_idents);
-                if let Some(f) = &t.face {
-                    ret += &format!("face: {}\n", f);
-                    ret += &format!("incomplete: {}\n", t.incomplete);
-                } else {
-                    ret += &format!("not face: {}\n", t.incomplete);
-                }
-            }
-        }
-        ret
-    }
-}
+//     fn debug_toplevels(
+//         toplevels: FxHashMap<&str, Vec<Toplevel>>,
+//     ) -> String {
+//         let mut ret = String::new();
+//         for (name, top) in &toplevels {
+//             ret += &format!("{} : \n", name);
+//             for t in top {
+//                 ret +=
+//                     &format!("resolved: {:?}\n", t.resolved_idents);
+//                 if let Some(f) = &t.face {
+//                     ret += &format!("face: {}\n", f);
+//                     ret += &format!("incomplete: {}\n", t.incomplete);
+//                 } else {
+//                     ret += &format!("not face: {}\n", t.incomplete);
+//                 }
+//             }
+//         }
+//         ret
+//     }
+// }

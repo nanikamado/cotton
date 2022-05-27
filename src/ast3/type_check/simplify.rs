@@ -1,6 +1,6 @@
 use crate::ast2::{
     types::{Type, TypeMatchable, TypeMatchableRef, TypeUnit},
-    IncompleteType, Requirements,
+    IncompleteType, Requirements, TypeConstructor,
 };
 use fxhash::FxHashSet;
 use hashbag::HashBag;
@@ -8,9 +8,9 @@ use itertools::Itertools;
 use petgraph::{self, algo::tarjan_scc, graphmap::DiGraphMap};
 use std::{collections::BTreeSet, fmt::Display, iter::Extend, vec};
 
-pub fn simplify_type(
-    mut t: IncompleteType,
-) -> Option<IncompleteType> {
+pub fn simplify_type<'a, T: TypeConstructor<'a>>(
+    mut t: IncompleteType<'a, T>,
+) -> Option<IncompleteType<'a, T>> {
     let mut i = 0;
     loop {
         i += 1;
@@ -25,13 +25,12 @@ pub fn simplify_type(
             break;
         }
     }
-    log::debug!("loop: {}", i);
     Some(t)
 }
 
-fn _simplify_type(
-    mut t: IncompleteType,
-) -> Option<(IncompleteType, bool)> {
+fn _simplify_type<'a, T: TypeConstructor<'a>>(
+    mut t: IncompleteType<'a, T>,
+) -> Option<(IncompleteType<'a, T>, bool)> {
     use TypeUnit::*;
     let hash_before_simplify = fxhash::hash(&t);
     let subtype_relationship =
@@ -105,12 +104,15 @@ fn _simplify_type(
         })
         .collect();
     for a in &type_variables_in_sub_rel {
+        let vs = t
+            .type_variables_in_constructors_or_variable_requirements(
+            );
         let st =
             possible_strongest(*a, &t.requirements.subtype_relation);
         let we =
             possible_weakest(*a, &t.requirements.subtype_relation);
         match (st, we) {
-            (Some(st), Some(we)) if st == we => {
+            (Some(st), Some(we)) if st == we || !vs.contains(a) => {
                 t = t.replace_num_option(*a, &st)?;
             }
             (_, Some(we)) if we.len() == 0 => {
@@ -278,7 +280,10 @@ fn simplify_subtype_rel<'a>(
 }
 
 /// Change `Cons[List[a], a] | Nil` to `List[a]`
-fn lift_recursive_alias(t: Type) -> Type {
+fn lift_recursive_alias<'a, T>(t: T) -> T
+where
+    T: TypeConstructor<'a>,
+{
     if let Some((alias, body)) = t.find_recursive_alias() {
         let r = &TypeUnit::RecursiveAlias {
             alias,
@@ -300,41 +305,17 @@ fn unwrap_recursive_alias(alias: usize, body: Type) -> Type {
     )
 }
 
-impl<'a> TypeUnit<'a> {
-    fn find_recursive_alias(&self) -> Option<(usize, Type<'a>)> {
-        match self {
-            TypeUnit::Normal { args, .. } => {
-                args.iter().find_map(Type::find_recursive_alias)
-            }
-            TypeUnit::Fn(a, r) => {
-                a.find_recursive_alias()?;
-                r.find_recursive_alias()
-            }
-            TypeUnit::Variable(_) => None,
-            TypeUnit::RecursiveAlias { alias, body } => {
-                Some((*alias, body.clone()))
-            }
-        }
-    }
-}
-
-impl<'a> Type<'a> {
-    fn find_recursive_alias(&self) -> Option<(usize, Type<'a>)> {
-        self.iter().find_map(TypeUnit::find_recursive_alias)
-    }
-}
-
 fn possible_weakest<'a>(
     t: usize,
     subtype_relation: &BTreeSet<(Type<'a>, Type<'a>)>,
 ) -> Option<Type<'a>> {
     let mut up = FxHashSet::default();
     for (sub, sup) in subtype_relation {
-        if contravariant_type_variables(sup).contains(&t) {
+        if sup.contravariant_type_variables().contains(&t) {
             return None;
         } else if *sub == TypeUnit::Variable(t).into() {
             up.insert(sup);
-        } else if covariant_type_variables(sub).contains(&t) {
+        } else if sub.covariant_type_variables().contains(&t) {
             return None;
         }
     }
@@ -389,11 +370,11 @@ fn possible_strongest<'a>(
 ) -> Option<Type<'a>> {
     let mut down = Vec::new();
     for (sub, sup) in subtype_relation {
-        if contravariant_type_variables(sub).contains(&t) {
+        if sub.contravariant_type_variables().contains(&t) {
             return None;
         } else if *sup == TypeUnit::Variable(t).into() {
             down.push(sub);
-        } else if covariant_type_variables(sup).contains(&t) {
+        } else if sup.covariant_type_variables().contains(&t) {
             return None;
         }
     }
@@ -420,85 +401,32 @@ fn possible_strongest<'a>(
     }
 }
 
-fn mk_contravariant_candidates(
-    t: &IncompleteType,
+fn mk_contravariant_candidates<'a, T: TypeConstructor<'a>>(
+    t: &IncompleteType<'a, T>,
 ) -> FxHashSet<usize> {
     let mut rst: Vec<usize> =
-        contravariant_type_variables(&t.constructor);
+        t.constructor.contravariant_type_variables();
     for (_, v, _) in &t.requirements.variable_requirements {
-        rst.append(&mut covariant_type_variables(v));
+        rst.append(&mut v.covariant_type_variables());
     }
     rst.into_iter().collect()
 }
 
-fn mk_covariant_candidates(t: &IncompleteType) -> FxHashSet<usize> {
+fn mk_covariant_candidates<'a, T: TypeConstructor<'a>>(
+    t: &IncompleteType<'a, T>,
+) -> FxHashSet<usize> {
     let mut rst: Vec<usize> =
-        covariant_type_variables(&t.constructor);
+        t.constructor.covariant_type_variables();
     for (_, v, _) in &t.requirements.variable_requirements {
-        rst.append(&mut contravariant_type_variables(v));
+        rst.append(&mut v.contravariant_type_variables());
     }
     rst.into_iter().collect()
 }
 
-fn covariant_type_variables(t: &Type) -> Vec<usize> {
-    match t.matchable_ref() {
-        TypeMatchableRef::Fn(a, r) => marge_vec(
-            covariant_type_variables(r),
-            contravariant_type_variables(a),
-        ),
-        TypeMatchableRef::Normal { args, .. } => {
-            args.iter().flat_map(covariant_type_variables).collect()
-        }
-        TypeMatchableRef::Union(cs) => cs
-            .iter()
-            .map(|c| covariant_type_variables(&c.clone().into()))
-            .concat(),
-        TypeMatchableRef::Variable(n) => {
-            [n].iter().copied().collect()
-        }
-        TypeMatchableRef::Empty => Default::default(),
-        TypeMatchableRef::RecursiveAlias { alias, body } => {
-            let mut vs: FxHashSet<_> =
-                covariant_type_variables(body).into_iter().collect();
-            vs.remove(&alias);
-            vs.into_iter().collect()
-        }
-    }
-}
-
-fn marge_vec<T>(mut a: Vec<T>, mut b: Vec<T>) -> Vec<T> {
-    a.append(&mut b);
-    a
-}
-
-fn contravariant_type_variables(t: &Type) -> Vec<usize> {
-    match t.matchable_ref() {
-        TypeMatchableRef::Fn(a, r) => marge_vec(
-            covariant_type_variables(a),
-            contravariant_type_variables(r),
-        ),
-        TypeMatchableRef::Normal { args, .. } => {
-            args.iter().map(contravariant_type_variables).concat()
-        }
-        TypeMatchableRef::Union(cs) => cs
-            .iter()
-            .map(|c| contravariant_type_variables(&c.clone().into()))
-            .concat(),
-        TypeMatchableRef::Variable(_) | TypeMatchableRef::Empty => {
-            Default::default()
-        }
-        TypeMatchableRef::RecursiveAlias { alias, body } => {
-            let mut vs: FxHashSet<_> =
-                contravariant_type_variables(body)
-                    .into_iter()
-                    .collect();
-            vs.remove(&alias);
-            vs.into_iter().collect()
-        }
-    }
-}
-
-impl<'a> IncompleteType<'a> {
+impl<'a, T> IncompleteType<'a, T>
+where
+    T: TypeConstructor<'a>,
+{
     pub fn replace_num_option(
         self,
         from: usize,
@@ -535,10 +463,6 @@ impl<'a> IncompleteType<'a> {
             },
         })
     }
-
-    pub fn resolved(&self) -> bool {
-        self.requirements.variable_requirements.is_empty()
-    }
 }
 
 fn mk_graph<'a, 'b>(
@@ -570,7 +494,19 @@ fn replace_type_test1() {
     );
 }
 
-impl Display for IncompleteType<'_> {
+impl<'a, T: TypeConstructor<'a>> IncompleteType<'a, T> {
+    fn type_variables_in_constructors_or_variable_requirements(
+        &self,
+    ) -> FxHashSet<usize> {
+        let mut s = self.constructor.all_type_variables();
+        for (_, t, _) in &self.requirements.variable_requirements {
+            s.extend(t.all_type_variables())
+        }
+        s
+    }
+}
+
+impl<'a, T: TypeConstructor<'a>> Display for IncompleteType<'a, T> {
     fn fmt(
         &self,
         f: &mut std::fmt::Formatter<'_>,
@@ -591,8 +527,8 @@ impl Display for Requirements<'_> {
         for (a, b) in &self.subtype_relation {
             writeln!(f, "    {} < {},", a, b)?;
         }
-        for (a, b, _) in &self.variable_requirements {
-            writeln!(f, "    ?{} : {},", a, b)?;
+        for (a, b, id) in &self.variable_requirements {
+            writeln!(f, "  {:<3}  ?{} : {},", id, a, b)?;
         }
         Ok(())
     }
@@ -611,7 +547,6 @@ mod tests {
         },
         parse,
     };
-    use stripmargin::StripMargin;
 
     #[test]
     fn simplify1() {
@@ -656,11 +591,8 @@ mod tests {
         };
         let st = simplify_type(t).unwrap();
         assert_eq!(
-            format!("{}", st.requirements),
-            r"|    /\(Num, Num) < t4,
-              |    t4 < {/\(Num, Num) | /\(Num, t0) | /\(t1, Num) | /\(t2, t3)},
-              |"
-            .strip_margin()
+            format!("{}", st),
+            "Num -> {Num | String} forall\n--"
         );
     }
 }

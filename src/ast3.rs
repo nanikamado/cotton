@@ -86,7 +86,15 @@ fn expr<'a>(
         ast2::Expr::StrLiteral(a) => StrLiteral(a),
         ast2::Expr::Ident { name, ident_id } => Ident {
             name,
-            variable_id: *resolved_idents.get(&ident_id).unwrap(),
+            variable_id: *resolved_idents
+                .get(&ident_id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{:?} not found in resolved_idents. \
+                        name: {:?}",
+                        ident_id, name
+                    )
+                }),
         },
         ast2::Expr::Decl(a) => {
             Decl(Box::new(variable_decl(*a, resolved_idents)))

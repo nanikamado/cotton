@@ -3,7 +3,7 @@ use crate::{
     ast2::{
         self,
         types::{Type, TypeMatchableRef, TypeUnit},
-        IncompleteType, Requirements,
+        IncompleteType, Requirements, TypeConstructor,
     },
     intrinsics::OP_PRECEDENCE,
 };
@@ -155,38 +155,6 @@ impl<'a> TypeUnit<'a> {
 }
 
 impl<'a> Type<'a> {
-    pub fn all_type_variables(&self) -> HashSet<usize> {
-        self.iter().flat_map(|t| t.all_type_variables()).collect()
-    }
-
-    pub fn replace_num(self, from: usize, to: &Self) -> Self {
-        self.into_iter()
-            .flat_map(|t| t.replace_num(from, to).into_iter())
-            .collect()
-    }
-
-    pub fn replace_type(
-        self,
-        from: &TypeUnit<'a>,
-        to: &TypeUnit<'a>,
-    ) -> Self {
-        self.into_iter().map(|t| t.replace_type(from, to)).collect()
-    }
-
-    pub fn replace_type_union(
-        self,
-        from: &Type,
-        to: &TypeUnit<'a>,
-    ) -> Self {
-        if self == *from {
-            to.clone().into()
-        } else {
-            self.into_iter()
-                .map(|t| t.replace_type_union(from, to))
-                .collect()
-        }
-    }
-
     pub fn is_singleton(&self) -> bool {
         match self.matchable_ref() {
             Normal { args, .. } => {
@@ -203,7 +171,7 @@ impl<'a> Type<'a> {
 }
 
 impl<'a> IncompleteType<'a> {
-    fn all_type_variables(&self) -> HashSet<usize> {
+    pub fn all_type_variables(&self) -> HashSet<usize> {
         let IncompleteType {
             constructor,
             requirements:

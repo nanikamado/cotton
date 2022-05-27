@@ -16,6 +16,7 @@ use crate::{
 };
 use fxhash::FxHashMap;
 use std::collections::BTreeSet;
+pub use types::TypeConstructor;
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
@@ -48,8 +49,11 @@ pub struct DataDecl<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct IncompleteType<'a> {
-    pub constructor: Type<'a>,
+pub struct IncompleteType<'a, T = Type<'a>>
+where
+    T: TypeConstructor<'a>,
+{
+    pub constructor: T,
     pub requirements: Requirements<'a>,
 }
 

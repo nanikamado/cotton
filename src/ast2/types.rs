@@ -1,5 +1,6 @@
 pub use self::type_type::Type;
 use crate::ast2::TypeId;
+use fxhash::FxHashSet;
 use itertools::Itertools;
 use std::{collections::BTreeSet, fmt::Display};
 
@@ -74,9 +75,9 @@ mod type_type {
     }
 
     impl<'a> Type<'a> {
-        pub fn iter(
-            &self,
-        ) -> std::collections::btree_set::Iter<'_, TypeUnit<'a>>
+        pub fn iter<'b>(
+            &'b self,
+        ) -> std::collections::btree_set::Iter<'b, TypeUnit<'a>>
         {
             self.0.iter()
         }
@@ -166,6 +167,152 @@ impl<'a> From<TypeMatchable<'a>> for Type<'a> {
             TypeMatchable::Empty => Default::default(),
             TypeMatchable::RecursiveAlias { alias, body } => {
                 TypeUnit::RecursiveAlias { alias, body }.into()
+            }
+        }
+    }
+}
+
+impl<'a> TypeConstructor<'a> for Type<'a> {
+    fn all_type_variables(&self) -> fxhash::FxHashSet<usize> {
+        self.iter().flat_map(|t| t.all_type_variables()).collect()
+    }
+
+    fn replace_num(self, from: usize, to: &Self) -> Self {
+        self.into_iter()
+            .flat_map(|t| t.replace_num(from, to).into_iter())
+            .collect()
+    }
+
+    fn covariant_type_variables(&self) -> Vec<usize> {
+        match self.matchable_ref() {
+            TypeMatchableRef::Fn(a, r) => marge_vec(
+                r.covariant_type_variables(),
+                a.contravariant_type_variables(),
+            ),
+            TypeMatchableRef::Normal { args, .. } => args
+                .iter()
+                .flat_map(TypeConstructor::covariant_type_variables)
+                .collect(),
+            TypeMatchableRef::Union(cs) => cs
+                .iter()
+                .map(|c| {
+                    Type::from(c.clone()).covariant_type_variables()
+                })
+                .concat(),
+            TypeMatchableRef::Variable(n) => {
+                [n].iter().copied().collect()
+            }
+            TypeMatchableRef::Empty => Default::default(),
+            TypeMatchableRef::RecursiveAlias { alias, body } => {
+                let mut vs: FxHashSet<_> = body
+                    .covariant_type_variables()
+                    .into_iter()
+                    .collect();
+                vs.remove(&alias);
+                vs.into_iter().collect()
+            }
+        }
+    }
+
+    fn contravariant_type_variables(&self) -> Vec<usize> {
+        match self.matchable_ref() {
+            TypeMatchableRef::Fn(a, r) => marge_vec(
+                a.covariant_type_variables(),
+                r.contravariant_type_variables(),
+            ),
+            TypeMatchableRef::Normal { args, .. } => args
+                .iter()
+                .map(TypeConstructor::contravariant_type_variables)
+                .concat(),
+            TypeMatchableRef::Union(cs) => cs
+                .iter()
+                .map(|c| {
+                    Type::from(c.clone())
+                        .contravariant_type_variables()
+                })
+                .concat(),
+            TypeMatchableRef::Variable(_)
+            | TypeMatchableRef::Empty => Default::default(),
+            TypeMatchableRef::RecursiveAlias { alias, body } => {
+                let mut vs: FxHashSet<_> = body
+                    .contravariant_type_variables()
+                    .into_iter()
+                    .collect();
+                vs.remove(&alias);
+                vs.into_iter().collect()
+            }
+        }
+    }
+
+    fn find_recursive_alias(&self) -> Option<(usize, Type<'a>)> {
+        self.iter().find_map(TypeUnit::find_recursive_alias)
+    }
+
+    fn replace_type(
+        self,
+        from: &TypeUnit<'a>,
+        to: &TypeUnit<'a>,
+    ) -> Self {
+        self.into_iter().map(|t| t.replace_type(from, to)).collect()
+    }
+
+    fn replace_type_union(
+        self,
+        from: &Type,
+        to: &TypeUnit<'a>,
+    ) -> Self {
+        if self == *from {
+            to.clone().into()
+        } else {
+            self.into_iter()
+                .map(|t| t.replace_type_union(from, to))
+                .collect()
+        }
+    }
+}
+
+fn marge_vec<T>(mut a: Vec<T>, mut b: Vec<T>) -> Vec<T> {
+    a.append(&mut b);
+    a
+}
+
+pub trait TypeConstructor<'a>:
+    Sized
+    + std::fmt::Debug
+    + std::fmt::Display
+    + Eq
+    + Clone
+    + std::hash::Hash
+{
+    fn all_type_variables(&self) -> FxHashSet<usize>;
+    fn replace_num(self, from: usize, to: &Type<'a>) -> Self;
+    fn covariant_type_variables(&self) -> Vec<usize>;
+    fn contravariant_type_variables(&self) -> Vec<usize>;
+    fn find_recursive_alias(&self) -> Option<(usize, Type<'a>)>;
+    fn replace_type(
+        self,
+        from: &TypeUnit<'a>,
+        to: &TypeUnit<'a>,
+    ) -> Self;
+    fn replace_type_union(
+        self,
+        from: &Type,
+        to: &TypeUnit<'a>,
+    ) -> Self;
+}
+
+impl<'a> TypeUnit<'a> {
+    fn find_recursive_alias(&self) -> Option<(usize, Type<'a>)> {
+        match self {
+            TypeUnit::Normal { args, .. } => {
+                args.iter().find_map(Type::find_recursive_alias)
+            }
+            TypeUnit::Fn(a, r) => {
+                [a, r].iter().find_map(|a| a.find_recursive_alias())
+            }
+            TypeUnit::Variable(_) => None,
+            TypeUnit::RecursiveAlias { alias, body } => {
+                Some((*alias, body.clone()))
             }
         }
     }
