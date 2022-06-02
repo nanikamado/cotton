@@ -1,12 +1,15 @@
 use crate::{
     ast0,
-    ast0::{Associativity, Forall, OperatorPrecedence},
+    ast0::{Associativity, Forall, OperatorPrecedenceDecl},
     intrinsics::OP_PRECEDENCE,
 };
 use fxhash::FxHashMap;
 use index_list::{Index, IndexList};
 use std::{collections::BTreeMap, fmt, fmt::Debug};
 
+/// # Difference between `ast0::Ast` and `ast1::Ast`
+/// - `OpSequence`s and `TypeOpSequence`s are converted to syntex trees
+/// based on `OperatorPrecedenceDecl`s.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
@@ -169,7 +172,7 @@ impl<'a> From<ast0::Ast<'a>> for Ast<'a> {
                     name: a.name,
                     field_len: a.field_len,
                 }),
-                ast0::Decl::Precedence(OperatorPrecedence {
+                ast0::Decl::Precedence(OperatorPrecedenceDecl {
                     name,
                     associativity,
                     precedence,

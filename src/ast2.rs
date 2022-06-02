@@ -34,6 +34,8 @@ pub enum TypeId<'a> {
     Intrinsic(IntrinsicType),
 }
 
+/// # Difference between `ast1::Ast` and `ast2::Ast`
+/// - The names of types and constructors are resolved.
 #[derive(Debug, PartialEq)]
 pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,

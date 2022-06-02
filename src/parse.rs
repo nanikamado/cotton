@@ -1,7 +1,8 @@
 use crate::ast0::{
     Associativity, Ast, DataDecl, Decl, Expr, FnArm, Forall,
-    InfixConstructorSequence, InfixTypeSequence, OpSequence,
-    OpSequenceUnit, OperatorPrecedence, Pattern, Type, VariableDecl,
+    InfixConstructorSequence, OpSequence, OpSequenceUnit,
+    OperatorPrecedenceDecl, Pattern, Type, TypeOpSequence,
+    VariableDecl,
 };
 use nom::{
     branch::alt,
@@ -138,7 +139,7 @@ fn type_expr(input: &str) -> IResult<&str, Type> {
 
 pub fn infix_type_sequence(
     input: &str,
-) -> IResult<&str, InfixTypeSequence> {
+) -> IResult<&str, TypeOpSequence> {
     let (input, (_, e, eo, _)) = tuple((
         separator0,
         type_expr,
@@ -387,7 +388,7 @@ fn type_op(input: &str) -> IResult<&str, OpSequenceUnit<Type>> {
 
 fn operator_precedence_decl(
     input: &str,
-) -> IResult<&str, OperatorPrecedence> {
+) -> IResult<&str, OperatorPrecedenceDecl> {
     alt((
         tuple((
             tag("infixl"),
@@ -397,7 +398,7 @@ fn operator_precedence_decl(
             op,
         ))
         .map(|(_, _, precedence, _, name)| {
-            OperatorPrecedence {
+            OperatorPrecedenceDecl {
                 name,
                 associativity: Associativity::Left,
                 precedence: precedence as i32,
@@ -411,7 +412,7 @@ fn operator_precedence_decl(
             op,
         ))
         .map(|(_, _, precedence, _, name)| {
-            OperatorPrecedence {
+            OperatorPrecedenceDecl {
                 name,
                 associativity: Associativity::Right,
                 precedence: precedence as i32,

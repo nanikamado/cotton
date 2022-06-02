@@ -7,23 +7,23 @@ pub struct Ast<'a> {
 pub enum Decl<'a> {
     Variable(VariableDecl<'a>),
     Data(DataDecl<'a>),
-    Precedence(OperatorPrecedence<'a>),
+    Precedence(OperatorPrecedenceDecl<'a>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VariableDecl<'a> {
     pub name: &'a str,
-    pub type_annotation: Option<(InfixTypeSequence<'a>, Forall<'a>)>,
+    pub type_annotation: Option<(TypeOpSequence<'a>, Forall<'a>)>,
     pub value: OpSequence<'a>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Type<'a> {
     Ident(&'a str),
-    Paren(InfixTypeSequence<'a>),
+    Paren(TypeOpSequence<'a>),
 }
 
-pub type InfixTypeSequence<'a> = Vec<OpSequenceUnit<'a, Type<'a>>>;
+pub type TypeOpSequence<'a> = Vec<OpSequenceUnit<'a, Type<'a>>>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum OpSequenceUnit<'a, T> {
@@ -58,7 +58,7 @@ pub type OpSequence<'a> = Vec<OpSequenceUnit<'a, Expr<'a>>>;
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FnArm<'a> {
     pub pattern: Vec<InfixConstructorSequence<'a>>,
-    pub pattern_type: Vec<Option<InfixTypeSequence<'a>>>,
+    pub pattern_type: Vec<Option<TypeOpSequence<'a>>>,
     pub exprs: Vec<OpSequence<'a>>,
 }
 
@@ -75,7 +75,7 @@ pub enum Pattern<'a> {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct OperatorPrecedence<'a> {
+pub struct OperatorPrecedenceDecl<'a> {
     pub name: &'a str,
     pub associativity: Associativity,
     pub precedence: i32,

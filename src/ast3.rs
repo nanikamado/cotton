@@ -8,6 +8,8 @@ use crate::ast2::{
 };
 use fxhash::FxHashMap;
 
+/// # Difference between `ast2::Ast` and `ast3::Ast`
+/// - The names of variables are resolved.
 #[derive(Debug, PartialEq)]
 pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
