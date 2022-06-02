@@ -200,7 +200,7 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
                 })
                 .concat(),
             TypeMatchableRef::Variable(n) => {
-                [n].iter().copied().collect()
+                vec![n]
             }
             TypeMatchableRef::Empty => Default::default(),
             TypeMatchableRef::RecursiveAlias { alias, body } => {

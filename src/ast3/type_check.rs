@@ -467,8 +467,8 @@ fn resolve_recursion_in_scc<'a>(
             resolved_variable_map
                 .get(req_name)
                 .into_iter()
-                .cloned()
-                .flatten(),
+                .flatten()
+                .cloned(),
             true,
         );
         satisfied.append(&mut find_satisfied_types(
