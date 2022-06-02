@@ -1,6 +1,6 @@
 use crate::ast2::{
     types::{Type, TypeMatchable, TypeMatchableRef, TypeUnit},
-    IncompleteType, Requirements, TypeConstructor,
+    IncompleteType, TypeConstructor,
 };
 use fxhash::FxHashSet;
 use hashbag::HashBag;
@@ -33,8 +33,7 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
 ) -> Option<(IncompleteType<'a, T>, bool)> {
     use TypeUnit::*;
     let hash_before_simplify = fxhash::hash(&t);
-    let subtype_relationship =
-        t.requirements.subtype_relation.clone();
+    let subtype_relationship = t.subtype_relation.clone();
     let g = mk_graph(&subtype_relationship);
     let eq_types = tarjan_scc(&g);
     for eqs in eq_types {
@@ -63,8 +62,7 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
             }
         }
     }
-    t.requirements.subtype_relation = t
-        .requirements
+    t.subtype_relation = t
         .subtype_relation
         .into_iter()
         .map(|(a, b)| simplify_subtype_rel(a, b))
@@ -75,26 +73,23 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
     t.constructor = lift_recursive_alias(t.constructor);
     for cov in mk_covariant_candidates(&t) {
         if !mk_contravariant_candidates(&t).contains(&cov) {
-            if let Some(s) = possible_strongest(
-                cov,
-                &t.requirements.subtype_relation,
-            ) {
+            if let Some(s) =
+                possible_strongest(cov, &t.subtype_relation)
+            {
                 t = t.replace_num_option(cov, &s)?;
             }
         }
     }
     for cont in mk_contravariant_candidates(&t) {
         if !mk_covariant_candidates(&t).contains(&cont) {
-            if let Some(s) = possible_weakest(
-                cont,
-                &t.requirements.subtype_relation,
-            ) {
+            if let Some(s) =
+                possible_weakest(cont, &t.subtype_relation)
+            {
                 t = t.replace_num_option(cont, &s)?;
             }
         }
     }
     let type_variables_in_sub_rel: FxHashSet<usize> = t
-        .requirements
         .subtype_relation
         .iter()
         .flat_map(|(a, b)| {
@@ -107,10 +102,8 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
         let vs = t
             .type_variables_in_constructors_or_variable_requirements(
             );
-        let st =
-            possible_strongest(*a, &t.requirements.subtype_relation);
-        let we =
-            possible_weakest(*a, &t.requirements.subtype_relation);
+        let st = possible_strongest(*a, &t.subtype_relation);
+        let we = possible_weakest(*a, &t.subtype_relation);
         match (st, we) {
             (Some(st), Some(we)) if st == we || !vs.contains(a) => {
                 t = t.replace_num_option(*a, &st)?;
@@ -127,7 +120,6 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
     let covariant_candidates = mk_covariant_candidates(&t);
     let contravariant_candidates = mk_contravariant_candidates(&t);
     let type_variables_in_sub_rel: HashBag<usize> = t
-        .requirements
         .subtype_relation
         .iter()
         .flat_map(|(a, b)| {
@@ -136,8 +128,7 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
             a
         })
         .collect();
-    t.requirements.subtype_relation = t
-        .requirements
+    t.subtype_relation = t
         .subtype_relation
         .into_iter()
         .filter(|(_, a)| {
@@ -407,7 +398,7 @@ fn mk_contravariant_candidates<'a, T: TypeConstructor<'a>>(
 ) -> FxHashSet<usize> {
     let mut rst: Vec<usize> =
         t.constructor.contravariant_type_variables();
-    for (_, v, _) in &t.requirements.variable_requirements {
+    for (_, v, _) in &t.variable_requirements {
         rst.append(&mut v.covariant_type_variables());
     }
     rst.into_iter().collect()
@@ -418,7 +409,7 @@ fn mk_covariant_candidates<'a, T: TypeConstructor<'a>>(
 ) -> FxHashSet<usize> {
     let mut rst: Vec<usize> =
         t.constructor.covariant_type_variables();
-    for (_, v, _) in &t.requirements.variable_requirements {
+    for (_, v, _) in &t.variable_requirements {
         rst.append(&mut v.contravariant_type_variables());
     }
     rst.into_iter().collect()
@@ -435,33 +426,28 @@ where
     ) -> Option<Self> {
         let IncompleteType {
             constructor,
-            requirements:
-                Requirements {
-                    variable_requirements,
-                    subtype_relation: subtype_relationship,
-                },
+            variable_requirements,
+            subtype_relation: subtype_relationship,
         } = self;
         Some(IncompleteType {
             constructor: constructor.replace_num(from, to),
-            requirements: Requirements {
-                variable_requirements: variable_requirements
-                    .into_iter()
-                    .map(|(name, t, id)| {
-                        (name, t.replace_num(from, to), id)
-                    })
-                    .collect(),
-                subtype_relation: subtype_relationship
-                    .into_iter()
-                    .map(|(a, b)| {
-                        let a = a.replace_num(from, to);
-                        let b = b.replace_num(from, to);
-                        simplify_subtype_rel(a, b)
-                    })
-                    .collect::<Option<Vec<_>>>()?
-                    .into_iter()
-                    .flatten()
-                    .collect(),
-            },
+            variable_requirements: variable_requirements
+                .into_iter()
+                .map(|(name, t, id)| {
+                    (name, t.replace_num(from, to), id)
+                })
+                .collect(),
+            subtype_relation: subtype_relationship
+                .into_iter()
+                .map(|(a, b)| {
+                    let a = a.replace_num(from, to);
+                    let b = b.replace_num(from, to);
+                    simplify_subtype_rel(a, b)
+                })
+                .collect::<Option<Vec<_>>>()?
+                .into_iter()
+                .flatten()
+                .collect(),
         })
     }
 }
@@ -500,7 +486,7 @@ impl<'a, T: TypeConstructor<'a>> IncompleteType<'a, T> {
         &self,
     ) -> FxHashSet<usize> {
         let mut s = self.constructor.all_type_variables();
-        for (_, t, _) in &self.requirements.variable_requirements {
+        for (_, t, _) in &self.variable_requirements {
             s.extend(t.all_type_variables())
         }
         s
@@ -512,25 +498,14 @@ impl<'a, T: TypeConstructor<'a>> Display for IncompleteType<'a, T> {
         &self,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
-        write!(
-            f,
-            "{} forall\n{}--",
-            self.constructor, self.requirements
-        )
-    }
-}
-
-impl Display for Requirements<'_> {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+        writeln!(f, "{} forall", self.constructor)?;
         for (a, b) in &self.subtype_relation {
             writeln!(f, "    {} < {},", a, b)?;
         }
         for (a, b, id) in &self.variable_requirements {
             writeln!(f, "  {:<3}  ?{} : {},", id, a, b)?;
         }
+        write!(f, "--")?;
         Ok(())
     }
 }
@@ -539,7 +514,7 @@ impl Display for Requirements<'_> {
 mod tests {
     use crate::{
         ast0, ast1, ast2,
-        ast2::{IncompleteType, Requirements},
+        ast2::IncompleteType,
         ast3::{
             type_check::simplify::simplify_type,
             type_util::{
@@ -583,12 +558,10 @@ mod tests {
         );
         let t = IncompleteType {
             constructor: construct_type("Num -> Num | String"),
-            requirements: Requirements {
-                variable_requirements: Vec::new(),
-                subtype_relation: vec![(dot, req_t)]
-                    .into_iter()
-                    .collect(),
-            },
+            variable_requirements: Vec::new(),
+            subtype_relation: vec![(dot, req_t)]
+                .into_iter()
+                .collect(),
         };
         let st = simplify_type(t).unwrap();
         assert_eq!(

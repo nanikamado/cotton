@@ -3,7 +3,7 @@ use crate::{
     ast2::{
         self,
         types::{Type, TypeMatchableRef, TypeUnit},
-        IncompleteType, Requirements, TypeConstructor,
+        IncompleteType, TypeConstructor,
     },
     intrinsics::OP_PRECEDENCE,
 };
@@ -174,11 +174,8 @@ impl<'a> IncompleteType<'a> {
     pub fn all_type_variables(&self) -> HashSet<usize> {
         let IncompleteType {
             constructor,
-            requirements:
-                Requirements {
-                    variable_requirements,
-                    subtype_relation,
-                },
+            variable_requirements,
+            subtype_relation,
         } = self;
         variable_requirements
             .iter()
@@ -204,48 +201,23 @@ impl<'a> IncompleteType<'a> {
     pub fn replace_num(self, from: usize, to: &Type<'a>) -> Self {
         let IncompleteType {
             constructor,
-            requirements:
-                Requirements {
-                    variable_requirements,
-                    subtype_relation: subtype_relationship,
-                },
+            variable_requirements,
+            subtype_relation: subtype_relationship,
         } = self;
         IncompleteType {
             constructor: constructor.replace_num(from, to),
-            requirements: Requirements {
-                variable_requirements: variable_requirements
-                    .into_iter()
-                    .map(|(name, t, id)| {
-                        (name, t.replace_num(from, to), id)
-                    })
-                    .collect(),
-                subtype_relation: subtype_relationship
-                    .into_iter()
-                    .map(|(a, b)| {
-                        (
-                            a.replace_num(from, to),
-                            b.replace_num(from, to),
-                        )
-                    })
-                    .collect(),
-            },
-        }
-    }
-}
-
-impl<'a> Requirements<'a> {
-    pub fn merge(self, other: Self) -> Self {
-        Self {
-            variable_requirements: [
-                self.variable_requirements,
-                other.variable_requirements,
-            ]
-            .concat(),
-            subtype_relation: {
-                let mut s = self.subtype_relation;
-                s.extend(other.subtype_relation);
-                s
-            },
+            variable_requirements: variable_requirements
+                .into_iter()
+                .map(|(name, t, id)| {
+                    (name, t.replace_num(from, to), id)
+                })
+                .collect(),
+            subtype_relation: subtype_relationship
+                .into_iter()
+                .map(|(a, b)| {
+                    (a.replace_num(from, to), b.replace_num(from, to))
+                })
+                .collect(),
         }
     }
 }

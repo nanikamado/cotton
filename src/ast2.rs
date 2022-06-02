@@ -56,13 +56,6 @@ where
     T: TypeConstructor<'a>,
 {
     pub constructor: T,
-    pub requirements: Requirements<'a>,
-}
-
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Default, Hash,
-)]
-pub struct Requirements<'a> {
     pub variable_requirements: Vec<(&'a str, Type<'a>, IdentId)>,
     pub subtype_relation: BTreeSet<(Type<'a>, Type<'a>)>,
 }
@@ -171,7 +164,8 @@ impl<'a> From<Type<'a>> for IncompleteType<'a> {
     fn from(t: Type<'a>) -> Self {
         Self {
             constructor: t,
-            requirements: Requirements::default(),
+            variable_requirements: Default::default(),
+            subtype_relation: Default::default(),
         }
     }
 }
