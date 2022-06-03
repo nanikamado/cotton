@@ -20,7 +20,7 @@ pub struct Ast<'a> {
 #[derive(Debug, PartialEq, Clone)]
 pub struct VariableDecl<'a> {
     pub name: &'a str,
-    pub type_annotation: IncompleteType<'a>,
+    pub type_: IncompleteType<'a>,
     pub value: Expr<'a>,
     pub decl_id: DeclId,
 }
@@ -74,10 +74,7 @@ fn variable_decl<'a>(
 ) -> VariableDecl<'a> {
     VariableDecl {
         name: d.name,
-        type_annotation: types_of_decls
-            .get(&d.decl_id)
-            .unwrap()
-            .clone(),
+        type_: types_of_decls.get(&d.decl_id).unwrap().clone(),
         value: expr(d.value, resolved_idents, types_of_decls),
         decl_id: d.decl_id,
     }
