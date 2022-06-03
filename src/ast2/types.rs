@@ -9,7 +9,7 @@ pub enum TypeMatchable<'a> {
     Normal {
         name: &'a str,
         args: Vec<Type<'a>>,
-        id: TypeId<'a>,
+        id: TypeId,
     },
     Fn(Type<'a>, Type<'a>),
     Union(Type<'a>),
@@ -26,7 +26,7 @@ pub enum TypeMatchableRef<'a> {
     Normal {
         name: &'a str,
         args: &'a Vec<Type<'a>>,
-        id: TypeId<'a>,
+        id: TypeId,
     },
     Fn(&'a Type<'a>, &'a Type<'a>),
     Union(&'a BTreeSet<TypeUnit<'a>>),
@@ -43,7 +43,7 @@ pub enum TypeUnit<'a> {
     Normal {
         name: &'a str,
         args: Vec<Type<'a>>,
-        id: TypeId<'a>,
+        id: TypeId,
     },
     Fn(Type<'a>, Type<'a>),
     Variable(usize),

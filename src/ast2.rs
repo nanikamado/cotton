@@ -11,7 +11,7 @@ use crate::{
     ast1,
     intrinsics::{
         IntrinsicConstructor, IntrinsicType, INTRINSIC_CONSTRUCTORS,
-        INTRINSIC_TYPES, INTRINSIC_TYPES_NAMES,
+        INTRINSIC_TYPES,
     },
 };
 use fxhash::FxHashMap;
@@ -29,8 +29,8 @@ pub enum ConstructorId<'a> {
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
-pub enum TypeId<'a> {
-    DeclId(DeclId, &'a str),
+pub enum TypeId {
+    DeclId(DeclId),
     Intrinsic(IntrinsicType),
 }
 
@@ -139,22 +139,10 @@ impl<'a> ConstructorId<'a> {
     }
 }
 
-impl TypeId<'_> {
-    #[allow(unused)]
-    pub fn name(&self) -> &str {
-        match self {
-            TypeId::DeclId(_, name) => name,
-            TypeId::Intrinsic(c) => INTRINSIC_TYPES_NAMES[c],
-        }
-    }
-}
-
-impl<'a> From<ConstructorId<'a>> for TypeId<'a> {
+impl<'a> From<ConstructorId<'a>> for TypeId {
     fn from(c: ConstructorId<'a>) -> Self {
         match c {
-            ConstructorId::DeclId(ident, name) => {
-                Self::DeclId(ident, name)
-            }
+            ConstructorId::DeclId(ident, _) => Self::DeclId(ident),
             ConstructorId::Intrinsic(i) => Self::Intrinsic(i.into()),
         }
     }
@@ -257,13 +245,13 @@ fn fn_arm<'a>(
     }
 }
 
-impl TypeId<'_> {
+impl TypeId {
     fn get<'a>(
         name: &'a str,
         data_decl_map: &FxHashMap<&str, DeclId>,
-    ) -> TypeId<'a> {
+    ) -> TypeId {
         if let Some(id) = data_decl_map.get(name) {
-            TypeId::DeclId(*id, name)
+            TypeId::DeclId(*id)
         } else if let Some(i) = INTRINSIC_TYPES.get(name) {
             TypeId::Intrinsic(*i)
         } else {

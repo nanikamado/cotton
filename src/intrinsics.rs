@@ -109,25 +109,6 @@ pub static INTRINSIC_TYPES: Lazy<
     .collect()
 });
 
-pub static INTRINSIC_TYPES_NAMES: Lazy<
-    HashMap<IntrinsicType, &'static str>,
-> = Lazy::new(|| {
-    [
-        (IntrinsicType::String, "String"),
-        (IntrinsicType::Num, "Num"),
-        (IntrinsicType::Unit, "()"),
-        (IntrinsicType::True, "True"),
-        (IntrinsicType::False, "False"),
-        (IntrinsicType::Call, "type_call"),
-        (IntrinsicType::Arrow, "->"),
-        (IntrinsicType::Bar, "|"),
-    ]
-    .map(|(t, n)| (t, n))
-    .iter()
-    .cloned()
-    .collect()
-});
-
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
 )]
