@@ -6,7 +6,7 @@ use crate::{
         decl_id::DeclId,
         ident_id::IdentId,
         types,
-        types::{Type, TypeUnit},
+        types::{Type, TypeUnit, TypeVariable},
         Ast, DataDecl, Expr, FnArm, IncompleteType, Pattern, TypeId,
     },
     intrinsics::IntrinsicVariable,
@@ -234,14 +234,14 @@ impl Display for SccTypeConstructor<'_> {
 }
 
 impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
-    fn all_type_variables(&self) -> FxHashSet<usize> {
+    fn all_type_variables(&self) -> FxHashSet<TypeVariable> {
         self.0
             .iter()
             .flat_map(TypeConstructor::all_type_variables)
             .collect()
     }
 
-    fn replace_num(self, from: usize, to: &Type<'a>) -> Self {
+    fn replace_num(self, from: TypeVariable, to: &Type<'a>) -> Self {
         SccTypeConstructor(
             self.0
                 .into_iter()
@@ -250,21 +250,23 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
         )
     }
 
-    fn covariant_type_variables(&self) -> Vec<usize> {
+    fn covariant_type_variables(&self) -> Vec<TypeVariable> {
         self.0
             .iter()
             .flat_map(TypeConstructor::covariant_type_variables)
             .collect()
     }
 
-    fn contravariant_type_variables(&self) -> Vec<usize> {
+    fn contravariant_type_variables(&self) -> Vec<TypeVariable> {
         self.0
             .iter()
             .flat_map(TypeConstructor::contravariant_type_variables)
             .collect()
     }
 
-    fn find_recursive_alias(&self) -> Option<(usize, Type<'a>)> {
+    fn find_recursive_alias(
+        &self,
+    ) -> Option<(TypeVariable, Type<'a>)> {
         self.0
             .iter()
             .find_map(TypeConstructor::find_recursive_alias)

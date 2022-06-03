@@ -2,7 +2,7 @@ use crate::{
     ast1::{self, OpPrecedenceMap},
     ast2::{
         self,
-        types::{Type, TypeMatchableRef, TypeUnit},
+        types::{Type, TypeMatchableRef, TypeUnit, TypeVariable},
         IncompleteType, TypeConstructor,
     },
     intrinsics::OP_PRECEDENCE,
@@ -13,7 +13,7 @@ use std::collections::HashSet;
 use TypeMatchableRef::{Fn, Normal};
 
 impl<'a> TypeUnit<'a> {
-    pub fn all_type_variables(&self) -> Vec<usize> {
+    pub fn all_type_variables(&self) -> Vec<TypeVariable> {
         match self {
             TypeUnit::Normal { args, .. } => args
                 .iter()
@@ -33,7 +33,11 @@ impl<'a> TypeUnit<'a> {
         }
     }
 
-    pub fn replace_num(self, from: usize, to: &Type<'a>) -> Type<'a> {
+    pub fn replace_num(
+        self,
+        from: TypeVariable,
+        to: &Type<'a>,
+    ) -> Type<'a> {
         match self {
             Self::Fn(args, rtn) => Self::Fn(
                 args.replace_num(from, to),
@@ -125,7 +129,7 @@ impl<'a> TypeUnit<'a> {
         }
     }
 
-    pub fn contains_num(&self, variable_num: usize) -> bool {
+    pub fn contains_num(&self, variable_num: TypeVariable) -> bool {
         match self {
             Self::Normal { args, .. } => {
                 args.iter().any(|c| c.contains_num(variable_num))
@@ -165,13 +169,13 @@ impl<'a> Type<'a> {
         }
     }
 
-    pub fn contains_num(&self, variable_num: usize) -> bool {
+    pub fn contains_num(&self, variable_num: TypeVariable) -> bool {
         self.iter().any(|t| t.contains_num(variable_num))
     }
 }
 
 impl<'a> IncompleteType<'a> {
-    pub fn all_type_variables(&self) -> HashSet<usize> {
+    pub fn all_type_variables(&self) -> HashSet<TypeVariable> {
         let IncompleteType {
             constructor,
             variable_requirements,
@@ -198,7 +202,11 @@ impl<'a> IncompleteType<'a> {
         self
     }
 
-    pub fn replace_num(self, from: usize, to: &Type<'a>) -> Self {
+    pub fn replace_num(
+        self,
+        from: TypeVariable,
+        to: &Type<'a>,
+    ) -> Self {
         let IncompleteType {
             constructor,
             variable_requirements,
@@ -242,7 +250,7 @@ pub fn construct_type_with_variables<'a>(
         data_decl_map,
         &type_variable_names
             .iter()
-            .map(|&name| (name, TypeUnit::new_variable_num()))
+            .map(|&name| (name, TypeVariable::new()))
             .collect(),
     )
 }

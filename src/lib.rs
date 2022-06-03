@@ -5,7 +5,6 @@ mod ast3;
 mod codegen;
 mod intrinsics;
 mod parse;
-mod type_variable;
 
 use codegen::codegen;
 use parse::parse;

@@ -1,4 +1,6 @@
 pub use self::type_type::Type;
+pub use self::type_unit::TypeUnit;
+pub use self::type_unit::TypeVariable;
 use crate::ast2::TypeId;
 use fxhash::FxHashSet;
 use itertools::Itertools;
@@ -13,10 +15,10 @@ pub enum TypeMatchable<'a> {
     },
     Fn(Type<'a>, Type<'a>),
     Union(Type<'a>),
-    Variable(usize),
+    Variable(TypeVariable),
     Empty,
     RecursiveAlias {
-        alias: usize,
+        alias: TypeVariable,
         body: Type<'a>,
     },
 }
@@ -30,27 +32,66 @@ pub enum TypeMatchableRef<'a> {
     },
     Fn(&'a Type<'a>, &'a Type<'a>),
     Union(&'a BTreeSet<TypeUnit<'a>>),
-    Variable(usize),
+    Variable(TypeVariable),
     Empty,
     RecursiveAlias {
-        alias: usize,
+        alias: TypeVariable,
         body: &'a Type<'a>,
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum TypeUnit<'a> {
-    Normal {
-        name: &'a str,
-        args: Vec<Type<'a>>,
-        id: TypeId,
-    },
-    Fn(Type<'a>, Type<'a>),
-    Variable(usize),
-    RecursiveAlias {
-        alias: usize,
-        body: Type<'a>,
-    },
+mod type_unit {
+    #[derive(
+        Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
+    )]
+    pub struct TypeVariable(usize);
+
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub enum TypeUnit<'a> {
+        Normal {
+            name: &'a str,
+            args: Vec<Type<'a>>,
+            id: TypeId,
+        },
+        Fn(Type<'a>, Type<'a>),
+        Variable(TypeVariable),
+        RecursiveAlias {
+            alias: TypeVariable,
+            body: Type<'a>,
+        },
+    }
+
+    use std::cell::Cell;
+
+    use crate::ast2::TypeId;
+
+    use super::Type;
+
+    impl TypeVariable {
+        pub fn new() -> Self {
+            VARIABLE_COUNT.with(|c| {
+                let t = c.get();
+                c.set(t + 1);
+                TypeVariable(t)
+            })
+        }
+    }
+
+    impl TypeUnit<'_> {
+        pub fn new_variable() -> Self {
+            Self::Variable(TypeVariable::new())
+        }
+    }
+
+    thread_local! {
+        static VARIABLE_COUNT: Cell<usize> = Cell::new(0);
+    }
+
+    impl From<&TypeVariable> for usize {
+        fn from(TypeVariable(n): &TypeVariable) -> Self {
+            *n
+        }
+    }
 }
 
 mod type_type {
@@ -173,17 +214,17 @@ impl<'a> From<TypeMatchable<'a>> for Type<'a> {
 }
 
 impl<'a> TypeConstructor<'a> for Type<'a> {
-    fn all_type_variables(&self) -> fxhash::FxHashSet<usize> {
+    fn all_type_variables(&self) -> fxhash::FxHashSet<TypeVariable> {
         self.iter().flat_map(|t| t.all_type_variables()).collect()
     }
 
-    fn replace_num(self, from: usize, to: &Self) -> Self {
+    fn replace_num(self, from: TypeVariable, to: &Self) -> Self {
         self.into_iter()
             .flat_map(|t| t.replace_num(from, to).into_iter())
             .collect()
     }
 
-    fn covariant_type_variables(&self) -> Vec<usize> {
+    fn covariant_type_variables(&self) -> Vec<TypeVariable> {
         match self.matchable_ref() {
             TypeMatchableRef::Fn(a, r) => marge_vec(
                 r.covariant_type_variables(),
@@ -214,7 +255,7 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
         }
     }
 
-    fn contravariant_type_variables(&self) -> Vec<usize> {
+    fn contravariant_type_variables(&self) -> Vec<TypeVariable> {
         match self.matchable_ref() {
             TypeMatchableRef::Fn(a, r) => marge_vec(
                 a.covariant_type_variables(),
@@ -244,7 +285,9 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
         }
     }
 
-    fn find_recursive_alias(&self) -> Option<(usize, Type<'a>)> {
+    fn find_recursive_alias(
+        &self,
+    ) -> Option<(TypeVariable, Type<'a>)> {
         self.iter().find_map(TypeUnit::find_recursive_alias)
     }
 
@@ -284,11 +327,13 @@ pub trait TypeConstructor<'a>:
     + Clone
     + std::hash::Hash
 {
-    fn all_type_variables(&self) -> FxHashSet<usize>;
-    fn replace_num(self, from: usize, to: &Type<'a>) -> Self;
-    fn covariant_type_variables(&self) -> Vec<usize>;
-    fn contravariant_type_variables(&self) -> Vec<usize>;
-    fn find_recursive_alias(&self) -> Option<(usize, Type<'a>)>;
+    fn all_type_variables(&self) -> FxHashSet<TypeVariable>;
+    fn replace_num(self, from: TypeVariable, to: &Type<'a>) -> Self;
+    fn covariant_type_variables(&self) -> Vec<TypeVariable>;
+    fn contravariant_type_variables(&self) -> Vec<TypeVariable>;
+    fn find_recursive_alias(
+        &self,
+    ) -> Option<(TypeVariable, Type<'a>)>;
     fn replace_type(
         self,
         from: &TypeUnit<'a>,
@@ -302,7 +347,9 @@ pub trait TypeConstructor<'a>:
 }
 
 impl<'a> TypeUnit<'a> {
-    fn find_recursive_alias(&self) -> Option<(usize, Type<'a>)> {
+    fn find_recursive_alias(
+        &self,
+    ) -> Option<(TypeVariable, Type<'a>)> {
         match self {
             TypeUnit::Normal { args, .. } => {
                 args.iter().find_map(Type::find_recursive_alias)
@@ -315,6 +362,15 @@ impl<'a> TypeUnit<'a> {
                 Some((*alias, body.clone()))
             }
         }
+    }
+}
+
+impl Display for TypeVariable {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        write!(f, "t{}", usize::from(self))
     }
 }
 
@@ -359,7 +415,7 @@ impl Display for Type<'_> {
                     })
                     .join(" | ")
             ),
-            Variable(n) => write!(f, "t{}", n),
+            Variable(n) => write!(f, "{}", n),
             Empty => write!(f, "∅"),
             RecursiveAlias { alias, body } => {
                 write!(f, "rec[t{} = {}]", alias, *body)

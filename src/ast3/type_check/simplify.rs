@@ -1,5 +1,7 @@
 use crate::ast2::{
-    types::{Type, TypeMatchable, TypeMatchableRef, TypeUnit},
+    types::{
+        Type, TypeMatchable, TypeMatchableRef, TypeUnit, TypeVariable,
+    },
     IncompleteType, TypeConstructor,
 };
 use fxhash::FxHashSet;
@@ -89,7 +91,7 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
             }
         }
     }
-    let type_variables_in_sub_rel: FxHashSet<usize> = t
+    let type_variables_in_sub_rel: FxHashSet<TypeVariable> = t
         .subtype_relation
         .iter()
         .flat_map(|(a, b)| {
@@ -119,7 +121,7 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
     }
     let covariant_candidates = mk_covariant_candidates(&t);
     let contravariant_candidates = mk_contravariant_candidates(&t);
-    let type_variables_in_sub_rel: HashBag<usize> = t
+    let type_variables_in_sub_rel: HashBag<TypeVariable> = t
         .subtype_relation
         .iter()
         .flat_map(|(a, b)| {
@@ -289,7 +291,7 @@ where
     }
 }
 
-fn unwrap_recursive_alias(alias: usize, body: Type) -> Type {
+fn unwrap_recursive_alias(alias: TypeVariable, body: Type) -> Type {
     body.clone().replace_num(
         alias,
         &(TypeUnit::RecursiveAlias { alias, body }).into(),
@@ -297,7 +299,7 @@ fn unwrap_recursive_alias(alias: usize, body: Type) -> Type {
 }
 
 fn possible_weakest<'a>(
-    t: usize,
+    t: TypeVariable,
     subtype_relation: &BTreeSet<(Type<'a>, Type<'a>)>,
 ) -> Option<Type<'a>> {
     let mut up = FxHashSet::default();
@@ -313,7 +315,7 @@ fn possible_weakest<'a>(
     if up.len() == 1 {
         let up = up.into_iter().next().unwrap().clone();
         Some(if up.contains_num(t) {
-            let v = TypeUnit::new_variable_num();
+            let v = TypeVariable::new();
             TypeUnit::RecursiveAlias {
                 alias: v,
                 body: up
@@ -356,7 +358,7 @@ fn possible_weakest<'a>(
 }
 
 fn possible_strongest<'a>(
-    t: usize,
+    t: TypeVariable,
     subtype_relation: &BTreeSet<(Type<'a>, Type<'a>)>,
 ) -> Option<Type<'a>> {
     let mut down = Vec::new();
@@ -379,7 +381,7 @@ fn possible_strongest<'a>(
         down.iter().copied().cloned().flatten().collect()
     };
     if down.iter().any(|d| d.contains_num(t)) {
-        let v = TypeUnit::new_variable_num();
+        let v = TypeVariable::new();
         Some(
             TypeUnit::RecursiveAlias {
                 alias: v,
@@ -395,8 +397,8 @@ fn possible_strongest<'a>(
 
 fn mk_contravariant_candidates<'a, T: TypeConstructor<'a>>(
     t: &IncompleteType<'a, T>,
-) -> FxHashSet<usize> {
-    let mut rst: Vec<usize> =
+) -> FxHashSet<TypeVariable> {
+    let mut rst: Vec<TypeVariable> =
         t.constructor.contravariant_type_variables();
     for (_, v, _) in &t.variable_requirements {
         rst.append(&mut v.covariant_type_variables());
@@ -406,8 +408,8 @@ fn mk_contravariant_candidates<'a, T: TypeConstructor<'a>>(
 
 fn mk_covariant_candidates<'a, T: TypeConstructor<'a>>(
     t: &IncompleteType<'a, T>,
-) -> FxHashSet<usize> {
-    let mut rst: Vec<usize> =
+) -> FxHashSet<TypeVariable> {
+    let mut rst: Vec<TypeVariable> =
         t.constructor.covariant_type_variables();
     for (_, v, _) in &t.variable_requirements {
         rst.append(&mut v.contravariant_type_variables());
@@ -421,7 +423,7 @@ where
 {
     pub fn replace_num_option(
         self,
-        from: usize,
+        from: TypeVariable,
         to: &Type<'a>,
     ) -> Option<Self> {
         let IncompleteType {
@@ -465,26 +467,31 @@ fn mk_graph<'a, 'b>(
 #[test]
 fn replace_type_test0() {
     use TypeUnit::*;
+    let zero = TypeVariable::new();
+    let one = TypeVariable::new();
     assert_eq!(
-        Variable(0).replace_num(0, &Variable(1).into()),
-        Variable(1).into()
+        Variable(zero).replace_num(zero, &Variable(one).into()),
+        Variable(one).into()
     );
 }
 
 #[test]
 fn replace_type_test1() {
     use TypeUnit::*;
+    let zero = TypeVariable::new();
+    let one = TypeVariable::new();
+    let two = TypeVariable::new();
     assert_eq!(
-        Fn(Variable(0).into(), Variable(2).into())
-            .replace_num(0, &Variable(1).into()),
-        Fn(Variable(1).into(), Variable(2).into()).into()
+        Fn(Variable(zero).into(), Variable(two).into())
+            .replace_num(zero, &Variable(one).into()),
+        Fn(Variable(one).into(), Variable(two).into()).into()
     );
 }
 
 impl<'a, T: TypeConstructor<'a>> IncompleteType<'a, T> {
     fn type_variables_in_constructors_or_variable_requirements(
         &self,
-    ) -> FxHashSet<usize> {
+    ) -> FxHashSet<TypeVariable> {
         let mut s = self.constructor.all_type_variables();
         for (_, t, _) in &self.variable_requirements {
             s.extend(t.all_type_variables())

@@ -2,6 +2,7 @@ pub mod decl_id;
 pub mod ident_id;
 pub mod types;
 
+use self::types::TypeVariable;
 use self::{
     decl_id::{new_decl_id, DeclId},
     ident_id::{new_ident_id, IdentId},
@@ -161,7 +162,7 @@ impl<'a> From<Type<'a>> for IncompleteType<'a> {
 fn variable_decl<'a>(
     v: ast1::VariableDecl<'a>,
     data_decl_map: &FxHashMap<&'a str, DeclId>,
-    type_variable_names: &FxHashMap<&'a str, usize>,
+    type_variable_names: &FxHashMap<&'a str, TypeVariable>,
 ) -> VariableDecl<'a> {
     let mut type_variable_names = type_variable_names.clone();
     VariableDecl {
@@ -171,7 +172,7 @@ fn variable_decl<'a>(
                 forall
                     .type_variable_names
                     .into_iter()
-                    .map(|s| (s, TypeUnit::new_variable_num())),
+                    .map(|s| (s, TypeVariable::new())),
             );
             type_to_type(t, data_decl_map, &type_variable_names)
                 .into()
@@ -184,7 +185,7 @@ fn variable_decl<'a>(
 fn expr<'a>(
     e: ast1::Expr<'a>,
     data_decl_map: &FxHashMap<&'a str, DeclId>,
-    type_variable_names: &FxHashMap<&'a str, usize>,
+    type_variable_names: &FxHashMap<&'a str, TypeVariable>,
 ) -> Expr<'a> {
     use Expr::*;
     match e {
@@ -216,7 +217,7 @@ fn expr<'a>(
 fn fn_arm<'a>(
     arm: ast1::FnArm<'a>,
     data_decl_map: &FxHashMap<&'a str, DeclId>,
-    type_variable_names: &FxHashMap<&'a str, usize>,
+    type_variable_names: &FxHashMap<&'a str, TypeVariable>,
 ) -> FnArm<'a> {
     FnArm {
         pattern: arm
@@ -298,7 +299,7 @@ fn pattern<'a>(
 pub fn type_to_type<'a>(
     t: ast1::Type<'a>,
     data_decl_map: &FxHashMap<&'a str, DeclId>,
-    type_variable_names: &FxHashMap<&'a str, usize>,
+    type_variable_names: &FxHashMap<&'a str, TypeVariable>,
 ) -> Type<'a> {
     match t.name {
         "|" => t
