@@ -72,9 +72,11 @@ fn variable_decl<'a>(
     resolved_idents: &FxHashMap<IdentId, VariableId>,
     types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
 ) -> VariableDecl<'a> {
+    let type_ = types_of_decls.get(&d.decl_id).unwrap().clone();
+    log::debug!("{} : {}", d.name, type_);
     VariableDecl {
         name: d.name,
-        type_: types_of_decls.get(&d.decl_id).unwrap().clone(),
+        type_,
         value: expr(d.value, resolved_idents, types_of_decls),
         decl_id: d.decl_id,
     }
