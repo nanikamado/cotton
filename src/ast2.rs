@@ -36,7 +36,7 @@ pub enum TypeId<'a> {
 
 /// # Difference between `ast1::Ast` and `ast2::Ast`
 /// - The names of types and constructors are resolved.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl<'a>>,
@@ -130,8 +130,8 @@ impl<'a> From<ast1::Ast<'a>> for Ast<'a> {
     }
 }
 
-impl ConstructorId<'_> {
-    pub fn name(&self) -> &str {
+impl<'a> ConstructorId<'a> {
+    pub fn name(&self) -> &'a str {
         match self {
             ConstructorId::DeclId(_, name) => name,
             ConstructorId::Intrinsic(c) => c.to_str(),

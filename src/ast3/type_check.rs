@@ -23,7 +23,7 @@ use types::TypeConstructor;
 
 type Resolved = Vec<(IdentId, VariableId)>;
 
-#[derive(PartialEq, Eq, Clone, Copy, PartialOrd, Ord)]
+#[derive(PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
 pub enum VariableId {
     Decl(DeclId),
     Intrinsic(IntrinsicVariable),
@@ -55,8 +55,13 @@ impl std::fmt::Debug for VariableId {
     }
 }
 
-pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, VariableId> {
-    let mut toplevels: Vec<Toplevel> = Default::default();
+pub fn type_check<'a>(
+    ast: &Ast<'a>,
+) -> (
+    FxHashMap<IdentId, VariableId>,
+    FxHashMap<DeclId, IncompleteType<'a>>,
+) {
+    let mut toplevels: Vec<Toplevel<'a>> = Default::default();
     for v in IntrinsicVariable::iter() {
         toplevels.push(Toplevel {
             incomplete: v.to_type().clone().into(),
@@ -102,7 +107,7 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, VariableId> {
             None
         };
         toplevels.push(Toplevel {
-            incomplete: simplify::simplify_type(t.clone()).unwrap(),
+            incomplete: simplify::simplify_type(t).unwrap(),
             type_annotation,
             resolved_idents: Default::default(),
             decl_id: VariableId::Decl(d.decl_id),
@@ -119,14 +124,14 @@ pub fn type_check(ast: &Ast) -> FxHashMap<IdentId, VariableId> {
             log::debug!("not face: {}", top.incomplete);
         }
     }
-    let resolved_names = resolve_names(toplevels);
+    let (resolved_names, types) = resolve_names(toplevels);
     for (ident_id, variable_id) in
         resolved_names.iter().sorted_unstable()
     {
         log::debug!("{ident_id} => {variable_id}");
     }
     resolved_idents.extend(resolved_names);
-    resolved_idents
+    (resolved_idents, types.into_iter().collect())
 }
 
 #[derive(Debug, Clone)]
@@ -138,9 +143,11 @@ struct Toplevel<'a> {
     name: &'a str,
 }
 
+type TypesOfDecls<'a> = Vec<(DeclId, IncompleteType<'a>)>;
+
 fn resolve_names(
     toplevels: Vec<Toplevel>,
-) -> Vec<(IdentId, VariableId)> {
+) -> (Vec<(IdentId, VariableId)>, TypesOfDecls) {
     let mut toplevel_graph = Graph::<Toplevel, ()>::new();
     for t in toplevels {
         toplevel_graph.add_node(t);
@@ -199,7 +206,17 @@ fn resolve_names(
                 });
         }
     }
-    resolved_idents
+    let types = resolved_variable_map
+        .into_iter()
+        .flat_map(|(_, toplevels)| {
+            toplevels.into_iter().map(|t| (t.decl_id, t.incomplete))
+        })
+        .filter_map(|(i, t)| match i {
+            VariableId::Decl(i) => Some((i, t)),
+            VariableId::Intrinsic(_) => None,
+        })
+        .collect();
+    (resolved_idents, types)
 }
 
 #[derive(Debug, Hash, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -494,13 +511,13 @@ fn constructor_type(d: DataDecl) -> TypeUnit {
 }
 
 fn min_type<'a>(
-    expr: &'a Expr,
+    expr: &Expr<'a>,
 ) -> Result<(IncompleteType<'a>, Resolved), &'a str> {
     Ok(min_type_incomplite(expr))
 }
 
 fn min_type_incomplite<'a>(
-    expr: &'a Expr,
+    expr: &Expr<'a>,
 ) -> (IncompleteType<'a>, Resolved) {
     match expr {
         Expr::Lambda(arms) => {
@@ -513,8 +530,10 @@ fn min_type_incomplite<'a>(
                 multiunzip(arms.iter().map(arm_min_type));
             let resolved_idents =
                 resolved_idents.into_iter().flatten().collect();
-            let (args, rtns): (Vec<types::Type>, Vec<types::Type>) =
-                arm_types.into_iter().unzip();
+            let (args, rtns): (
+                Vec<types::Type<'a>>,
+                Vec<types::Type<'a>>,
+            ) = arm_types.into_iter().unzip();
             let constructor = if args.len() == 1 {
                 TypeUnit::Fn(
                     args.into_iter().next().unwrap(),
@@ -603,7 +622,7 @@ fn min_type_incomplite<'a>(
 }
 
 fn multi_expr_min_type<'a>(
-    exprs: &'a [Expr],
+    exprs: &[Expr<'a>],
 ) -> (IncompleteType<'a>, Resolved) {
     let mut variable_requirements = Vec::new();
     let mut subtype_relation = BTreeSet::new();
@@ -630,13 +649,17 @@ fn multi_expr_min_type<'a>(
     )
 }
 
+type VariableRequirement<'a> = (&'a str, types::Type<'a>, IdentId);
+type SubtypeRelation<'a> =
+    BTreeSet<(types::Type<'a>, types::Type<'a>)>;
+
 /// Returns (argument type, return type), variable requirements, subtype relation, resolved idents.
 fn arm_min_type<'a>(
-    arm: &'a FnArm,
+    arm: &FnArm<'a>,
 ) -> (
     (types::Type<'a>, types::Type<'a>),
-    Vec<(&'a str, types::Type<'a>, IdentId)>,
-    BTreeSet<(types::Type<'a>, types::Type<'a>)>,
+    Vec<VariableRequirement<'a>>,
+    SubtypeRelation<'a>,
     Resolved,
 ) {
     let (body_type, mut resolved_idents) =
@@ -644,8 +667,10 @@ fn arm_min_type<'a>(
     let (types, bindings): (Vec<_>, Vec<_>) =
         arm.pattern.iter().map(pattern_to_type).unzip();
     let mut arm_type = body_type.constructor;
-    for pattern_type in types[1..].iter().rev() {
-        arm_type = TypeUnit::Fn(pattern_type.clone(), arm_type).into()
+    let mut types = types.into_iter();
+    let first_type = types.next().unwrap();
+    for pattern_type in types.rev() {
+        arm_type = TypeUnit::Fn(pattern_type, arm_type).into()
     }
     let bindings: FxHashMap<&str, (DeclId, types::Type)> = bindings
         .into_iter()
@@ -664,7 +689,7 @@ fn arm_min_type<'a>(
         }
     }
     (
-        (types[0].clone(), arm_type),
+        (first_type, arm_type),
         variable_requirements,
         {
             let mut tmp = body_type.subtype_relation;
@@ -678,7 +703,7 @@ fn arm_min_type<'a>(
 }
 
 fn pattern_to_type<'a>(
-    p: &'a Pattern,
+    p: &Pattern<'a>,
 ) -> (types::Type<'a>, Vec<(&'a str, DeclId, types::Type<'a>)>) {
     match p {
         Pattern::Number(_) => (construct_type("Num"), Vec::new()),

@@ -20,7 +20,7 @@ pub struct Ast<'a> {
 #[derive(Debug, PartialEq, Clone)]
 pub struct VariableDecl<'a> {
     pub name: &'a str,
-    pub type_annotation: Option<IncompleteType<'a>>,
+    pub type_annotation: IncompleteType<'a>,
     pub value: Expr<'a>,
     pub decl_id: DeclId,
 }
@@ -47,13 +47,19 @@ pub struct FnArm<'a> {
 
 impl<'a> From<ast2::Ast<'a>> for Ast<'a> {
     fn from(ast: ast2::Ast<'a>) -> Self {
-        let resolved_idents = type_check(&ast);
+        let (resolved_idents, types_of_decls) = type_check(&ast);
         log::trace!("{:?}", resolved_idents);
         Self {
             variable_decl: ast
                 .variable_decl
                 .into_iter()
-                .map(move |d| variable_decl(d, &resolved_idents))
+                .map(move |d| {
+                    variable_decl(
+                        d,
+                        &resolved_idents,
+                        &types_of_decls,
+                    )
+                })
                 .collect(),
             data_decl: ast.data_decl,
             entry_point: ast.entry_point,
@@ -64,11 +70,15 @@ impl<'a> From<ast2::Ast<'a>> for Ast<'a> {
 fn variable_decl<'a>(
     d: ast2::VariableDecl<'a>,
     resolved_idents: &FxHashMap<IdentId, VariableId>,
+    types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
 ) -> VariableDecl<'a> {
     VariableDecl {
         name: d.name,
-        type_annotation: d.type_annotation,
-        value: expr(d.value, resolved_idents),
+        type_annotation: types_of_decls
+            .get(&d.decl_id)
+            .unwrap()
+            .clone(),
+        value: expr(d.value, resolved_idents, types_of_decls),
         decl_id: d.decl_id,
     }
 }
@@ -76,12 +86,15 @@ fn variable_decl<'a>(
 fn expr<'a>(
     e: ast2::Expr<'a>,
     resolved_idents: &FxHashMap<IdentId, VariableId>,
+    types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
 ) -> Expr<'a> {
     use Expr::*;
     match e {
         ast2::Expr::Lambda(a) => Lambda(
             a.into_iter()
-                .map(|arm| fn_arm(arm, resolved_idents))
+                .map(|arm| {
+                    fn_arm(arm, resolved_idents, types_of_decls)
+                })
                 .collect(),
         ),
         ast2::Expr::Number(a) => Number(a),
@@ -98,12 +111,14 @@ fn expr<'a>(
                     )
                 }),
         },
-        ast2::Expr::Decl(a) => {
-            Decl(Box::new(variable_decl(*a, resolved_idents)))
-        }
+        ast2::Expr::Decl(a) => Decl(Box::new(variable_decl(
+            *a,
+            resolved_idents,
+            types_of_decls,
+        ))),
         ast2::Expr::Call(f, a) => Call(
-            expr(*f, resolved_idents).into(),
-            expr(*a, resolved_idents).into(),
+            expr(*f, resolved_idents, types_of_decls).into(),
+            expr(*a, resolved_idents, types_of_decls).into(),
         ),
     }
 }
@@ -111,6 +126,7 @@ fn expr<'a>(
 fn fn_arm<'a>(
     arm: ast2::FnArm<'a>,
     resolved_idents: &FxHashMap<IdentId, VariableId>,
+    types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
 ) -> FnArm<'a> {
     FnArm {
         pattern: arm.pattern,
@@ -118,7 +134,7 @@ fn fn_arm<'a>(
         exprs: arm
             .exprs
             .into_iter()
-            .map(|a| expr(a, resolved_idents))
+            .map(|a| expr(a, resolved_idents, types_of_decls))
             .collect(),
     }
 }
