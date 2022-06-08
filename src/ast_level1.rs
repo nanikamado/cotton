@@ -1,13 +1,13 @@
 use crate::{
-    ast0,
-    ast0::{Associativity, Forall, OperatorPrecedenceDecl},
+    ast_level0,
+    ast_level0::{Associativity, Forall, OperatorPrecedenceDecl},
     intrinsics::OP_PRECEDENCE,
 };
 use fxhash::FxHashMap;
 use index_list::{Index, IndexList};
 use std::{collections::BTreeMap, fmt, fmt::Debug};
 
-/// # Difference between `ast0::Ast` and `ast1::Ast`
+/// # Difference between `ast_level0::Ast` and `ast_level1::Ast`
 /// - `OpSequence`s and `TypeOpSequence`s are converted to syntex trees
 /// based on `OperatorPrecedenceDecl`s.
 #[derive(Debug, PartialEq, Eq)]
@@ -160,23 +160,25 @@ impl<T> OpSequenceUnit<'_, T> {
     }
 }
 
-impl<'a> From<ast0::Ast<'a>> for Ast<'a> {
-    fn from(ast: ast0::Ast<'a>) -> Self {
+impl<'a> From<ast_level0::Ast<'a>> for Ast<'a> {
+    fn from(ast: ast_level0::Ast<'a>) -> Self {
         let mut vs = Vec::new();
         let mut ds = Vec::new();
         let mut precedence_map = OP_PRECEDENCE.clone();
         for d in ast.decls {
             match d {
-                ast0::Decl::Variable(a) => vs.push(a),
-                ast0::Decl::Data(a) => ds.push(DataDecl {
+                ast_level0::Decl::Variable(a) => vs.push(a),
+                ast_level0::Decl::Data(a) => ds.push(DataDecl {
                     name: a.name,
                     field_len: a.field_len,
                 }),
-                ast0::Decl::Precedence(OperatorPrecedenceDecl {
-                    name,
-                    associativity,
-                    precedence,
-                }) => {
+                ast_level0::Decl::Precedence(
+                    OperatorPrecedenceDecl {
+                        name,
+                        associativity,
+                        precedence,
+                    },
+                ) => {
                     precedence_map
                         .insert(name, (associativity, precedence));
                 }
@@ -194,7 +196,7 @@ impl<'a> From<ast0::Ast<'a>> for Ast<'a> {
 }
 
 fn variable_decl<'a>(
-    v: ast0::VariableDecl<'a>,
+    v: ast_level0::VariableDecl<'a>,
     op_precedence_map: &OpPrecedenceMap,
 ) -> VariableDecl<'a> {
     VariableDecl {
@@ -378,16 +380,16 @@ pub fn infix_op_sequence<
     }
 }
 
-impl<'a> ConvertWithOpPrecedenceMap for ast0::Type<'a> {
+impl<'a> ConvertWithOpPrecedenceMap for ast_level0::Type<'a> {
     type T = Type<'a>;
 
     fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T {
         match self {
-            ast0::Type::Ident(name) => Type {
+            ast_level0::Type::Ident(name) => Type {
                 name,
                 args: Vec::new(),
             },
-            ast0::Type::Paren(s) => {
+            ast_level0::Type::Paren(s) => {
                 infix_op_sequence(op_sequence(s, op_precedence_map))
             }
         }
@@ -395,20 +397,20 @@ impl<'a> ConvertWithOpPrecedenceMap for ast0::Type<'a> {
 }
 
 pub fn op_sequence<'a, U: ConvertWithOpPrecedenceMap>(
-    s: Vec<ast0::OpSequenceUnit<'a, U>>,
+    s: Vec<ast_level0::OpSequenceUnit<'a, U>>,
     op_precedence_map: &OpPrecedenceMap,
 ) -> Vec<OpSequenceUnit<'a, <U as ConvertWithOpPrecedenceMap>::T>> {
     use OpSequenceUnit::*;
     s.into_iter()
         .map(|u| match u {
-            ast0::OpSequenceUnit::Operand(e) => {
+            ast_level0::OpSequenceUnit::Operand(e) => {
                 Operand(e.convert(op_precedence_map))
             }
-            ast0::OpSequenceUnit::Operator(a) => {
+            ast_level0::OpSequenceUnit::Operator(a) => {
                 let (ass, p) = op_precedence_map.get(a);
                 Operator(a, ass, p)
             }
-            ast0::OpSequenceUnit::Apply(a) => {
+            ast_level0::OpSequenceUnit::Apply(a) => {
                 Apply(a.convert(op_precedence_map))
             }
         })
@@ -420,24 +422,24 @@ pub trait ConvertWithOpPrecedenceMap {
     fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T;
 }
 
-impl<'a> ConvertWithOpPrecedenceMap for ast0::Expr<'a> {
+impl<'a> ConvertWithOpPrecedenceMap for ast_level0::Expr<'a> {
     type T = Expr<'a>;
 
     fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T {
         use Expr::*;
         match self {
-            ast0::Expr::Lambda(arms) => Lambda(
+            ast_level0::Expr::Lambda(arms) => Lambda(
                 arms.into_iter()
                     .map(|a| fn_arm(a, op_precedence_map))
                     .collect(),
             ),
-            ast0::Expr::Number(a) => Number(a),
-            ast0::Expr::StrLiteral(a) => StrLiteral(a),
-            ast0::Expr::Ident(a) => Ident(a),
-            ast0::Expr::Decl(a) => {
+            ast_level0::Expr::Number(a) => Number(a),
+            ast_level0::Expr::StrLiteral(a) => StrLiteral(a),
+            ast_level0::Expr::Ident(a) => Ident(a),
+            ast_level0::Expr::Decl(a) => {
                 Decl(Box::new(variable_decl(*a, op_precedence_map)))
             }
-            ast0::Expr::Paren(a) => {
+            ast_level0::Expr::Paren(a) => {
                 infix_op_sequence(op_sequence(a, op_precedence_map))
             }
         }
@@ -445,7 +447,7 @@ impl<'a> ConvertWithOpPrecedenceMap for ast0::Expr<'a> {
 }
 
 fn fn_arm<'a>(
-    a: ast0::FnArm<'a>,
+    a: ast_level0::FnArm<'a>,
     op_precedence_map: &OpPrecedenceMap,
 ) -> FnArm<'a> {
     FnArm {
@@ -478,14 +480,16 @@ fn fn_arm<'a>(
     }
 }
 
-impl<'a> ConvertWithOpPrecedenceMap for ast0::Pattern<'a> {
+impl<'a> ConvertWithOpPrecedenceMap for ast_level0::Pattern<'a> {
     type T = Pattern<'a>;
 
     fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T {
         match self {
-            ast0::Pattern::Number(a) => Pattern::Number(a),
-            ast0::Pattern::StrLiteral(a) => Pattern::StrLiteral(a),
-            ast0::Pattern::Constructor(name, ps) => {
+            ast_level0::Pattern::Number(a) => Pattern::Number(a),
+            ast_level0::Pattern::StrLiteral(a) => {
+                Pattern::StrLiteral(a)
+            }
+            ast_level0::Pattern::Constructor(name, ps) => {
                 Pattern::Constructor {
                     name,
                     args: ps
@@ -494,8 +498,8 @@ impl<'a> ConvertWithOpPrecedenceMap for ast0::Pattern<'a> {
                         .collect(),
                 }
             }
-            ast0::Pattern::Binder(a) => Pattern::Binder(a),
-            ast0::Pattern::Underscore => Pattern::Underscore,
+            ast_level0::Pattern::Binder(a) => Pattern::Binder(a),
+            ast_level0::Pattern::Underscore => Pattern::Underscore,
         }
     }
 }

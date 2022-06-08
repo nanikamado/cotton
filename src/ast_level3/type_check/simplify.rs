@@ -1,4 +1,4 @@
-use crate::ast2::{
+use crate::ast_level2::{
     self,
     ident_id::IdentId,
     types::{
@@ -81,11 +81,12 @@ impl<'a> TypeVariableTracker<'a> {
     }
 }
 
-impl<'a, T: TypeConstructor<'a>> From<ast2::IncompleteType<'a, T>>
+impl<'a, T: TypeConstructor<'a>>
+    From<ast_level2::IncompleteType<'a, T>>
     for IncompleteType<'a, T>
 {
-    fn from(t: ast2::IncompleteType<'a, T>) -> Self {
-        let ast2::IncompleteType {
+    fn from(t: ast_level2::IncompleteType<'a, T>) -> Self {
+        let ast_level2::IncompleteType {
             constructor,
             variable_requirements,
             subtype_relation,
@@ -560,9 +561,10 @@ where
 
     pub fn destruct(
         self,
-    ) -> (ast2::IncompleteType<'a, T>, TypeVariableTracker<'a>) {
+    ) -> (ast_level2::IncompleteType<'a, T>, TypeVariableTracker<'a>)
+    {
         (
-            ast2::IncompleteType {
+            ast_level2::IncompleteType {
                 constructor: self.constructor,
                 variable_requirements: self.variable_requirements,
                 subtype_relation: self.subtype_relation,
@@ -619,7 +621,7 @@ impl<'a, T: TypeConstructor<'a>> IncompleteType<'a, T> {
 }
 
 impl<'a, T: TypeConstructor<'a>> Display
-    for ast2::IncompleteType<'a, T>
+    for ast_level2::IncompleteType<'a, T>
 {
     fn fmt(
         &self,
@@ -675,9 +677,9 @@ impl<'a> Display for TypeVariableTracker<'a> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        ast0, ast1, ast2,
-        ast2::IncompleteType,
-        ast3::{
+        ast_level0, ast_level1, ast_level2,
+        ast_level2::IncompleteType,
+        ast_level3::{
             type_check::simplify::simplify_type,
             type_util::{
                 construct_type, construct_type_with_variables,
@@ -688,7 +690,7 @@ mod tests {
 
     #[test]
     fn simplify1() {
-        let ast: ast0::Ast = parse::parse(
+        let ast: ast_level0::Ast = parse::parse(
             r#"data a /\ b
             infixl 3 /\
             main : () -> ()
@@ -701,8 +703,8 @@ mod tests {
         )
         .unwrap()
         .1;
-        let ast: ast1::Ast = ast.into();
-        let ast: ast2::Ast = ast.into();
+        let ast: ast_level1::Ast = ast.into();
+        let ast: ast_level2::Ast = ast.into();
         let req_t = ast
             .variable_decl
             .iter()

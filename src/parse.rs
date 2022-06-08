@@ -1,4 +1,4 @@
-use crate::ast0::{
+use crate::ast_level0::{
     Associativity, Ast, DataDecl, Decl, Expr, FnArm, Forall,
     InfixConstructorSequence, OpSequence, OpSequenceUnit,
     OperatorPrecedenceDecl, Pattern, Type, TypeOpSequence,

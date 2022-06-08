@@ -1,6 +1,6 @@
 use crate::{
-    ast2::{decl_id::DeclId, DataDecl, Pattern},
-    ast3::{Ast, Expr, FnArm, VariableDecl},
+    ast_level2::{decl_id::DeclId, DataDecl, Pattern},
+    ast_level3::{Ast, Expr, FnArm, VariableDecl},
     intrinsics::IntrinsicVariable,
 };
 use itertools::Itertools;

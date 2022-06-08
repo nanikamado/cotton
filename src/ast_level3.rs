@@ -2,13 +2,13 @@ mod type_check;
 pub mod type_util;
 
 use self::type_check::{type_check, VariableId};
-use crate::ast2::{
+use crate::ast_level2::{
     self, decl_id::DeclId, ident_id::IdentId, types::Type, DataDecl,
     IncompleteType, Pattern,
 };
 use fxhash::FxHashMap;
 
-/// # Difference between `ast2::Ast` and `ast3::Ast`
+/// # Difference between `ast_level2::Ast` and `ast_level3::Ast`
 /// - The names of variables are resolved.
 #[derive(Debug, PartialEq)]
 pub struct Ast<'a> {
@@ -46,8 +46,8 @@ pub struct FnArm<'a> {
     pub exprs: Vec<Expr<'a>>,
 }
 
-impl<'a> From<ast2::Ast<'a>> for Ast<'a> {
-    fn from(ast: ast2::Ast<'a>) -> Self {
+impl<'a> From<ast_level2::Ast<'a>> for Ast<'a> {
+    fn from(ast: ast_level2::Ast<'a>) -> Self {
         let (resolved_idents, types_of_decls, type_map) =
             type_check(&ast);
         log::trace!("{:?}", resolved_idents);
@@ -74,7 +74,7 @@ impl<'a> From<ast2::Ast<'a>> for Ast<'a> {
 }
 
 fn variable_decl<'a>(
-    d: ast2::VariableDecl<'a>,
+    d: ast_level2::VariableDecl<'a>,
     resolved_idents: &FxHashMap<IdentId, VariableId>,
     types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
 ) -> VariableDecl<'a> {
@@ -89,22 +89,22 @@ fn variable_decl<'a>(
 }
 
 fn expr<'a>(
-    e: ast2::Expr<'a>,
+    e: ast_level2::Expr<'a>,
     resolved_idents: &FxHashMap<IdentId, VariableId>,
     types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
 ) -> Expr<'a> {
     use Expr::*;
     match e {
-        ast2::Expr::Lambda(a) => Lambda(
+        ast_level2::Expr::Lambda(a) => Lambda(
             a.into_iter()
                 .map(|arm| {
                     fn_arm(arm, resolved_idents, types_of_decls)
                 })
                 .collect(),
         ),
-        ast2::Expr::Number(a) => Number(a),
-        ast2::Expr::StrLiteral(a) => StrLiteral(a),
-        ast2::Expr::Ident { name, ident_id } => {
+        ast_level2::Expr::Number(a) => Number(a),
+        ast_level2::Expr::StrLiteral(a) => StrLiteral(a),
+        ast_level2::Expr::Ident { name, ident_id } => {
             log::debug!("{} -- {}", name, ident_id);
             Ident {
                 name,
@@ -119,12 +119,12 @@ fn expr<'a>(
                     }),
             }
         }
-        ast2::Expr::Decl(a) => Decl(Box::new(variable_decl(
+        ast_level2::Expr::Decl(a) => Decl(Box::new(variable_decl(
             *a,
             resolved_idents,
             types_of_decls,
         ))),
-        ast2::Expr::Call(f, a) => Call(
+        ast_level2::Expr::Call(f, a) => Call(
             expr(*f, resolved_idents, types_of_decls).into(),
             expr(*a, resolved_idents, types_of_decls).into(),
         ),
@@ -132,7 +132,7 @@ fn expr<'a>(
 }
 
 fn fn_arm<'a>(
-    arm: ast2::FnArm<'a>,
+    arm: ast_level2::FnArm<'a>,
     resolved_idents: &FxHashMap<IdentId, VariableId>,
     types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
 ) -> FnArm<'a> {

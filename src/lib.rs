@@ -1,7 +1,7 @@
-mod ast0;
-mod ast1;
-mod ast2;
-mod ast3;
+mod ast_level0;
+mod ast_level1;
+mod ast_level2;
+mod ast_level3;
 mod codegen;
 mod intrinsics;
 mod parse;
@@ -45,9 +45,9 @@ pub fn run(source: &str, output_js: bool, loglevel: LevelFilter) {
     }
     let (remaining, ast) = parse(source).unwrap();
     if remaining.is_empty() {
-        let ast: ast1::Ast = ast.into();
-        let ast: ast2::Ast = ast.into();
-        let ast: ast3::Ast = ast.into();
+        let ast: ast_level1::Ast = ast.into();
+        let ast: ast_level2::Ast = ast.into();
+        let ast: ast_level3::Ast = ast.into();
         log::trace!("{:?}", ast);
         let js = codegen(ast);
         if output_js {
