@@ -41,6 +41,10 @@ pub enum TypeMatchableRef<'a> {
 }
 
 mod type_unit {
+    use super::Type;
+    use crate::ast2::TypeId;
+    use std::cell::Cell;
+
     #[derive(
         Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
     )]
@@ -60,12 +64,6 @@ mod type_unit {
             body: Type<'a>,
         },
     }
-
-    use std::cell::Cell;
-
-    use crate::ast2::TypeId;
-
-    use super::Type;
 
     impl Default for TypeVariable {
         fn default() -> Self {
