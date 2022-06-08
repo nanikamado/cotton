@@ -560,8 +560,7 @@ fn min_type_incomplite<'a>(
                 ident_type_map,
             ): (Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>) =
                 multiunzip(arms.iter().map(arm_min_type));
-            let resolved_idents =
-                resolved_idents.into_iter().flatten().collect();
+            let resolved_idents = resolved_idents.concat();
             let (args, rtns): (
                 Vec<types::Type<'a>>,
                 Vec<types::Type<'a>>,
