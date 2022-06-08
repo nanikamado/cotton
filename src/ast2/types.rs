@@ -67,13 +67,19 @@ mod type_unit {
 
     use super::Type;
 
-    impl TypeVariable {
-        pub fn new() -> Self {
+    impl Default for TypeVariable {
+        fn default() -> Self {
             VARIABLE_COUNT.with(|c| {
                 let t = c.get();
                 c.set(t + 1);
                 TypeVariable(t)
             })
+        }
+    }
+
+    impl TypeVariable {
+        pub fn new() -> Self {
+            Self::default()
         }
     }
 
