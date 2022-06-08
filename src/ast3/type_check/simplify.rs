@@ -1,14 +1,112 @@
 use crate::ast2::{
+    self,
+    ident_id::IdentId,
     types::{
         Type, TypeMatchable, TypeMatchableRef, TypeUnit, TypeVariable,
     },
-    IncompleteType, TypeConstructor,
+    TypeConstructor,
 };
 use fxhash::FxHashSet;
 use hashbag::HashBag;
 use itertools::Itertools;
 use petgraph::{self, algo::tarjan_scc, graphmap::DiGraphMap};
-use std::{collections::BTreeSet, fmt::Display, iter::Extend, vec};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt::Display,
+    iter::Extend,
+    vec,
+};
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
+)]
+pub struct IncompleteType<'a, T = Type<'a>>
+where
+    T: TypeConstructor<'a>,
+{
+    pub constructor: T,
+    pub variable_requirements: Vec<(&'a str, Type<'a>, IdentId)>,
+    pub subtype_relation: BTreeSet<(Type<'a>, Type<'a>)>,
+    pub type_variable_tracker: TypeVariableTracker<'a>,
+}
+
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
+)]
+pub struct TypeVariableTracker<'a>(BTreeMap<TypeVariable, Type<'a>>);
+
+impl<'a> TypeVariableTracker<'a> {
+    fn insert(
+        &mut self,
+        key: TypeVariable,
+        value: Type<'a>,
+    ) -> Option<Type<'a>> {
+        self.0.insert(key, value)
+    }
+
+    pub fn find(&mut self, key: TypeVariable) -> Type<'a> {
+        if let Some(t) = self.0.get(&key).cloned() {
+            let t = self.normalize_type(t);
+            self.0.insert(key, t.clone());
+            t
+        } else {
+            TypeUnit::Variable(key).into()
+        }
+    }
+
+    pub fn normalize_type(&mut self, t: Type<'a>) -> Type<'a> {
+        t.into_iter()
+            .flat_map(|tu| match tu {
+                TypeUnit::Fn(arg, rtn) => TypeUnit::Fn(
+                    self.normalize_type(arg),
+                    self.normalize_type(rtn),
+                )
+                .into(),
+                TypeUnit::Variable(v) => self.find(v),
+                TypeUnit::RecursiveAlias { alias, body } => {
+                    TypeUnit::RecursiveAlias {
+                        alias,
+                        body: self.normalize_type(body),
+                    }
+                    .into()
+                }
+                tu @ TypeUnit::Normal { .. } => tu.into(),
+            })
+            .collect()
+    }
+
+    pub fn merge(mut self, other: Self) -> Self {
+        self.0.extend(other.0);
+        self
+    }
+}
+
+impl<'a, T: TypeConstructor<'a>> From<ast2::IncompleteType<'a, T>>
+    for IncompleteType<'a, T>
+{
+    fn from(t: ast2::IncompleteType<'a, T>) -> Self {
+        let ast2::IncompleteType {
+            constructor,
+            variable_requirements,
+            subtype_relation,
+        } = t;
+        IncompleteType {
+            constructor,
+            variable_requirements,
+            subtype_relation,
+            type_variable_tracker: Default::default(),
+        }
+    }
+}
+
+impl<'a> From<Type<'a>> for IncompleteType<'a> {
+    fn from(t: Type<'a>) -> Self {
+        Self {
+            constructor: t,
+            ..Default::default()
+        }
+    }
+}
 
 pub fn simplify_type<'a, T: TypeConstructor<'a>>(
     mut t: IncompleteType<'a, T>,
@@ -430,7 +528,13 @@ where
             constructor,
             variable_requirements,
             subtype_relation: subtype_relationship,
+            mut type_variable_tracker,
         } = self;
+        if let Some(old) =
+            type_variable_tracker.insert(from, to.clone())
+        {
+            log::error!("{} is already replaced by {}, but replaced by {} again.", from, old, to);
+        }
         Some(IncompleteType {
             constructor: constructor.replace_num(from, to),
             variable_requirements: variable_requirements
@@ -450,7 +554,21 @@ where
                 .into_iter()
                 .flatten()
                 .collect(),
+            type_variable_tracker,
         })
+    }
+
+    pub fn destruct(
+        self,
+    ) -> (ast2::IncompleteType<'a, T>, TypeVariableTracker<'a>) {
+        (
+            ast2::IncompleteType {
+                constructor: self.constructor,
+                variable_requirements: self.variable_requirements,
+                subtype_relation: self.subtype_relation,
+            },
+            self.type_variable_tracker,
+        )
     }
 }
 
@@ -500,7 +618,9 @@ impl<'a, T: TypeConstructor<'a>> IncompleteType<'a, T> {
     }
 }
 
-impl<'a, T: TypeConstructor<'a>> Display for IncompleteType<'a, T> {
+impl<'a, T: TypeConstructor<'a>> Display
+    for ast2::IncompleteType<'a, T>
+{
     fn fmt(
         &self,
         f: &mut std::fmt::Formatter<'_>,
@@ -513,6 +633,41 @@ impl<'a, T: TypeConstructor<'a>> Display for IncompleteType<'a, T> {
             writeln!(f, "  {:<3}  ?{} : {},", id, a, b)?;
         }
         write!(f, "--")?;
+        Ok(())
+    }
+}
+
+impl<'a, T: TypeConstructor<'a>> Display for IncompleteType<'a, T> {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        writeln!(f, "{} forall", self.constructor)?;
+        for (a, b) in &self.subtype_relation {
+            writeln!(f, "    {} < {},", a, b)?;
+        }
+        for (a, b, id) in &self.variable_requirements {
+            writeln!(f, "  {:<3}  ?{} : {},", id, a, b)?;
+        }
+        writeln!(f, "--")?;
+        write!(f, "{}", self.type_variable_tracker)?;
+        Ok(())
+    }
+}
+
+impl<'a> Display for TypeVariableTracker<'a> {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        write!(
+            f,
+            "[{}]",
+            self.0
+                .iter()
+                .map(|(v, t)| format!("{} : {}", v, t))
+                .join(", ")
+        )?;
         Ok(())
     }
 }
@@ -570,7 +725,8 @@ mod tests {
                 .into_iter()
                 .collect(),
         };
-        let st = simplify_type(t).unwrap();
+        let (st, _tracker) =
+            simplify_type(t.into()).unwrap().destruct();
         assert_eq!(
             format!("{}", st),
             "Num -> {Num | String} forall\n--"

@@ -15,6 +15,7 @@ pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl<'a>>,
     pub entry_point: DeclId,
+    pub type_map: Vec<(IdentId, Type<'a>)>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -47,8 +48,12 @@ pub struct FnArm<'a> {
 
 impl<'a> From<ast2::Ast<'a>> for Ast<'a> {
     fn from(ast: ast2::Ast<'a>) -> Self {
-        let (resolved_idents, types_of_decls) = type_check(&ast);
+        let (resolved_idents, types_of_decls, type_map) =
+            type_check(&ast);
         log::trace!("{:?}", resolved_idents);
+        for (ident, t) in &type_map {
+            log::debug!("{ident} : {t}");
+        }
         Self {
             variable_decl: ast
                 .variable_decl
@@ -63,6 +68,7 @@ impl<'a> From<ast2::Ast<'a>> for Ast<'a> {
                 .collect(),
             data_decl: ast.data_decl,
             entry_point: ast.entry_point,
+            type_map,
         }
     }
 }
@@ -98,18 +104,21 @@ fn expr<'a>(
         ),
         ast2::Expr::Number(a) => Number(a),
         ast2::Expr::StrLiteral(a) => StrLiteral(a),
-        ast2::Expr::Ident { name, ident_id } => Ident {
-            name,
-            variable_id: *resolved_idents
-                .get(&ident_id)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "{:?} not found in resolved_idents. \
+        ast2::Expr::Ident { name, ident_id } => {
+            log::debug!("{} -- {}", name, ident_id);
+            Ident {
+                name,
+                variable_id: *resolved_idents
+                    .get(&ident_id)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "{:?} not found in resolved_idents. \
                         name: {:?}",
-                        ident_id, name
-                    )
-                }),
-        },
+                            ident_id, name
+                        )
+                    }),
+            }
+        }
         ast2::Expr::Decl(a) => Decl(Box::new(variable_decl(
             *a,
             resolved_idents,
