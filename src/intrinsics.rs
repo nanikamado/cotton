@@ -85,9 +85,6 @@ pub enum IntrinsicType {
     Unit,
     True,
     False,
-    Arrow,
-    Call,
-    Bar,
 }
 
 pub static INTRINSIC_TYPES: Lazy<
@@ -99,9 +96,6 @@ pub static INTRINSIC_TYPES: Lazy<
         ("()", IntrinsicType::Unit),
         ("True", IntrinsicType::True),
         ("False", IntrinsicType::False),
-        ("->", IntrinsicType::Arrow),
-        ("type_call", IntrinsicType::Call),
-        ("|", IntrinsicType::Bar),
     ]
     .map(|(n, t)| (n, t))
     .iter()
