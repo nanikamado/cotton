@@ -9,7 +9,8 @@ mod parse;
 use codegen::codegen;
 use parse::parse;
 use simplelog::{
-    self, ColorChoice, Config, LevelFilter, TermLogger, TerminalMode,
+    self, ColorChoice, ConfigBuilder, LevelFilter, TermLogger,
+    TerminalMode,
 };
 use std::{
     io::ErrorKind,
@@ -19,7 +20,12 @@ use std::{
 pub fn run(source: &str, output_js: bool, loglevel: LevelFilter) {
     TermLogger::init(
         loglevel,
-        Config::default(),
+        ConfigBuilder::new()
+            .set_location_level(LevelFilter::Error)
+            .set_time_level(LevelFilter::Off)
+            .set_thread_level(LevelFilter::Off)
+            .set_target_level(LevelFilter::Off)
+            .build(),
         TerminalMode::Stderr,
         ColorChoice::Auto,
     )
