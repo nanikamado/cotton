@@ -37,17 +37,22 @@ where
 pub struct TypeVariableTracker<'a>(BTreeMap<TypeVariable, Type<'a>>);
 
 impl<'a> TypeVariableTracker<'a> {
-    fn insert(
-        &mut self,
-        key: TypeVariable,
-        value: Type<'a>,
-    ) -> Option<Type<'a>> {
-        self.0.insert(key, value)
+    fn insert(&mut self, key: TypeVariable, value: Type<'a>) {
+        if let Some(old) = match value.matchable_ref() {
+            TypeMatchableRef::Variable(v) if key > v => {
+                self.0.insert(v, TypeUnit::Variable(key).into())
+            }
+            _ => self.0.insert(key, value.clone()),
+        } {
+            log::error!("{} is already replaced by {}, but replaced by {} again.", key, old, value);
+        }
     }
 
     pub fn find(&mut self, key: TypeVariable) -> Type<'a> {
         if let Some(t) = self.0.get(&key).cloned() {
+            log::debug!("normalizing {}", t);
             let t = self.normalize_type(t);
+            log::debug!("normalized");
             self.0.insert(key, t.clone());
             t
         } else {
@@ -532,11 +537,7 @@ where
             subtype_relation: subtype_relationship,
             mut type_variable_tracker,
         } = self;
-        if let Some(old) =
-            type_variable_tracker.insert(from, to.clone())
-        {
-            log::error!("{} is already replaced by {}, but replaced by {} again.", from, old, to);
-        }
+        type_variable_tracker.insert(from, to.clone());
         Some(IncompleteType {
             constructor: constructor.replace_num(from, to),
             variable_requirements: variable_requirements
