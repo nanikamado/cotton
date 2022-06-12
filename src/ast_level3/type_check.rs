@@ -23,8 +23,6 @@ use std::{cmp::Reverse, collections::BTreeSet, fmt::Display};
 use strum::IntoEnumIterator;
 use types::TypeConstructor;
 
-type Resolved = Vec<(IdentId, VariableId)>;
-
 #[derive(PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
 pub enum VariableId {
     Decl(DeclId),
@@ -58,11 +56,13 @@ impl std::fmt::Debug for VariableId {
 }
 
 type TypeMap<'a> = Vec<(IdentId, Type<'a>)>;
+pub type ResolvedIdents<'a> =
+    FxHashMap<IdentId, (VariableId, Vec<(TypeVariable, Type<'a>)>)>;
 
 pub fn type_check<'a>(
     ast: &Ast<'a>,
 ) -> (
-    FxHashMap<IdentId, VariableId>,
+    ResolvedIdents<'a>,
     FxHashMap<DeclId, ast_level2::IncompleteType<'a>>,
     TypeMap<'a>,
 ) {
@@ -86,7 +86,7 @@ pub fn type_check<'a>(
             name: d.name,
         });
     }
-    let mut resolved_idents = FxHashMap::default();
+    let mut resolved_idents = Vec::new();
     let mut ident_type_map = Vec::new();
     let mut type_variable_tracker = TypeVariableTracker::default();
     for d in &ast.variable_decl {
@@ -97,7 +97,7 @@ pub fn type_check<'a>(
         let type_annotation: Option<ast_level2::IncompleteType> =
             if let Some(annotation) = &d.type_annotation {
                 let annotation =
-                    annotation.clone().change_variable_num();
+                    annotation.clone().change_variable_num().0;
                 t.subtype_relation.insert((
                     t.constructor.clone(),
                     annotation.constructor.clone(),
@@ -111,7 +111,7 @@ pub fn type_check<'a>(
                 t.variable_requirements.append(
                     &mut annotation.variable_requirements.clone(),
                 );
-                Some(annotation)
+                Some(annotation.clone())
             } else {
                 None
             };
@@ -136,14 +136,33 @@ pub fn type_check<'a>(
             log::debug!("not face: {}", top.incomplete);
         }
     }
-    let (resolved_names, types, tracker) = resolve_names(toplevels);
+    let (mut resolved_names, types, tracker) =
+        resolve_names(toplevels);
     type_variable_tracker = type_variable_tracker.merge(tracker);
-    for (ident_id, variable_id) in
+    for (ident_id, variable_id, _) in
         resolved_names.iter().sorted_unstable()
     {
-        log::debug!("{ident_id} => {variable_id}");
+        log::debug!("{ident_id} => {variable_id:?}");
     }
-    resolved_idents.extend(resolved_names);
+    resolved_idents.append(&mut resolved_names);
+    let resolved_idents = resolved_idents
+        .into_iter()
+        .map(|(ident_id, variable_id, type_args)| {
+            (
+                ident_id,
+                (
+                    variable_id,
+                    type_args
+                        .into_iter()
+                        .map(|(v, t)| {
+                            (v, type_variable_tracker.find(t))
+                        })
+                        .collect(),
+                ),
+            )
+        })
+        .collect();
+    log::debug!("ok");
     (
         resolved_idents,
         types.into_iter().collect(),
@@ -153,6 +172,9 @@ pub fn type_check<'a>(
             .collect(),
     )
 }
+
+pub type Resolved =
+    Vec<(IdentId, VariableId, Vec<(TypeVariable, TypeVariable)>)>;
 
 #[derive(Debug, Clone)]
 struct Toplevel<'a> {
@@ -334,7 +356,7 @@ fn resolve_scc<'a>(
     scc: Vec<Toplevel<'a>>,
     resolved_variable_map: &FxHashMap<&str, Vec<Toplevel<'a>>>,
 ) -> (
-    Vec<(IdentId, VariableId)>,
+    Resolved,
     Vec<ast_level2::IncompleteType<'a, Type<'a>>>,
     TypeVariableTracker<'a>,
 ) {
@@ -355,6 +377,16 @@ fn resolve_scc<'a>(
     let names_in_scc: FxHashSet<_> =
         name_vec.iter().copied().collect();
     log::debug!("name of unresolved: {:?}", names_in_scc);
+    log::debug!(
+        "resolved = {{{}}}",
+        resolved_variable_map.get(".").iter().format_with(
+            ", ",
+            |t, f| f(&format!(
+                ". : {}",
+                t.iter().format_with("\\/", |t, f| f(&t.incomplete))
+            ))
+        )
+    );
     // The order of resolving is important.
     // Requirements that are easier to solve should be solved earlier.
     variable_requirements.sort_unstable_by_key(|(req_name, _, _)| {
@@ -393,8 +425,11 @@ fn resolve_scc<'a>(
             true,
         );
         let satisfied = get_one_satisfied(satisfied);
-        resolved_idents
-            .push((ident_id, satisfied.id_of_satisfied_variable));
+        resolved_idents.push((
+            ident_id,
+            satisfied.id_of_satisfied_variable,
+            satisfied.type_args,
+        ));
         unresolved_type = satisfied.type_of_improved_decl;
     }
     // Resolve recursive requirements.
@@ -425,6 +460,7 @@ fn resolve_scc<'a>(
 struct SatisfiedType<T> {
     id_of_satisfied_variable: VariableId,
     type_of_improved_decl: T,
+    type_args: Vec<(TypeVariable, TypeVariable)>,
 }
 
 fn find_satisfied_types<'a, T: TypeConstructor<'a>>(
@@ -445,8 +481,10 @@ fn find_satisfied_types<'a, T: TypeConstructor<'a>>(
                 } else {
                     candidate.incomplete
                 };
+            let mut type_args = Vec::new();
+            log::debug!("~~ {} : {}", candidate.name, cand_t);
             if replace_variables {
-                cand_t = cand_t.change_variable_num();
+                (cand_t, type_args) = cand_t.change_variable_num();
             }
             t.subtype_relation
                 .insert((cand_t.constructor, required_type.clone()));
@@ -456,6 +494,7 @@ fn find_satisfied_types<'a, T: TypeConstructor<'a>>(
                 SatisfiedType {
                     id_of_satisfied_variable: decl_id,
                     type_of_improved_decl,
+                    type_args,
                 }
             })
         })
@@ -490,7 +529,7 @@ fn resolve_recursion_in_scc<'a>(
     toplevels: &[Toplevel<'a>],
     resolved_variable_map: &FxHashMap<&str, Vec<Toplevel<'a>>>,
 ) -> (
-    Vec<(IdentId, VariableId)>,
+    Resolved,
     simplify::IncompleteType<'a, SccTypeConstructor<'a>>,
 ) {
     let mut scc_map: FxHashMap<&str, Vec<usize>> =
@@ -522,8 +561,11 @@ fn resolve_recursion_in_scc<'a>(
             false,
         ));
         let satisfied = get_one_satisfied(satisfied);
-        resolved_idents
-            .push((ident_id, satisfied.id_of_satisfied_variable));
+        resolved_idents.push((
+            ident_id,
+            satisfied.id_of_satisfied_variable,
+            satisfied.type_args,
+        ));
         scc = satisfied.type_of_improved_decl;
     }
     (resolved_idents, scc)
@@ -739,7 +781,11 @@ fn arm_min_type<'a>(
         if let Some(a) = bindings.get(&p.0) {
             subtype_requirement.push((a.1.clone(), p.1.clone()));
             subtype_requirement.push((p.1, a.1.clone()));
-            resolved_idents.push((p.2, VariableId::Decl(a.0)));
+            resolved_idents.push((
+                p.2,
+                VariableId::Decl(a.0),
+                Vec::new(),
+            ));
         } else {
             variable_requirements.push(p);
         }

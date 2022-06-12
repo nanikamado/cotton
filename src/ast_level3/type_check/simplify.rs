@@ -38,21 +38,22 @@ pub struct TypeVariableTracker<'a>(BTreeMap<TypeVariable, Type<'a>>);
 
 impl<'a> TypeVariableTracker<'a> {
     fn insert(&mut self, key: TypeVariable, value: Type<'a>) {
-        if let Some(old) = match value.matchable_ref() {
-            TypeMatchableRef::Variable(v) if key > v => {
-                self.0.insert(v, TypeUnit::Variable(key).into())
-            }
-            _ => self.0.insert(key, value.clone()),
-        } {
-            log::error!("{} is already replaced by {}, but replaced by {} again.", key, old, value);
+        if self.0.contains_key(&key) {
+            log::debug!(
+                "{} is already replaced by {}. ignored.",
+                key,
+                value
+            );
+        } else if value.all_type_variables().contains(&key) {
+            panic!("recursion is not allowed.");
+        } else {
+            self.0.insert(key, value);
         }
     }
 
     pub fn find(&mut self, key: TypeVariable) -> Type<'a> {
         if let Some(t) = self.0.get(&key).cloned() {
-            log::debug!("normalizing {}", t);
             let t = self.normalize_type(t);
-            log::debug!("normalized");
             self.0.insert(key, t.clone());
             t
         } else {

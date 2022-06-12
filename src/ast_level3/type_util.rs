@@ -192,13 +192,20 @@ impl<'a> IncompleteType<'a> {
             .collect()
     }
 
-    pub fn change_variable_num(mut self) -> Self {
+    pub fn change_variable_num(
+        mut self,
+    ) -> (Self, Vec<(TypeVariable, TypeVariable)>) {
         let anos = self.all_type_variables();
+        let mut variable_map = Vec::new();
         for a in anos {
-            self =
-                self.replace_num(a, &TypeUnit::new_variable().into())
+            let new_variable = TypeVariable::new();
+            self = self.replace_num(
+                a,
+                &TypeUnit::Variable(new_variable).into(),
+            );
+            variable_map.push((a, new_variable));
         }
-        self
+        (self, variable_map)
     }
 
     pub fn replace_num(

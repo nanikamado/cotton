@@ -1,12 +1,16 @@
 mod type_check;
 pub mod type_util;
 
-use self::type_check::{type_check, VariableId};
+use self::type_check::{type_check, ResolvedIdents, VariableId};
 use crate::ast_level2::{
-    self, decl_id::DeclId, ident_id::IdentId, types::Type, DataDecl,
-    IncompleteType, Pattern,
+    self,
+    decl_id::DeclId,
+    ident_id::IdentId,
+    types::{Type, TypeVariable},
+    DataDecl, IncompleteType, Pattern,
 };
 use fxhash::FxHashMap;
+use itertools::Itertools;
 
 /// # Difference between `ast_level2::Ast` and `ast_level3::Ast`
 /// - The names of variables are resolved.
@@ -34,6 +38,7 @@ pub enum Expr<'a> {
     Ident {
         name: &'a str,
         variable_id: VariableId,
+        type_args: Vec<(TypeVariable, Type<'a>)>,
     },
     Decl(Box<VariableDecl<'a>>),
     Call(Box<Expr<'a>>, Box<Expr<'a>>),
@@ -54,18 +59,18 @@ impl<'a> From<ast_level2::Ast<'a>> for Ast<'a> {
         for (ident, t) in &type_map {
             log::debug!("{ident} : {t}");
         }
+        let variable_decl: Vec<_> = ast
+            .variable_decl
+            .into_iter()
+            .map(move |d| {
+                variable_decl(d, &resolved_idents, &types_of_decls)
+            })
+            .collect();
+        for v in &variable_decl {
+            log::debug!("type_ {} : {}", v.name, v.type_);
+        }
         Self {
-            variable_decl: ast
-                .variable_decl
-                .into_iter()
-                .map(move |d| {
-                    variable_decl(
-                        d,
-                        &resolved_idents,
-                        &types_of_decls,
-                    )
-                })
-                .collect(),
+            variable_decl,
             data_decl: ast.data_decl,
             entry_point: ast.entry_point,
             type_map,
@@ -75,11 +80,14 @@ impl<'a> From<ast_level2::Ast<'a>> for Ast<'a> {
 
 fn variable_decl<'a>(
     d: ast_level2::VariableDecl<'a>,
-    resolved_idents: &FxHashMap<IdentId, VariableId>,
+    resolved_idents: &ResolvedIdents<'a>,
     types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
 ) -> VariableDecl<'a> {
-    let type_ = types_of_decls.get(&d.decl_id).unwrap().clone();
-    log::debug!("{} : {}", d.name, type_);
+    let type_ = if let Some(t) = d.type_annotation {
+        t
+    } else {
+        types_of_decls.get(&d.decl_id).unwrap().clone()
+    };
     VariableDecl {
         name: d.name,
         type_,
@@ -90,7 +98,7 @@ fn variable_decl<'a>(
 
 fn expr<'a>(
     e: ast_level2::Expr<'a>,
-    resolved_idents: &FxHashMap<IdentId, VariableId>,
+    resolved_idents: &ResolvedIdents<'a>,
     types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
 ) -> Expr<'a> {
     use Expr::*;
@@ -105,18 +113,28 @@ fn expr<'a>(
         ast_level2::Expr::Number(a) => Number(a),
         ast_level2::Expr::StrLiteral(a) => StrLiteral(a),
         ast_level2::Expr::Ident { name, ident_id } => {
-            log::debug!("{} -- {}", name, ident_id);
+            let (variable_id, type_args) = resolved_idents
+                .get(&ident_id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{:?} not found in resolved_idents. \
+                        name: {:?}",
+                        ident_id, name
+                    )
+                })
+                .clone();
+            log::debug!(
+                "{} -- {} -- [{}]",
+                name,
+                ident_id,
+                type_args.iter().format_with(", ", |(v, t), f| f(
+                    &format!("({v} ~> {t})")
+                ))
+            );
             Ident {
                 name,
-                variable_id: *resolved_idents
-                    .get(&ident_id)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "{:?} not found in resolved_idents. \
-                        name: {:?}",
-                            ident_id, name
-                        )
-                    }),
+                variable_id,
+                type_args,
             }
         }
         ast_level2::Expr::Decl(a) => Decl(Box::new(variable_decl(
@@ -133,7 +151,7 @@ fn expr<'a>(
 
 fn fn_arm<'a>(
     arm: ast_level2::FnArm<'a>,
-    resolved_idents: &FxHashMap<IdentId, VariableId>,
+    resolved_idents: &ResolvedIdents<'a>,
     types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
 ) -> FnArm<'a> {
     FnArm {
