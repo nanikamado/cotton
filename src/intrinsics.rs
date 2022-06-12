@@ -4,7 +4,7 @@ use crate::{
 };
 use fxhash::FxHashMap;
 use once_cell::sync::Lazy;
-use std::{collections::HashMap, fmt::Display};
+use std::fmt::Display;
 use strum::EnumIter;
 
 #[derive(
@@ -56,7 +56,7 @@ impl IntrinsicVariable {
 }
 
 pub static INTRINSIC_VARIABLES_TYPES: Lazy<
-    HashMap<IntrinsicVariable, Type>,
+    FxHashMap<IntrinsicVariable, Type>,
 > = Lazy::new(|| {
     [
         (IntrinsicVariable::Minus, "Num -> Num -> Num"),
@@ -88,7 +88,7 @@ pub enum IntrinsicType {
 }
 
 pub static INTRINSIC_TYPES: Lazy<
-    HashMap<&'static str, IntrinsicType>,
+    FxHashMap<&'static str, IntrinsicType>,
 > = Lazy::new(|| {
     [
         ("String", IntrinsicType::String),
@@ -113,7 +113,7 @@ pub enum IntrinsicConstructor {
 }
 
 pub static INTRINSIC_CONSTRUCTORS: Lazy<
-    HashMap<String, IntrinsicConstructor>,
+    FxHashMap<String, IntrinsicConstructor>,
 > = Lazy::new(|| {
     [
         ("()", IntrinsicConstructor::Unit),

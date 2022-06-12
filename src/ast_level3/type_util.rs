@@ -7,9 +7,8 @@ use crate::{
     },
     intrinsics::OP_PRECEDENCE,
 };
-use fxhash::FxHashMap;
+use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
-use std::collections::HashSet;
 use TypeMatchableRef::{Fn, Normal};
 
 impl<'a> TypeUnit<'a> {
@@ -175,7 +174,7 @@ impl<'a> Type<'a> {
 }
 
 impl<'a> IncompleteType<'a> {
-    pub fn all_type_variables(&self) -> HashSet<TypeVariable> {
+    pub fn all_type_variables(&self) -> FxHashSet<TypeVariable> {
         let IncompleteType {
             constructor,
             variable_requirements,

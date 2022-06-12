@@ -3,9 +3,9 @@ use crate::{
     ast_level3::{Ast, Expr, FnArm, VariableDecl},
     intrinsics::IntrinsicVariable,
 };
+use fxhash::FxHashMap;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
-use std::collections::HashMap;
 use stripmargin::StripMargin;
 use unic_ucd_category::GeneralCategory;
 
@@ -58,7 +58,7 @@ fn variable_decl(d: &VariableDecl) -> String {
     )
 }
 
-static PRIMITIVES_DEF: Lazy<HashMap<IntrinsicVariable, &str>> =
+static PRIMITIVES_DEF: Lazy<FxHashMap<IntrinsicVariable, &str>> =
     Lazy::new(|| {
         use IntrinsicVariable::*;
         [

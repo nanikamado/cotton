@@ -7,7 +7,6 @@ use crate::ast_level2::{
     TypeConstructor,
 };
 use fxhash::FxHashSet;
-use hashbag::HashBag;
 use itertools::Itertools;
 use petgraph::{self, algo::tarjan_scc, graphmap::DiGraphMap};
 use std::{
@@ -16,6 +15,8 @@ use std::{
     iter::Extend,
     vec,
 };
+
+type HashBag<T> = hashbag::HashBag<T, fxhash::FxBuildHasher>;
 
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
