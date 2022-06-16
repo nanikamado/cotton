@@ -103,11 +103,13 @@ fn expr(e: &Expr, name_count: u32) -> String {
             expr(&*f, name_count),
             expr(&*a, name_count)
         ),
+        Expr::DoBlock(exprs) => {
+            format!(
+                "({})",
+                exprs.iter().map(|e| expr(e, name_count)).join(",")
+            )
+        }
     }
-}
-
-fn multi_expr(es: &[Expr], name_count: u32) -> String {
-    format!("({})", es.iter().map(|e| expr(e, name_count)).join(","))
 }
 
 fn fn_arm(e: &FnArm, name_count: u32) -> String {
@@ -117,7 +119,7 @@ fn fn_arm(e: &FnArm, name_count: u32) -> String {
         format!(
             "{}?{}:",
             cond,
-            multi_expr(&e.exprs, name_count + e.pattern.len() as u32),
+            expr(&e.expr, name_count + e.pattern.len() as u32),
         )
     } else {
         format!(
@@ -127,7 +129,7 @@ fn fn_arm(e: &FnArm, name_count: u32) -> String {
                 .iter()
                 .map(|(s, _, id)| format!("${}${}=>", id, s))
                 .join(""),
-            multi_expr(&e.exprs, name_count + e.pattern.len() as u32),
+            expr(&e.expr, name_count + e.pattern.len() as u32),
             binds.iter().map(|(_, n, _)| format!("({})", n)).join(""),
         )
     }

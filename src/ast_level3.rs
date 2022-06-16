@@ -42,13 +42,14 @@ pub enum Expr<'a> {
     },
     Decl(Box<VariableDecl<'a>>),
     Call(Box<Expr<'a>>, Box<Expr<'a>>),
+    DoBlock(Vec<Expr<'a>>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FnArm<'a> {
     pub pattern: Vec<Pattern<'a>>,
     pub pattern_type: Vec<Option<Type<'a>>>,
-    pub exprs: Vec<Expr<'a>>,
+    pub expr: Expr<'a>,
 }
 
 impl<'a> From<ast_level2::Ast<'a>> for Ast<'a> {
@@ -157,10 +158,11 @@ fn fn_arm<'a>(
     FnArm {
         pattern: arm.pattern,
         pattern_type: arm.pattern_type,
-        exprs: arm
-            .exprs
-            .into_iter()
-            .map(|a| expr(a, resolved_idents, types_of_decls))
-            .collect(),
+        expr: Expr::DoBlock(
+            arm.exprs
+                .into_iter()
+                .map(|a| expr(a, resolved_idents, types_of_decls))
+                .collect(),
+        ),
     }
 }
