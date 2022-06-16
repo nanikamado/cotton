@@ -38,16 +38,45 @@ pub struct TypeVariableTracker<'a>(BTreeMap<TypeVariable, Type<'a>>);
 
 impl<'a> TypeVariableTracker<'a> {
     fn insert(&mut self, key: TypeVariable, value: Type<'a>) {
-        if self.0.contains_key(&key) {
-            log::debug!(
-                "{} is already replaced by {}. ignored.",
-                key,
-                value
-            );
-        } else if value.all_type_variables().contains(&key) {
-            panic!("recursion is not allowed.");
-        } else {
-            self.0.insert(key, value);
+        let key = self.find(key);
+        let value = self.normalize_type(value);
+        if key == value {
+            return;
+        }
+        match (key.matchable_ref(), value.matchable_ref()) {
+            (
+                TypeMatchableRef::Variable(key),
+                TypeMatchableRef::Variable(value),
+            ) => {
+                if value < key {
+                    self.0.insert(
+                        value,
+                        TypeUnit::Variable(key).into(),
+                    );
+                } else {
+                    self.0.insert(
+                        key,
+                        TypeUnit::Variable(value).into(),
+                    );
+                }
+            }
+            (TypeMatchableRef::Variable(key), _)
+                if !value.all_type_variables().contains(&key) =>
+            {
+                self.0.insert(key, value);
+            }
+            (_, TypeMatchableRef::Variable(value))
+                if !key.all_type_variables().contains(&value) =>
+            {
+                self.0.insert(value, key);
+            }
+            (TypeMatchableRef::Variable(_), _)
+            | (_, TypeMatchableRef::Variable(_)) => {
+                panic!("recursion is not allowed.",)
+            }
+            _ => {
+                todo!()
+            }
         }
     }
 
@@ -83,7 +112,9 @@ impl<'a> TypeVariableTracker<'a> {
     }
 
     pub fn merge(mut self, other: Self) -> Self {
-        self.0.extend(other.0);
+        for (v, t) in other.0 {
+            self.insert(v, t);
+        }
         self
     }
 }

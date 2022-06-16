@@ -96,8 +96,6 @@ pub fn type_check<'a>(
         ident_type_map.append(&mut ident_type);
         let type_annotation: Option<ast_level2::IncompleteType> =
             if let Some(annotation) = &d.type_annotation {
-                let annotation =
-                    annotation.clone().change_variable_num().0;
                 t.subtype_relation.insert((
                     t.constructor.clone(),
                     annotation.constructor.clone(),
