@@ -1,6 +1,7 @@
 mod simplify;
 
 use super::type_util::construct_type;
+pub use crate::ast_level3::type_check::simplify::TypeVariableTracker;
 use crate::{
     ast_level2::{
         self,
@@ -8,9 +9,8 @@ use crate::{
         ident_id::IdentId,
         types,
         types::{Type, TypeUnit, TypeVariable},
-        Ast, DataDecl, Expr, FnArm, Pattern, TypeId,
+        Ast, DataDecl, Expr, ExprWithType, FnArm, Pattern, TypeId,
     },
-    ast_level3::type_check::simplify::TypeVariableTracker,
     intrinsics::IntrinsicVariable,
 };
 use fxhash::{FxHashMap, FxHashSet};
@@ -55,7 +55,6 @@ impl std::fmt::Debug for VariableId {
     }
 }
 
-type TypeMap<'a> = Vec<(IdentId, Type<'a>)>;
 pub type ResolvedIdents<'a> =
     FxHashMap<IdentId, (VariableId, Vec<(TypeVariable, Type<'a>)>)>;
 
@@ -64,7 +63,7 @@ pub fn type_check<'a>(
 ) -> (
     ResolvedIdents<'a>,
     FxHashMap<DeclId, ast_level2::IncompleteType<'a>>,
-    TypeMap<'a>,
+    TypeVariableTracker<'a>,
 ) {
     let mut toplevels: Vec<Toplevel<'a>> = Default::default();
     for v in IntrinsicVariable::iter() {
@@ -91,7 +90,7 @@ pub fn type_check<'a>(
     let mut type_variable_tracker = TypeVariableTracker::default();
     for d in &ast.variable_decl {
         let (mut t, resolved, mut ident_type) =
-            min_type_incomplite(&d.value);
+            min_type_incomplite(&d.value, &mut type_variable_tracker);
         resolved_idents.extend(resolved);
         ident_type_map.append(&mut ident_type);
         let type_annotation: Option<ast_level2::IncompleteType> =
@@ -164,10 +163,7 @@ pub fn type_check<'a>(
     (
         resolved_idents,
         types.into_iter().collect(),
-        ident_type_map
-            .into_iter()
-            .map(|(ident, v)| (ident, type_variable_tracker.find(v)))
-            .collect(),
+        type_variable_tracker,
     )
 }
 
@@ -584,7 +580,8 @@ fn constructor_type(d: DataDecl) -> TypeUnit {
 }
 
 fn min_type_incomplite<'a>(
-    expr: &Expr<'a>,
+    (expr, type_variable): &ExprWithType<'a>,
+    type_variable_tracker: &mut TypeVariableTracker<'a>,
 ) -> (
     ast_level2::IncompleteType<'a>,
     Resolved,
@@ -599,13 +596,15 @@ fn min_type_incomplite<'a>(
                 resolved_idents,
                 ident_type_map,
             ): (Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>) =
-                multiunzip(arms.iter().map(arm_min_type));
+                multiunzip(arms.iter().map(|arm| {
+                    arm_min_type(arm, type_variable_tracker)
+                }));
             let resolved_idents = resolved_idents.concat();
             let (args, rtns): (
                 Vec<types::Type<'a>>,
                 Vec<types::Type<'a>>,
             ) = arm_types.into_iter().unzip();
-            let constructor = if args.len() == 1 {
+            let constructor: Type = if args.len() == 1 {
                 TypeUnit::Fn(
                     args.into_iter().next().unwrap(),
                     rtns.into_iter().next().unwrap(),
@@ -615,10 +614,13 @@ fn min_type_incomplite<'a>(
                     args.into_iter().flatten().collect(),
                     rtns.into_iter().flatten().collect(),
                 )
-            };
+            }
+            .into();
+            type_variable_tracker
+                .insert(*type_variable, constructor.clone());
             (
                 ast_level2::IncompleteType {
-                    constructor: constructor.into(),
+                    constructor,
                     variable_requirements: variable_requirements
                         .concat(),
                     subtype_relation: subtype_relation
@@ -630,23 +632,22 @@ fn min_type_incomplite<'a>(
                 ident_type_map.concat(),
             )
         }
-        Expr::Number(_) => (
-            construct_type("Num").into(),
-            Default::default(),
-            Default::default(),
-        ),
-        Expr::StrLiteral(_) => (
-            construct_type("String").into(),
-            Default::default(),
-            Default::default(),
-        ),
+        Expr::Number(_) => {
+            let t = construct_type("Num");
+            type_variable_tracker.insert(*type_variable, t.clone());
+            (t.into(), Default::default(), Default::default())
+        }
+        Expr::StrLiteral(_) => {
+            let t = construct_type("String");
+            type_variable_tracker.insert(*type_variable, t.clone());
+            (t.into(), Default::default(), Default::default())
+        }
         Expr::Ident {
             name: info,
             ident_id,
             ..
         } => {
-            let v = TypeVariable::new();
-            let t: Type = TypeUnit::Variable(v).into();
+            let t: Type = TypeUnit::Variable(*type_variable).into();
             (
                 ast_level2::IncompleteType {
                     constructor: t.clone(),
@@ -654,7 +655,7 @@ fn min_type_incomplite<'a>(
                     subtype_relation: BTreeSet::new(),
                 },
                 Default::default(),
-                vec![(*ident_id, v)],
+                vec![(*ident_id, *type_variable)],
             )
         }
         Expr::Decl(_) => {
@@ -667,10 +668,11 @@ fn min_type_incomplite<'a>(
         }
         Expr::Call(f, a) => {
             let (f_t, resolved1, ident_type_map1) =
-                min_type_incomplite(f);
+                min_type_incomplite(f, type_variable_tracker);
             let (a_t, resolved2, ident_type_map2) =
-                min_type_incomplite(a);
-            let b: types::Type = TypeUnit::new_variable().into();
+                min_type_incomplite(a, type_variable_tracker);
+            let b: types::Type =
+                TypeUnit::Variable(*type_variable).into();
             let c: types::Type = TypeUnit::new_variable().into();
             // c -> b
             let cb_fn = TypeUnit::Fn(c.clone(), b.clone());
@@ -708,7 +710,8 @@ fn min_type_incomplite<'a>(
 }
 
 fn multi_expr_min_type<'a>(
-    exprs: &[Expr<'a>],
+    exprs: &[(Expr<'a>, TypeVariable)],
+    type_variable_tracker: &mut TypeVariableTracker<'a>,
 ) -> (
     ast_level2::IncompleteType<'a>,
     Resolved,
@@ -722,7 +725,7 @@ fn multi_expr_min_type<'a>(
         .iter()
         .map(|e| {
             let (t, resolved, mut ident_type) =
-                min_type_incomplite(e);
+                min_type_incomplite(e, type_variable_tracker);
             variable_requirements
                 .append(&mut t.variable_requirements.clone());
             subtype_relation.extend(t.subtype_relation.clone());
@@ -751,6 +754,7 @@ type IdentTypeMap = Vec<(IdentId, TypeVariable)>;
 /// Returns (argument type, return type), variable requirements, subtype relation, resolved idents.
 fn arm_min_type<'a>(
     arm: &FnArm<'a>,
+    type_variable_tracker: &mut TypeVariableTracker<'a>,
 ) -> (
     (types::Type<'a>, types::Type<'a>),
     Vec<VariableRequirement<'a>>,
@@ -759,7 +763,7 @@ fn arm_min_type<'a>(
     IdentTypeMap,
 ) {
     let (body_type, mut resolved_idents, ident_type_map) =
-        multi_expr_min_type(&arm.exprs);
+        multi_expr_min_type(&arm.exprs, type_variable_tracker);
     let (types, bindings): (Vec<_>, Vec<_>) =
         arm.pattern.iter().map(pattern_to_type).unzip();
     let mut arm_type = body_type.constructor;

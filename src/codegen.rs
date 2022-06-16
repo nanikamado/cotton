@@ -1,6 +1,6 @@
 use crate::{
     ast_level2::{decl_id::DeclId, DataDecl, Pattern},
-    ast_level3::{Ast, Expr, FnArm, VariableDecl},
+    ast_level3::{Ast, Expr, ExprWithType, FnArm, VariableDecl},
     intrinsics::IntrinsicVariable,
 };
 use fxhash::FxHashMap;
@@ -79,7 +79,7 @@ static PRIMITIVES_DEF: Lazy<FxHashMap<IntrinsicVariable, &str>> =
         .collect()
     });
 
-fn expr(e: &Expr, name_count: u32) -> String {
+fn expr((e, _): &ExprWithType, name_count: u32) -> String {
     match e {
         Expr::Lambda(a) => format!(
             r#"{}{}$$unexpected()"#,

@@ -65,9 +65,11 @@ where
 pub struct VariableDecl<'a> {
     pub name: &'a str,
     pub type_annotation: Option<IncompleteType<'a>>,
-    pub value: Expr<'a>,
+    pub value: ExprWithType<'a>,
     pub decl_id: DeclId,
 }
+
+pub type ExprWithType<'a> = (Expr<'a>, TypeVariable);
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr<'a> {
@@ -76,14 +78,14 @@ pub enum Expr<'a> {
     StrLiteral(&'a str),
     Ident { name: &'a str, ident_id: IdentId },
     Decl(Box<VariableDecl<'a>>),
-    Call(Box<Expr<'a>>, Box<Expr<'a>>),
+    Call(Box<ExprWithType<'a>>, Box<ExprWithType<'a>>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FnArm<'a> {
     pub pattern: Vec<Pattern<'a>>,
     pub pattern_type: Vec<Option<Type<'a>>>,
-    pub exprs: Vec<Expr<'a>>,
+    pub exprs: Vec<ExprWithType<'a>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -186,9 +188,9 @@ fn expr<'a>(
     e: ast_level1::Expr<'a>,
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
-) -> Expr<'a> {
+) -> ExprWithType<'a> {
     use Expr::*;
-    match e {
+    let e = match e {
         ast_level1::Expr::Lambda(arms) => Lambda(
             arms.into_iter()
                 .map(move |arm| {
@@ -211,7 +213,8 @@ fn expr<'a>(
             Box::new(expr(*f, data_decl_map, type_variable_names)),
             Box::new(expr(*a, data_decl_map, type_variable_names)),
         ),
-    }
+    };
+    (e, TypeVariable::new())
 }
 
 fn fn_arm<'a>(

@@ -1,11 +1,12 @@
 mod type_check;
 pub mod type_util;
 
-use self::type_check::{type_check, ResolvedIdents, VariableId};
+use self::type_check::{
+    type_check, ResolvedIdents, TypeVariableTracker, VariableId,
+};
 use crate::ast_level2::{
     self,
     decl_id::DeclId,
-    ident_id::IdentId,
     types::{Type, TypeVariable},
     DataDecl, IncompleteType, Pattern,
 };
@@ -19,16 +20,17 @@ pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl<'a>>,
     pub entry_point: DeclId,
-    pub type_map: Vec<(IdentId, Type<'a>)>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct VariableDecl<'a> {
     pub name: &'a str,
     pub type_: IncompleteType<'a>,
-    pub value: Expr<'a>,
+    pub value: ExprWithType<'a>,
     pub decl_id: DeclId,
 }
+
+pub type ExprWithType<'a> = (Expr<'a>, Type<'a>);
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr<'a> {
@@ -41,30 +43,32 @@ pub enum Expr<'a> {
         type_args: Vec<(TypeVariable, Type<'a>)>,
     },
     Decl(Box<VariableDecl<'a>>),
-    Call(Box<Expr<'a>>, Box<Expr<'a>>),
-    DoBlock(Vec<Expr<'a>>),
+    Call(Box<ExprWithType<'a>>, Box<ExprWithType<'a>>),
+    DoBlock(Vec<ExprWithType<'a>>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FnArm<'a> {
     pub pattern: Vec<Pattern<'a>>,
     pub pattern_type: Vec<Option<Type<'a>>>,
-    pub expr: Expr<'a>,
+    pub expr: ExprWithType<'a>,
 }
 
 impl<'a> From<ast_level2::Ast<'a>> for Ast<'a> {
     fn from(ast: ast_level2::Ast<'a>) -> Self {
-        let (resolved_idents, types_of_decls, type_map) =
+        let (resolved_idents, types_of_decls, mut type_map) =
             type_check(&ast);
         log::trace!("{:?}", resolved_idents);
-        for (ident, t) in &type_map {
-            log::debug!("{ident} : {t}");
-        }
         let variable_decl: Vec<_> = ast
             .variable_decl
             .into_iter()
             .map(move |d| {
-                variable_decl(d, &resolved_idents, &types_of_decls)
+                variable_decl(
+                    d,
+                    &resolved_idents,
+                    &types_of_decls,
+                    &mut type_map,
+                )
             })
             .collect();
         for v in &variable_decl {
@@ -74,7 +78,6 @@ impl<'a> From<ast_level2::Ast<'a>> for Ast<'a> {
             variable_decl,
             data_decl: ast.data_decl,
             entry_point: ast.entry_point,
-            type_map,
         }
     }
 }
@@ -83,6 +86,7 @@ fn variable_decl<'a>(
     d: ast_level2::VariableDecl<'a>,
     resolved_idents: &ResolvedIdents<'a>,
     types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
+    type_variable_tracker: &mut TypeVariableTracker<'a>,
 ) -> VariableDecl<'a> {
     let type_ = if let Some(t) = d.type_annotation {
         t
@@ -92,22 +96,33 @@ fn variable_decl<'a>(
     VariableDecl {
         name: d.name,
         type_,
-        value: expr(d.value, resolved_idents, types_of_decls),
+        value: expr(
+            d.value,
+            resolved_idents,
+            types_of_decls,
+            type_variable_tracker,
+        ),
         decl_id: d.decl_id,
     }
 }
 
 fn expr<'a>(
-    e: ast_level2::Expr<'a>,
+    (e, t): ast_level2::ExprWithType<'a>,
     resolved_idents: &ResolvedIdents<'a>,
     types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
-) -> Expr<'a> {
+    type_variable_tracker: &mut TypeVariableTracker<'a>,
+) -> ExprWithType<'a> {
     use Expr::*;
-    match e {
+    let e = match e {
         ast_level2::Expr::Lambda(a) => Lambda(
             a.into_iter()
                 .map(|arm| {
-                    fn_arm(arm, resolved_idents, types_of_decls)
+                    fn_arm(
+                        arm,
+                        resolved_idents,
+                        types_of_decls,
+                        type_variable_tracker,
+                    )
                 })
                 .collect(),
         ),
@@ -142,27 +157,50 @@ fn expr<'a>(
             *a,
             resolved_idents,
             types_of_decls,
+            type_variable_tracker,
         ))),
         ast_level2::Expr::Call(f, a) => Call(
-            expr(*f, resolved_idents, types_of_decls).into(),
-            expr(*a, resolved_idents, types_of_decls).into(),
+            expr(
+                *f,
+                resolved_idents,
+                types_of_decls,
+                type_variable_tracker,
+            )
+            .into(),
+            expr(
+                *a,
+                resolved_idents,
+                types_of_decls,
+                type_variable_tracker,
+            )
+            .into(),
         ),
-    }
+    };
+    (e, type_variable_tracker.find(t))
 }
 
 fn fn_arm<'a>(
     arm: ast_level2::FnArm<'a>,
     resolved_idents: &ResolvedIdents<'a>,
     types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
+    type_variable_tracker: &mut TypeVariableTracker<'a>,
 ) -> FnArm<'a> {
+    let exprs: Vec<_> = arm
+        .exprs
+        .into_iter()
+        .map(|a| {
+            expr(
+                a,
+                resolved_idents,
+                types_of_decls,
+                type_variable_tracker,
+            )
+        })
+        .collect();
+    let last_type = exprs[exprs.len() - 1].1.clone();
     FnArm {
         pattern: arm.pattern,
         pattern_type: arm.pattern_type,
-        expr: Expr::DoBlock(
-            arm.exprs
-                .into_iter()
-                .map(|a| expr(a, resolved_idents, types_of_decls))
-                .collect(),
-        ),
+        expr: (Expr::DoBlock(exprs), last_type),
     }
 }

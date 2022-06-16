@@ -37,7 +37,7 @@ where
 pub struct TypeVariableTracker<'a>(BTreeMap<TypeVariable, Type<'a>>);
 
 impl<'a> TypeVariableTracker<'a> {
-    fn insert(&mut self, key: TypeVariable, value: Type<'a>) {
+    pub fn insert(&mut self, key: TypeVariable, value: Type<'a>) {
         let key = self.find(key);
         let value = self.normalize_type(value);
         if key == value {
