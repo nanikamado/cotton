@@ -422,7 +422,7 @@ impl Display for Type<'_> {
             Variable(n) => write!(f, "{}", n),
             Empty => write!(f, "∅"),
             RecursiveAlias { alias, body } => {
-                write!(f, "rec[t{} = {}]", alias, *body)
+                write!(f, "rec[{} = {}]", alias, *body)
             }
         }
     }
@@ -458,9 +458,9 @@ impl Display for TypeUnit<'_> {
                     write!(f, "{} -> {}", arg, rtn)
                 }
             }
-            Variable(n) => write!(f, "t{}", n),
+            Variable(n) => write!(f, "{}", n),
             RecursiveAlias { alias, body } => {
-                write!(f, "rec[t{} = {}]", alias, *body)
+                write!(f, "rec[{} = {}]", alias, *body)
             }
         }
     }
