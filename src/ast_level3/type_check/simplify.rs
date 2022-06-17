@@ -16,8 +16,6 @@ use std::{
     vec,
 };
 
-type HashBag<T> = hashbag::HashBag<T, fxhash::FxBuildHasher>;
-
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
 )]
@@ -37,46 +35,61 @@ where
 pub struct TypeVariableTracker<'a>(BTreeMap<TypeVariable, Type<'a>>);
 
 impl<'a> TypeVariableTracker<'a> {
-    pub fn insert(&mut self, key: TypeVariable, value: Type<'a>) {
-        let key = self.find(key);
-        let value = self.normalize_type(value);
+    pub fn insert(&mut self, k: TypeVariable, v: Type<'a>) {
+        let key = self.find(k);
+        let value = self.normalize_type(v.clone());
+        log::debug!(
+            "{k} {} ----> {v} {}",
+            match key.matchable_ref() {
+                TypeMatchableRef::Variable(key) if k == key =>
+                    "".to_string(),
+                _ => format!("({})", key),
+            },
+            if v == value {
+                "".to_string()
+            } else {
+                format!("({})", value)
+            }
+        );
         if key == value {
             return;
         }
-        match (key.matchable_ref(), value.matchable_ref()) {
-            (
-                TypeMatchableRef::Variable(key),
-                TypeMatchableRef::Variable(value),
-            ) => {
-                if value < key {
-                    self.0.insert(
-                        value,
-                        TypeUnit::Variable(key).into(),
-                    );
-                } else {
-                    self.0.insert(
-                        key,
-                        TypeUnit::Variable(value).into(),
-                    );
+        let (key, value) =
+            match (key.matchable_ref(), value.matchable_ref()) {
+                (
+                    TypeMatchableRef::Variable(key),
+                    TypeMatchableRef::Variable(value),
+                ) => {
+                    if value < key {
+                        (value, TypeUnit::Variable(key).into())
+                    } else {
+                        (key, TypeUnit::Variable(value).into())
+                    }
                 }
-            }
-            (TypeMatchableRef::Variable(key), _)
-                if !value.all_type_variables().contains(&key) =>
-            {
-                self.0.insert(key, value);
-            }
-            (_, TypeMatchableRef::Variable(value))
-                if !key.all_type_variables().contains(&value) =>
-            {
-                self.0.insert(value, key);
-            }
-            (TypeMatchableRef::Variable(_), _)
-            | (_, TypeMatchableRef::Variable(_)) => {
-                panic!("recursion is not allowed.",)
-            }
-            _ => {
-                todo!()
-            }
+                (TypeMatchableRef::Variable(key), _)
+                    if !value.all_type_variables().contains(&key) =>
+                {
+                    (key, value)
+                }
+                (_, TypeMatchableRef::Variable(value))
+                    if !key.all_type_variables().contains(&value) =>
+                {
+                    (value, key)
+                }
+                (TypeMatchableRef::Variable(_), _)
+                | (_, TypeMatchableRef::Variable(_)) => {
+                    panic!("recursion is not allowed.",)
+                }
+                _ => {
+                    todo!()
+                }
+            };
+        if let Some(old) = self.0.get(&key) {
+            log::error!(
+                "{key} is already pointing to {old}. ignored"
+            );
+        } else {
+            self.0.insert(key, value);
         }
     }
 
@@ -106,7 +119,17 @@ impl<'a> TypeVariableTracker<'a> {
                     }
                     .into()
                 }
-                tu @ TypeUnit::Normal { .. } => tu.into(),
+                TypeUnit::Normal { name, args, id } => {
+                    TypeUnit::Normal {
+                        name,
+                        args: args
+                            .into_iter()
+                            .map(|t| self.normalize_type(t))
+                            .collect(),
+                        id,
+                    }
+                    .into()
+                }
             })
             .collect()
     }
@@ -256,30 +279,6 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
             _ => (),
         }
     }
-    let covariant_candidates = mk_covariant_candidates(&t);
-    let contravariant_candidates = mk_contravariant_candidates(&t);
-    let type_variables_in_sub_rel: HashBag<TypeVariable> = t
-        .subtype_relation
-        .iter()
-        .flat_map(|(a, b)| {
-            let mut a = a.all_type_variables();
-            a.extend(b.all_type_variables());
-            a
-        })
-        .collect();
-    t.subtype_relation = t
-        .subtype_relation
-        .into_iter()
-        .filter(|(_, a)| {
-            if let TypeMatchableRef::Variable(a) = a.matchable_ref() {
-                contravariant_candidates.contains(&a)
-                    || covariant_candidates.contains(&a)
-                    || type_variables_in_sub_rel.contains(&a) >= 2
-            } else {
-                true
-            }
-        })
-        .collect();
     let updated = fxhash::hash(&t) != hash_before_simplify;
     Some((t, updated))
 }
