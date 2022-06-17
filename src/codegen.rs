@@ -94,13 +94,16 @@ fn expr((e, t): &ExprWithType, name_count: u32) -> String {
         Expr::Ident {
             name: info,
             variable_id,
-            ..
+            type_args,
         } => {
             format!(
-                "${}${} /* ({}) */",
+                "${}${} /* ({}) [{}] */",
                 variable_id,
                 convert_name(info),
-                info
+                info,
+                type_args.iter().format_with(", ", |(v, t), f| f(
+                    &format!("({v} ~> {t})")
+                ))
             )
         }
         Expr::Decl(a) => variable_decl(a),
