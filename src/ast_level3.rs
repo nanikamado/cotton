@@ -59,6 +59,7 @@ impl<'a> From<ast_level2::Ast<'a>> for Ast<'a> {
         let (resolved_idents, types_of_decls, mut type_map) =
             type_check(&ast);
         log::trace!("{:?}", resolved_idents);
+        log::debug!("type_variable_tracker: {}", type_map);
         let variable_decl: Vec<_> = ast
             .variable_decl
             .into_iter()
@@ -88,14 +89,27 @@ fn variable_decl<'a>(
     types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
     type_variable_tracker: &mut TypeVariableTracker<'a>,
 ) -> VariableDecl<'a> {
-    let type_ = if let Some(t) = d.type_annotation {
-        t
-    } else {
-        types_of_decls.get(&d.decl_id).unwrap().clone()
-    };
+    let decl_type = types_of_decls.get(&d.decl_id).unwrap();
+    assert_eq!(0, decl_type.variable_requirements.len());
     VariableDecl {
         name: d.name,
-        type_,
+        type_: IncompleteType {
+            constructor: type_variable_tracker
+                .normalize_type(decl_type.constructor.clone()),
+            variable_requirements: Vec::new(),
+            subtype_relation: decl_type
+                .subtype_relation
+                .iter()
+                .map(|(a, b)| {
+                    (
+                        type_variable_tracker
+                            .normalize_type(a.clone()),
+                        type_variable_tracker
+                            .normalize_type(b.clone()),
+                    )
+                })
+                .collect(),
+        },
         value: expr(
             d.value,
             resolved_idents,

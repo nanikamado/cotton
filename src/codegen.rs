@@ -51,9 +51,10 @@ fn data_decl(d: DataDecl) -> String {
 
 fn variable_decl(d: &VariableDecl) -> String {
     format!(
-        "let ${}${}={};",
+        "let ${}${}/*: {} */={};",
         d.decl_id,
         convert_name(d.name),
+        d.type_,
         expr(&d.value, 0)
     )
 }
@@ -79,8 +80,8 @@ static PRIMITIVES_DEF: Lazy<FxHashMap<IntrinsicVariable, &str>> =
         .collect()
     });
 
-fn expr((e, _): &ExprWithType, name_count: u32) -> String {
-    match e {
+fn expr((e, t): &ExprWithType, name_count: u32) -> String {
+    let s = match e {
         Expr::Lambda(a) => format!(
             r#"{}{}$$unexpected()"#,
             (0..a[0].pattern.len())
@@ -95,7 +96,12 @@ fn expr((e, _): &ExprWithType, name_count: u32) -> String {
             variable_id,
             ..
         } => {
-            format!("${}${}", variable_id, convert_name(info))
+            format!(
+                "${}${} /* ({}) */",
+                variable_id,
+                convert_name(info),
+                info
+            )
         }
         Expr::Decl(a) => variable_decl(a),
         Expr::Call(f, a) => format!(
@@ -109,7 +115,8 @@ fn expr((e, _): &ExprWithType, name_count: u32) -> String {
                 exprs.iter().map(|e| expr(e, name_count)).join(",")
             )
         }
-    }
+    };
+    format!("{s} /*: {t} */")
 }
 
 fn fn_arm(e: &FnArm, name_count: u32) -> String {
