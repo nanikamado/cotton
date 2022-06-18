@@ -1,13 +1,14 @@
 mod type_check;
 pub mod type_util;
 
+pub use self::type_check::VariableId;
 use self::type_check::{
-    type_check, ResolvedIdents, TypeVariableTracker, VariableId,
+    type_check, ResolvedIdents, TypeVariableTracker,
 };
 use crate::ast_level2::{
     self,
     decl_id::DeclId,
-    types::{Type, TypeVariable},
+    types::{Type, TypeMatchable, TypeVariable},
     DataDecl, IncompleteType, Pattern,
 };
 use fxhash::FxHashMap;
@@ -159,6 +160,17 @@ fn expr<'a>(
                     )
                 })
                 .clone();
+            let type_args: Vec<_> = type_args
+                .into_iter()
+                .map(|(v, t)| {
+                    let v = type_variable_tracker.find(v);
+                    let v = match v.matchable() {
+                        TypeMatchable::Variable(v) => v,
+                        _ => panic!(),
+                    };
+                    (v, type_variable_tracker.normalize_type(t))
+                })
+                .collect();
             log::debug!(
                 "{} -- {} -- [{}]",
                 name,

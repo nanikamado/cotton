@@ -1,6 +1,6 @@
 use crate::{
     ast_level2::{decl_id::DeclId, DataDecl, Pattern},
-    ast_level3::{Ast, Expr, ExprWithType, FnArm, VariableDecl},
+    ast_level4::{Ast, Expr, ExprWithType, FnArm, VariableDecl},
     intrinsics::IntrinsicVariable,
 };
 use fxhash::FxHashMap;
@@ -51,10 +51,9 @@ fn data_decl(d: DataDecl) -> String {
 
 fn variable_decl(d: &VariableDecl) -> String {
     format!(
-        "let ${}${}/*: {} */={};",
+        "let ${}${}={};",
         d.decl_id,
         convert_name(d.name),
-        d.type_,
         expr(&d.value, 0)
     )
 }
@@ -94,19 +93,14 @@ fn expr((e, t): &ExprWithType, name_count: u32) -> String {
         Expr::Ident {
             name: info,
             variable_id,
-            type_args,
         } => {
             format!(
-                "${}${} /* ({}) [{}] */",
+                "${}${} /* ({}) */",
                 variable_id,
                 convert_name(info),
                 info,
-                type_args.iter().format_with(", ", |(v, t), f| f(
-                    &format!("({v} ~> {t})")
-                ))
             )
         }
-        Expr::Decl(a) => variable_decl(a),
         Expr::Call(f, a) => format!(
             "{}({})",
             expr(&*f, name_count),
