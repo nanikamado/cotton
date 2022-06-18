@@ -371,16 +371,6 @@ fn resolve_scc<'a>(
     let names_in_scc: FxHashSet<_> =
         name_vec.iter().copied().collect();
     log::debug!("name of unresolved: {:?}", names_in_scc);
-    log::debug!(
-        "resolved = {{{}}}",
-        resolved_variable_map.get(".").iter().format_with(
-            ", ",
-            |t, f| f(&format!(
-                ". : {}",
-                t.iter().format_with("\\/", |t, f| f(&t.incomplete))
-            ))
-        )
-    );
     // The order of resolving is important.
     // Requirements that are easier to solve should be solved earlier.
     variable_requirements.sort_unstable_by_key(|(req_name, _, _)| {
