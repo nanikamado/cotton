@@ -10,8 +10,8 @@ use crate::{
 };
 use fxhash::FxHashMap;
 
-/// # Difference between `ast_level2::Ast` and `ast_level3::Ast`
-/// - The names of variables are resolved.
+/// # Difference between `ast_level3::Ast` and `ast_level4::Ast`
+/// - Polymorphic variables in `ast_level3::Ast` are replicated and become monomorphic in `ast_level4::Ast`.
 #[derive(Debug, PartialEq)]
 pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
