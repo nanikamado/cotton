@@ -56,10 +56,16 @@ pub struct FnArm<'a> {
 
 impl<'a> From<ast_level2::Ast<'a>> for Ast<'a> {
     fn from(ast: ast_level2::Ast<'a>) -> Self {
-        let (resolved_idents, types_of_decls, mut type_map) =
-            type_check(&ast);
+        let (
+            resolved_idents,
+            types_of_decls,
+            mut type_variable_tracker,
+        ) = type_check(&ast);
         log::trace!("{:?}", resolved_idents);
-        log::debug!("type_variable_tracker: {}", type_map);
+        log::debug!(
+            "type_variable_tracker: {}",
+            type_variable_tracker
+        );
         let variable_decl: Vec<_> = ast
             .variable_decl
             .into_iter()
@@ -68,7 +74,7 @@ impl<'a> From<ast_level2::Ast<'a>> for Ast<'a> {
                     d,
                     &resolved_idents,
                     &types_of_decls,
-                    &mut type_map,
+                    &mut type_variable_tracker,
                 )
             })
             .collect();
