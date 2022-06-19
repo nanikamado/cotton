@@ -1,6 +1,8 @@
 use crate::{
-    ast_level2::{decl_id::DeclId, DataDecl, Pattern},
-    ast_level4::{Ast, Expr, ExprWithType, FnArm, VariableDecl},
+    ast_level2::{decl_id::DeclId, Pattern},
+    ast_level4::{
+        Ast, DataDecl, Expr, ExprWithType, FnArm, VariableDecl,
+    },
     intrinsics::IntrinsicVariable,
 };
 use fxhash::FxHashMap;
@@ -42,12 +44,10 @@ fn data_decl(d: DataDecl) -> String {
         "let ${}${}={}({{name:'${}${}',{}}});",
         d.decl_id,
         name,
-        (0..d.fields.len()).map(|i| format!("${}=>", i)).join(""),
+        (0..d.field_len).map(|i| format!("${}=>", i)).join(""),
         d.decl_id,
         name,
-        (0..d.fields.len())
-            .map(|i| format!("{0}:${0}", i))
-            .join(", "),
+        (0..d.field_len).map(|i| format!("{0}:${0}", i)).join(", "),
     )
 }
 

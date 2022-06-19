@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 
 use crate::{
     ast_level2::{
+        self,
         decl_id::{new_decl_id, DeclId},
         types::{Type, TypeVariable},
-        DataDecl, Pattern, TypeConstructor,
+        Pattern, TypeConstructor,
     },
     ast_level3::{self, VariableId},
 };
@@ -48,6 +49,13 @@ pub struct FnArm<'a> {
     pub expr: ExprWithType<'a>,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct DataDecl<'a> {
+    pub name: &'a str,
+    pub field_len: usize,
+    pub decl_id: DeclId,
+}
+
 impl<'a> From<ast_level3::Ast<'a>> for Ast<'a> {
     fn from(ast: ast_level3::Ast<'a>) -> Self {
         let (variable_decl, entry_point) = variable_decl(
@@ -55,9 +63,18 @@ impl<'a> From<ast_level3::Ast<'a>> for Ast<'a> {
             &ast.data_decl,
             ast.entry_point,
         );
+        let data_decl = ast
+            .data_decl
+            .into_iter()
+            .map(|d| DataDecl {
+                name: d.name,
+                field_len: d.fields.len(),
+                decl_id: d.decl_id,
+            })
+            .collect();
         Self {
             variable_decl,
-            data_decl: ast.data_decl,
+            data_decl,
             entry_point,
         }
     }
@@ -73,7 +90,7 @@ struct Monomorphics<'a>(
 
 fn variable_decl<'a>(
     variable_decls: Vec<ast_level3::VariableDecl<'a>>,
-    data_decls: &[DataDecl<'a>],
+    data_decls: &[ast_level2::DataDecl<'a>],
     entry_point: DeclId,
 ) -> (Vec<VariableDecl<'a>>, DeclId) {
     let variable_decls: FxHashMap<DeclId, &ast_level3::VariableDecl> =
@@ -84,13 +101,14 @@ fn variable_decl<'a>(
                 (did, d)
             })
             .collect();
-    let data_decls: FxHashMap<DeclId, &DataDecl> = data_decls
-        .iter()
-        .map(|d| {
-            let did = d.decl_id;
-            (did, d)
-        })
-        .collect();
+    let data_decls: FxHashMap<DeclId, &ast_level2::DataDecl<'a>> =
+        data_decls
+            .iter()
+            .map(|d| {
+                let did = d.decl_id;
+                (did, d)
+            })
+            .collect();
     log::debug!("decl_decls: {:?}", variable_decls.keys());
     let mut monomorphics = Monomorphics::default();
     let entry_point = monomorphics.get_monomorphic_variables(
@@ -113,7 +131,7 @@ impl<'a> Monomorphics<'a> {
             DeclId,
             &ast_level3::VariableDecl<'a>,
         >,
-        data_decls: &FxHashMap<DeclId, &DataDecl>,
+        data_decls: &FxHashMap<DeclId, &ast_level2::DataDecl<'a>>,
         mut trace: FxHashMap<DeclId, DeclId>,
     ) -> DeclId {
         if let Some(d) = trace.get(&old_decl_id) {
@@ -155,7 +173,7 @@ impl<'a> Monomorphics<'a> {
             DeclId,
             &ast_level3::VariableDecl<'a>,
         >,
-        data_decls: &FxHashMap<DeclId, &DataDecl>,
+        data_decls: &FxHashMap<DeclId, &ast_level2::DataDecl<'a>>,
         trace: FxHashMap<DeclId, DeclId>,
     ) -> ExprWithType<'a> {
         for (v, to) in args {
