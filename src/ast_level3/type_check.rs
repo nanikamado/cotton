@@ -567,7 +567,7 @@ fn constructor_type(d: DataDecl) -> TypeUnit {
         id: TypeId::DeclId(d.decl_id),
     };
     for field in fields.into_iter().rev() {
-        t = TypeUnit::Fn(field.into(), t.into())
+        t = TypeUnit::Fn(field, t.into())
     }
     t
 }
