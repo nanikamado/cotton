@@ -36,6 +36,7 @@ pub enum Expr<'a> {
     Ident {
         name: &'a str,
         variable_id: VariableId,
+        type_args: Option<Vec<Type<'a>>>,
     },
     Call(Box<ExprWithType<'a>>, Box<ExprWithType<'a>>),
     DoBlock(Vec<ExprWithType<'a>>),
@@ -49,8 +50,11 @@ pub struct FnArm<'a> {
 
 impl<'a> From<ast_level3::Ast<'a>> for Ast<'a> {
     fn from(ast: ast_level3::Ast<'a>) -> Self {
-        let (variable_decl, entry_point) =
-            variable_decl(ast.variable_decl, ast.entry_point);
+        let (variable_decl, entry_point) = variable_decl(
+            ast.variable_decl,
+            &ast.data_decl,
+            ast.entry_point,
+        );
         Self {
             variable_decl,
             data_decl: ast.data_decl,
@@ -67,24 +71,33 @@ struct Monomorphics<'a>(
     >,
 );
 
-fn variable_decl(
-    decls: Vec<ast_level3::VariableDecl>,
+fn variable_decl<'a>(
+    variable_decls: Vec<ast_level3::VariableDecl<'a>>,
+    data_decls: &[DataDecl<'a>],
     entry_point: DeclId,
-) -> (Vec<VariableDecl>, DeclId) {
-    let decl_map: FxHashMap<DeclId, &ast_level3::VariableDecl> =
-        decls
+) -> (Vec<VariableDecl<'a>>, DeclId) {
+    let variable_decls: FxHashMap<DeclId, &ast_level3::VariableDecl> =
+        variable_decls
             .iter()
             .map(|d| {
                 let did = d.decl_id;
                 (did, d)
             })
             .collect();
-    log::debug!("decl_map: {:?}", decl_map.keys());
+    let data_decls: FxHashMap<DeclId, &DataDecl> = data_decls
+        .iter()
+        .map(|d| {
+            let did = d.decl_id;
+            (did, d)
+        })
+        .collect();
+    log::debug!("decl_decls: {:?}", variable_decls.keys());
     let mut monomorphics = Monomorphics::default();
     let entry_point = monomorphics.get_monomorphic_variables(
         entry_point,
         Default::default(),
-        &decl_map,
+        &variable_decls,
+        &data_decls,
         Default::default(),
     );
     let decls = monomorphics.0.into_iter().map(|(_, d)| d).collect();
@@ -96,7 +109,11 @@ impl<'a> Monomorphics<'a> {
         &mut self,
         old_decl_id: DeclId,
         args: BTreeMap<TypeVariable, Type<'a>>,
-        decl_map: &FxHashMap<DeclId, &ast_level3::VariableDecl<'a>>,
+        variable_decls: &FxHashMap<
+            DeclId,
+            &ast_level3::VariableDecl<'a>,
+        >,
+        data_decls: &FxHashMap<DeclId, &DataDecl>,
         mut trace: FxHashMap<DeclId, DeclId>,
     ) -> DeclId {
         if let Some(d) = trace.get(&old_decl_id) {
@@ -105,12 +122,17 @@ impl<'a> Monomorphics<'a> {
             self.0.get(&(old_decl_id, args.clone()))
         {
             d.decl_id
-        } else if let Some(d) = decl_map.get(&old_decl_id) {
+        } else if let Some(d) = variable_decls.get(&old_decl_id) {
             let d = (*d).clone();
             let new_decl_id = new_decl_id();
             trace.insert(old_decl_id, new_decl_id);
-            let value =
-                self.monomorphy_expr(d.value, &args, decl_map, trace);
+            let value = self.monomorphy_expr(
+                d.value,
+                &args,
+                variable_decls,
+                data_decls,
+                trace,
+            );
             self.0.insert(
                 (old_decl_id, args),
                 VariableDecl {
@@ -129,7 +151,11 @@ impl<'a> Monomorphics<'a> {
         &mut self,
         (e, mut t): ast_level3::ExprWithType<'a>,
         args: &BTreeMap<TypeVariable, Type<'a>>,
-        decl_map: &FxHashMap<DeclId, &ast_level3::VariableDecl<'a>>,
+        variable_decls: &FxHashMap<
+            DeclId,
+            &ast_level3::VariableDecl<'a>,
+        >,
+        data_decls: &FxHashMap<DeclId, &DataDecl>,
         trace: FxHashMap<DeclId, DeclId>,
     ) -> ExprWithType<'a> {
         for (v, to) in args {
@@ -142,7 +168,8 @@ impl<'a> Monomorphics<'a> {
                         let expr = self.monomorphy_expr(
                             a.expr,
                             args,
-                            decl_map,
+                            variable_decls,
+                            data_decls,
                             trace.clone(),
                         );
                         FnArm {
@@ -159,10 +186,10 @@ impl<'a> Monomorphics<'a> {
                 variable_id,
                 type_args,
             } => {
+                let mut new_type_args = None;
                 let variable_id = match variable_id {
-                    VariableId::Decl(decl_id) => VariableId::Decl(
-                        self.get_monomorphic_variables(
-                            decl_id,
+                    VariableId::Decl(decl_id) => {
+                        let type_args: BTreeMap<TypeVariable, Type> =
                             type_args
                                 .into_iter()
                                 .map(|(v, mut t)| {
@@ -171,26 +198,53 @@ impl<'a> Monomorphics<'a> {
                                     }
                                     (v, t)
                                 })
-                                .collect(),
-                            decl_map,
-                            trace,
-                        ),
-                    ),
+                                .collect();
+                        if let Some(d) = data_decls.get(&decl_id) {
+                            new_type_args = Some(
+                                d.fields
+                                    .iter()
+                                    .map(|v| type_args[v].clone())
+                                    .collect(),
+                            );
+                            VariableId::Decl(decl_id)
+                        } else {
+                            VariableId::Decl(
+                                self.get_monomorphic_variables(
+                                    decl_id,
+                                    type_args,
+                                    variable_decls,
+                                    data_decls,
+                                    trace,
+                                ),
+                            )
+                        }
+                    }
                     a => a,
                 };
-                Expr::Ident { name, variable_id }
+                Expr::Ident {
+                    name,
+                    variable_id,
+                    type_args: new_type_args,
+                }
             }
             ast_level3::Expr::Decl(_) => unimplemented!(),
             ast_level3::Expr::Call(f, a) => Expr::Call(
                 self.monomorphy_expr(
                     *f,
                     args,
-                    decl_map,
+                    variable_decls,
+                    data_decls,
                     trace.clone(),
                 )
                 .into(),
-                self.monomorphy_expr(*a, args, decl_map, trace)
-                    .into(),
+                self.monomorphy_expr(
+                    *a,
+                    args,
+                    variable_decls,
+                    data_decls,
+                    trace,
+                )
+                .into(),
             ),
             ast_level3::Expr::DoBlock(exprs) => Expr::DoBlock(
                 exprs
@@ -199,7 +253,8 @@ impl<'a> Monomorphics<'a> {
                         self.monomorphy_expr(
                             expr,
                             args,
-                            decl_map,
+                            variable_decls,
+                            data_decls,
                             trace.clone(),
                         )
                     })
