@@ -762,9 +762,7 @@ mod tests {
             -> Num | String forall t1, t2, t3, t4 --
             = ()
             "#,
-        )
-        .unwrap()
-        .1;
+        );
         let ast: ast_level1::Ast = ast.into();
         let ast: ast_level2::Ast = ast.into();
         let req_t = ast
