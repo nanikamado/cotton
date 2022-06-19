@@ -42,10 +42,12 @@ fn data_decl(d: DataDecl) -> String {
         "let ${}${}={}({{name:'${}${}',{}}});",
         d.decl_id,
         name,
-        (0..d.field_len).map(|i| format!("${}=>", i)).join(""),
+        (0..d.fields.len()).map(|i| format!("${}=>", i)).join(""),
         d.decl_id,
         name,
-        (0..d.field_len).map(|i| format!("{0}:${0}", i)).join(", "),
+        (0..d.fields.len())
+            .map(|i| format!("{0}:${0}", i))
+            .join(", "),
     )
 }
 

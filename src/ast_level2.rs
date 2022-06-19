@@ -44,10 +44,10 @@ pub struct Ast<'a> {
     pub entry_point: DeclId,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DataDecl<'a> {
     pub name: &'a str,
-    pub field_len: usize,
+    pub fields: Vec<TypeVariable>,
     pub decl_id: DeclId,
 }
 
@@ -107,7 +107,9 @@ impl<'a> From<ast_level1::Ast<'a>> for Ast<'a> {
             .into_iter()
             .map(|d| DataDecl {
                 name: d.name,
-                field_len: d.field_len,
+                fields: (0..d.field_len)
+                    .map(|_| TypeVariable::new())
+                    .collect(),
                 decl_id: new_decl_id(),
             })
             .collect();
