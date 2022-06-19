@@ -96,9 +96,14 @@ impl<'a> TypeVariableTracker<'a> {
 
     pub fn find(&mut self, key: TypeVariable) -> Type<'a> {
         if let Some(t) = self.0.get(&key).cloned() {
-            let t = self.normalize_type(t);
-            self.0.insert(key, t.clone());
-            t
+            let t_new = self.normalize_type(t.clone());
+            if t_new == t {
+                t
+            } else {
+                let t_new = lift_recursive_alias(t_new);
+                self.0.insert(key, t_new.clone());
+                t_new
+            }
         } else {
             TypeUnit::Variable(key).into()
         }
