@@ -9,9 +9,9 @@ use crate::ast_level2::{
     self,
     decl_id::DeclId,
     types::{Type, TypeMatchable, TypeVariable},
-    DataDecl, IncompleteType, Pattern,
+    DataDecl, IncompleteType, Pattern, TypeConstructor,
 };
-use fxhash::FxHashMap;
+use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 
 /// # Difference between `ast_level2::Ast` and `ast_level3::Ast`
@@ -98,31 +98,32 @@ fn variable_decl<'a>(
 ) -> VariableDecl<'a> {
     let decl_type = types_of_decls.get(&d.decl_id).unwrap();
     assert_eq!(0, decl_type.variable_requirements.len());
+    let type_ = IncompleteType {
+        constructor: type_variable_tracker
+            .normalize_type(decl_type.constructor.clone()),
+        variable_requirements: Vec::new(),
+        subtype_relation: decl_type
+            .subtype_relation
+            .iter()
+            .map(|(a, b)| {
+                (
+                    type_variable_tracker.normalize_type(a.clone()),
+                    type_variable_tracker.normalize_type(b.clone()),
+                )
+            })
+            .collect(),
+    };
+    let value = expr(
+        d.value,
+        resolved_idents,
+        types_of_decls,
+        &type_.all_type_variables(),
+        type_variable_tracker,
+    );
     VariableDecl {
         name: d.name,
-        type_: IncompleteType {
-            constructor: type_variable_tracker
-                .normalize_type(decl_type.constructor.clone()),
-            variable_requirements: Vec::new(),
-            subtype_relation: decl_type
-                .subtype_relation
-                .iter()
-                .map(|(a, b)| {
-                    (
-                        type_variable_tracker
-                            .normalize_type(a.clone()),
-                        type_variable_tracker
-                            .normalize_type(b.clone()),
-                    )
-                })
-                .collect(),
-        },
-        value: expr(
-            d.value,
-            resolved_idents,
-            types_of_decls,
-            type_variable_tracker,
-        ),
+        type_,
+        value,
         decl_id: d.decl_id,
     }
 }
@@ -131,6 +132,7 @@ fn expr<'a>(
     (e, t): ast_level2::ExprWithType<'a>,
     resolved_idents: &ResolvedIdents<'a>,
     types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
+    fixed_variables: &FxHashSet<TypeVariable>,
     type_variable_tracker: &mut TypeVariableTracker<'a>,
 ) -> ExprWithType<'a> {
     use Expr::*;
@@ -142,6 +144,7 @@ fn expr<'a>(
                         arm,
                         resolved_idents,
                         types_of_decls,
+                        fixed_variables,
                         type_variable_tracker,
                     )
                 })
@@ -168,7 +171,12 @@ fn expr<'a>(
                         TypeMatchable::Variable(v) => v,
                         _ => panic!(),
                     };
-                    (v, type_variable_tracker.normalize_type(t))
+                    let t = remove_free_type_variables(
+                        type_variable_tracker.normalize_type(t),
+                        fixed_variables,
+                        type_variable_tracker,
+                    );
+                    (v, t)
                 })
                 .collect();
             log::debug!(
@@ -196,6 +204,7 @@ fn expr<'a>(
                 *f,
                 resolved_idents,
                 types_of_decls,
+                fixed_variables,
                 type_variable_tracker,
             )
             .into(),
@@ -203,18 +212,25 @@ fn expr<'a>(
                 *a,
                 resolved_idents,
                 types_of_decls,
+                fixed_variables,
                 type_variable_tracker,
             )
             .into(),
         ),
     };
-    (e, type_variable_tracker.find(t))
+    let t = remove_free_type_variables(
+        type_variable_tracker.find(t),
+        fixed_variables,
+        type_variable_tracker,
+    );
+    (e, t)
 }
 
 fn fn_arm<'a>(
     arm: ast_level2::FnArm<'a>,
     resolved_idents: &ResolvedIdents<'a>,
     types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
+    fixed_variables: &FxHashSet<TypeVariable>,
     type_variable_tracker: &mut TypeVariableTracker<'a>,
 ) -> FnArm<'a> {
     let exprs: Vec<_> = arm
@@ -225,6 +241,7 @@ fn fn_arm<'a>(
                 a,
                 resolved_idents,
                 types_of_decls,
+                fixed_variables,
                 type_variable_tracker,
             )
         })
@@ -235,4 +252,18 @@ fn fn_arm<'a>(
         pattern_type: arm.pattern_type,
         expr: (Expr::DoBlock(exprs), last_type),
     }
+}
+
+fn remove_free_type_variables<'a>(
+    t: Type<'a>,
+    fixed_variables: &FxHashSet<TypeVariable>,
+    type_variable_tracker: &mut TypeVariableTracker<'a>,
+) -> Type<'a> {
+    for v in t.all_type_variables() {
+        if !fixed_variables.contains(&v) {
+            type_variable_tracker
+                .insert(v, TypeMatchable::Empty.into());
+        }
+    }
+    type_variable_tracker.normalize_type(t)
 }

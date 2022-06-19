@@ -7,6 +7,7 @@ use crate::ast_level2::{
     TypeConstructor,
 };
 use fxhash::FxHashSet;
+use hashbag::HashBag;
 use itertools::Itertools;
 use petgraph::{self, algo::tarjan_scc, graphmap::DiGraphMap};
 use std::{
@@ -120,15 +121,15 @@ impl<'a> TypeVariableTracker<'a> {
                     .into()
                 }
                 TypeUnit::Normal { name, args, id } => {
-                    TypeUnit::Normal {
-                        name,
-                        args: args
-                            .into_iter()
-                            .map(|t| self.normalize_type(t))
-                            .collect(),
-                        id,
+                    let args: Vec<_> = args
+                        .into_iter()
+                        .map(|t| self.normalize_type(t))
+                        .collect();
+                    if args.iter().any(|c| c.len() == 0) {
+                        Default::default()
+                    } else {
+                        TypeUnit::Normal { name, args, id }.into()
                     }
-                    .into()
                 }
             })
             .collect()
@@ -277,6 +278,29 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
                 )?;
             }
             _ => (),
+        }
+    }
+    let covariant_candidates = mk_covariant_candidates(&t);
+    let contravariant_candidates = mk_contravariant_candidates(&t);
+    let type_variables_in_sub_rel: HashBag<TypeVariable> = t
+        .subtype_relation
+        .iter()
+        .flat_map(|(a, b)| {
+            a.all_type_variables()
+                .into_iter()
+                .chain(b.all_type_variables())
+        })
+        .collect();
+    for (v, count) in type_variables_in_sub_rel {
+        if count == 1
+            && !covariant_candidates.contains(&v)
+            && !contravariant_candidates.contains(&v)
+        {
+            if let Some(new_t) =
+                possible_strongest(v, &t.subtype_relation)
+            {
+                t = t.replace_num_option(v, &new_t).unwrap();
+            }
         }
     }
     let updated = fxhash::hash(&t) != hash_before_simplify;
