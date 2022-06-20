@@ -76,7 +76,7 @@ pub fn type_check<'a>(
         });
     }
     for d in &ast.data_decl {
-        let d_type: types::Type = constructor_type(*d).into();
+        let d_type: types::Type = constructor_type(d.clone()).into();
         toplevels.push(Toplevel {
             incomplete: d_type.into(),
             type_annotation: None,
@@ -556,15 +556,18 @@ fn resolve_recursion_in_scc<'a>(
 }
 
 fn constructor_type(d: DataDecl) -> TypeUnit {
-    let field_types: Vec<_> =
-        (0..d.field_len).map(|_| TypeUnit::new_variable()).collect();
+    let fields: Vec<_> = d
+        .fields
+        .iter()
+        .map(|t| TypeUnit::Variable(*t).into())
+        .collect();
     let mut t = TypeUnit::Normal {
         name: d.name,
-        args: field_types.iter().map(|t| t.clone().into()).collect(),
+        args: fields.clone(),
         id: TypeId::DeclId(d.decl_id),
     };
-    for field in field_types.into_iter().rev() {
-        t = TypeUnit::Fn(field.into(), t.into())
+    for field in fields.into_iter().rev() {
+        t = TypeUnit::Fn(field, t.into())
     }
     t
 }
