@@ -50,28 +50,21 @@ pub fn run(source: &str, output_js: bool, loglevel: LevelFilter) {
             }
         }
     }
-    let (remaining, ast) = parse(source).unwrap();
-    if remaining.is_empty() {
-        let ast: ast_level1::Ast = ast.into();
-        let ast: ast_level2::Ast = ast.into();
-        let ast: ast_level3::Ast = ast.into();
-        let ast: ast_level4::Ast = ast.into();
-        let js = codegen(ast);
-        if output_js {
-            println!("{}", js);
-        } else {
-            Command::new("node")
-                .arg("--eval")
-                .arg(js)
-                .spawn()
-                .unwrap()
-                .wait()
-                .unwrap();
-        }
+    let ast = parse(source);
+    let ast: ast_level1::Ast = ast.into();
+    let ast: ast_level2::Ast = ast.into();
+    let ast: ast_level3::Ast = ast.into();
+    let ast: ast_level4::Ast = ast.into();
+    let js = codegen(ast);
+    if output_js {
+        println!("{}", js);
     } else {
-        eprintln!(
-            "unexpected input:\n{}\nast:\n{:?}",
-            remaining, ast
-        );
+        Command::new("node")
+            .arg("--eval")
+            .arg(js)
+            .spawn()
+            .unwrap()
+            .wait()
+            .unwrap();
     }
 }

@@ -23,7 +23,16 @@ fn separator1(input: &str) -> IResult<&str, Vec<char>> {
     many1(one_of("\r\n\t "))(input)
 }
 
-pub fn parse(source: &str) -> IResult<&str, Ast> {
+pub fn parse(source: &str) -> Ast {
+    let (remaining, ast) = ast(source).unwrap();
+    if remaining.is_empty() {
+        ast
+    } else {
+        panic!("unexpected input:\n{}\nast:\n{:?}", remaining, ast);
+    }
+}
+
+fn ast(source: &str) -> IResult<&str, Ast> {
     let (input, decls) = many1(dec)(source)?;
     Ok((input, Ast { decls }))
 }
