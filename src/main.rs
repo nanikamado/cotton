@@ -23,6 +23,13 @@ fn main() {
                 ),
         )
         .arg(
+            Arg::new("rust")
+                .short('r')
+                .long("rust-backend")
+                .takes_value(false)
+                .help("Compile to Rust code."),
+        )
+        .arg(
             Arg::new("loglevel")
                 .short('l')
                 .long("loglevel")
@@ -35,11 +42,14 @@ fn main() {
         .get_matches();
     let file_name = matches.value_of("filename").unwrap();
     let output_js = matches.is_present("js");
+    let use_rust_backend = matches.is_present("rust");
     let loglevel =
         LevelFilter::from_str(matches.value_of("loglevel").unwrap())
             .unwrap();
     match fs::read_to_string(file_name) {
-        Ok(source) => run(&source, output_js, loglevel),
+        Ok(source) => {
+            run(&source, output_js, use_rust_backend, loglevel)
+        }
         Err(e) => {
             eprintln!("{}", e);
             process::exit(1)
