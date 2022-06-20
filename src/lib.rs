@@ -1,8 +1,8 @@
-mod ast_level0;
-mod ast_level1;
-mod ast_level2;
-mod ast_level3;
-mod ast_level4;
+mod ast_step0;
+mod ast_step1;
+mod ast_step2;
+mod ast_step3;
+mod ast_step4;
 mod codegen;
 mod intrinsics;
 mod parse;
@@ -57,10 +57,10 @@ pub fn run(
         }
     }
     let ast = parse(source);
-    let ast: ast_level1::Ast = ast.into();
-    let ast: ast_level2::Ast = ast.into();
-    let ast: ast_level3::Ast = ast.into();
-    let ast: ast_level4::Ast = ast.into();
+    let ast: ast_step1::Ast = ast.into();
+    let ast: ast_step2::Ast = ast.into();
+    let ast: ast_step3::Ast = ast.into();
+    let ast: ast_step4::Ast = ast.into();
     if use_rust_backend {
         rust_backend::run(ast);
     } else {

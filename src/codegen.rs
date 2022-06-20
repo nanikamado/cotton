@@ -1,6 +1,6 @@
 use crate::{
-    ast_level2::{decl_id::DeclId, Pattern},
-    ast_level4::{
+    ast_step2::{decl_id::DeclId, Pattern},
+    ast_step4::{
         Ast, DataDecl, Expr, ExprWithType, FnArm, VariableDecl,
     },
     intrinsics::IntrinsicVariable,

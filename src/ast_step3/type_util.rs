@@ -1,6 +1,6 @@
 use crate::{
-    ast_level1::{self, OpPrecedenceMap},
-    ast_level2::{
+    ast_step1::{self, OpPrecedenceMap},
+    ast_step2::{
         self,
         types::{Type, TypeMatchableRef, TypeUnit, TypeVariable},
         IncompleteType, TypeConstructor,
@@ -243,16 +243,16 @@ pub fn construct_type(s: &str) -> Type {
 pub fn construct_type_with_variables<'a>(
     s: &'a str,
     type_variable_names: &[&'a str],
-    data_decl_map: &FxHashMap<&'a str, ast_level2::decl_id::DeclId>,
+    data_decl_map: &FxHashMap<&'a str, ast_step2::decl_id::DeclId>,
 ) -> Type<'a> {
     let (_, type_seq) = crate::parse::infix_type_sequence(s).unwrap();
-    let type_seq: ast_level1::TypeOperatorSequence =
-        ast_level1::op_sequence(
+    let type_seq: ast_step1::TypeOperatorSequence =
+        ast_step1::op_sequence(
             type_seq,
             &OpPrecedenceMap::new(OP_PRECEDENCE.clone()),
         );
-    let t = ast_level1::infix_op_sequence(type_seq);
-    crate::ast_level2::type_to_type(
+    let t = ast_step1::infix_op_sequence(type_seq);
+    crate::ast_step2::type_to_type(
         t,
         data_decl_map,
         &type_variable_names

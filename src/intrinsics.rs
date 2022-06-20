@@ -1,6 +1,6 @@
 use crate::{
-    ast_level0::Associativity, ast_level2::types::Type,
-    ast_level3::type_util::construct_type,
+    ast_step0::Associativity, ast_step2::types::Type,
+    ast_step3::type_util::construct_type,
 };
 use fxhash::FxHashMap;
 use once_cell::sync::Lazy;
