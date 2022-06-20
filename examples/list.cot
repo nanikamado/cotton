@@ -26,7 +26,7 @@ print_num_list
 = fn
 | () => ()
 | h /\ t =>
-    h.num_to_string.println
+    h.i64_to_string.println
     t.print_num_list
 --
 

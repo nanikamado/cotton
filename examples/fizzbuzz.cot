@@ -21,7 +21,7 @@ data a /\ b
 
 infixl 3 /\
 
-fizzbuzz : Num -> String | Num
+fizzbuzz : I64 -> String | I64
 = fn
 | n =>
     (n % 3 /\ n % 5).fn
@@ -34,7 +34,7 @@ fizzbuzz : Num -> String | Num
 
 to_string
 = fn
-| n => n.num_to_string
+| n => n.i64_to_string
 | s => s
 --
 

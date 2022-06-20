@@ -74,12 +74,12 @@ filter = fn
     Filter(l, f)
 --
 
-print_num = fn
-| n => n.num_to_string.println
+print_i64 = fn
+| n => n.i64_to_string.println
 --
 
 main : () -> ()
 = fn
 | () =>
-    (2..100).filter(is_prime).each(print_num)
+    (2..100).filter(is_prime).each(print_i64)
 --

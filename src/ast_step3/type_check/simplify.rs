@@ -756,9 +756,9 @@ mod tests {
             infixl 3 /\
             main : () -> ()
             = fn | () => () --
-            test : Num /\ Num ->
-            ((Num /\ Num | Num /\ t1 | t2 /\ Num | t3 /\ t4) -> Num | String)
-            -> Num | String forall t1, t2, t3, t4 --
+            test : I64 /\ I64 ->
+            ((I64 /\ I64 | I64 /\ t1 | t2 /\ I64 | t3 /\ t4) -> I64 | String)
+            -> I64 | String forall t1, t2, t3, t4 --
             = ()
             "#,
         );
@@ -780,7 +780,7 @@ mod tests {
             &Default::default(),
         );
         let t = IncompleteType {
-            constructor: construct_type("Num -> Num | String"),
+            constructor: construct_type("I64 -> I64 | String"),
             variable_requirements: Vec::new(),
             subtype_relation: vec![(dot, req_t)]
                 .into_iter()
@@ -790,7 +790,7 @@ mod tests {
             simplify_type(t.into()).unwrap().destruct();
         assert_eq!(
             format!("{}", st),
-            "Num -> {Num | String} forall\n--"
+            "I64 -> {I64 | String} forall\n--"
         );
     }
 }

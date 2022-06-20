@@ -64,7 +64,7 @@ static PRIMITIVES_DEF: Lazy<FxHashMap<IntrinsicVariable, &str>> =
     Lazy::new(|| {
         use IntrinsicVariable::*;
         [
-            (NumToString, "a => String(a)"),
+            (I64ToString, "a => String(a)"),
             (Lt, "a => b => $$bool(a < b)"),
             (Minus, "a => b => a - b"),
             (Plus, "a => b => a + b"),
