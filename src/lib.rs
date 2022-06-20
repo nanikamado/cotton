@@ -6,6 +6,7 @@ mod ast_level4;
 mod codegen;
 mod intrinsics;
 mod parse;
+mod rust_backend;
 
 use codegen::codegen;
 use parse::parse;
@@ -18,7 +19,12 @@ use std::{
     process::{exit, Command, Stdio},
 };
 
-pub fn run(source: &str, output_js: bool, loglevel: LevelFilter) {
+pub fn run(
+    source: &str,
+    output_js: bool,
+    use_rust_backend: bool,
+    loglevel: LevelFilter,
+) {
     TermLogger::init(
         loglevel,
         ConfigBuilder::new()
@@ -55,16 +61,20 @@ pub fn run(source: &str, output_js: bool, loglevel: LevelFilter) {
     let ast: ast_level2::Ast = ast.into();
     let ast: ast_level3::Ast = ast.into();
     let ast: ast_level4::Ast = ast.into();
-    let js = codegen(ast);
-    if output_js {
-        println!("{}", js);
+    if use_rust_backend {
+        rust_backend::run(ast);
     } else {
-        Command::new("node")
-            .arg("--eval")
-            .arg(js)
-            .spawn()
-            .unwrap()
-            .wait()
-            .unwrap();
+        let js = codegen(ast);
+        if output_js {
+            println!("{}", js);
+        } else {
+            Command::new("node")
+                .arg("--eval")
+                .arg(js)
+                .spawn()
+                .unwrap()
+                .wait()
+                .unwrap();
+        }
     }
 }
