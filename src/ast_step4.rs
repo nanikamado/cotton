@@ -1,5 +1,3 @@
-use std::collections::BTreeMap;
-
 use crate::{
     ast_step2::{
         self,
@@ -10,6 +8,7 @@ use crate::{
     ast_step3::{self, VariableId},
 };
 use fxhash::FxHashMap;
+use std::collections::BTreeMap;
 
 /// # Difference between `ast_step3::Ast` and `ast_step4::Ast`
 /// - Polymorphic variables in `ast_step3::Ast` are replicated and become monomorphic in `ast_step4::Ast`.
