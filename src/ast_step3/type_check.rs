@@ -1,9 +1,9 @@
 mod simplify;
 
 use super::type_util::construct_type;
-pub use crate::ast_level3::type_check::simplify::TypeVariableTracker;
+pub use crate::ast_step3::type_check::simplify::TypeVariableTracker;
 use crate::{
-    ast_level2::{
+    ast_step2::{
         self,
         decl_id::DeclId,
         ident_id::IdentId,
@@ -62,7 +62,7 @@ pub fn type_check<'a>(
     ast: &Ast<'a>,
 ) -> (
     ResolvedIdents<'a>,
-    FxHashMap<DeclId, ast_level2::IncompleteType<'a>>,
+    FxHashMap<DeclId, ast_step2::IncompleteType<'a>>,
     TypeVariableTracker<'a>,
 ) {
     let mut toplevels: Vec<Toplevel<'a>> = Default::default();
@@ -93,7 +93,7 @@ pub fn type_check<'a>(
             min_type_incomplite(&d.value, &mut type_variable_tracker);
         resolved_idents.extend(resolved);
         ident_type_map.append(&mut ident_type);
-        let type_annotation: Option<ast_level2::IncompleteType> =
+        let type_annotation: Option<ast_step2::IncompleteType> =
             if let Some(annotation) = &d.type_annotation {
                 t.subtype_relation.insert((
                     t.constructor.clone(),
@@ -172,15 +172,15 @@ pub type Resolved =
 
 #[derive(Debug, Clone)]
 struct Toplevel<'a> {
-    incomplete: ast_level2::IncompleteType<'a>,
-    type_annotation: Option<ast_level2::IncompleteType<'a>>,
+    incomplete: ast_step2::IncompleteType<'a>,
+    type_annotation: Option<ast_step2::IncompleteType<'a>>,
     resolved_idents: FxHashMap<IdentId, VariableId>,
     decl_id: VariableId,
     name: &'a str,
 }
 
 type TypesOfDeclsVec<'a> =
-    Vec<(DeclId, ast_level2::IncompleteType<'a>)>;
+    Vec<(DeclId, ast_step2::IncompleteType<'a>)>;
 
 fn resolve_names<'a>(
     toplevels: Vec<Toplevel<'a>>,
@@ -351,7 +351,7 @@ fn resolve_scc<'a>(
     resolved_variable_map: &FxHashMap<&str, Vec<Toplevel<'a>>>,
 ) -> (
     Resolved,
-    Vec<ast_level2::IncompleteType<'a, Type<'a>>>,
+    Vec<ast_step2::IncompleteType<'a, Type<'a>>>,
     TypeVariableTracker<'a>,
 ) {
     // Merge the declarations in a scc to treate them as if they are one declaration,
@@ -431,7 +431,7 @@ fn resolve_scc<'a>(
             .constructor
             .0
             .into_iter()
-            .map(|t| ast_level2::IncompleteType {
+            .map(|t| ast_step2::IncompleteType {
                 constructor: t,
                 variable_requirements: variable_requirements.clone(),
                 subtype_relation: subtype_relation.clone(),
@@ -576,7 +576,7 @@ fn min_type_incomplite<'a>(
     (expr, type_variable): &ExprWithType<'a>,
     type_variable_tracker: &mut TypeVariableTracker<'a>,
 ) -> (
-    ast_level2::IncompleteType<'a>,
+    ast_step2::IncompleteType<'a>,
     Resolved,
     Vec<(IdentId, TypeVariable)>,
 ) {
@@ -612,7 +612,7 @@ fn min_type_incomplite<'a>(
             type_variable_tracker
                 .insert(*type_variable, constructor.clone());
             (
-                ast_level2::IncompleteType {
+                ast_step2::IncompleteType {
                     constructor,
                     variable_requirements: variable_requirements
                         .concat(),
@@ -642,7 +642,7 @@ fn min_type_incomplite<'a>(
         } => {
             let t: Type = TypeUnit::Variable(*type_variable).into();
             (
-                ast_level2::IncompleteType {
+                ast_step2::IncompleteType {
                     constructor: t.clone(),
                     variable_requirements: vec![(info, t, *ident_id)],
                     subtype_relation: BTreeSet::new(),
@@ -678,7 +678,7 @@ fn min_type_incomplite<'a>(
             let a_sub_c =
                 [(a_t.constructor, c)].iter().cloned().collect();
             (
-                ast_level2::IncompleteType {
+                ast_step2::IncompleteType {
                     constructor: b,
                     variable_requirements: [
                         f_t.variable_requirements,
@@ -706,7 +706,7 @@ fn multi_expr_min_type<'a>(
     exprs: &[(Expr<'a>, TypeVariable)],
     type_variable_tracker: &mut TypeVariableTracker<'a>,
 ) -> (
-    ast_level2::IncompleteType<'a>,
+    ast_step2::IncompleteType<'a>,
     Resolved,
     Vec<(IdentId, TypeVariable)>,
 ) {
@@ -729,7 +729,7 @@ fn multi_expr_min_type<'a>(
         .collect::<Vec<_>>();
     let t = t.last().unwrap().clone();
     (
-        ast_level2::IncompleteType {
+        ast_step2::IncompleteType {
             constructor: t.constructor,
             variable_requirements,
             subtype_relation,

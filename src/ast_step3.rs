@@ -5,7 +5,7 @@ pub use self::type_check::VariableId;
 use self::type_check::{
     type_check, ResolvedIdents, TypeVariableTracker,
 };
-use crate::ast_level2::{
+use crate::ast_step2::{
     self,
     decl_id::DeclId,
     types::{Type, TypeMatchable, TypeVariable},
@@ -14,7 +14,7 @@ use crate::ast_level2::{
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 
-/// # Difference between `ast_level2::Ast` and `ast_level3::Ast`
+/// # Difference between `ast_step2::Ast` and `ast_step3::Ast`
 /// - The names of variables are resolved.
 #[derive(Debug, PartialEq)]
 pub struct Ast<'a> {
@@ -55,8 +55,8 @@ pub struct FnArm<'a> {
     pub expr: ExprWithType<'a>,
 }
 
-impl<'a> From<ast_level2::Ast<'a>> for Ast<'a> {
-    fn from(ast: ast_level2::Ast<'a>) -> Self {
+impl<'a> From<ast_step2::Ast<'a>> for Ast<'a> {
+    fn from(ast: ast_step2::Ast<'a>) -> Self {
         let (
             resolved_idents,
             types_of_decls,
@@ -91,7 +91,7 @@ impl<'a> From<ast_level2::Ast<'a>> for Ast<'a> {
 }
 
 fn variable_decl<'a>(
-    d: ast_level2::VariableDecl<'a>,
+    d: ast_step2::VariableDecl<'a>,
     resolved_idents: &ResolvedIdents<'a>,
     types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
     type_variable_tracker: &mut TypeVariableTracker<'a>,
@@ -129,7 +129,7 @@ fn variable_decl<'a>(
 }
 
 fn expr<'a>(
-    (e, t): ast_level2::ExprWithType<'a>,
+    (e, t): ast_step2::ExprWithType<'a>,
     resolved_idents: &ResolvedIdents<'a>,
     types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
     fixed_variables: &FxHashSet<TypeVariable>,
@@ -137,7 +137,7 @@ fn expr<'a>(
 ) -> ExprWithType<'a> {
     use Expr::*;
     let e = match e {
-        ast_level2::Expr::Lambda(a) => Lambda(
+        ast_step2::Expr::Lambda(a) => Lambda(
             a.into_iter()
                 .map(|arm| {
                     fn_arm(
@@ -150,9 +150,9 @@ fn expr<'a>(
                 })
                 .collect(),
         ),
-        ast_level2::Expr::Number(a) => Number(a),
-        ast_level2::Expr::StrLiteral(a) => StrLiteral(a),
-        ast_level2::Expr::Ident { name, ident_id } => {
+        ast_step2::Expr::Number(a) => Number(a),
+        ast_step2::Expr::StrLiteral(a) => StrLiteral(a),
+        ast_step2::Expr::Ident { name, ident_id } => {
             let (variable_id, type_args) = resolved_idents
                 .get(&ident_id)
                 .unwrap_or_else(|| {
@@ -193,13 +193,13 @@ fn expr<'a>(
                 type_args,
             }
         }
-        ast_level2::Expr::Decl(a) => Decl(Box::new(variable_decl(
+        ast_step2::Expr::Decl(a) => Decl(Box::new(variable_decl(
             *a,
             resolved_idents,
             types_of_decls,
             type_variable_tracker,
         ))),
-        ast_level2::Expr::Call(f, a) => Call(
+        ast_step2::Expr::Call(f, a) => Call(
             expr(
                 *f,
                 resolved_idents,
@@ -227,7 +227,7 @@ fn expr<'a>(
 }
 
 fn fn_arm<'a>(
-    arm: ast_level2::FnArm<'a>,
+    arm: ast_step2::FnArm<'a>,
     resolved_idents: &ResolvedIdents<'a>,
     types_of_decls: &FxHashMap<DeclId, IncompleteType<'a>>,
     fixed_variables: &FxHashSet<TypeVariable>,

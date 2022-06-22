@@ -1,4 +1,4 @@
-use crate::ast_level2::{
+use crate::ast_step2::{
     self,
     ident_id::IdentId,
     types::{
@@ -149,11 +149,10 @@ impl<'a> TypeVariableTracker<'a> {
 }
 
 impl<'a, T: TypeConstructor<'a>>
-    From<ast_level2::IncompleteType<'a, T>>
-    for IncompleteType<'a, T>
+    From<ast_step2::IncompleteType<'a, T>> for IncompleteType<'a, T>
 {
-    fn from(t: ast_level2::IncompleteType<'a, T>) -> Self {
-        let ast_level2::IncompleteType {
+    fn from(t: ast_step2::IncompleteType<'a, T>) -> Self {
+        let ast_step2::IncompleteType {
             constructor,
             variable_requirements,
             subtype_relation,
@@ -623,10 +622,10 @@ where
 
     pub fn destruct(
         self,
-    ) -> (ast_level2::IncompleteType<'a, T>, TypeVariableTracker<'a>)
+    ) -> (ast_step2::IncompleteType<'a, T>, TypeVariableTracker<'a>)
     {
         (
-            ast_level2::IncompleteType {
+            ast_step2::IncompleteType {
                 constructor: self.constructor,
                 variable_requirements: self.variable_requirements,
                 subtype_relation: self.subtype_relation,
@@ -683,7 +682,7 @@ impl<'a, T: TypeConstructor<'a>> IncompleteType<'a, T> {
 }
 
 impl<'a, T: TypeConstructor<'a>> Display
-    for ast_level2::IncompleteType<'a, T>
+    for ast_step2::IncompleteType<'a, T>
 {
     fn fmt(
         &self,
@@ -739,9 +738,9 @@ impl<'a> Display for TypeVariableTracker<'a> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        ast_level0, ast_level1, ast_level2,
-        ast_level2::IncompleteType,
-        ast_level3::{
+        ast_step0, ast_step1, ast_step2,
+        ast_step2::IncompleteType,
+        ast_step3::{
             type_check::simplify::simplify_type,
             type_util::{
                 construct_type, construct_type_with_variables,
@@ -752,7 +751,7 @@ mod tests {
 
     #[test]
     fn simplify1() {
-        let ast: ast_level0::Ast = parse::parse(
+        let ast: ast_step0::Ast = parse::parse(
             r#"data a /\ b
             infixl 3 /\
             main : () -> ()
@@ -763,8 +762,8 @@ mod tests {
             = ()
             "#,
         );
-        let ast: ast_level1::Ast = ast.into();
-        let ast: ast_level2::Ast = ast.into();
+        let ast: ast_step1::Ast = ast.into();
+        let ast: ast_step2::Ast = ast.into();
         let req_t = ast
             .variable_decl
             .iter()

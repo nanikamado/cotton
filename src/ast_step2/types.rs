@@ -1,7 +1,7 @@
 pub use self::type_type::Type;
 pub use self::type_unit::TypeUnit;
 pub use self::type_unit::TypeVariable;
-use crate::ast_level2::TypeId;
+use crate::ast_step2::TypeId;
 use fxhash::FxHashSet;
 use itertools::Itertools;
 use std::{collections::BTreeSet, fmt::Display};
@@ -42,7 +42,7 @@ pub enum TypeMatchableRef<'a> {
 
 mod type_unit {
     use super::Type;
-    use crate::ast_level2::TypeId;
+    use crate::ast_step2::TypeId;
     use std::cell::Cell;
 
     #[derive(

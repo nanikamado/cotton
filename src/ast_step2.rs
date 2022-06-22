@@ -9,7 +9,7 @@ use self::{
     types::{Type, TypeUnit},
 };
 use crate::{
-    ast_level1,
+    ast_step1,
     intrinsics::{
         IntrinsicConstructor, IntrinsicType, INTRINSIC_CONSTRUCTORS,
         INTRINSIC_TYPES,
@@ -35,7 +35,7 @@ pub enum TypeId {
     Intrinsic(IntrinsicType),
 }
 
-/// # Difference between `ast_level1::Ast` and `ast_level2::Ast`
+/// # Difference between `ast_step1::Ast` and `ast_step2::Ast`
 /// - The names of types and constructors are resolved.
 #[derive(Debug, PartialEq, Clone)]
 pub struct Ast<'a> {
@@ -100,8 +100,8 @@ pub enum Pattern<'a> {
     Underscore,
 }
 
-impl<'a> From<ast_level1::Ast<'a>> for Ast<'a> {
-    fn from(ast: ast_level1::Ast<'a>) -> Self {
+impl<'a> From<ast_step1::Ast<'a>> for Ast<'a> {
+    fn from(ast: ast_step1::Ast<'a>) -> Self {
         let data_decl: Vec<_> = ast
             .data_decl
             .into_iter()
@@ -164,7 +164,7 @@ impl<'a> From<Type<'a>> for IncompleteType<'a> {
 }
 
 fn variable_decl<'a>(
-    v: ast_level1::VariableDecl<'a>,
+    v: ast_step1::VariableDecl<'a>,
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
 ) -> VariableDecl<'a> {
@@ -187,31 +187,31 @@ fn variable_decl<'a>(
 }
 
 fn expr<'a>(
-    e: ast_level1::Expr<'a>,
+    e: ast_step1::Expr<'a>,
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
 ) -> ExprWithType<'a> {
     use Expr::*;
     let e = match e {
-        ast_level1::Expr::Lambda(arms) => Lambda(
+        ast_step1::Expr::Lambda(arms) => Lambda(
             arms.into_iter()
                 .map(move |arm| {
                     fn_arm(arm, data_decl_map, type_variable_names)
                 })
                 .collect(),
         ),
-        ast_level1::Expr::Number(n) => Number(n),
-        ast_level1::Expr::StrLiteral(s) => StrLiteral(s),
-        ast_level1::Expr::Ident(name) => Ident {
+        ast_step1::Expr::Number(n) => Number(n),
+        ast_step1::Expr::StrLiteral(s) => StrLiteral(s),
+        ast_step1::Expr::Ident(name) => Ident {
             name,
             ident_id: new_ident_id(),
         },
-        ast_level1::Expr::Decl(d) => Decl(Box::new(variable_decl(
+        ast_step1::Expr::Decl(d) => Decl(Box::new(variable_decl(
             *d,
             data_decl_map,
             type_variable_names,
         ))),
-        ast_level1::Expr::Call(f, a) => Call(
+        ast_step1::Expr::Call(f, a) => Call(
             Box::new(expr(*f, data_decl_map, type_variable_names)),
             Box::new(expr(*a, data_decl_map, type_variable_names)),
         ),
@@ -220,7 +220,7 @@ fn expr<'a>(
 }
 
 fn fn_arm<'a>(
-    arm: ast_level1::FnArm<'a>,
+    arm: ast_step1::FnArm<'a>,
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
 ) -> FnArm<'a> {
@@ -282,14 +282,14 @@ impl ConstructorId<'_> {
 }
 
 fn pattern<'a>(
-    p: ast_level1::Pattern<'a>,
+    p: ast_step1::Pattern<'a>,
     data_decl_map: &FxHashMap<&str, DeclId>,
 ) -> Pattern<'a> {
     use Pattern::*;
     match p {
-        ast_level1::Pattern::Number(n) => Number(n),
-        ast_level1::Pattern::StrLiteral(s) => StrLiteral(s),
-        ast_level1::Pattern::Constructor { name, args } => {
+        ast_step1::Pattern::Number(n) => Number(n),
+        ast_step1::Pattern::StrLiteral(s) => StrLiteral(s),
+        ast_step1::Pattern::Constructor { name, args } => {
             Constructor {
                 id: ConstructorId::get(name, data_decl_map),
                 args: args
@@ -298,15 +298,15 @@ fn pattern<'a>(
                     .collect(),
             }
         }
-        ast_level1::Pattern::Binder(name) => {
+        ast_step1::Pattern::Binder(name) => {
             Binder(name, new_decl_id())
         }
-        ast_level1::Pattern::Underscore => Pattern::Underscore,
+        ast_step1::Pattern::Underscore => Pattern::Underscore,
     }
 }
 
 pub fn type_to_type<'a>(
-    t: ast_level1::Type<'a>,
+    t: ast_step1::Type<'a>,
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
 ) -> Type<'a> {
