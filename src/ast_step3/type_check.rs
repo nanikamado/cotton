@@ -626,7 +626,7 @@ fn min_type_incomplite<'a>(
             )
         }
         Expr::Number(_) => {
-            let t = construct_type("Num");
+            let t = construct_type("I64");
             type_variable_tracker.insert(*type_variable, t.clone());
             (t.into(), Default::default(), Default::default())
         }
@@ -804,7 +804,7 @@ fn pattern_to_type<'a>(
     p: &Pattern<'a>,
 ) -> (types::Type<'a>, Vec<(&'a str, DeclId, types::Type<'a>)>) {
     match p {
-        Pattern::Number(_) => (construct_type("Num"), Vec::new()),
+        Pattern::Number(_) => (construct_type("I64"), Vec::new()),
         Pattern::StrLiteral(_) => {
             (construct_type("String"), Vec::new())
         }

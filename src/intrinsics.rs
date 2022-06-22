@@ -18,7 +18,7 @@ pub enum IntrinsicVariable {
     Neq,
     Println,
     Print,
-    NumToString,
+    I64ToString,
     True,
     False,
     Unit,
@@ -43,7 +43,7 @@ impl IntrinsicVariable {
             IntrinsicVariable::Neq => "!=",
             IntrinsicVariable::Println => "println",
             IntrinsicVariable::Print => "print",
-            IntrinsicVariable::NumToString => "num_to_string",
+            IntrinsicVariable::I64ToString => "i64_to_string",
             IntrinsicVariable::True => "True",
             IntrinsicVariable::False => "False",
             IntrinsicVariable::Unit => "()",
@@ -59,14 +59,14 @@ pub static INTRINSIC_VARIABLES_TYPES: Lazy<
     FxHashMap<IntrinsicVariable, Type>,
 > = Lazy::new(|| {
     [
-        (IntrinsicVariable::Minus, "Num -> Num -> Num"),
-        (IntrinsicVariable::Plus, "Num -> Num -> Num"),
-        (IntrinsicVariable::Percent, "Num -> Num -> Num"),
-        (IntrinsicVariable::Lt, "Num -> Num -> True | False"),
-        (IntrinsicVariable::Neq, "Num -> Num -> True | False"),
+        (IntrinsicVariable::Minus, "I64 -> I64 -> I64"),
+        (IntrinsicVariable::Plus, "I64 -> I64 -> I64"),
+        (IntrinsicVariable::Percent, "I64 -> I64 -> I64"),
+        (IntrinsicVariable::Lt, "I64 -> I64 -> True | False"),
+        (IntrinsicVariable::Neq, "I64 -> I64 -> True | False"),
         (IntrinsicVariable::Println, "String -> ()"),
         (IntrinsicVariable::Print, "String -> ()"),
-        (IntrinsicVariable::NumToString, "Num -> String"),
+        (IntrinsicVariable::I64ToString, "I64 -> String"),
         (IntrinsicVariable::True, "True"),
         (IntrinsicVariable::False, "False"),
         (IntrinsicVariable::Unit, "()"),
@@ -81,7 +81,7 @@ pub static INTRINSIC_VARIABLES_TYPES: Lazy<
 )]
 pub enum IntrinsicType {
     String,
-    Num,
+    I64,
     Unit,
     True,
     False,
@@ -92,7 +92,7 @@ pub static INTRINSIC_TYPES: Lazy<
 > = Lazy::new(|| {
     [
         ("String", IntrinsicType::String),
-        ("Num", IntrinsicType::Num),
+        ("I64", IntrinsicType::I64),
         ("()", IntrinsicType::Unit),
         ("True", IntrinsicType::True),
         ("False", IntrinsicType::False),
