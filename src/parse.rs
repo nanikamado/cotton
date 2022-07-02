@@ -1,8 +1,7 @@
 use crate::ast_step0::{
-    Associativity, Ast, DataDecl, Decl, Expr, FnArm, Forall,
-    InfixConstructorSequence, OpSequence, OpSequenceUnit,
-    OperatorPrecedenceDecl, Pattern, Type, TypeOpSequence,
-    VariableDecl,
+    Associativity, Ast, DataDecl, Decl, Expr, ExprUnit, FnArm,
+    Forall, OpPrecedenceDecl, OpSequenceUnit, Pattern, PatternUnit,
+    Type, TypeUnit, VariableDecl,
 };
 use nom::{
     branch::alt,
@@ -89,7 +88,7 @@ fn forall(input: &str) -> IResult<&str, Forall> {
     Ok((
         input,
         Forall {
-            type_variable_names: [vec![id], ids].concat(),
+            type_variables: [vec![id], ids].concat(),
         },
     ))
 }
@@ -137,18 +136,16 @@ fn infix_constructor_decl(input: &str) -> IResult<&str, DataDecl> {
     Ok((input, DataDecl { name, field_len: 2 }))
 }
 
-fn type_expr(input: &str) -> IResult<&str, Type> {
+fn type_expr(input: &str) -> IResult<&str, TypeUnit> {
     alt((
-        identifier.map(Type::Ident),
-        tag("()").map(|_| Type::Ident("()")),
+        identifier.map(TypeUnit::Ident),
+        tag("()").map(|_| TypeUnit::Ident("()")),
         delimited(tag("("), infix_type_sequence, tag(")"))
-            .map(Type::Paren),
+            .map(TypeUnit::Paren),
     ))(input)
 }
 
-pub fn infix_type_sequence(
-    input: &str,
-) -> IResult<&str, TypeOpSequence> {
+pub fn infix_type_sequence(input: &str) -> IResult<&str, Type> {
     let (input, (_, e, eo, _)) = tuple((
         separator0,
         type_expr,
@@ -167,7 +164,7 @@ pub fn infix_type_sequence(
     Ok((input, eo))
 }
 
-fn type_call(input: &str) -> IResult<&str, Vec<Type>> {
+fn type_call(input: &str) -> IResult<&str, Vec<TypeUnit>> {
     let (input, (_, a0, a1, _, _)) = tuple((
         tag("["),
         infix_type_sequence,
@@ -175,8 +172,8 @@ fn type_call(input: &str) -> IResult<&str, Vec<Type>> {
         opt(tag(",")),
         tag("]"),
     ))(input)?;
-    let mut a0 = vec![Type::Paren(a0)];
-    let mut a1 = a1.into_iter().map(Type::Paren).collect();
+    let mut a0 = vec![TypeUnit::Paren(a0)];
+    let mut a1 = a1.into_iter().map(TypeUnit::Paren).collect();
     a0.append(&mut a1);
     Ok((input, a0))
 }
@@ -205,30 +202,30 @@ fn is_identifier_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
-fn expr(input: &str) -> IResult<&str, Expr<'_>> {
+fn expr(input: &str) -> IResult<&str, ExprUnit<'_>> {
     alt((
-        str_literal.map(Expr::StrLiteral),
-        num_literal.map(Expr::Number),
+        str_literal.map(ExprUnit::StrLiteral),
+        num_literal.map(ExprUnit::Number),
         unit,
         lambda,
-        decl.map(|d| Expr::Decl(Box::new(d))),
-        identifier.map(Expr::Ident),
+        decl.map(|d| ExprUnit::Decl(Box::new(d))),
+        identifier.map(ExprUnit::Ident),
         paren,
     ))(input)
 }
 
-fn paren(input: &str) -> IResult<&str, Expr> {
+fn paren(input: &str) -> IResult<&str, ExprUnit> {
     let (input, s) =
         delimited(tag("("), op_sequence, tag(")"))(input)?;
-    Ok((input, Expr::Paren(s)))
+    Ok((input, ExprUnit::Paren(s)))
 }
 
-fn lambda(input: &str) -> IResult<&str, Expr> {
+fn lambda(input: &str) -> IResult<&str, ExprUnit> {
     let (input, (_, _, arms, _)) =
         tuple((tag("fn"), separator0, many1(fn_arm), tag("--")))(
             input,
         )?;
-    Ok((input, Expr::Lambda(arms)))
+    Ok((input, ExprUnit::Lambda(arms)))
 }
 
 fn fn_arm(input: &str) -> IResult<&str, FnArm> {
@@ -270,18 +267,18 @@ fn fn_arm(input: &str) -> IResult<&str, FnArm> {
     ))
 }
 
-fn pattern(input: &str) -> IResult<&str, Pattern> {
+fn pattern(input: &str) -> IResult<&str, PatternUnit> {
     pad(alt((
-        str_literal.map(Pattern::StrLiteral),
-        num_literal.map(Pattern::Number),
-        tag("()").map(|_| Pattern::Constructor("()", Vec::new())),
-        tag("_").map(|_| Pattern::Underscore),
+        str_literal.map(PatternUnit::StrLiteral),
+        num_literal.map(PatternUnit::Number),
+        tag("()").map(|_| PatternUnit::Constructor("()", Vec::new())),
+        tag("_").map(|_| PatternUnit::Underscore),
         constructor_pattern,
-        identifier.map(Pattern::Binder),
+        identifier.map(PatternUnit::Binder),
     )))(input)
 }
 
-fn constructor_pattern(input: &str) -> IResult<&str, Pattern> {
+fn constructor_pattern(input: &str) -> IResult<&str, PatternUnit> {
     let (input, (name, fields)) = tuple((
         capital_head_identifier,
         opt(tuple((
@@ -299,7 +296,7 @@ fn constructor_pattern(input: &str) -> IResult<&str, Pattern> {
     } else {
         Vec::new()
     };
-    Ok((input, Pattern::Constructor(name, fields)))
+    Ok((input, PatternUnit::Constructor(name, fields)))
 }
 
 fn str_literal(input: &str) -> IResult<&str, &str> {
@@ -314,7 +311,7 @@ fn num_literal(input: &str) -> IResult<&str, &str> {
     digit1(input).map(|(i, s)| (i, s))
 }
 
-fn fn_call(input: &str) -> IResult<&str, Vec<Expr>> {
+fn fn_call(input: &str) -> IResult<&str, Vec<ExprUnit>> {
     let (input, (_, a0, a1, _, _)) = tuple((
         tag("("),
         op_sequence,
@@ -322,20 +319,18 @@ fn fn_call(input: &str) -> IResult<&str, Vec<Expr>> {
         opt(tag(",")),
         tag(")"),
     ))(input)?;
-    let mut a0 = vec![Expr::Paren(a0)];
-    let mut a1 = a1.into_iter().map(Expr::Paren).collect();
+    let mut a0 = vec![ExprUnit::Paren(a0)];
+    let mut a1 = a1.into_iter().map(ExprUnit::Paren).collect();
     a0.append(&mut a1);
     Ok((input, a0))
 }
 
-fn unit(input: &str) -> IResult<&str, Expr> {
+fn unit(input: &str) -> IResult<&str, ExprUnit> {
     let (input, _) = tag("()")(input)?;
-    Ok((input, Expr::Ident("()")))
+    Ok((input, ExprUnit::Ident("()")))
 }
 
-fn infix_constructor_sequence(
-    input: &str,
-) -> IResult<&str, InfixConstructorSequence> {
+fn infix_constructor_sequence(input: &str) -> IResult<&str, Pattern> {
     let (input, (_, e, eo, _)) = tuple((
         separator0,
         pattern,
@@ -353,7 +348,7 @@ fn infix_constructor_sequence(
     Ok((input, eo))
 }
 
-fn op_sequence(input: &str) -> IResult<&str, OpSequence> {
+fn op_sequence(input: &str) -> IResult<&str, Expr> {
     let (input, (_, e, eo, _)) = tuple((
         separator0,
         expr,
@@ -389,7 +384,7 @@ fn op(input: &str) -> IResult<&str, &str> {
     )(input)
 }
 
-fn type_op(input: &str) -> IResult<&str, OpSequenceUnit<Type>> {
+fn type_op(input: &str) -> IResult<&str, OpSequenceUnit<TypeUnit>> {
     alt((op, tag("|")))
         .map(OpSequenceUnit::Operator)
         .parse(input)
@@ -397,7 +392,7 @@ fn type_op(input: &str) -> IResult<&str, OpSequenceUnit<Type>> {
 
 fn operator_precedence_decl(
     input: &str,
-) -> IResult<&str, OperatorPrecedenceDecl> {
+) -> IResult<&str, OpPrecedenceDecl> {
     alt((
         tuple((
             tag("infixl"),
@@ -407,7 +402,7 @@ fn operator_precedence_decl(
             op,
         ))
         .map(|(_, _, precedence, _, name)| {
-            OperatorPrecedenceDecl {
+            OpPrecedenceDecl {
                 name,
                 associativity: Associativity::Left,
                 precedence: precedence as i32,
@@ -421,7 +416,7 @@ fn operator_precedence_decl(
             op,
         ))
         .map(|(_, _, precedence, _, name)| {
-            OperatorPrecedenceDecl {
+            OpPrecedenceDecl {
                 name,
                 associativity: Associativity::Right,
                 precedence: precedence as i32,

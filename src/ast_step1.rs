@@ -1,6 +1,6 @@
 use crate::{
     ast_step0,
-    ast_step0::{Associativity, Forall, OperatorPrecedenceDecl},
+    ast_step0::{Associativity, Forall, OpPrecedenceDecl},
     intrinsics::OP_PRECEDENCE,
 };
 use fxhash::FxHashMap;
@@ -172,13 +172,11 @@ impl<'a> From<ast_step0::Ast<'a>> for Ast<'a> {
                     name: a.name,
                     field_len: a.field_len,
                 }),
-                ast_step0::Decl::Precedence(
-                    OperatorPrecedenceDecl {
-                        name,
-                        associativity,
-                        precedence,
-                    },
-                ) => {
+                ast_step0::Decl::Precedence(OpPrecedenceDecl {
+                    name,
+                    associativity,
+                    precedence,
+                }) => {
                     precedence_map
                         .insert(name, (associativity, precedence));
                 }
@@ -380,16 +378,16 @@ pub fn infix_op_sequence<
     }
 }
 
-impl<'a> ConvertWithOpPrecedenceMap for ast_step0::Type<'a> {
+impl<'a> ConvertWithOpPrecedenceMap for ast_step0::TypeUnit<'a> {
     type T = Type<'a>;
 
     fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T {
         match self {
-            ast_step0::Type::Ident(name) => Type {
+            ast_step0::TypeUnit::Ident(name) => Type {
                 name,
                 args: Vec::new(),
             },
-            ast_step0::Type::Paren(s) => {
+            ast_step0::TypeUnit::Paren(s) => {
                 infix_op_sequence(op_sequence(s, op_precedence_map))
             }
         }
@@ -422,24 +420,24 @@ pub trait ConvertWithOpPrecedenceMap {
     fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T;
 }
 
-impl<'a> ConvertWithOpPrecedenceMap for ast_step0::Expr<'a> {
+impl<'a> ConvertWithOpPrecedenceMap for ast_step0::ExprUnit<'a> {
     type T = Expr<'a>;
 
     fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T {
         use Expr::*;
         match self {
-            ast_step0::Expr::Lambda(arms) => Lambda(
+            ast_step0::ExprUnit::Lambda(arms) => Lambda(
                 arms.into_iter()
                     .map(|a| fn_arm(a, op_precedence_map))
                     .collect(),
             ),
-            ast_step0::Expr::Number(a) => Number(a),
-            ast_step0::Expr::StrLiteral(a) => StrLiteral(a),
-            ast_step0::Expr::Ident(a) => Ident(a),
-            ast_step0::Expr::Decl(a) => {
+            ast_step0::ExprUnit::Number(a) => Number(a),
+            ast_step0::ExprUnit::StrLiteral(a) => StrLiteral(a),
+            ast_step0::ExprUnit::Ident(a) => Ident(a),
+            ast_step0::ExprUnit::Decl(a) => {
                 Decl(Box::new(variable_decl(*a, op_precedence_map)))
             }
-            ast_step0::Expr::Paren(a) => {
+            ast_step0::ExprUnit::Paren(a) => {
                 infix_op_sequence(op_sequence(a, op_precedence_map))
             }
         }
@@ -480,16 +478,16 @@ fn fn_arm<'a>(
     }
 }
 
-impl<'a> ConvertWithOpPrecedenceMap for ast_step0::Pattern<'a> {
+impl<'a> ConvertWithOpPrecedenceMap for ast_step0::PatternUnit<'a> {
     type T = Pattern<'a>;
 
     fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T {
         match self {
-            ast_step0::Pattern::Number(a) => Pattern::Number(a),
-            ast_step0::Pattern::StrLiteral(a) => {
+            ast_step0::PatternUnit::Number(a) => Pattern::Number(a),
+            ast_step0::PatternUnit::StrLiteral(a) => {
                 Pattern::StrLiteral(a)
             }
-            ast_step0::Pattern::Constructor(name, ps) => {
+            ast_step0::PatternUnit::Constructor(name, ps) => {
                 Pattern::Constructor {
                     name,
                     args: ps
@@ -498,8 +496,8 @@ impl<'a> ConvertWithOpPrecedenceMap for ast_step0::Pattern<'a> {
                         .collect(),
                 }
             }
-            ast_step0::Pattern::Binder(a) => Pattern::Binder(a),
-            ast_step0::Pattern::Underscore => Pattern::Underscore,
+            ast_step0::PatternUnit::Binder(a) => Pattern::Binder(a),
+            ast_step0::PatternUnit::Underscore => Pattern::Underscore,
         }
     }
 }

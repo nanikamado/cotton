@@ -174,7 +174,7 @@ fn variable_decl<'a>(
         type_annotation: v.type_annotation.map(|(t, forall)| {
             type_variable_names.extend(
                 forall
-                    .type_variable_names
+                    .type_variables
                     .into_iter()
                     .map(|s| (s, TypeVariable::new())),
             );
