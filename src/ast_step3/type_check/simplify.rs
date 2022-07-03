@@ -739,13 +739,8 @@ impl<'a> Display for TypeVariableTracker<'a> {
 mod tests {
     use crate::{
         ast_step1, ast_step2,
-        ast_step2::IncompleteType,
-        ast_step3::{
-            type_check::simplify::simplify_type,
-            type_util::{
-                construct_type, construct_type_with_variables,
-            },
-        },
+        ast_step2::{types::Type, IncompleteType},
+        ast_step3::type_check::simplify::simplify_type,
         parse,
     };
 
@@ -755,14 +750,15 @@ mod tests {
             r#"data a /\ b
             infixl 3 /\
             main : () -> ()
-            = fn | () => () --
+            = | () => ()
             test : I64 /\ I64 ->
             ((I64 /\ I64 | I64 /\ t1 | t2 /\ I64 | t3 /\ t4) -> I64 | String)
-            -> I64 | String forall t1, t2, t3, t4 --
+            -> I64 | String forall {t1, t2, t3, t4}
             = ()
+            dot : a -> (a -> b) -> b forall {a, b} = ()
             "#,
         );
-        let ast: ast_step1::Ast = ast.into();
+        let ast: ast_step1::Ast = (&ast).into();
         let ast: ast_step2::Ast = ast.into();
         let req_t = ast
             .variable_decl
@@ -774,13 +770,20 @@ mod tests {
             .unwrap()
             .constructor
             .clone();
-        let dot = construct_type_with_variables(
-            "a -> (a -> b) -> b",
-            &["a", "b"],
-            &Default::default(),
-        );
+        let dot = ast
+            .variable_decl
+            .iter()
+            .find(|d| d.name == "dot")
+            .unwrap()
+            .type_annotation
+            .clone()
+            .unwrap()
+            .constructor
+            .clone();
         let t = IncompleteType {
-            constructor: construct_type("I64 -> I64 | String"),
+            constructor: Type::from_str("I64").arrow(
+                Type::from_str("I64").union(Type::from_str("String")),
+            ),
             variable_requirements: Vec::new(),
             subtype_relation: vec![(dot, req_t)]
                 .into_iter()

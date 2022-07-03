@@ -264,7 +264,7 @@ impl<'a> Monomorphics<'a> {
                 )
                 .into(),
             ),
-            ast_step3::Expr::DoBlock(exprs) => Expr::DoBlock(
+            ast_step3::Expr::Do(exprs) => Expr::DoBlock(
                 exprs
                     .into_iter()
                     .map(|expr| {

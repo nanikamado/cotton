@@ -1,20 +1,14 @@
 data Hoge
 
 greet : Hoge -> String
-= fn
-| _ => "Hogeeeeee"
---
+= | _ => "Hogeeeeee"
 
 data Fuga
 
 greet : Fuga -> String
-= fn
-| _ => "Fugaaaaaa"
---
+= | _ => "Fugaaaaaa"
 
 main : () -> ()
-= fn
-| () =>
+= | () => do
     println(greet(Hoge))
     println(greet(Fuga))
---

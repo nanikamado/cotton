@@ -1,14 +1,10 @@
 (.)
-= fn
-| a, f => f(a)
---
+= | a, f => f(a)
 
 infixl 10 .
 
-($) : (a -> b) -> a -> b forall a, b --
-= fn
-| f, a => f(a)
---
+($) : (a -> b) -> a -> b forall {a, b}
+= | f, a => f(a)
 
 infixr 0 $
 
@@ -21,72 +17,41 @@ data a .. b
 infixl 4 ..
 
 pop
-= fn
-| a .. b =>
-    (a < b).fn
+= | a .. b => (a < b).case
     | True => (a + 1)..b /\ a
     | False => ()
-    --
---
 
 pop : Filter[I64..I64, I64 -> (True | False)]
     -> () | (Filter[I64..I64, I64 -> (True | False)] /\ I64)
-= fn
-| Filter(l, f) =>
-    l.pop.fn
+= | Filter(l, f) => l.pop.case
     | () => ()
-    | l2 /\ a =>
-        a.f.fn
+    | l2 /\ a => a.f.case
         | True => Filter(l2, f) /\ a
         | False => Filter(l2, f).pop
-        --
-    --
---
 
 all : I64..I64 -> (I64 -> (True | False)) -> (True | False)
-= fn
-| i, f =>
-    i.pop.fn
+= | i, f => i.pop.case
     | () => True
-    | i2 /\ a =>
-        a.f.fn
+    | i2 /\ a => a.f.case
         | True => i2.all(f)
         | False => False
-        --
-    --
---
 
 is_prime
-= fn
-| n =>
-    (2..n - 1).all $ fn
+= | n => (2..n - 1).all $ case
     | i => n % i != 0
-    --
---
 
 each : Filter[I64..I64, I64 -> (True | False)]
     -> (I64 -> ()) -> ()
-= fn
-| l, f =>
-    l.pop.fn
+= | l, f => l.pop.case
     | () => ()
-    | l2 /\ a =>
+    | l2 /\ a => do
         a.f
         l2.each(f)
-    --
---
 
 data Filter(a, b)
 
-filter = fn
-| l, f =>
-    Filter(l, f)
---
+filter = | l, f => Filter(l, f)
 
 main : () -> ()
-= fn
-| () =>
-    (2..100).filter(is_prime).each $ fn
+= | () => (2..100).filter(is_prime).each $ case
     | n => n.i64_to_string.println
-    --
---

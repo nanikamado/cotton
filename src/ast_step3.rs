@@ -45,7 +45,7 @@ pub enum Expr<'a> {
     },
     Decl(Box<VariableDecl<'a>>),
     Call(Box<ExprWithType<'a>>, Box<ExprWithType<'a>>),
-    DoBlock(Vec<ExprWithType<'a>>),
+    Do(Vec<ExprWithType<'a>>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -217,6 +217,18 @@ fn expr<'a>(
             )
             .into(),
         ),
+        ast_step2::Expr::Do(es) => Do(es
+            .into_iter()
+            .map(|et| {
+                expr(
+                    et,
+                    resolved_idents,
+                    types_of_decls,
+                    fixed_variables,
+                    type_variable_tracker,
+                )
+            })
+            .collect()),
     };
     let t = remove_free_type_variables(
         type_variable_tracker.find(t),
@@ -233,24 +245,17 @@ fn fn_arm<'a>(
     fixed_variables: &FxHashSet<TypeVariable>,
     type_variable_tracker: &mut TypeVariableTracker<'a>,
 ) -> FnArm<'a> {
-    let exprs: Vec<_> = arm
-        .exprs
-        .into_iter()
-        .map(|a| {
-            expr(
-                a,
-                resolved_idents,
-                types_of_decls,
-                fixed_variables,
-                type_variable_tracker,
-            )
-        })
-        .collect();
-    let last_type = exprs[exprs.len() - 1].1.clone();
+    let expr = expr(
+        arm.expr,
+        resolved_idents,
+        types_of_decls,
+        fixed_variables,
+        type_variable_tracker,
+    );
     FnArm {
         pattern: arm.pattern,
         pattern_type: arm.pattern_type,
-        expr: (Expr::DoBlock(exprs), last_type),
+        expr,
     }
 }
 

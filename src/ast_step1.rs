@@ -1,7 +1,7 @@
 use crate::{
     intrinsics::OP_PRECEDENCE,
     parse,
-    parse::{Associativity, Forall, OpPrecedenceDecl},
+    parse::{Associativity, OpPrecedenceDecl},
 };
 use fxhash::FxHashMap;
 use index_list::{Index, IndexList};
@@ -14,6 +14,11 @@ use std::{collections::BTreeMap, fmt, fmt::Debug};
 pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl<'a>>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Forall<'a> {
+    pub type_variables: Vec<&'a str>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -43,13 +48,14 @@ pub enum Expr<'a> {
     Ident(&'a str),
     Decl(Box<VariableDecl<'a>>),
     Call(Box<Expr<'a>>, Box<Expr<'a>>),
+    Do(Vec<Expr<'a>>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FnArm<'a> {
     pub pattern: Vec<Pattern<'a>>,
     pub pattern_type: Vec<Option<Type<'a>>>,
-    pub exprs: Vec<Expr<'a>>,
+    pub expr: Expr<'a>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -64,13 +70,11 @@ pub enum Pattern<'a> {
     Underscore,
 }
 
-pub type TypeOperatorSequence<'a> = Vec<OpSequenceUnit<'a, Type<'a>>>;
-
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum OpSequenceUnit<'a, T> {
     Operand(T),
     Operator(&'a str, Associativity, i32),
-    Apply(T),
+    Apply(Vec<OpSequenceUnit<'a, T>>),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -160,25 +164,25 @@ impl<T> OpSequenceUnit<'_, T> {
     }
 }
 
-impl<'a> From<parse::Ast<'a>> for Ast<'a> {
-    fn from(ast: parse::Ast<'a>) -> Self {
+impl<'a> From<&'a parse::Ast> for Ast<'a> {
+    fn from(ast: &'a parse::Ast) -> Self {
         let mut vs = Vec::new();
         let mut ds = Vec::new();
         let mut precedence_map = OP_PRECEDENCE.clone();
-        for d in ast.decls {
+        for d in &ast.decls {
             match d {
                 parse::Decl::Variable(a) => vs.push(a),
                 parse::Decl::Data(a) => ds.push(DataDecl {
-                    name: a.name,
+                    name: &a.name,
                     field_len: a.field_len,
                 }),
-                parse::Decl::Precedence(OpPrecedenceDecl {
+                parse::Decl::OpPrecedence(OpPrecedenceDecl {
                     name,
                     associativity,
                     precedence,
                 }) => {
                     precedence_map
-                        .insert(name, (associativity, precedence));
+                        .insert(name, (*associativity, *precedence));
                 }
             }
         }
@@ -194,19 +198,29 @@ impl<'a> From<parse::Ast<'a>> for Ast<'a> {
 }
 
 fn variable_decl<'a>(
-    v: parse::VariableDecl<'a>,
+    v: &'a parse::VariableDecl,
     op_precedence_map: &OpPrecedenceMap,
 ) -> VariableDecl<'a> {
     VariableDecl {
-        name: v.name,
-        type_annotation: v.type_annotation.map(|(s, forall)| {
-            (
-                infix_op_sequence(op_sequence(s, op_precedence_map)),
-                forall,
-            )
-        }),
+        name: &v.name,
+        type_annotation: v.type_annotation.as_ref().map(
+            |(s, parse::Forall { type_variables })| {
+                (
+                    infix_op_sequence(op_sequence(
+                        s,
+                        op_precedence_map,
+                    )),
+                    Forall {
+                        type_variables: type_variables
+                            .iter()
+                            .map(|s| s.as_str())
+                            .collect(),
+                    },
+                )
+            },
+        ),
         value: infix_op_sequence(op_sequence(
-            v.value,
+            &v.expr,
             op_precedence_map,
         )),
     }
@@ -249,7 +263,7 @@ fn apply_type_op<
         Some(OpSequenceUnit::Apply(a)) => {
             match sequence.get_mut(i_prev).unwrap() {
                 OpSequenceUnit::Operand(e) => {
-                    *e = e.clone().add_argument(a);
+                    *e = e.clone().add_argument(infix_op_sequence(a));
                     sequence.remove(i);
                 }
                 OpSequenceUnit::Apply(_) => {
@@ -378,7 +392,7 @@ pub fn infix_op_sequence<
     }
 }
 
-impl<'a> ConvertWithOpPrecedenceMap for parse::TypeUnit<'a> {
+impl<'a> ConvertWithOpPrecedenceMap for &'a parse::TypeUnit {
     type T = Type<'a>;
 
     fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T {
@@ -394,22 +408,25 @@ impl<'a> ConvertWithOpPrecedenceMap for parse::TypeUnit<'a> {
     }
 }
 
-pub fn op_sequence<'a, U: ConvertWithOpPrecedenceMap>(
-    s: Vec<parse::OpSequenceUnit<'a, U>>,
+pub fn op_sequence<'a, U>(
+    s: &'a [parse::OpSequenceUnit<U>],
     op_precedence_map: &OpPrecedenceMap,
-) -> Vec<OpSequenceUnit<'a, <U as ConvertWithOpPrecedenceMap>::T>> {
+) -> Vec<OpSequenceUnit<'a, <&'a U as ConvertWithOpPrecedenceMap>::T>>
+where
+    &'a U: ConvertWithOpPrecedenceMap,
+{
     use OpSequenceUnit::*;
-    s.into_iter()
+    s.iter()
         .map(|u| match u {
             parse::OpSequenceUnit::Operand(e) => {
                 Operand(e.convert(op_precedence_map))
             }
-            parse::OpSequenceUnit::Operator(a) => {
+            parse::OpSequenceUnit::Op(a) => {
                 let (ass, p) = op_precedence_map.get(a);
                 Operator(a, ass, p)
             }
             parse::OpSequenceUnit::Apply(a) => {
-                Apply(a.convert(op_precedence_map))
+                Apply(op_sequence(a, op_precedence_map))
             }
         })
         .collect()
@@ -420,47 +437,56 @@ pub trait ConvertWithOpPrecedenceMap {
     fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T;
 }
 
-impl<'a> ConvertWithOpPrecedenceMap for parse::ExprUnit<'a> {
+impl<'a> ConvertWithOpPrecedenceMap for &'a parse::ExprUnit {
     type T = Expr<'a>;
 
     fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T {
         use Expr::*;
         match self {
-            parse::ExprUnit::Lambda(arms) => Lambda(
-                arms.into_iter()
+            parse::ExprUnit::Case(arms) => Lambda(
+                arms.iter()
                     .map(|a| fn_arm(a, op_precedence_map))
                     .collect(),
             ),
-            parse::ExprUnit::Number(a) => Number(a),
-            parse::ExprUnit::StrLiteral(a) => StrLiteral(a),
+            parse::ExprUnit::Int(a) => Number(a),
+            parse::ExprUnit::Str(a) => StrLiteral(a),
             parse::ExprUnit::Ident(a) => Ident(a),
-            parse::ExprUnit::Decl(a) => {
-                Decl(Box::new(variable_decl(*a, op_precedence_map)))
+            parse::ExprUnit::VariableDecl(a) => {
+                Decl(Box::new(variable_decl(a, op_precedence_map)))
             }
             parse::ExprUnit::Paren(a) => {
                 infix_op_sequence(op_sequence(a, op_precedence_map))
             }
+            parse::ExprUnit::Do(es) => Do(es
+                .iter()
+                .map(|e| {
+                    infix_op_sequence(op_sequence(
+                        e,
+                        op_precedence_map,
+                    ))
+                })
+                .collect()),
         }
     }
 }
 
 fn fn_arm<'a>(
-    a: parse::FnArm<'a>,
+    a: &'a parse::FnArm,
     op_precedence_map: &OpPrecedenceMap,
 ) -> FnArm<'a> {
     FnArm {
         pattern: a
             .pattern
-            .into_iter()
+            .iter()
             .map(|s| {
                 infix_op_sequence(op_sequence(s, op_precedence_map))
             })
             .collect(),
         pattern_type: a
             .pattern_type
-            .into_iter()
+            .iter()
             .map(|t| {
-                t.map(|t| {
+                t.as_ref().map(|t| {
                     infix_op_sequence(op_sequence(
                         t,
                         op_precedence_map,
@@ -468,35 +494,35 @@ fn fn_arm<'a>(
                 })
             })
             .collect(),
-        exprs: a
-            .exprs
-            .into_iter()
-            .map(|e| {
-                infix_op_sequence(op_sequence(e, op_precedence_map))
-            })
-            .collect(),
+        expr: infix_op_sequence(op_sequence(
+            &a.expr,
+            op_precedence_map,
+        )),
     }
 }
 
-impl<'a> ConvertWithOpPrecedenceMap for parse::PatternUnit<'a> {
+impl<'a> ConvertWithOpPrecedenceMap for &'a parse::PatternUnit {
     type T = Pattern<'a>;
 
     fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T {
         match self {
-            parse::PatternUnit::Number(a) => Pattern::Number(a),
-            parse::PatternUnit::StrLiteral(a) => {
-                Pattern::StrLiteral(a)
-            }
+            parse::PatternUnit::Int(a) => Pattern::Number(a),
+            parse::PatternUnit::Str(a) => Pattern::StrLiteral(a),
             parse::PatternUnit::Constructor(name, ps) => {
                 Pattern::Constructor {
                     name,
                     args: ps
-                        .into_iter()
-                        .map(|p| p.convert(op_precedence_map))
+                        .iter()
+                        .map(|p| {
+                            infix_op_sequence(op_sequence(
+                                p,
+                                op_precedence_map,
+                            ))
+                        })
                         .collect(),
                 }
             }
-            parse::PatternUnit::Binder(a) => Pattern::Binder(a),
+            parse::PatternUnit::Bind(a) => Pattern::Binder(a),
             parse::PatternUnit::Underscore => Pattern::Underscore,
         }
     }

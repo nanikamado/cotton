@@ -1,7 +1,5 @@
 (.)
-= fn
-| a, f => f(a)
---
+= | a, f => f(a)
 
 infixl 10 .
 
@@ -14,24 +12,16 @@ data a .. b
 infixl 4 ..
 
 range_to_list
-= fn
-| a .. b =>
-    (a < b).fn
+= | a .. b => (a < b).case
     | True => a /\ ((a + 1)..b).range_to_list
     | False => ()
-    --
---
 
 print_num_list
-= fn
-| () => ()
-| h /\ t =>
-    h.i64_to_string.println
-    t.print_num_list
---
+= case
+    | () => ()
+    | h /\ t => do
+        h.i64_to_string.println
+        t.print_num_list
 
 main : () -> ()
-= fn
-| () =>
-    (0..100).range_to_list.print_num_list
---
+= | () => (0..100).range_to_list.print_num_list

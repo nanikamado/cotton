@@ -1,92 +1,261 @@
-use nom::{
-    branch::alt,
-    bytes::complete::{is_not, tag, take_while1},
-    character::complete::{self, anychar, digit1, one_of},
-    combinator::{opt, recognize, verify},
-    multi::{many0, many1},
-    sequence::{delimited, pair, preceded, tuple},
-    AsChar, IResult, Parser,
+use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
+use chumsky::{
+    prelude::*,
+    text::{newline, Character},
+    Error, Stream,
 };
+use std::iter;
 use unic_ucd_category::GeneralCategory;
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct Ast<'a> {
-    pub decls: Vec<Decl<'a>>,
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum Token {
+    Int(String),
+    Str(String),
+    Ident(String),
+    CapitalHeadIdent(String),
+    Op(String),
+    Comma,
+    Assign,
+    Paren(char),
+    OpenParenWithoutPad,
+    Indent,
+    Dedent,
+    Case,
+    Do,
+    Forall,
+    Infixl,
+    Infixr,
+    Data,
+    Bar,
+    BArrow,
+    Colon,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Decl<'a> {
-    Variable(VariableDecl<'a>),
-    Data(DataDecl<'a>),
-    Precedence(OpPrecedenceDecl<'a>),
+trait RequiresIndet {
+    fn requires_indent(&self) -> bool;
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct VariableDecl<'a> {
-    pub name: &'a str,
-    pub type_annotation: Option<(Type<'a>, Forall<'a>)>,
-    pub value: Expr<'a>,
+impl RequiresIndet for (Token, Span) {
+    fn requires_indent(&self) -> bool {
+        use Token::*;
+        matches!(self, (Case | Do | Forall, _))
+    }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum TypeUnit<'a> {
-    Ident(&'a str),
-    Paren(Type<'a>),
+pub type Span = std::ops::Range<usize>;
+
+fn semantic_indentation<'a, C, T>(
+    token: T,
+    indent_tok: Token,
+    dedent_tok: Token,
+    src_len: usize,
+) -> impl Parser<C, Vec<(Token, Span)>, Error = Simple<C>> + Clone + 'a
+where
+    C: Character + Eq + core::hash::Hash + 'a,
+    T: Parser<C, (Token, Span), Error = Simple<C>> + Clone + 'a,
+{
+    let line_ws = filter(|c: &C| c.is_inline_whitespace());
+    let line = token.repeated().then_ignore(line_ws.repeated());
+    let lines = line_ws
+        .repeated()
+        .map_with_span(|token, span| (token, span))
+        .then(line)
+        .separated_by(newline())
+        .padded();
+    lines.map(move |lines| {
+        let mut tokens: Vec<(Token, Span)> = Vec::new();
+        let mut indent_level = 0;
+        let mut requires_indent = false;
+        let mut ignored_indents = vec![0];
+        for ((indent, ident_span), mut line) in lines {
+            if line.is_empty() {
+                continue;
+            }
+            let indent_level_delta =
+                indent.len() as i32 - indent_level as i32;
+            indent_level = indent.len();
+            match indent_level_delta.cmp(&0) {
+                std::cmp::Ordering::Less => {
+                    let mut dedent_level = -indent_level_delta;
+                    while dedent_level > 0 {
+                        let ignored_indents_h =
+                            ignored_indents.pop().unwrap();
+                        if ignored_indents_h >= dedent_level {
+                            ignored_indents.push(
+                                ignored_indents_h - dedent_level,
+                            );
+                            break;
+                        } else {
+                            dedent_level -= ignored_indents_h + 1;
+                            tokens.push((
+                                dedent_tok.clone(),
+                                ident_span.clone(),
+                            ));
+                        }
+                    }
+                }
+                std::cmp::Ordering::Equal => (),
+                std::cmp::Ordering::Greater => {
+                    if requires_indent {
+                        tokens.push((
+                            indent_tok.clone(),
+                            ident_span.clone(),
+                        ));
+                        ignored_indents.push(indent_level_delta - 1);
+                    } else {
+                        *ignored_indents.last_mut().unwrap() +=
+                            indent_level_delta;
+                    }
+                }
+            }
+            requires_indent = line
+                .last()
+                .map(|t| t.requires_indent())
+                .unwrap_or(false);
+            tokens.append(&mut line);
+        }
+        tokens.extend(
+            (iter::repeat((
+                dedent_tok.clone(),
+                src_len - 1..src_len,
+            )))
+            .take(ignored_indents.len() - 1),
+        );
+        tokens
+    })
 }
 
-pub type Type<'a> = Vec<OpSequenceUnit<'a, TypeUnit<'a>>>;
+fn lexer(
+    src_len: usize,
+) -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> {
+    let int = text::int(10).from_str().unwrapped().map(Token::Int);
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum OpSequenceUnit<'a, T> {
-    Operand(T),
-    Operator(&'a str),
-    Apply(T),
+    let ident = text::ident().map(|i: String| match i.as_str() {
+        "case" => Token::Case,
+        "do" => Token::Do,
+        "forall" => Token::Forall,
+        "infixl" => Token::Infixl,
+        "infixr" => Token::Infixr,
+        "data" => Token::Data,
+        _ if i.chars().next().unwrap().is_uppercase() => {
+            Token::CapitalHeadIdent(i)
+        }
+        _ => Token::Ident(i),
+    });
+
+    let str = filter(|&c| c != '"')
+        .repeated()
+        .delimited_by(just("\""), just("\""))
+        .collect()
+        .map(Token::Str);
+
+    let unit = just('(')
+        .then(just(')'))
+        .map(|_| Token::CapitalHeadIdent("()".to_string()));
+
+    let paren = just('(')
+        .or(just(')'))
+        .or(just('}'))
+        .or(just('{'))
+        .or(just('['))
+        .or(just(']'))
+        .map(Token::Paren);
+
+    let op = filter::<_, _, Simple<char>>(|&c| {
+        (GeneralCategory::of(c).is_punctuation()
+            || GeneralCategory::of(c).is_symbol())
+            && c != '"'
+            && c != '('
+            && c != ')'
+    })
+    .repeated()
+    .at_least(1)
+    .collect::<String>()
+    .map(|op| match op.as_str() {
+        "," => Token::Comma,
+        "=>" => Token::BArrow,
+        "|" => Token::Bar,
+        "=" => Token::Assign,
+        ":" => Token::Colon,
+        _ => Token::Op(op),
+    });
+
+    let line_ws = filter(|c: &char| c.is_inline_whitespace());
+
+    let tt = line_ws
+        .repeated()
+        .ignore_then(unit)
+        .or(just('(').map(|_| Token::OpenParenWithoutPad))
+        .or(line_ws
+            .repeated()
+            .ignore_then(int.or(str).or(paren).or(op).or(ident)))
+        .map_with_span(|tok, span| (tok, span));
+
+    semantic_indentation(tt, Token::Indent, Token::Dedent, src_len)
+        .then_ignore(end())
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub struct Forall<'a> {
-    pub type_variables: Vec<&'a str>,
+pub struct Forall {
+    pub type_variables: Vec<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct DataDecl<'a> {
-    pub name: &'a str,
-    pub field_len: usize,
+pub struct VariableDecl {
+    pub name: String,
+    pub type_annotation: Option<(Type, Forall)>,
+    pub expr: Expr,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum ExprUnit<'a> {
-    Lambda(Vec<FnArm<'a>>),
-    Number(&'a str),
-    StrLiteral(&'a str),
-    Ident(&'a str),
-    Decl(Box<VariableDecl<'a>>),
-    Paren(Expr<'a>),
+pub enum OpSequenceUnit<T> {
+    Operand(T),
+    Op(String),
+    Apply(Vec<OpSequenceUnit<T>>),
 }
 
-pub type Expr<'a> = Vec<OpSequenceUnit<'a, ExprUnit<'a>>>;
+pub type Expr = Vec<OpSequenceUnit<ExprUnit>>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct FnArm<'a> {
-    pub pattern: Vec<Pattern<'a>>,
-    pub pattern_type: Vec<Option<Type<'a>>>,
-    pub exprs: Vec<Expr<'a>>,
+pub enum ExprUnit {
+    Int(String),
+    Str(String),
+    Ident(String),
+    Case(Vec<FnArm>),
+    Paren(Expr),
+    Do(Vec<Expr>),
+    VariableDecl(VariableDecl),
 }
 
-pub type Pattern<'a> = Vec<OpSequenceUnit<'a, PatternUnit<'a>>>;
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum TypeUnit {
+    Ident(String),
+    Paren(Type),
+}
+
+pub type Type = Vec<OpSequenceUnit<TypeUnit>>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum PatternUnit<'a> {
-    Number(&'a str),
-    StrLiteral(&'a str),
-    Constructor(&'a str, Vec<PatternUnit<'a>>),
-    Binder(&'a str),
+pub enum PatternUnit {
+    Int(String),
+    Str(String),
+    Constructor(String, Vec<Pattern>),
     Underscore,
+    Bind(String),
+}
+
+pub type Pattern = Vec<OpSequenceUnit<PatternUnit>>;
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct FnArm {
+    pub pattern: Vec<Pattern>,
+    pub pattern_type: Vec<Option<Type>>,
+    pub expr: Expr,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct OpPrecedenceDecl<'a> {
-    pub name: &'a str,
+pub struct OpPrecedenceDecl {
+    pub name: String,
     pub associativity: Associativity,
     pub precedence: i32,
 }
@@ -98,414 +267,372 @@ pub enum Associativity {
     UnaryLeft,
 }
 
-fn separator0(input: &str) -> IResult<&str, Vec<char>> {
-    many0(one_of("\r\n\t "))(input)
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct DataDecl {
+    pub name: String,
+    pub field_len: usize,
 }
 
-fn separator1(input: &str) -> IResult<&str, Vec<char>> {
-    many1(one_of("\r\n\t "))(input)
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Decl {
+    Variable(VariableDecl),
+    OpPrecedence(OpPrecedenceDecl),
+    Data(DataDecl),
 }
 
-pub fn parse(source: &str) -> Ast {
-    let (remaining, ast) = ast(source).unwrap();
-    if remaining.is_empty() {
-        ast
-    } else {
-        panic!("unexpected input:\n{}\nast:\n{:?}", remaining, ast);
-    }
+#[derive(Debug, PartialEq, Eq)]
+pub struct Ast {
+    pub decls: Vec<Decl>,
 }
 
-fn ast(source: &str) -> IResult<&str, Ast> {
-    let (input, decls) = many1(dec)(source)?;
-    Ok((input, Ast { decls }))
+fn indented<'a, O: 'a + Clone, E: 'a + Error<Token> + Clone>(
+    p: impl 'a + Parser<Token, O, Error = E> + Clone,
+) -> Recursive<'a, Token, O, E> {
+    recursive(|indented| {
+        let indented = indented.or(p);
+        indented
+            .clone()
+            .delimited_by(just(Token::Indent), just(Token::Dedent))
+            .or(indented.delimited_by(
+                just(Token::Paren('{')),
+                just(Token::Paren('}')),
+            ))
+    })
 }
 
-fn dec(input: &str) -> IResult<&str, Decl> {
-    pad(alt((
-        decl.map(Decl::Variable),
-        infix_constructor_decl.map(Decl::Data),
-        data_decl.map(Decl::Data),
-        operator_precedence_decl.map(Decl::Precedence),
-    )))(input)
-}
-
-fn pad<'a, O, F>(
-    f: F,
-) -> impl FnMut(&'a str) -> IResult<&'a str, O, nom::error::Error<&str>>
-where
-    F: FnMut(&'a str) -> IResult<&'a str, O, nom::error::Error<&str>>,
-{
-    delimited(separator0, f, separator0)
-}
-
-fn decl(input: &str) -> IResult<&str, VariableDecl> {
-    let (input, (identifier, _, data_type, _, _, value)) =
-        tuple((
-            identifier,
-            separator0,
-            opt(tuple((tag(":"), infix_type_sequence, opt(forall)))),
-            separator0,
-            tag("="),
-            op_sequence,
-        ))(input)?;
-    Ok((
-        input,
-        VariableDecl {
-            name: identifier,
-            type_annotation: data_type.map(|(_, t, forall)| {
-                (t, forall.unwrap_or_default())
+fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
+    let int = select! { Token::Int(i) => i };
+    let str = select! { Token::Str(s) => s };
+    let op = select! { Token::Op(s) => s };
+    let ident = select! { Token::Ident(ident) => ident };
+    let capital_head_ident =
+        select! { Token::CapitalHeadIdent(ident) => ident };
+    let ident = ident.or(capital_head_ident);
+    let open_paren =
+        just(Token::Paren('(')).or(just(Token::OpenParenWithoutPad));
+    let ident_or_op = ident.or(
+        op.delimited_by(open_paren.clone(), just(Token::Paren(')')))
+    );
+    let pattern = recursive(|pattern| {
+        let constructor_pattern = capital_head_ident
+            .then(
+                pattern
+                    .separated_by(just(Token::Comma))
+                    .allow_trailing()
+                    .delimited_by(
+                        open_paren.clone(),
+                        just(Token::Paren(')')),
+                    )
+                    .or_not(),
+            )
+            .map(|(name, args)| {
+                PatternUnit::Constructor(
+                    name,
+                    args.unwrap_or_default(),
+                )
+            });
+        let pattern_unit = constructor_pattern
+            .or(just(Token::Op("_".to_string()))
+                .map(|_| PatternUnit::Underscore))
+            .or(ident.map(PatternUnit::Bind))
+            .or(int.map(PatternUnit::Int))
+            .or(str.map(PatternUnit::Str));
+        pattern_unit
+            .clone()
+            .then(
+                op.then(pattern_unit.clone())
+                    .map(|(o, e)| {
+                        vec![
+                            OpSequenceUnit::Op(o),
+                            OpSequenceUnit::Operand(e),
+                        ]
+                    })
+                    .repeated()
+                    .flatten(),
+            )
+            .map(|(e, oes)| {
+                [vec![OpSequenceUnit::Operand(e)], oes].concat()
+            })
+    });
+    let patterns = pattern
+        .separated_by(just(Token::Comma))
+        .allow_trailing()
+        .at_least(1);
+    let forall = just(Token::Forall)
+        .ignore_then(indented(
+            ident.separated_by(just(Token::Comma)).allow_trailing(),
+        ))
+        .map(|type_variable_names| Forall {
+            type_variables: type_variable_names,
+        });
+    let type_ = recursive(|type_| {
+        let type_unit = ident.map(TypeUnit::Ident).or(type_
+            .clone()
+            .delimited_by(open_paren.clone(), just(Token::Paren(')')))
+            .map(TypeUnit::Paren));
+        let apply = type_
+            .separated_by(just(Token::Comma))
+            .at_least(1)
+            .allow_trailing()
+            .delimited_by(
+                just(Token::Paren('[')),
+                just(Token::Paren(']')),
+            )
+            .map(|es| {
+                es.into_iter().map(OpSequenceUnit::Apply).collect()
+            });
+        type_unit
+            .clone()
+            .then(
+                op.or(just(Token::Bar).map(|_| "|".to_string()))
+                    .then(type_unit.clone())
+                    .map(|(o, e)| {
+                        vec![
+                            OpSequenceUnit::Op(o),
+                            OpSequenceUnit::Operand(e),
+                        ]
+                    })
+                    .or(apply)
+                    .repeated()
+                    .flatten(),
+            )
+            .map(|(e, oes)| {
+                [vec![OpSequenceUnit::Operand(e)], oes].concat()
+            })
+    });
+    let type_ = type_.then(forall.or_not()).map(|(t, forall)| {
+        (
+            t,
+            forall.unwrap_or_else(|| Forall {
+                type_variables: Vec::new(),
             }),
-            value,
-        },
-    ))
-}
-
-fn forall(input: &str) -> IResult<&str, Forall> {
-    let (input, (_, id, ids, _, _, _)) = tuple((
-        tag("forall"),
-        identifier_separators,
-        many0(preceded(tag(","), identifier_separators)),
-        opt(tag(",")),
-        separator0,
-        tag("--"),
-    ))(input)?;
-    Ok((
-        input,
-        Forall {
-            type_variables: [vec![id], ids].concat(),
-        },
-    ))
-}
-
-fn identifier_separators(input: &str) -> IResult<&str, &str> {
-    pad(identifier)(input)
-}
-
-fn data_decl(input: &str) -> IResult<&str, DataDecl> {
-    let (input, (_, _, name, fields)) = tuple((
-        tag("data"),
-        separator0,
-        capital_head_identifier,
-        opt(tuple((
-            tag("("),
-            identifier_separators,
-            many0(preceded(tag(","), identifier_separators)),
-            opt(tag(",")),
-            tag(")"),
-        ))),
-    ))(input)?;
-    let fields = if let Some((_, field0, mut field1, _, _)) = fields {
-        let mut field0 = vec![field0];
-        field0.append(&mut field1);
-        field0
-    } else {
-        Vec::new()
-    };
-    Ok((
-        input,
-        DataDecl {
+        )
+    });
+    let variable_decl = recursive(|variable_decl| {
+        let expr = recursive(|expr| {
+            let lambda = just(Token::Bar)
+                .ignore_then(patterns)
+                .then_ignore(just(Token::BArrow))
+                .then(expr.clone())
+                .map(|(pattern, expr)| {
+                    let l = pattern.len();
+                    FnArm {
+                        pattern,
+                        expr,
+                        pattern_type: vec![None; l],
+                    }
+                });
+            let case = just(Token::Case)
+                .ignore_then(indented(
+                    lambda.clone().repeated().at_least(1),
+                ))
+                .map(ExprUnit::Case);
+            let do_ = just(Token::Do)
+                .ignore_then(indented(expr.clone().repeated()))
+                .map(ExprUnit::Do);
+            let expr_unit = do_
+                .or(case)
+                .or(int.map(ExprUnit::Int))
+                .or(str.map(ExprUnit::Str))
+                .or(ident_or_op.clone().map(ExprUnit::Ident))
+                .or(lambda.map(|a| ExprUnit::Case(vec![a])))
+                .or(variable_decl.map(ExprUnit::VariableDecl))
+                .or(expr
+                    .clone()
+                    .delimited_by(open_paren, just(Token::Paren(')')))
+                    .map(ExprUnit::Paren));
+            let apply = expr
+                .separated_by(just(Token::Comma))
+                .at_least(1)
+                .allow_trailing()
+                .delimited_by(
+                    just(Token::OpenParenWithoutPad),
+                    just(Token::Paren(')')),
+                )
+                .map(|es| {
+                    es.into_iter()
+                        .map(OpSequenceUnit::Apply)
+                        .collect()
+                });
+            expr_unit
+                .clone()
+                .then(
+                    op.then(expr_unit.clone())
+                        .map(|(o, e)| {
+                            vec![
+                                OpSequenceUnit::Op(o),
+                                OpSequenceUnit::Operand(e),
+                            ]
+                        })
+                        .or(apply)
+                        .repeated()
+                        .flatten(),
+                )
+                .map(|(e, oes)| {
+                    [vec![OpSequenceUnit::Operand(e)], oes].concat()
+                })
+        });
+        ident_or_op
+            .clone()
+            .then(
+                just(Token::Colon)
+                    .ignore_then(type_.clone())
+                    .or_not(),
+            )
+            .then_ignore(just(Token::Assign))
+            .then(expr)
+            .map(|((name, type_annotation), expr)| VariableDecl {
+                name,
+                type_annotation,
+                expr,
+            })
+    });
+    let op_precedence_decl = just(Token::Infixl)
+        .map(|_| Associativity::Left)
+        .or(just(Token::Infixr).map(|_| Associativity::Right))
+        .then(int)
+        .then(op)
+        .map(|((associativity, i), name)| OpPrecedenceDecl {
             name,
-            field_len: fields.len(),
-        },
-    ))
+            associativity,
+            precedence: i.parse().unwrap(),
+        });
+    let data_decl_normal = capital_head_ident
+        .then(
+            ident_or_op
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+                .delimited_by(
+                    just(Token::OpenParenWithoutPad),
+                    just(Token::Paren(')')),
+                )
+                .or_not(),
+        )
+        .map(|(name, args)| DataDecl {
+            name,
+            field_len: args.unwrap_or_default().len(),
+        });
+    let data_decl_infix = ident
+        .ignore_then(op)
+        .then_ignore(ident)
+        .map(|name| DataDecl { name, field_len: 2 });
+    let data_decl = just(Token::Data)
+        .ignore_then(data_decl_normal.or(data_decl_infix));
+    variable_decl
+        .map(Decl::Variable)
+        .or(op_precedence_decl.map(Decl::OpPrecedence))
+        .or(data_decl.map(Decl::Data))
+        .repeated()
+        .at_least(1)
+        .then_ignore(end())
 }
 
-fn infix_constructor_decl(input: &str) -> IResult<&str, DataDecl> {
-    let (input, (_, _l, name, _r)) = tuple((
-        tag("data"),
-        identifier_separators,
-        op,
-        identifier_separators,
-    ))(input)?;
-    Ok((input, DataDecl { name, field_len: 2 }))
-}
-
-fn type_expr(input: &str) -> IResult<&str, TypeUnit> {
-    alt((
-        identifier.map(TypeUnit::Ident),
-        tag("()").map(|_| TypeUnit::Ident("()")),
-        delimited(tag("("), infix_type_sequence, tag(")"))
-            .map(TypeUnit::Paren),
-    ))(input)
-}
-
-pub fn infix_type_sequence(input: &str) -> IResult<&str, Type> {
-    let (input, (_, e, eo, _)) = tuple((
-        separator0,
-        type_expr,
-        many0(alt((
-            type_call.map(|es| {
-                es.into_iter().map(OpSequenceUnit::Apply).collect()
-            }),
-            tuple((pad(type_op), type_expr))
-                .map(|(s, e)| vec![s, OpSequenceUnit::Operand(e)]),
-        ))),
-        separator0,
-    ))(input)?;
-    let eo = std::iter::once(OpSequenceUnit::Operand(e))
-        .chain(eo.into_iter().flatten())
-        .collect();
-    Ok((input, eo))
-}
-
-fn type_call(input: &str) -> IResult<&str, Vec<TypeUnit>> {
-    let (input, (_, a0, a1, _, _)) = tuple((
-        tag("["),
-        infix_type_sequence,
-        many0(preceded(tag(","), infix_type_sequence)),
-        opt(tag(",")),
-        tag("]"),
-    ))(input)?;
-    let mut a0 = vec![TypeUnit::Paren(a0)];
-    let mut a1 = a1.into_iter().map(TypeUnit::Paren).collect();
-    a0.append(&mut a1);
-    Ok((input, a0))
-}
-
-fn identifier(input: &str) -> IResult<&str, &str> {
-    let head = verify(anychar, |c| {
-        is_identifier_char(*c) && !c.is_dec_digit() || *c == '_'
-    });
-    let tail = verify(anychar, |c| is_identifier_char(*c));
-    let op = delimited(tag("("), op, tag(")"));
-    alt((recognize(pair(head, many0(tail))), op))(input)
-}
-
-fn capital_head_identifier(input: &str) -> IResult<&str, &str> {
-    let head = verify(anychar, |c| {
-        c.is_uppercase()
-            && is_identifier_char(*c)
-            && !c.is_dec_digit()
-    });
-    let tail = verify(anychar, |c| is_identifier_char(*c));
-    let op = delimited(tag("("), op, tag(")"));
-    alt((recognize(pair(head, many0(tail))), op))(input)
-}
-
-fn is_identifier_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_'
-}
-
-fn expr(input: &str) -> IResult<&str, ExprUnit<'_>> {
-    alt((
-        str_literal.map(ExprUnit::StrLiteral),
-        num_literal.map(ExprUnit::Number),
-        unit,
-        lambda,
-        decl.map(|d| ExprUnit::Decl(Box::new(d))),
-        identifier.map(ExprUnit::Ident),
-        paren,
-    ))(input)
-}
-
-fn paren(input: &str) -> IResult<&str, ExprUnit> {
-    let (input, s) =
-        delimited(tag("("), op_sequence, tag(")"))(input)?;
-    Ok((input, ExprUnit::Paren(s)))
-}
-
-fn lambda(input: &str) -> IResult<&str, ExprUnit> {
-    let (input, (_, _, arms, _)) =
-        tuple((tag("fn"), separator0, many1(fn_arm), tag("--")))(
-            input,
-        )?;
-    Ok((input, ExprUnit::Lambda(arms)))
-}
-
-fn fn_arm(input: &str) -> IResult<&str, FnArm> {
-    let (
-        input,
-        (_, pattern0, type0, pattern1_type1, _, _, arguments),
-    ) = tuple((
-        tag("|"),
-        infix_constructor_sequence,
-        opt(preceded(tag(":"), infix_type_sequence)),
-        many0(preceded(
-            tag(","),
-            tuple((
-                infix_constructor_sequence,
-                opt(preceded(tag(":"), infix_type_sequence)),
-            )),
-        )),
-        opt(tag(",")),
-        tag("=>"),
-        many1(op_sequence),
-    ))(input)?;
-    let (mut pattern1, mut type1) =
-        pattern1_type1.into_iter().unzip();
-    Ok((
-        input,
-        FnArm {
-            pattern: {
-                let mut p = vec![pattern0];
-                p.append(&mut pattern1);
-                p
-            },
-            pattern_type: {
-                let mut p = vec![type0];
-                p.append(&mut type1);
-                p
-            },
-            exprs: arguments,
-        },
-    ))
-}
-
-fn pattern(input: &str) -> IResult<&str, PatternUnit> {
-    pad(alt((
-        str_literal.map(PatternUnit::StrLiteral),
-        num_literal.map(PatternUnit::Number),
-        tag("()").map(|_| PatternUnit::Constructor("()", Vec::new())),
-        tag("_").map(|_| PatternUnit::Underscore),
-        constructor_pattern,
-        identifier.map(PatternUnit::Binder),
-    )))(input)
-}
-
-fn constructor_pattern(input: &str) -> IResult<&str, PatternUnit> {
-    let (input, (name, fields)) = tuple((
-        capital_head_identifier,
-        opt(tuple((
-            tag("("),
-            pattern,
-            many0(preceded(tag(","), pattern)),
-            opt(tag(",")),
-            tag(")"),
-        ))),
-    ))(input)?;
-    let fields = if let Some((_, field0, mut field1, _, _)) = fields {
-        let mut field0 = vec![field0];
-        field0.append(&mut field1);
-        field0
-    } else {
-        Vec::new()
-    };
-    Ok((input, PatternUnit::Constructor(name, fields)))
-}
-
-fn str_literal(input: &str) -> IResult<&str, &str> {
-    let (input, s) =
-        recognize(tuple((tag("\""), is_not("\""), tag("\""))))(
-            input,
-        )?;
-    Ok((input, s))
-}
-
-fn num_literal(input: &str) -> IResult<&str, &str> {
-    digit1(input).map(|(i, s)| (i, s))
-}
-
-fn fn_call(input: &str) -> IResult<&str, Vec<ExprUnit>> {
-    let (input, (_, a0, a1, _, _)) = tuple((
-        tag("("),
-        op_sequence,
-        many0(preceded(tag(","), op_sequence)),
-        opt(tag(",")),
-        tag(")"),
-    ))(input)?;
-    let mut a0 = vec![ExprUnit::Paren(a0)];
-    let mut a1 = a1.into_iter().map(ExprUnit::Paren).collect();
-    a0.append(&mut a1);
-    Ok((input, a0))
-}
-
-fn unit(input: &str) -> IResult<&str, ExprUnit> {
-    let (input, _) = tag("()")(input)?;
-    Ok((input, ExprUnit::Ident("()")))
-}
-
-fn infix_constructor_sequence(input: &str) -> IResult<&str, Pattern> {
-    let (input, (_, e, eo, _)) = tuple((
-        separator0,
-        pattern,
-        many0(tuple((pad(op), pattern)).map(|(s, e)| {
-            vec![
-                OpSequenceUnit::Operator(s),
-                OpSequenceUnit::Operand(e),
-            ]
-        })),
-        separator0,
-    ))(input)?;
-    let eo = std::iter::once(OpSequenceUnit::Operand(e))
-        .chain(eo.into_iter().flatten())
-        .collect();
-    Ok((input, eo))
-}
-
-fn op_sequence(input: &str) -> IResult<&str, Expr> {
-    let (input, (_, e, eo, _)) = tuple((
-        separator0,
-        expr,
-        many0(alt((
-            fn_call.map(|es| {
-                es.into_iter().map(OpSequenceUnit::Apply).collect()
-            }),
-            tuple((pad(op), expr)).map(|(s, e)| {
-                vec![
-                    OpSequenceUnit::Operator(s),
-                    OpSequenceUnit::Operand(e),
-                ]
-            }),
-        ))),
-        separator0,
-    ))(input)?;
-    let eo = std::iter::once(OpSequenceUnit::Operand(e))
-        .chain(eo.into_iter().flatten())
-        .collect();
-    Ok((input, eo))
-}
-
-fn op(input: &str) -> IResult<&str, &str> {
-    verify(
-        take_while1(|c| {
-            (GeneralCategory::of(c).is_punctuation()
-                || GeneralCategory::of(c).is_symbol())
-                && c != '"'
-                && c != '('
-                && c != ')'
-        }),
-        |s: &str| !["=", "=>", "|", "--", ",", ":"].contains(&s),
-    )(input)
-}
-
-fn type_op(input: &str) -> IResult<&str, OpSequenceUnit<TypeUnit>> {
-    alt((op, tag("|")))
-        .map(OpSequenceUnit::Operator)
-        .parse(input)
-}
-
-fn operator_precedence_decl(
-    input: &str,
-) -> IResult<&str, OpPrecedenceDecl> {
-    alt((
-        tuple((
-            tag("infixl"),
-            separator1,
-            complete::i64,
-            separator1,
-            op,
-        ))
-        .map(|(_, _, precedence, _, name)| {
-            OpPrecedenceDecl {
-                name,
-                associativity: Associativity::Left,
-                precedence: precedence as i32,
+pub fn parse(src: &str) -> Ast {
+    let len = src.chars().count();
+    let ts = lexer(len).parse(src);
+    let parser = parser();
+    let r = parser.parse(Stream::from_iter(
+        len..len + 1,
+        ts.unwrap().into_iter(),
+    ));
+    match r {
+        Ok(decls) => Ast { decls },
+        Err(es) => {
+            for e in es {
+                let e = e.map(|c| format!("{:?}", c));
+                let report = Report::build(
+                    ReportKind::Error,
+                    (),
+                    e.span().start,
+                );
+                let report = match e.reason() {
+                    chumsky::error::SimpleReason::Unclosed {
+                        span,
+                        delimiter,
+                    } => report
+                        .with_message(format!(
+                            "Unclosed delimiter {}",
+                            delimiter.fg(Color::Yellow)
+                        ))
+                        .with_label(
+                            Label::new(span.clone())
+                                .with_message(format!(
+                                    "Unclosed delimiter {}",
+                                    delimiter.fg(Color::Yellow)
+                                ))
+                                .with_color(Color::Yellow),
+                        )
+                        .with_label(
+                            Label::new(e.span())
+                                .with_message(format!(
+                                    "Must be closed before this {}",
+                                    e.found()
+                                        .unwrap_or(
+                                            &"end of file"
+                                                .to_string()
+                                        )
+                                        .fg(Color::Red)
+                                ))
+                                .with_color(Color::Red),
+                        ),
+                    chumsky::error::SimpleReason::Unexpected => {
+                        report
+                            .with_message(format!(
+                                "{}, expected {}",
+                                if e.found().is_some() {
+                                    "Unexpected token in input"
+                                } else {
+                                    "Unexpected end of input"
+                                },
+                                if e.expected().len() == 0 {
+                                    "something else".to_string()
+                                } else {
+                                    e.expected()
+                                        .map(
+                                            |expected| match expected
+                                            {
+                                                Some(expected) => {
+                                                    expected
+                                                        .to_string()
+                                                }
+                                                None => {
+                                                    "end of input"
+                                                        .to_string()
+                                                }
+                                            },
+                                        )
+                                        .collect::<Vec<_>>()
+                                        .join(", ")
+                                }
+                            ))
+                            .with_label(
+                                Label::new(e.span())
+                                    .with_message(format!(
+                                        "Unexpected token {}",
+                                        e.found()
+                                            .unwrap_or(
+                                                &"end of file"
+                                                    .to_string()
+                                            )
+                                            .fg(Color::Red)
+                                    ))
+                                    .with_color(Color::Red),
+                            )
+                    }
+                    chumsky::error::SimpleReason::Custom(msg) => {
+                        report.with_message(msg).with_label(
+                            Label::new(e.span())
+                                .with_message(format!(
+                                    "{}",
+                                    msg.fg(Color::Red)
+                                ))
+                                .with_color(Color::Red),
+                        )
+                    }
+                };
+                report.finish().print(Source::from(&src)).unwrap();
             }
-        }),
-        tuple((
-            tag("infixr"),
-            separator1,
-            complete::i64,
-            separator1,
-            op,
-        ))
-        .map(|(_, _, precedence, _, name)| {
-            OpPrecedenceDecl {
-                name,
-                associativity: Associativity::Right,
-                precedence: precedence as i32,
-            }
-        }),
-    ))
-    .parse(input)
+            panic!()
+        }
+    }
 }

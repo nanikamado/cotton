@@ -56,10 +56,11 @@ pub fn run(
         }
     }
     let ast = parse(source);
-    let ast: ast_step1::Ast = ast.into();
+    let ast: ast_step1::Ast = (&ast).into();
     let ast: ast_step2::Ast = ast.into();
     let ast: ast_step3::Ast = ast.into();
     let ast: ast_step4::Ast = ast.into();
+    dbg!(&ast);
     if use_rust_backend {
         rust_backend::run(ast);
     } else {

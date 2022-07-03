@@ -1,7 +1,4 @@
-use crate::{
-    ast_step2::types::Type, ast_step3::type_util::construct_type,
-    parse::Associativity,
-};
+use crate::{ast_step2::types::Type, parse::Associativity};
 use fxhash::FxHashMap;
 use once_cell::sync::Lazy;
 use std::fmt::Display;
@@ -58,21 +55,60 @@ impl IntrinsicVariable {
 pub static INTRINSIC_VARIABLES_TYPES: Lazy<
     FxHashMap<IntrinsicVariable, Type>,
 > = Lazy::new(|| {
-    [
-        (IntrinsicVariable::Minus, "I64 -> I64 -> I64"),
-        (IntrinsicVariable::Plus, "I64 -> I64 -> I64"),
-        (IntrinsicVariable::Percent, "I64 -> I64 -> I64"),
-        (IntrinsicVariable::Lt, "I64 -> I64 -> True | False"),
-        (IntrinsicVariable::Neq, "I64 -> I64 -> True | False"),
-        (IntrinsicVariable::Println, "String -> ()"),
-        (IntrinsicVariable::Print, "String -> ()"),
-        (IntrinsicVariable::I64ToString, "I64 -> String"),
-        (IntrinsicVariable::True, "True"),
-        (IntrinsicVariable::False, "False"),
-        (IntrinsicVariable::Unit, "()"),
+    vec![
+        (
+            IntrinsicVariable::Minus,
+            Type::from_str("I64").arrow(
+                Type::from_str("I64").arrow(Type::from_str("I64")),
+            ),
+        ),
+        (
+            IntrinsicVariable::Plus,
+            Type::from_str("I64").arrow(
+                Type::from_str("I64").arrow(Type::from_str("I64")),
+            ),
+        ),
+        (
+            IntrinsicVariable::Percent,
+            Type::from_str("I64").arrow(
+                Type::from_str("I64").arrow(Type::from_str("I64")),
+            ),
+        ),
+        (
+            IntrinsicVariable::Lt,
+            Type::from_str("I64").arrow(Type::from_str("I64").arrow(
+                Type::from_str("True").union(Type::from_str("False")),
+            )),
+        ),
+        (
+            IntrinsicVariable::Neq,
+            Type::from_str("I64").arrow(Type::from_str("I64").arrow(
+                Type::from_str("True").union(Type::from_str("False")),
+            )),
+        ),
+        (
+            IntrinsicVariable::Neq,
+            Type::from_str("I64").arrow(Type::from_str("I64").arrow(
+                Type::from_str("True").union(Type::from_str("False")),
+            )),
+        ),
+        (
+            IntrinsicVariable::Println,
+            Type::from_str("String").arrow(Type::from_str("()")),
+        ),
+        (
+            IntrinsicVariable::Print,
+            Type::from_str("String").arrow(Type::from_str("()")),
+        ),
+        (
+            IntrinsicVariable::I64ToString,
+            Type::from_str("I64").arrow(Type::from_str("String")),
+        ),
+        (IntrinsicVariable::True, Type::from_str("True")),
+        (IntrinsicVariable::False, Type::from_str("False")),
+        (IntrinsicVariable::Unit, Type::from_str("()")),
     ]
-    .iter()
-    .map(|(n, t)| (*n, construct_type(t)))
+    .into_iter()
     .collect()
 });
 
