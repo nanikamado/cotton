@@ -738,7 +738,7 @@ impl<'a> Display for TypeVariableTracker<'a> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        ast_step0, ast_step1, ast_step2,
+        ast_step1, ast_step2,
         ast_step2::IncompleteType,
         ast_step3::{
             type_check::simplify::simplify_type,
@@ -751,7 +751,7 @@ mod tests {
 
     #[test]
     fn simplify1() {
-        let ast: ast_step0::Ast = parse::parse(
+        let ast: parse::Ast = parse::parse(
             r#"data a /\ b
             infixl 3 /\
             main : () -> ()
