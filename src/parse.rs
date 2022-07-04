@@ -630,7 +630,7 @@ pub fn parse(src: &str) -> Ast {
                         )
                     }
                 };
-                report.finish().print(Source::from(&src)).unwrap();
+                report.finish().eprint(Source::from(&src)).unwrap();
             }
             panic!()
         }
