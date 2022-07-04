@@ -632,7 +632,7 @@ pub fn parse(src: &str) -> Ast {
                 };
                 report.finish().eprint(Source::from(&src)).unwrap();
             }
-            panic!()
+            std::process::exit(1)
         }
     }
 }
