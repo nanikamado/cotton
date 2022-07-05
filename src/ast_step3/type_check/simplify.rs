@@ -741,23 +741,23 @@ mod tests {
         ast_step1, ast_step2,
         ast_step2::{types::Type, IncompleteType},
         ast_step3::type_check::simplify::simplify_type,
-        parse,
+        lex, parse,
     };
 
     #[test]
     fn simplify1() {
-        let ast: parse::Ast = parse::parse(
-            r#"data a /\ b
-            infixl 3 /\
-            main : () -> ()
-            = | () => ()
-            test : I64 /\ I64 ->
-            ((I64 /\ I64 | I64 /\ t1 | t2 /\ I64 | t3 /\ t4) -> I64 | String)
-            -> I64 | String forall {t1, t2, t3, t4}
-            = ()
-            dot : a -> (a -> b) -> b forall {a, b} = ()
-            "#,
-        );
+        let src = r#"data a /\ b
+        infixl 3 /\
+        main : () -> ()
+        = | () => ()
+        test : I64 /\ I64 ->
+        ((I64 /\ I64 | I64 /\ t1 | t2 /\ I64 | t3 /\ t4) -> I64 | String)
+        -> I64 | String forall {t1, t2, t3, t4}
+        = ()
+        dot : a -> (a -> b) -> b forall {a, b} = ()
+        "#;
+        let (tokens, src_len) = lex::lex(src);
+        let ast = parse(tokens, src, src_len);
         let ast: ast_step1::Ast = (&ast).into();
         let ast: ast_step2::Ast = ast.into();
         let req_t = ast
