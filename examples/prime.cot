@@ -26,24 +26,21 @@ pop = case
             | True => Filter(l2, f) /\ a
             | False => Filter(l2, f).pop
 
-all = case
-    | i, f => i.pop.case
-        | () => True
-        | i2 /\ a => a.f.case
-            | True => i2.all(f)
-            | False => False
+all = | i, f => i.pop.case
+    | () => True
+    | i2 /\ a => a.f.case
+        | True => i2.all(f)
+        | False => False
 
 is_prime
-= case
-    | n => (2..n - 1).all $ case
-        | i => n % i != 0
+= | n => (2..n - 1).all $ case
+    | i => n % i != 0
 
-each = case
-    | l, f => l.pop.case
-        | () => ()
-        | l2 /\ a => do
-            a.f
-            l2.each(f)
+each = | l, f => l.pop.case
+    | () => ()
+    | l2 /\ a => do
+        a.f
+        l2.each(f)
 
 data Filter(a, b)
 

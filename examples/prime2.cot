@@ -37,7 +37,7 @@ all : I64..I64 -> (I64 -> (True | False)) -> (True | False)
         | False => False
 
 is_prime
-= | n => (2..n - 1).all $ case
+= | n => (2..n - 1).all $
     | i => n % i != 0
 
 each : Filter[I64..I64, I64 -> (True | False)]
