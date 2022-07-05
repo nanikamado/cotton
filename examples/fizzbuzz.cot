@@ -28,9 +28,9 @@ to_string
     | s => s
 
 main : () -> ()
-= | () => 1.loop(case
+= | () => 1.loop(case {
     | 101 => End(())
     | i => do
         i.fizzbuzz.to_string.println
         Next(i + 1)
-)
+    })
