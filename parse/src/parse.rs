@@ -334,7 +334,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         .then_ignore(end())
 }
 
-pub fn parse(
+pub(crate) fn parse(
     ts: Vec<(Token, Span)>,
     src: &str,
     src_len: usize,

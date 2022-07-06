@@ -1,10 +1,7 @@
-use crate::{
-    intrinsics::OP_PRECEDENCE,
-    parse,
-    parse::{Associativity, OpPrecedenceDecl},
-};
+use crate::intrinsics::OP_PRECEDENCE;
 use fxhash::FxHashMap;
 use index_list::{Index, IndexList};
+use parse::{self, Associativity, OpPrecedenceDecl};
 use std::{collections::BTreeMap, fmt, fmt::Debug};
 
 /// # Difference between `parse::Ast` and `ast_step1::Ast`
