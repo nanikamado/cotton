@@ -1,13 +1,12 @@
 use crate::{
-    ast_step1::{self, OpPrecedenceMap},
+    ast_step1,
     ast_step2::{
-        self,
+        type_to_type,
         types::{Type, TypeMatchableRef, TypeUnit, TypeVariable},
         IncompleteType, TypeConstructor,
     },
-    intrinsics::OP_PRECEDENCE,
 };
-use fxhash::{FxHashMap, FxHashSet};
+use fxhash::FxHashSet;
 use itertools::Itertools;
 use TypeMatchableRef::{Fn, Normal};
 
@@ -171,6 +170,22 @@ impl<'a> Type<'a> {
     pub fn contains_num(&self, variable_num: TypeVariable) -> bool {
         self.iter().any(|t| t.contains_num(variable_num))
     }
+
+    pub fn from_str(t: &'static str) -> Self {
+        let t = ast_step1::Type {
+            name: t,
+            args: Default::default(),
+        };
+        type_to_type(t, &Default::default(), &Default::default())
+    }
+
+    pub fn arrow(self, other: Self) -> Self {
+        TypeUnit::Fn(self, other).into()
+    }
+
+    pub fn union(self, other: Self) -> Self {
+        self.into_iter().chain(other.into_iter()).collect()
+    }
 }
 
 impl<'a> IncompleteType<'a> {
@@ -234,30 +249,4 @@ impl<'a> IncompleteType<'a> {
                 .collect(),
         }
     }
-}
-
-pub fn construct_type(s: &str) -> Type {
-    construct_type_with_variables(s, &[], &Default::default())
-}
-
-pub fn construct_type_with_variables<'a>(
-    s: &'a str,
-    type_variable_names: &[&'a str],
-    data_decl_map: &FxHashMap<&'a str, ast_step2::decl_id::DeclId>,
-) -> Type<'a> {
-    let (_, type_seq) = crate::parse::infix_type_sequence(s).unwrap();
-    let type_seq: ast_step1::TypeOperatorSequence =
-        ast_step1::op_sequence(
-            type_seq,
-            &OpPrecedenceMap::new(OP_PRECEDENCE.clone()),
-        );
-    let t = ast_step1::infix_op_sequence(type_seq);
-    crate::ast_step2::type_to_type(
-        t,
-        data_decl_map,
-        &type_variable_names
-            .iter()
-            .map(|&name| (name, TypeVariable::new()))
-            .collect(),
-    )
 }

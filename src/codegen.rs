@@ -91,7 +91,7 @@ fn expr((e, t): &ExprWithType, name_count: u32) -> String {
             a.iter().map(|e| fn_arm(e, name_count)).join("")
         ),
         Expr::Number(a) => a.to_string(),
-        Expr::StrLiteral(a) => a.to_string(),
+        Expr::StrLiteral(a) => format!("\"{}\"", a),
         Expr::Ident {
             name: info,
             variable_id,

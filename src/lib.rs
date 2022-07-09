@@ -1,10 +1,10 @@
-mod ast_step0;
 mod ast_step1;
 mod ast_step2;
 mod ast_step3;
 mod ast_step4;
 mod codegen;
 mod intrinsics;
+mod lex;
 mod parse;
 mod rust_backend;
 
@@ -18,6 +18,8 @@ use std::{
     io::ErrorKind,
     process::{exit, Command, Stdio},
 };
+
+use crate::lex::lex;
 
 pub fn run(
     source: &str,
@@ -56,8 +58,9 @@ pub fn run(
             }
         }
     }
-    let ast = parse(source);
-    let ast: ast_step1::Ast = ast.into();
+    let (tokens, src_len) = lex(source);
+    let ast = parse(tokens, source, src_len);
+    let ast: ast_step1::Ast = (&ast).into();
     let ast: ast_step2::Ast = ast.into();
     let ast: ast_step3::Ast = ast.into();
     let ast: ast_step4::Ast = ast.into();

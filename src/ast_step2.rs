@@ -79,13 +79,14 @@ pub enum Expr<'a> {
     Ident { name: &'a str, ident_id: IdentId },
     Decl(Box<VariableDecl<'a>>),
     Call(Box<ExprWithType<'a>>, Box<ExprWithType<'a>>),
+    Do(Vec<ExprWithType<'a>>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FnArm<'a> {
     pub pattern: Vec<Pattern<'a>>,
     pub pattern_type: Vec<Option<Type<'a>>>,
-    pub exprs: Vec<ExprWithType<'a>>,
+    pub expr: ExprWithType<'a>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -174,7 +175,7 @@ fn variable_decl<'a>(
         type_annotation: v.type_annotation.map(|(t, forall)| {
             type_variable_names.extend(
                 forall
-                    .type_variable_names
+                    .type_variables
                     .into_iter()
                     .map(|s| (s, TypeVariable::new())),
             );
@@ -215,6 +216,13 @@ fn expr<'a>(
             Box::new(expr(*f, data_decl_map, type_variable_names)),
             Box::new(expr(*a, data_decl_map, type_variable_names)),
         ),
+        ast_step1::Expr::Do(es) => {
+            let es: Vec<_> = es
+                .into_iter()
+                .map(|e| expr(e, data_decl_map, type_variable_names))
+                .collect();
+            Do(es)
+        }
     };
     (e, TypeVariable::new())
 }
@@ -243,11 +251,7 @@ fn fn_arm<'a>(
                 })
             })
             .collect(),
-        exprs: arm
-            .exprs
-            .into_iter()
-            .map(|e| expr(e, data_decl_map, type_variable_names))
-            .collect(),
+        expr: expr(arm.expr, data_decl_map, type_variable_names),
     }
 }
 

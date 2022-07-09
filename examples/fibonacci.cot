@@ -1,12 +1,8 @@
 fib : I64 -> I64
-= fn
-| 0 => 0
-| 1 => 1
-| n : I64 => fib(n - 1) + fib(n - 2)
---
+= case
+    | 0 => 0
+    | 1 => 1
+    | n => fib(n - 1) + fib(n - 2)
 
 main : () -> ()
-= fn
-| () =>
-    println(i64_to_string(fib(10)))
---
+= | () => println(i64_to_string(fib(10)))

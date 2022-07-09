@@ -1,5 +1,2 @@
 main : () -> ()
-= fn
-| () =>
-    println("Hello, world.")
---
+= | () => println("Hello, world.")

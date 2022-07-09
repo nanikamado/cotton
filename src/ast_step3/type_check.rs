@@ -1,6 +1,5 @@
 mod simplify;
 
-use super::type_util::construct_type;
 pub use crate::ast_step3::type_check::simplify::TypeVariableTracker;
 use crate::{
     ast_step2::{
@@ -626,12 +625,12 @@ fn min_type_incomplite<'a>(
             )
         }
         Expr::Number(_) => {
-            let t = construct_type("I64");
+            let t = Type::from_str("I64");
             type_variable_tracker.insert(*type_variable, t.clone());
             (t.into(), Default::default(), Default::default())
         }
         Expr::StrLiteral(_) => {
-            let t = construct_type("String");
+            let t = Type::from_str("String");
             type_variable_tracker.insert(*type_variable, t.clone());
             (t.into(), Default::default(), Default::default())
         }
@@ -699,6 +698,9 @@ fn min_type_incomplite<'a>(
                 [ident_type_map1, ident_type_map2].concat(),
             )
         }
+        Expr::Do(es) => {
+            multi_expr_min_type(es, type_variable_tracker)
+        }
     }
 }
 
@@ -756,7 +758,7 @@ fn arm_min_type<'a>(
     IdentTypeMap,
 ) {
     let (body_type, mut resolved_idents, ident_type_map) =
-        multi_expr_min_type(&arm.exprs, type_variable_tracker);
+        min_type_incomplite(&arm.expr, type_variable_tracker);
     let (types, bindings): (Vec<_>, Vec<_>) =
         arm.pattern.iter().map(pattern_to_type).unzip();
     let mut arm_type = body_type.constructor;
@@ -804,9 +806,9 @@ fn pattern_to_type<'a>(
     p: &Pattern<'a>,
 ) -> (types::Type<'a>, Vec<(&'a str, DeclId, types::Type<'a>)>) {
     match p {
-        Pattern::Number(_) => (construct_type("I64"), Vec::new()),
+        Pattern::Number(_) => (Type::from_str("I64"), Vec::new()),
         Pattern::StrLiteral(_) => {
-            (construct_type("String"), Vec::new())
+            (Type::from_str("String"), Vec::new())
         }
         Pattern::Constructor { id, args } => {
             let (types, bindings): (Vec<_>, Vec<_>) =

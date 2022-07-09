@@ -1,51 +1,36 @@
-(.) : a -> (a -> b) -> b forall a, b --
-= fn
-| a, f => f(a)
---
+(.) : a -> (a -> b) -> b forall {a, b}
+= | a, f => f(a)
 
 infixl 10 .
 
 data Next(a)
 data End(a)
 
-loop : a -> (a -> Next[a] | End[b]) -> b forall a, b --
-= fn
-| init, f =>
-    init.f.fn
+loop : a -> (a -> Next[a] | End[b]) -> b forall {a, b}
+= | init, f => init.f.case
     | Next(a) => a.loop(f)
     | End(a) => a
-    --
---
 
 data a /\ b
 
 infixl 3 /\
 
 fizzbuzz : I64 -> String | I64
-= fn
-| n =>
-    (n % 3 /\ n % 5).fn
+= | n => (n % 3 /\ n % 5).case
     | 0 /\ 0 => "FizzBuzz"
     | 0 /\ _ => "Fizz"
     | _ /\ 0 => "Buzz"
     | _ /\ _ => n
-    --
---
 
 to_string
-= fn
-| n => n.i64_to_string
-| s => s
---
+= case
+    | n => n.i64_to_string
+    | s => s
 
 main : () -> ()
-= fn
-| () =>
-    1.loop(fn
+= | () => 1.loop(case {
     | 101 => End(())
-    | i =>
+    | i => do
         i.fizzbuzz.to_string.println
         Next(i + 1)
-    --
-    )
---
+    })
