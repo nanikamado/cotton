@@ -198,36 +198,10 @@ pub fn simplify_type<'a, T: TypeConstructor<'a>>(
 fn _simplify_type<'a, T: TypeConstructor<'a>>(
     mut t: IncompleteType<'a, T>,
 ) -> Option<(IncompleteType<'a, T>, bool)> {
-    use TypeUnit::*;
     let hash_before_simplify = fxhash::hash(&t);
-    let subtype_relationship = t.subtype_relation.clone();
-    let g = mk_graph(&subtype_relationship);
-    let eq_types = tarjan_scc(&g);
-    for eqs in eq_types {
-        let (eq_variable, eq_cons): (Vec<_>, Vec<_>) = eqs
-            .into_iter()
-            .map(|ts| {
-                if let TypeMatchableRef::Variable(n) =
-                    ts.matchable_ref()
-                {
-                    Ok(n)
-                } else {
-                    Err(ts)
-                }
-            })
-            .partition_result();
-        if eq_cons.is_empty() {
-            for a in &eq_variable[1..] {
-                t = t.replace_num_option(
-                    *a,
-                    &Variable(eq_variable[0]).into(),
-                )?;
-            }
-        } else {
-            for a in eq_variable {
-                t = t.replace_num_option(a, eq_cons[0])?;
-            }
-        }
+    let eqs = find_eq_types(&t.subtype_relation);
+    for (from, to) in eqs {
+        t = t.replace_num_option(from, &to)?;
     }
     t.subtype_relation = t
         .subtype_relation
@@ -309,6 +283,39 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
     }
     let updated = fxhash::hash(&t) != hash_before_simplify;
     Some((t, updated))
+}
+
+fn find_eq_types<'a>(
+    subtype_rel: &BTreeSet<(Type<'a>, Type<'a>)>,
+) -> Vec<(TypeVariable, Type<'a>)> {
+    use TypeUnit::*;
+    let g = mk_graph(&subtype_rel);
+    let eq_types = tarjan_scc(&g);
+    let mut r = Vec::new();
+    for eqs in eq_types {
+        let (eq_variable, eq_cons): (Vec<_>, Vec<_>) = eqs
+            .into_iter()
+            .map(|ts| {
+                if let TypeMatchableRef::Variable(n) =
+                    ts.matchable_ref()
+                {
+                    Ok(n)
+                } else {
+                    Err(ts)
+                }
+            })
+            .partition_result();
+        if eq_cons.is_empty() {
+            for a in &eq_variable[1..] {
+                r.push((*a, Variable(eq_variable[0]).into()));
+            }
+        } else {
+            for a in eq_variable {
+                r.push((a, eq_cons[0].clone()));
+            }
+        }
+    }
+    r
 }
 
 fn simplify_subtype_rel<'a>(
