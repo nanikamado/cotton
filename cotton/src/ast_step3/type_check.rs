@@ -592,22 +592,30 @@ fn min_type_incomplite<'a>(
                     arm_min_type(arm, type_variable_tracker)
                 }));
             let resolved_idents = resolved_idents.concat();
-            let (args, rtns): (
-                Vec<types::Type<'a>>,
-                Vec<types::Type<'a>>,
-            ) = arm_types.into_iter().unzip();
-            let constructor: Type = if args.len() == 1 {
-                TypeUnit::Fn(
-                    args.into_iter().next().unwrap(),
-                    rtns.into_iter().next().unwrap(),
-                )
-            } else {
-                TypeUnit::Fn(
-                    args.into_iter().flatten().collect(),
-                    rtns.into_iter().flatten().collect(),
-                )
-            }
-            .into();
+            let arg_len =
+                arm_types.iter().map(Vec::len).min().unwrap() - 1;
+            let mut arm_types = arm_types
+                .into_iter()
+                .map(Vec::into_iter)
+                .collect_vec();
+            let arg_types: Vec<Type> = (0..arg_len)
+                .map(|_| {
+                    let t: Type = arm_types
+                        .iter_mut()
+                        .flat_map(|arm_type| arm_type.next().unwrap())
+                        .collect();
+                    t
+                })
+                .collect();
+            let rtn_type: Type = arm_types
+                .into_iter()
+                .flat_map(|a| types_to_fn_type(a))
+                .collect();
+            let constructor: Type = types_to_fn_type(
+                arg_types
+                    .into_iter()
+                    .chain(std::iter::once(rtn_type)),
+            );
             type_variable_tracker
                 .insert(*type_variable, constructor.clone());
             (
@@ -696,6 +704,17 @@ fn min_type_incomplite<'a>(
     }
 }
 
+fn types_to_fn_type<'a>(
+    types: impl DoubleEndedIterator<Item = Type<'a>>,
+) -> Type<'a> {
+    let mut ts = types.rev();
+    let mut r = ts.next().unwrap();
+    for t in ts {
+        r = TypeUnit::Fn(t, r).into()
+    }
+    r
+}
+
 fn multi_expr_min_type<'a>(
     exprs: &[(Expr<'a>, TypeVariable)],
     type_variable_tracker: &mut TypeVariableTracker<'a>,
@@ -738,12 +757,13 @@ type SubtypeRelation<'a> =
     BTreeSet<(types::Type<'a>, types::Type<'a>)>;
 type IdentTypeMap = Vec<(IdentId, TypeVariable)>;
 
-/// Returns (argument type, return type), variable requirements, subtype relation, resolved idents.
+/// Returns `vec![argument type, argument type, ..., return type]`,
+/// variable requirements, subtype relation, resolved idents.
 fn arm_min_type<'a>(
     arm: &FnArm<'a>,
     type_variable_tracker: &mut TypeVariableTracker<'a>,
 ) -> (
-    (types::Type<'a>, types::Type<'a>),
+    Vec<types::Type<'a>>,
     Vec<VariableRequirement<'a>>,
     SubtypeRelation<'a>,
     Resolved,
@@ -751,14 +771,9 @@ fn arm_min_type<'a>(
 ) {
     let (body_type, mut resolved_idents, ident_type_map) =
         min_type_incomplite(&arm.expr, type_variable_tracker);
-    let (types, bindings): (Vec<_>, Vec<_>) =
+    let (mut ts, bindings): (Vec<_>, Vec<_>) =
         arm.pattern.iter().map(pattern_to_type).unzip();
-    let mut arm_type = body_type.constructor;
-    let mut types = types.into_iter();
-    let first_type = types.next().unwrap();
-    for pattern_type in types.rev() {
-        arm_type = TypeUnit::Fn(pattern_type, arm_type).into()
-    }
+    ts.push(body_type.constructor);
     let bindings: FxHashMap<&str, (DeclId, types::Type)> = bindings
         .into_iter()
         .flatten()
@@ -780,7 +795,7 @@ fn arm_min_type<'a>(
         }
     }
     (
-        (first_type, arm_type),
+        ts,
         variable_requirements,
         {
             let mut tmp = body_type.subtype_relation;
