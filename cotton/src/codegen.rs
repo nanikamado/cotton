@@ -84,7 +84,7 @@ static PRIMITIVES_DEF: Lazy<FxHashMap<IntrinsicVariable, &str>> =
 fn expr((e, t): &ExprWithType, name_count: u32) -> String {
     let s = match e {
         Expr::Lambda(a) => format!(
-            r#"{}{}$$unexpected()"#,
+            r#"({}{}$$unexpected())"#,
             (0..a[0].pattern.len())
                 .map(|c| format!("${}=>", name_count + c as u32))
                 .join(""),

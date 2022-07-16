@@ -43,7 +43,6 @@ pub enum Expr<'a> {
         variable_id: VariableId,
         type_args: Vec<(TypeVariable, Type<'a>)>,
     },
-    Decl(Box<VariableDecl<'a>>),
     Call(Box<ExprWithType<'a>>, Box<ExprWithType<'a>>),
     Do(Vec<ExprWithType<'a>>),
 }
@@ -193,12 +192,6 @@ fn expr<'a>(
                 type_args,
             }
         }
-        ast_step2::Expr::Decl(a) => Decl(Box::new(variable_decl(
-            *a,
-            resolved_idents,
-            types_of_decls,
-            type_variable_tracker,
-        ))),
         ast_step2::Expr::Call(f, a) => Call(
             expr(
                 *f,

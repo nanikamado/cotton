@@ -245,7 +245,6 @@ impl<'a> Monomorphics<'a> {
                     type_args: new_type_args,
                 }
             }
-            ast_step3::Expr::Decl(_) => unimplemented!(),
             ast_step3::Expr::Call(f, a) => Expr::Call(
                 self.monomorphy_expr(
                     *f,

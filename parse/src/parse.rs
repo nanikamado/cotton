@@ -241,9 +241,9 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 .or(case)
                 .or(int.map(ExprUnit::Int))
                 .or(str.map(ExprUnit::Str))
+                .or(variable_decl.map(ExprUnit::VariableDecl))
                 .or(ident_or_op.clone().map(ExprUnit::Ident))
                 .or(lambda.map(|a| ExprUnit::Case(vec![a])))
-                .or(variable_decl.map(ExprUnit::VariableDecl))
                 .or(expr
                     .clone()
                     .delimited_by(open_paren, just(Token::Paren(')')))

@@ -37,6 +37,7 @@ pub enum TypeId {
 
 /// # Difference between `ast_step1::Ast` and `ast_step2::Ast`
 /// - The names of types and constructors are resolved.
+/// - Local variable declarations are converted into lambdas and function calls.
 #[derive(Debug, PartialEq, Clone)]
 pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
@@ -77,7 +78,6 @@ pub enum Expr<'a> {
     Number(&'a str),
     StrLiteral(&'a str),
     Ident { name: &'a str, ident_id: IdentId },
-    Decl(Box<VariableDecl<'a>>),
     Call(Box<ExprWithType<'a>>, Box<ExprWithType<'a>>),
     Do(Vec<ExprWithType<'a>>),
 }
@@ -207,24 +207,70 @@ fn expr<'a>(
             name,
             ident_id: new_ident_id(),
         },
-        ast_step1::Expr::Decl(d) => Decl(Box::new(variable_decl(
-            *d,
-            data_decl_map,
-            type_variable_names,
-        ))),
+        ast_step1::Expr::Decl(d) => {
+            let d =
+                variable_decl(*d, data_decl_map, type_variable_names);
+            d.value.0
+        }
         ast_step1::Expr::Call(f, a) => Call(
             Box::new(expr(*f, data_decl_map, type_variable_names)),
             Box::new(expr(*a, data_decl_map, type_variable_names)),
         ),
         ast_step1::Expr::Do(es) => {
-            let es: Vec<_> = es
-                .into_iter()
-                .map(|e| expr(e, data_decl_map, type_variable_names))
-                .collect();
-            Do(es)
+            let mut new_es = Vec::new();
+            for e in es.into_iter().rev() {
+                new_es = add_expr_in_do(
+                    e,
+                    new_es,
+                    data_decl_map,
+                    type_variable_names,
+                );
+            }
+            new_es.reverse();
+            Do(new_es)
         }
     };
     (e, TypeVariable::new())
+}
+
+fn add_expr_in_do<'a>(
+    e: ast_step1::Expr<'a>,
+    mut es: Vec<ExprWithType<'a>>,
+    data_decl_map: &FxHashMap<&'a str, DeclId>,
+    type_variable_names: &FxHashMap<&'a str, TypeVariable>,
+) -> Vec<ExprWithType<'a>> {
+    // dbg!(&es);
+    match e {
+        ast_step1::Expr::Decl(d) => {
+            let d =
+                variable_decl(*d, data_decl_map, type_variable_names);
+            match es.len() {
+                0 => {
+                    vec![d.value]
+                }
+                _ => {
+                    let l = Expr::Lambda(vec![FnArm {
+                        pattern: vec![Pattern::Binder(
+                            d.name, d.decl_id,
+                        )],
+                        pattern_type: vec![None],
+                        expr: (Expr::Do(es), TypeVariable::new()),
+                    }]);
+                    vec![(
+                        Expr::Call(
+                            Box::new((l, TypeVariable::new())),
+                            Box::new(d.value),
+                        ),
+                        TypeVariable::new(),
+                    )]
+                }
+            }
+        }
+        e => {
+            es.push(expr(e, data_decl_map, type_variable_names));
+            es
+        }
+    }
 }
 
 fn fn_arm<'a>(
