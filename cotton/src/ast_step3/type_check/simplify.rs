@@ -119,11 +119,21 @@ impl<'a> TypeVariableTracker<'a> {
                 .into(),
                 TypeUnit::Variable(v) => self.find(v),
                 TypeUnit::RecursiveAlias { alias, body } => {
-                    TypeUnit::RecursiveAlias {
-                        alias,
-                        body: self.normalize_type(body),
+                    let body = self.normalize_type(body);
+                    match body.matchable() {
+                        TypeMatchable::RecursiveAlias {
+                            alias: alias_inner,
+                            body: body_inner,
+                        } => body_inner.replace_num(
+                            alias,
+                            &TypeUnit::Variable(alias_inner).into(),
+                        ),
+                        body => TypeUnit::RecursiveAlias {
+                            alias,
+                            body: body.into(),
+                        }
+                        .into(),
                     }
-                    .into()
                 }
                 TypeUnit::Normal { name, args, id } => {
                     let args: Vec<_> = args
