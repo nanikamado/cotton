@@ -215,6 +215,7 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
     mut t: IncompleteType<'a, T>,
 ) -> Option<(IncompleteType<'a, T>, bool)> {
     let hash_before_simplify = fxhash::hash(&t);
+    t = t.normalize();
     let eqs = find_eq_types(&t.subtype_relation);
     for (from, to) in eqs {
         t = t.replace_num_option(from, &to)?;
@@ -655,6 +656,36 @@ where
             },
             self.type_variable_tracker,
         )
+    }
+
+    fn normalize(mut self) -> Self {
+        Self {
+            constructor: self.constructor.map_type(|t| {
+                self.type_variable_tracker.normalize_type(t)
+            }),
+            variable_requirements: self
+                .variable_requirements
+                .into_iter()
+                .map(|(name, t, id)| {
+                    (
+                        name,
+                        self.type_variable_tracker.normalize_type(t),
+                        id,
+                    )
+                })
+                .collect(),
+            subtype_relation: self
+                .subtype_relation
+                .into_iter()
+                .map(|(a, b)| {
+                    (
+                        self.type_variable_tracker.normalize_type(a),
+                        self.type_variable_tracker.normalize_type(b),
+                    )
+                })
+                .collect(),
+            type_variable_tracker: self.type_variable_tracker,
+        }
     }
 }
 

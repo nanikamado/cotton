@@ -341,6 +341,10 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
                 .collect(),
         )
     }
+
+    fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(self, f: F) -> Self {
+        Self(self.0.into_iter().map(f).collect())
+    }
 }
 
 /// Resolves names in strongly connected declarations.
