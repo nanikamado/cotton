@@ -136,14 +136,20 @@ impl<'a> TypeVariableTracker<'a> {
                     }
                 }
                 TypeUnit::Normal { name, args, id } => {
-                    let args: Vec<_> = args
-                        .into_iter()
-                        .map(|t| self.normalize_type(t))
-                        .collect();
-                    if args.iter().any(|c| c.len() == 0) {
-                        Default::default()
-                    } else {
+                    if args.is_empty() {
                         TypeUnit::Normal { name, args, id }.into()
+                    } else {
+                        args.into_iter()
+                            .map(|t| {
+                                self.normalize_type(t).partition()
+                            })
+                            .multi_cartesian_product()
+                            .map(|args| TypeUnit::Normal {
+                                name,
+                                args,
+                                id,
+                            })
+                            .collect()
                     }
                 }
             })
@@ -757,7 +763,9 @@ mod tests {
     use crate::{
         ast_step1, ast_step2,
         ast_step2::{types::Type, IncompleteType},
-        ast_step3::type_check::simplify::simplify_type,
+        ast_step3::type_check::{
+            simplify::simplify_type, TypeVariableTracker,
+        },
     };
 
     #[test]
@@ -809,6 +817,36 @@ mod tests {
         assert_eq!(
             format!("{}", st),
             "I64 -> {I64 | String} forall\n--"
+        );
+    }
+
+    #[test]
+    fn simplify2() {
+        let src = r#"data a /\ b
+        infixl 3 /\
+        main : () -> ()
+        = | () => ()
+        test : (True | False) /\ (True | False)
+        = ()
+        "#;
+        let ast = parse::parse(src);
+        let ast: ast_step1::Ast = (&ast).into();
+        let ast: ast_step2::Ast = ast.into();
+        let t = ast
+            .variable_decl
+            .iter()
+            .find(|d| d.name == "test")
+            .unwrap()
+            .type_annotation
+            .clone()
+            .unwrap()
+            .constructor
+            .clone();
+        let mut tracker = TypeVariableTracker::default();
+        let t = tracker.normalize_type(t);
+        assert_eq!(
+            format!("{}", t),
+            r"{/\(False, False) | /\(False, True) | /\(True, False) | /\(True, True)}"
         );
     }
 }

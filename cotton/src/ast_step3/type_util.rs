@@ -186,6 +186,18 @@ impl<'a> Type<'a> {
     pub fn union(self, other: Self) -> Self {
         self.into_iter().chain(other.into_iter()).collect()
     }
+
+    pub fn partition(self) -> Vec<Self> {
+        let mut t = Vec::new();
+        for tu in self.iter() {
+            if tu.is_singleton() {
+                t.push(tu.clone().into());
+            } else {
+                return vec![self];
+            }
+        }
+        t.into_iter().collect()
+    }
 }
 
 impl<'a> IncompleteType<'a> {
