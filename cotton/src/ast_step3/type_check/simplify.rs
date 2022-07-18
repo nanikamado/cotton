@@ -419,32 +419,21 @@ fn simplify_subtype_rel<'a>(
         {
             Some(Vec::new())
         }
-        (a, Union(cs)) if Type::from(a.clone()).is_singleton() => {
-            let new_cs = cs
-                .into_iter()
-                .filter(|c| {
-                    !(c.is_singleton()
-                        && Type::from(a.clone())
-                            != Type::from(c.clone()))
-                })
-                .collect();
-            Some(vec![(a.into(), new_cs)])
-        }
-        (Normal { name, args, id }, Union(u)) => {
-            let new_u: Type = u
-                .into_iter()
-                .filter(|c| {
-                    if let TypeUnit::Normal { name: c_name, .. } = c {
-                        *c_name == name
-                    } else {
-                        true
-                    }
-                })
-                .collect();
-            Some(vec![(
-                TypeUnit::Normal { name, args, id }.into(),
-                new_u,
-            )])
+        (t @ Normal { .. }, Union(tus)) => {
+            let t: Type = t.into();
+            let rel = simplify_subtype_rel(
+                t.clone(),
+                tus.into_iter()
+                    .filter(|tu| {
+                        simplify_subtype_rel(
+                            t.clone(),
+                            tu.clone().into(),
+                        )
+                        .is_some()
+                    })
+                    .collect(),
+            )?;
+            Some(rel)
         }
         (sub, sup) => {
             let sub: Type = sub.into();
@@ -795,7 +784,8 @@ mod tests {
         ast_step1, ast_step2,
         ast_step2::{types::Type, IncompleteType},
         ast_step3::type_check::{
-            simplify::simplify_type, TypeVariableTracker,
+            simplify::{simplify_subtype_rel, simplify_type},
+            TypeVariableTracker,
         },
     };
 
@@ -879,5 +869,43 @@ mod tests {
             format!("{}", t),
             r"{/\(False, False) | /\(False, True) | /\(True, False) | /\(True, True)}"
         );
+    }
+
+    #[test]
+    fn simplify3() {
+        let src = r#"data a /\ b
+        infixl 3 /\
+        main : () -> ()
+        = | () => ()
+        test1 : (False /\ False /\ False) = ()
+        test2 : (True /\ a /\ b)
+            | (c /\ True /\ d)
+            | (e /\ f /\ True) forall {a,b,c,d,e,f} = ()
+        "#;
+        let ast = parse::parse(src);
+        let ast: ast_step1::Ast = (&ast).into();
+        let ast: ast_step2::Ast = ast.into();
+        let t1 = ast
+            .variable_decl
+            .iter()
+            .find(|d| d.name == "test1")
+            .unwrap()
+            .type_annotation
+            .clone()
+            .unwrap()
+            .constructor
+            .clone();
+        let t2 = ast
+            .variable_decl
+            .iter()
+            .find(|d| d.name == "test2")
+            .unwrap()
+            .type_annotation
+            .clone()
+            .unwrap()
+            .constructor
+            .clone();
+        let t = simplify_subtype_rel(t1.clone(), t2.clone());
+        assert_eq!(format!("{:?}", t), "None");
     }
 }
