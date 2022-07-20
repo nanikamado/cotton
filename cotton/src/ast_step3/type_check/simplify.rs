@@ -741,7 +741,6 @@ mod tests {
         ast_step1, ast_step2,
         ast_step2::{types::Type, IncompleteType},
         ast_step3::type_check::simplify::simplify_type,
-        lex, parse,
     };
 
     #[test]
@@ -756,8 +755,7 @@ mod tests {
         = ()
         dot : a -> (a -> b) -> b forall {a, b} = ()
         "#;
-        let (tokens, src_len) = lex::lex(src);
-        let ast = parse(tokens, src, src_len);
+        let ast = parse::parse(src);
         let ast: ast_step1::Ast = (&ast).into();
         let ast: ast_step2::Ast = ast.into();
         let req_t = ast

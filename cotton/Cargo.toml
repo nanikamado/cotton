@@ -1,0 +1,23 @@
+[package]
+name = "cotton"
+version = "0.1.0"
+edition = "2021"
+description = "A programming language."
+
+[dependencies]
+clap = { version = "3.0.12", features = ["cargo"] }
+once_cell = "1.8.0"
+itertools = "0.10.3"
+petgraph = "0.6.0"
+hashbag = "0.1.3"
+fxhash = "0.2.1"
+stripmargin = "*"
+simplelog = "0.12.0"
+log = "0.4.14"
+strum = { version = "0.24", features = ["derive"] }
+index_list = "0.2.7"
+parse = { path = "../parse" }
+unic-ucd-category = "0.9.0"
+
+[dev-dependencies]
+assert_cmd = "2.0.4"

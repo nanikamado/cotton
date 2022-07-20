@@ -6,7 +6,7 @@ use stripmargin::StripMargin;
 fn test_examples(file_name: &str, stdout: &str) {
     Command::cargo_bin(env!("CARGO_PKG_NAME"))
         .unwrap()
-        .arg(["examples/", file_name].concat())
+        .arg(["../examples/", file_name].concat())
         .assert()
         .stdout(stdout.to_string())
         .success();
