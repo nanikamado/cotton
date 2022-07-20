@@ -602,6 +602,7 @@ fn min_type_incomplite<'a>(
                 .into_iter()
                 .map(Vec::into_iter)
                 .collect_vec();
+            #[allow(clippy::needless_collect)]
             let arg_types: Vec<Type> = (0..arg_len)
                 .map(|_| {
                     let t: Type = arm_types
@@ -613,7 +614,7 @@ fn min_type_incomplite<'a>(
                 .collect();
             let rtn_type: Type = arm_types
                 .into_iter()
-                .flat_map(|a| types_to_fn_type(a))
+                .flat_map(types_to_fn_type)
                 .collect();
             let constructor: Type = types_to_fn_type(
                 arg_types

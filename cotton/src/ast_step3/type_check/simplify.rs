@@ -306,7 +306,7 @@ fn find_eq_types<'a>(
     subtype_rel: &BTreeSet<(Type<'a>, Type<'a>)>,
 ) -> Vec<(TypeVariable, Type<'a>)> {
     use TypeUnit::*;
-    let g = mk_graph(&subtype_rel);
+    let g = mk_graph(subtype_rel);
     let eq_types = tarjan_scc(&g);
     let mut r = Vec::new();
     for eqs in eq_types {
