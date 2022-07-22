@@ -110,6 +110,9 @@ where
                 .last()
                 .map(|t| t.requires_indent())
                 .unwrap_or(false);
+            if line[0].0 == Token::OpenParenWithoutPad {
+                line[0].0 = Token::Paren('(');
+            }
             tokens.append(&mut line);
         }
         tokens.extend(

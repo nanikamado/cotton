@@ -650,14 +650,6 @@ fn min_type_incomplite<'a>(
                 vec![(*ident_id, *type_variable)],
             )
         }
-        Expr::Decl(_) => {
-            // (
-            //     construct_type("()").into(),
-            //     Default::default(),
-            //     Default::default(),
-            // )
-            todo!();
-        }
         Expr::Call(f, a) => {
             let (f_t, resolved1, ident_type_map1) =
                 min_type_incomplite(f, type_variable_tracker);
