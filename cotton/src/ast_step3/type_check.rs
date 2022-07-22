@@ -659,12 +659,16 @@ fn min_type_incomplite<'a>(
                 TypeUnit::Variable(*type_variable).into();
             let c: types::Type = TypeUnit::new_variable().into();
             // c -> b
-            let cb_fn = TypeUnit::Fn(c.clone(), b.clone());
+            let cb_fn: Type =
+                TypeUnit::Fn(c.clone(), b.clone()).into();
             // f < c -> b
-            let f_sub_cb = [(f_t.constructor, cb_fn.into())]
+            let f_sub_cb = [(f_t.constructor.clone(), cb_fn.clone())]
                 .iter()
                 .cloned()
                 .collect();
+            // c -> b < f
+            let cb_sub_f =
+                [(cb_fn, f_t.constructor)].iter().cloned().collect();
             // a < c
             let a_sub_c =
                 [(a_t.constructor, c)].iter().cloned().collect();
@@ -678,6 +682,7 @@ fn min_type_incomplite<'a>(
                     .concat(),
                     subtype_relation: vec![
                         f_sub_cb,
+                        cb_sub_f,
                         a_sub_c,
                         f_t.subtype_relation,
                         a_t.subtype_relation,
