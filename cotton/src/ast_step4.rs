@@ -36,7 +36,7 @@ pub enum Expr<'a> {
     Ident {
         name: &'a str,
         variable_id: VariableId,
-        /// `Some()` if and only if the ident is a contractor.
+        /// `Some()` if and only if the ident is a constructor.
         type_args: Option<Vec<Type<'a>>>,
     },
     Call(Box<ExprWithType<'a>>, Box<ExprWithType<'a>>),

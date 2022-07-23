@@ -672,12 +672,16 @@ fn min_type_incomplite<'a>(
                 TypeUnit::Variable(*type_variable).into();
             let c: types::Type = TypeUnit::new_variable().into();
             // c -> b
-            let cb_fn = TypeUnit::Fn(c.clone(), b.clone());
+            let cb_fn: Type =
+                TypeUnit::Fn(c.clone(), b.clone()).into();
             // f < c -> b
-            let f_sub_cb = [(f_t.constructor, cb_fn.into())]
+            let f_sub_cb = [(f_t.constructor.clone(), cb_fn.clone())]
                 .iter()
                 .cloned()
                 .collect();
+            // c -> b < f
+            let cb_sub_f =
+                [(cb_fn, f_t.constructor)].iter().cloned().collect();
             // a < c
             let a_sub_c =
                 [(a_t.constructor, c)].iter().cloned().collect();
@@ -691,6 +695,7 @@ fn min_type_incomplite<'a>(
                     .concat(),
                     subtype_relation: vec![
                         f_sub_cb,
+                        cb_sub_f,
                         a_sub_c,
                         f_t.subtype_relation,
                         a_t.subtype_relation,
@@ -704,7 +709,36 @@ fn min_type_incomplite<'a>(
             )
         }
         Expr::Do(es) => {
-            multi_expr_min_type(es, type_variable_tracker)
+            let mut variable_requirements = Vec::new();
+            let mut subtype_relation = BTreeSet::new();
+            let mut resolved_idents = Vec::default();
+            let mut ident_type_map = Vec::new();
+            let t = es
+                .iter()
+                .map(|e| {
+                    let (t, resolved, mut ident_type) =
+                        min_type_incomplite(e, type_variable_tracker);
+                    variable_requirements
+                        .append(&mut t.variable_requirements.clone());
+                    subtype_relation
+                        .extend(t.subtype_relation.clone());
+                    resolved_idents.extend(resolved);
+                    ident_type_map.append(&mut ident_type);
+                    t
+                })
+                .collect::<Vec<_>>();
+            let t = t.last().unwrap().clone();
+            type_variable_tracker
+                .insert(*type_variable, t.constructor.clone());
+            (
+                ast_step2::IncompleteType {
+                    constructor: t.constructor,
+                    variable_requirements,
+                    subtype_relation,
+                },
+                resolved_idents,
+                ident_type_map,
+            )
         }
     }
 }
@@ -718,43 +752,6 @@ fn types_to_fn_type<'a>(
         r = TypeUnit::Fn(t, r).into()
     }
     r
-}
-
-fn multi_expr_min_type<'a>(
-    exprs: &[(Expr<'a>, TypeVariable)],
-    type_variable_tracker: &mut TypeVariableTracker<'a>,
-) -> (
-    ast_step2::IncompleteType<'a>,
-    Resolved,
-    Vec<(IdentId, TypeVariable)>,
-) {
-    let mut variable_requirements = Vec::new();
-    let mut subtype_relation = BTreeSet::new();
-    let mut resolved_idents = Vec::default();
-    let mut ident_type_map = Vec::new();
-    let t = exprs
-        .iter()
-        .map(|e| {
-            let (t, resolved, mut ident_type) =
-                min_type_incomplite(e, type_variable_tracker);
-            variable_requirements
-                .append(&mut t.variable_requirements.clone());
-            subtype_relation.extend(t.subtype_relation.clone());
-            resolved_idents.extend(resolved);
-            ident_type_map.append(&mut ident_type);
-            t
-        })
-        .collect::<Vec<_>>();
-    let t = t.last().unwrap().clone();
-    (
-        ast_step2::IncompleteType {
-            constructor: t.constructor,
-            variable_requirements,
-            subtype_relation,
-        },
-        resolved_idents,
-        ident_type_map,
-    )
 }
 
 type VariableRequirement<'a> = (&'a str, types::Type<'a>, IdentId);
