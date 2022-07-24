@@ -1,5 +1,5 @@
 use crate::{
-    ast_step2::{decl_id::DeclId, Pattern},
+    ast_step2::{decl_id::DeclId, Pattern, PatternUnit},
     ast_step4::{
         Ast, DataDecl, Expr, ExprWithType, FnArm, VariableDecl,
     },
@@ -167,26 +167,33 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
     pattern
         .iter()
         .zip(names)
-        .flat_map(|(p, n)| match p {
-            Pattern::Number(a) | Pattern::StrLiteral(a) => {
-                vec![format!("{}==={}", a, n)]
+        .flat_map(|(p, n)| {
+            if p.len() == 1 {
+                use PatternUnit::*;
+                match &p[0] {
+                    Number(a) | StrLiteral(a) => {
+                        vec![format!("{}==={}", a, n)]
+                    }
+                    Constructor { id, args } => {
+                        let mut v = vec![format!(
+                            "'${}${}'==={}.name",
+                            id,
+                            convert_name(id.name()),
+                            n
+                        )];
+                        v.append(&mut _condition(
+                            &args,
+                            &(0..args.len())
+                                .map(|i| format!("{}[{}]", n, i))
+                                .collect_vec(),
+                        ));
+                        v
+                    }
+                    _ => Vec::new(),
+                }
+            } else {
+                unimplemented!()
             }
-            Pattern::Constructor { id, args } => {
-                let mut v = vec![format!(
-                    "'${}${}'==={}.name",
-                    id,
-                    convert_name(id.name()),
-                    n
-                )];
-                v.append(&mut _condition(
-                    args,
-                    &(0..args.len())
-                        .map(|i| format!("{}[{}]", n, i))
-                        .collect_vec(),
-                ));
-                v
-            }
-            _ => Vec::new(),
         })
         .collect()
 }
@@ -210,15 +217,25 @@ fn _bindings<'a>(
     pattern
         .iter()
         .zip(names)
-        .flat_map(|(p, n)| match p {
-            Pattern::Binder(a, id) => vec![(&a[..], n, *id)],
-            Pattern::Constructor { args, .. } => _bindings(
-                args,
-                (0..args.len())
-                    .map(|i| format!("{}[{}]", n, i))
-                    .collect(),
-            ),
-            _ => Vec::new(),
+        .flat_map(|(p, n)| {
+            if p.len() == 1 {
+                match &p[0] {
+                    PatternUnit::Binder(a, id) => {
+                        vec![(&a[..], n, *id)]
+                    }
+                    PatternUnit::Constructor { args, .. } => {
+                        _bindings(
+                            args,
+                            (0..args.len())
+                                .map(|i| format!("{}[{}]", n, i))
+                                .collect(),
+                        )
+                    }
+                    _ => Vec::new(),
+                }
+            } else {
+                unimplemented!()
+            }
         })
         .collect()
 }

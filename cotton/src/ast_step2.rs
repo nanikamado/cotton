@@ -89,8 +89,12 @@ pub struct FnArm<'a> {
     pub expr: ExprWithType<'a>,
 }
 
+/// Represents a multi-case pattern which matches if any of the `PatternUnit` in it matches.
+/// It should have at least one `PatternUnit`.
+pub type Pattern<'a> = Vec<PatternUnit<'a>>;
+
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Pattern<'a> {
+pub enum PatternUnit<'a> {
     Number(&'a str),
     StrLiteral(&'a str),
     Constructor {
@@ -161,6 +165,12 @@ impl<'a> From<Type<'a>> for IncompleteType<'a> {
             variable_requirements: Default::default(),
             subtype_relation: Default::default(),
         }
+    }
+}
+
+impl<'a> From<PatternUnit<'a>> for Pattern<'a> {
+    fn from(p: PatternUnit<'a>) -> Self {
+        vec![p]
     }
 }
 
@@ -250,9 +260,10 @@ fn add_expr_in_do<'a>(
                 }
                 _ => {
                     let l = Expr::Lambda(vec![FnArm {
-                        pattern: vec![Pattern::Binder(
+                        pattern: vec![PatternUnit::Binder(
                             d.name, d.decl_id,
-                        )],
+                        )
+                        .into()],
                         pattern_type: vec![None],
                         expr: (Expr::Do(es), TypeVariable::new()),
                     }]);
@@ -335,7 +346,7 @@ fn pattern<'a>(
     p: ast_step1::Pattern<'a>,
     data_decl_map: &FxHashMap<&str, DeclId>,
 ) -> Pattern<'a> {
-    use Pattern::*;
+    use PatternUnit::*;
     match p {
         ast_step1::Pattern::Number(n) => Number(n),
         ast_step1::Pattern::StrLiteral(s) => StrLiteral(s),
@@ -351,8 +362,9 @@ fn pattern<'a>(
         ast_step1::Pattern::Binder(name) => {
             Binder(name, new_decl_id())
         }
-        ast_step1::Pattern::Underscore => Pattern::Underscore,
+        ast_step1::Pattern::Underscore => Underscore,
     }
+    .into()
 }
 
 pub fn type_to_type<'a>(
