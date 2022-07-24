@@ -103,6 +103,7 @@ pub enum PatternUnit<'a> {
     },
     Binder(&'a str, DeclId),
     Underscore,
+    TypeRestriction(Pattern<'a>, Type<'a>),
 }
 
 impl<'a> From<ast_step1::Ast<'a>> for Ast<'a> {

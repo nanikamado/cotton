@@ -827,6 +827,10 @@ fn pattern_unit_to_type<'a>(
         Underscore => {
             (TypeUnit::new_variable().into(), Default::default())
         }
+        TypeRestriction(p, t) => {
+            let (_, binds) = pattern_to_type(p);
+            (t.clone(), binds)
+        }
     }
 }
 
