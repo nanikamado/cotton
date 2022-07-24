@@ -171,7 +171,7 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
             if p.len() == 1 {
                 use PatternUnit::*;
                 match &p[0] {
-                    Number(a) | StrLiteral(a) => {
+                    I64(a) | Str(a) => {
                         vec![format!("{}==={}", a, n)]
                     }
                     Constructor { id, args } => {

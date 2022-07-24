@@ -800,10 +800,8 @@ fn pattern_unit_to_type<'a>(
 ) {
     use PatternUnit::*;
     match p {
-        Number(_) => (Type::from_str("I64"), Default::default()),
-        StrLiteral(_) => {
-            (Type::from_str("String"), Default::default())
-        }
+        I64(_) => (Type::from_str("I64"), Default::default()),
+        Str(_) => (Type::from_str("String"), Default::default()),
         Constructor { id, args } => {
             let (types, bindings): (Vec<_>, Vec<_>) =
                 args.iter().map(pattern_to_type).unzip();

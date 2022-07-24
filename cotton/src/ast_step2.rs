@@ -95,8 +95,8 @@ pub type Pattern<'a> = Vec<PatternUnit<'a>>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PatternUnit<'a> {
-    Number(&'a str),
-    StrLiteral(&'a str),
+    I64(&'a str),
+    Str(&'a str),
     Constructor {
         id: ConstructorId<'a>,
         args: Vec<Pattern<'a>>,
@@ -349,8 +349,8 @@ fn pattern<'a>(
 ) -> Pattern<'a> {
     use PatternUnit::*;
     match p {
-        ast_step1::Pattern::Number(n) => Number(n),
-        ast_step1::Pattern::StrLiteral(s) => StrLiteral(s),
+        ast_step1::Pattern::Number(n) => I64(n),
+        ast_step1::Pattern::StrLiteral(s) => Str(s),
         ast_step1::Pattern::Constructor { name, args } => {
             Constructor {
                 id: ConstructorId::get(name, data_decl_map),
