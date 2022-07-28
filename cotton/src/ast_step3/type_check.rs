@@ -8,7 +8,8 @@ use crate::{
         ident_id::IdentId,
         types,
         types::{Type, TypeUnit, TypeVariable},
-        Ast, DataDecl, Expr, ExprWithType, FnArm, Pattern, TypeId,
+        Ast, DataDecl, Expr, ExprWithType, FnArm, Pattern,
+        PatternUnit, TypeId,
     },
     intrinsics::IntrinsicVariable,
 };
@@ -756,11 +757,8 @@ fn arm_min_type<'a>(
     for pattern_type in types.rev() {
         arm_type = TypeUnit::Fn(pattern_type, arm_type).into()
     }
-    let bindings: FxHashMap<&str, (DeclId, types::Type)> = bindings
-        .into_iter()
-        .flatten()
-        .map(|(n, i, t)| (n, (i, t)))
-        .collect();
+    let bindings: FxHashMap<&str, (DeclId, types::Type)> =
+        bindings.into_iter().flatten().collect();
     let mut variable_requirements = Vec::new();
     let mut subtype_requirement = Vec::new();
     for p in body_type.variable_requirements.into_iter() {
@@ -791,15 +789,17 @@ fn arm_min_type<'a>(
     )
 }
 
-fn pattern_to_type<'a>(
-    p: &Pattern<'a>,
-) -> (types::Type<'a>, Vec<(&'a str, DeclId, types::Type<'a>)>) {
+fn pattern_unit_to_type<'a>(
+    p: &PatternUnit<'a>,
+) -> (
+    types::Type<'a>,
+    FxHashMap<&'a str, (DeclId, types::Type<'a>)>,
+) {
+    use PatternUnit::*;
     match p {
-        Pattern::Number(_) => (Type::from_str("I64"), Vec::new()),
-        Pattern::StrLiteral(_) => {
-            (Type::from_str("String"), Vec::new())
-        }
-        Pattern::Constructor { id, args } => {
+        I64(_) => (Type::from_str("I64"), Default::default()),
+        Str(_) => (Type::from_str("String"), Default::default()),
+        Constructor { id, args } => {
             let (types, bindings): (Vec<_>, Vec<_>) =
                 args.iter().map(pattern_to_type).unzip();
             (
@@ -809,15 +809,49 @@ fn pattern_to_type<'a>(
                     id: (*id).into(),
                 }
                 .into(),
-                bindings.concat(),
+                bindings.into_iter().flatten().collect(),
             )
         }
-        Pattern::Binder(name, decl_id) => {
+        Binder(name, decl_id) => {
             let t: types::Type = TypeUnit::new_variable().into();
-            (t.clone(), vec![(name, *decl_id, t)])
+            (
+                t.clone(),
+                vec![(*name, (*decl_id, t))].into_iter().collect(),
+            )
         }
-        Pattern::Underscore => {
-            (TypeUnit::new_variable().into(), Vec::new())
+        Underscore => {
+            (TypeUnit::new_variable().into(), Default::default())
+        }
+        TypeRestriction(p, t) => {
+            let (_, binds) = pattern_to_type(p);
+            (t.clone(), binds)
         }
     }
+}
+
+fn pattern_to_type<'a>(
+    p: &Pattern<'a>,
+) -> (
+    types::Type<'a>,
+    FxHashMap<&'a str, (DeclId, types::Type<'a>)>,
+) {
+    let mut ps = p.iter();
+    let first_p = ps.next().unwrap();
+    let (mut t, mut binds) = pattern_unit_to_type(first_p);
+    for p in ps {
+        let (t_, binds_) = pattern_unit_to_type(p);
+        t = t.union(t_);
+        if binds.len() != binds_.len() {
+            panic!("illegal pattern");
+        }
+        for ((name1, (id1, t1)), (name2, (id2, t2))) in
+            binds.iter_mut().zip(binds_)
+        {
+            if *name1 != name2 || *id1 != id2 {
+                panic!("illegal pattern");
+            }
+            *t1 = t1.clone().union(t2);
+        }
+    }
+    (t, binds)
 }
