@@ -1,14 +1,14 @@
 data Hoge
 
-greet : Hoge -> String
-= | _ => "Hogeeeeee"
+greet : Hoge -> String =
+    | _ => "Hogeeeeee"
 
 data Fuga
 
-greet : Fuga -> String
-= | _ => "Fugaaaaaa"
+greet : Fuga -> String =
+    | _ => "Fugaaaaaa"
 
-main : () -> ()
-= | () => do
-    println(greet(Hoge))
-    println(greet(Fuga))
+main : () -> () =
+    | () => do
+        println(greet(Hoge))
+        println(greet(Fuga))

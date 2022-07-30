@@ -1,10 +1,10 @@
-(.) : A -> (A -> B) -> B forall {A, B}
-= | a, f => f(a)
+(.) : A -> (A -> B) -> B forall {A, B} =
+    | a, f => f(a)
 
 infixl 10 .
 
-($) : (a -> b) -> a -> b forall {a, b}
-= | f, a => f(a)
+($) : (a -> b) -> a -> b forall {a, b} =
+    | f, a => f(a)
 
 infixr 0 $
 
@@ -16,31 +16,33 @@ data a .. b
 
 infixl 4 ..
 
-pop = case
-    | a .. b => (a < b).case
+pop =
+    | a .. b => (a < b).
         | True => (a + 1)..b /\ a
         | False => ()
-    | Filter(l, f) => l.pop.case
+    | Filter(l, f) => l.pop.
         | () => ()
-        | l2 /\ a => a.f.case
+        | l2 /\ a => a.f.
             | True => Filter(l2, f) /\ a
             | False => Filter(l2, f).pop
 
-all = | i, f => i.pop.case
-    | () => True
-    | i2 /\ a => a.f.case
-        | True => i2.all(f)
-        | False => False
+all =
+    | i, f => i.pop.
+        | () => True
+        | i2 /\ a => a.f.
+            | True => i2.all(f)
+            | False => False
 
-is_prime
-= | n => (2..n - 1).all $ case
-    | i => n % i != 0
+is_prime =
+    | n => (2..n - 1).all $
+        | i => n % i != 0
 
-each = | l, f => l.pop.case
-    | () => ()
-    | l2 /\ a => do
-        a.f
-        l2.each(f)
+each =
+    | l, f => l.pop.
+        | () => ()
+        | l2 /\ a => do
+            a.f
+            l2.each(f)
 
 data Filter(a, b)
 

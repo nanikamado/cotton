@@ -230,6 +230,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                     }
                 });
             let case = just(Token::Case)
+                .or_not()
                 .ignore_then(indented(
                     lambda.clone().repeated().at_least(1),
                 ))
