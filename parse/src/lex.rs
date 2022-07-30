@@ -36,7 +36,7 @@ trait RequiresIndet {
 impl RequiresIndet for (Token, Span) {
     fn requires_indent(&self) -> bool {
         use Token::*;
-        matches!(self, (Case | Do | Forall, _))
+        matches!(self, (Do | Forall, _))
     }
 }
 
@@ -69,9 +69,13 @@ where
             if line.is_empty() {
                 continue;
             }
-            let indent_level_delta =
-                indent.len() as i32 - indent_level as i32;
-            indent_level = indent.len();
+            let l = if line.len() >= 2 && line[0].0 == Token::Bar {
+                line[1].1.start - ident_span.start
+            } else {
+                indent.len()
+            };
+            let indent_level_delta = l as i32 - indent_level as i32;
+            indent_level = l;
             match indent_level_delta.cmp(&0) {
                 std::cmp::Ordering::Less => {
                     let mut dedent_level = -indent_level_delta;
@@ -94,7 +98,24 @@ where
                 }
                 std::cmp::Ordering::Equal => (),
                 std::cmp::Ordering::Greater => {
-                    if requires_indent {
+                    let requrires_ident_case =
+                        line[0].0 == Token::Bar;
+                    if requires_indent
+                        && requrires_ident_case
+                        && indent_level_delta >= 2
+                    {
+                        tokens.push((
+                            indent_tok.clone(),
+                            ident_span.clone(),
+                        ));
+                        tokens.push((
+                            indent_tok.clone(),
+                            ident_span.clone(),
+                        ));
+                        ignored_indents.push(indent_level_delta);
+                        ignored_indents.push(indent_level_delta - 2);
+                    } else if requires_indent || requrires_ident_case
+                    {
                         tokens.push((
                             indent_tok.clone(),
                             ident_span.clone(),
@@ -185,12 +206,17 @@ fn lexer(
 
     let tt = line_ws
         .repeated()
-        .ignore_then(unit)
-        .or(just('(').map(|_| Token::OpenParenWithoutPad))
-        .or(line_ws
-            .repeated()
-            .ignore_then(int.or(str).or(paren).or(op).or(ident)))
-        .map_with_span(|tok, span| (tok, span));
+        .ignore_then(unit.map_with_span(|tok, span| (tok, span)))
+        .or(just('(')
+            .map(|_| Token::OpenParenWithoutPad)
+            .map_with_span(|tok, span| (tok, span)))
+        .or(line_ws.repeated().ignore_then(
+            int.or(str)
+                .or(paren)
+                .or(op)
+                .or(ident)
+                .map_with_span(|tok, span| (tok, span)),
+        ));
 
     semantic_indentation(tt, Token::Indent, Token::Dedent, src_len)
         .then_ignore(end())
