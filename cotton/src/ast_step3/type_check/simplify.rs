@@ -925,8 +925,8 @@ mod tests {
     fn simplify2() {
         let src = r#"data a /\ b
         infixl 3 /\
-        main : () -> ()
-        = | () => ()
+        main : () -> () =
+            | () => ()
         test : (True | False) /\ (True | False)
         = ()
         "#;
@@ -955,12 +955,12 @@ mod tests {
     fn simplify3() {
         let src = r#"data a /\ b
         infixl 3 /\
-        main : () -> ()
-        = | () => ()
+        main : () -> () =
+            | () => ()
         test1 : (False /\ False /\ False) = ()
-        test2 : (True /\ a /\ b)
-            | (c /\ True /\ d)
-            | (e /\ f /\ True) forall {a,b,c,d,e,f} = ()
+        test2 : (True /\ a /\ b) |
+            (c /\ True /\ d) |
+            (e /\ f /\ True) forall {a,b,c,d,e,f} = ()
         "#;
         let ast = parse::parse(src);
         let ast: ast_step1::Ast = (&ast).into();
