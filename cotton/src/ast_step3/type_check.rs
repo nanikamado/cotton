@@ -387,8 +387,10 @@ fn resolve_scc<'a>(
     let mut unresolved_type = simplify::IncompleteType {
         constructor: SccTypeConstructor(types),
         variable_requirements,
-        subtype_relation,
-        type_variable_tracker: Default::default(),
+        type_variable_tracker: TypeVariableTracker {
+            map: Default::default(),
+            subtype_relation,
+        },
     };
     // Recursions are not resolved in this loop.
     while let Some((req_name, req_type, ident_id)) =
@@ -427,7 +429,10 @@ fn resolve_scc<'a>(
     );
     resolved_idents.append(&mut resolved);
     let variable_requirements = improved_types.variable_requirements;
-    let subtype_relation = improved_types.subtype_relation;
+    let subtype_relation = improved_types
+        .type_variable_tracker
+        .subtype_relation
+        .clone();
     (
         resolved_idents,
         improved_types
@@ -473,9 +478,12 @@ fn find_satisfied_types<'a, T: TypeConstructor<'a>>(
             if replace_variables {
                 (cand_t, type_args) = cand_t.change_variable_num();
             }
-            t.subtype_relation
-                .insert((cand_t.constructor, required_type.clone()));
-            t.subtype_relation.extend(cand_t.subtype_relation);
+            t.type_variable_tracker.add_subtype_rel(
+                cand_t.constructor,
+                required_type.clone(),
+            );
+            t.type_variable_tracker
+                .add_subtype_rels(cand_t.subtype_relation);
             let decl_id = candidate.decl_id;
             simplify::simplify_type(t).map(|type_of_improved_decl| {
                 SatisfiedType {
