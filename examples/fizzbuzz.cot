@@ -1,36 +1,36 @@
-(.) : a -> (a -> b) -> b forall {a, b}
-= | a, f => f(a)
+(.) : a -> (a -> b) -> b forall {a, b} =
+    | a, f => f(a)
 
 infixl 10 .
 
 data Next(a)
 data End(a)
 
-loop : a -> (a -> Next[a] | End[b]) -> b forall {a, b}
-= | init, f => init.f.case
-    | Next(a) => a.loop(f)
-    | End(a) => a
+loop : a -> (a -> Next[a] | End[b]) -> b forall {a, b} =
+    | init, f => init.f.
+        | Next(a) => a.loop(f)
+        | End(a) => a
 
 data a /\ b
 
 infixl 3 /\
 
-fizzbuzz : I64 -> String | I64
-= | n => (n % 3 /\ n % 5).case
-    | 0 /\ 0 => "FizzBuzz"
-    | 0 /\ _ => "Fizz"
-    | _ /\ 0 => "Buzz"
-    | _ /\ _ => n
+fizzbuzz : I64 -> String | I64 =
+    | n => (n % 3 /\ n % 5).
+        | 0 /\ 0 => "FizzBuzz"
+        | 0 /\ _ => "Fizz"
+        | _ /\ 0 => "Buzz"
+        | _ /\ _ => n
 
-to_string
-= case
+to_string =
     | n => n.i64_to_string
     | s => s
 
-main : () -> ()
-= | () => 1.loop(case {
-    | 101 => End(())
-    | i => do
-        i.fizzbuzz.to_string.println
-        Next(i + 1)
-    })
+main : () -> () =
+    | () =>
+        1.loop(
+            | 101 => End(())
+            | i => do
+                i.fizzbuzz.to_string.println
+                Next(i + 1)
+        )

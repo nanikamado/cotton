@@ -1,2 +1,2 @@
-main : () -> ()
-= | () => println("Hello, world.")
+main : () -> () =
+    | () => println("Hello, world.")
