@@ -112,8 +112,8 @@ fn expr((e, t): &ExprWithType, name_count: u32) -> String {
         }
         Expr::Call(f, a) => format!(
             "{}({})",
-            expr(&*f, name_count),
-            expr(&*a, name_count)
+            expr(f, name_count),
+            expr(a, name_count)
         ),
         Expr::DoBlock(exprs) => {
             format!(
