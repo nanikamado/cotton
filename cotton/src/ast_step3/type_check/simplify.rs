@@ -541,7 +541,6 @@ fn possible_strongest<'a>(
     } else if down.is_empty() {
         TypeMatchable::Empty.into()
     } else {
-        #[allow(clippy::iter_overeager_cloned)]
         down.iter().copied().cloned().flatten().collect()
     };
     if down.iter().any(|d| d.contains_num(t)) {
