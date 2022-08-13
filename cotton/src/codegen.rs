@@ -182,7 +182,7 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
                             n
                         )];
                         v.append(&mut _condition(
-                            &args,
+                            args,
                             &(0..args.len())
                                 .map(|i| format!("{}[{}]", n, i))
                                 .collect_vec(),
