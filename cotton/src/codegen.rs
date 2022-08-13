@@ -112,8 +112,8 @@ fn expr((e, t): &ExprWithType, name_count: u32) -> String {
         }
         Expr::Call(f, a) => format!(
             "{}({})",
-            expr(&*f, name_count),
-            expr(&*a, name_count)
+            expr(f, name_count),
+            expr(a, name_count)
         ),
         Expr::DoBlock(exprs) => {
             format!(
@@ -182,7 +182,7 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
                             n
                         )];
                         v.append(&mut _condition(
-                            &args,
+                            args,
                             &(0..args.len())
                                 .map(|i| format!("{}[{}]", n, i))
                                 .collect_vec(),
