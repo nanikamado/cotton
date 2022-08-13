@@ -1,7 +1,7 @@
 use crate::{
     ast_step2::{
         self,
-        decl_id::{new_decl_id, DeclId},
+        decl_id::DeclId,
         types::{Type, TypeVariable},
         Pattern, TypeConstructor,
     },
@@ -142,7 +142,7 @@ impl<'a> Monomorphics<'a> {
             d.decl_id
         } else if let Some(d) = variable_decls.get(&old_decl_id) {
             let d = (*d).clone();
-            let new_decl_id = new_decl_id();
+            let new_decl_id = DeclId::new();
             trace.insert(old_decl_id, new_decl_id);
             let value = self.monomorphy_expr(
                 d.value,

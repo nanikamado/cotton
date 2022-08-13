@@ -4,7 +4,7 @@ pub mod types;
 
 use self::types::TypeVariable;
 use self::{
-    decl_id::{new_decl_id, DeclId},
+    decl_id::DeclId,
     ident_id::{new_ident_id, IdentId},
     types::{Type, TypeUnit},
 };
@@ -116,7 +116,7 @@ impl<'a> From<ast_step1::Ast<'a>> for Ast<'a> {
                 fields: (0..d.field_len)
                     .map(|_| TypeVariable::new())
                     .collect(),
-                decl_id: new_decl_id(),
+                decl_id: DeclId::new(),
             })
             .collect();
         let data_decl_map: FxHashMap<&str, DeclId> =
@@ -194,7 +194,7 @@ fn variable_decl<'a>(
                 .into()
         }),
         value: expr(v.value, data_decl_map, &type_variable_names),
-        decl_id: new_decl_id(),
+        decl_id: DeclId::new(),
     }
 }
 
@@ -361,7 +361,7 @@ fn pattern<'a>(
             }
         }
         ast_step1::Pattern::Binder(name) => {
-            Binder(name, new_decl_id())
+            Binder(name, DeclId::new())
         }
         ast_step1::Pattern::Underscore => Underscore,
     }
