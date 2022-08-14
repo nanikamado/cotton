@@ -1,0 +1,19 @@
+(.) : A -> (A -> B) -> B forall { A, B } =
+    | a, f => f(a)
+
+infixl 10 .
+
+data O
+data S(a)
+
+type Even = O | S[Odd]
+type Odd = S[Even]
+
+div2 : Even -> I64 =
+    | O => 0
+    | S(S(n)) => 1 + n.div2
+
+main : () -> () =
+    | () => do
+        O.S.S.S.S.div2.i64_to_string.println
+

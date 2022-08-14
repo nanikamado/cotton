@@ -1,4 +1,7 @@
-use assert_cmd::prelude::{CommandCargoExt, OutputAssertExt};
+use assert_cmd::{
+    assert::Assert,
+    prelude::{CommandCargoExt, OutputAssertExt},
+};
 use itertools::Itertools;
 use std::process::Command;
 use stripmargin::StripMargin;
@@ -10,6 +13,13 @@ fn test_examples(file_name: &str, stdout: &str) {
         .assert()
         .stdout(stdout.to_string())
         .success();
+}
+
+fn test_test(file_name: &str) -> Assert {
+    Command::cargo_bin(env!("CARGO_PKG_NAME"))
+        .unwrap()
+        .arg(["../test/", file_name].concat())
+        .assert()
 }
 
 #[test]
@@ -87,4 +97,25 @@ fn prime() {
 #[test]
 fn prime2() {
     test_examples("prime2.cot", &PRIMES.strip_margin());
+}
+
+#[test]
+fn mutal_recursive_type_alias() {
+    test_examples("mutual_recursive_type_alias.cot", "2\n");
+}
+
+#[test]
+fn list_fail() {
+    test_test("list_fail.cot").failure();
+}
+
+#[test]
+fn list_without_types() {
+    let out = (0..100).map(|i| format!("{}\n", i)).join("");
+    test_test("list_without_types.cot").stdout(out).success();
+}
+
+#[test]
+fn mutual_recursive_type_alias_fail() {
+    test_test("mutual_recursive_type_alias_fail.cot").failure();
 }

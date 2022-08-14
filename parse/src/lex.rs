@@ -27,6 +27,7 @@ pub enum Token {
     Bar,
     BArrow,
     Colon,
+    Type,
 }
 
 trait RequiresIndet {
@@ -159,6 +160,7 @@ fn lexer(
         "infixl" => Token::Infixl,
         "infixr" => Token::Infixr,
         "data" => Token::Data,
+        "type" => Token::Type,
         _ if i.chars().next().unwrap().is_uppercase() => {
             Token::CapitalHeadIdent(i)
         }

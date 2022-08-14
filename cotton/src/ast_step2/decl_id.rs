@@ -15,6 +15,12 @@ impl DeclId {
     }
 }
 
+impl Default for DeclId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 thread_local! {
     static DECL_COUNT: Cell<u32> = Cell::new(0);
 }

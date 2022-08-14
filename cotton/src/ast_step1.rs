@@ -11,6 +11,7 @@ use std::{collections::BTreeMap, fmt, fmt::Debug};
 pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl<'a>>,
+    pub type_alias_decl: Vec<TypeAliasDecl<'a>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -35,6 +36,12 @@ pub struct Type<'a> {
 pub struct DataDecl<'a> {
     pub name: &'a str,
     pub field_len: usize,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct TypeAliasDecl<'a> {
+    pub name: &'a str,
+    pub body: (Type<'a>, Forall<'a>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -165,6 +172,7 @@ impl<'a> From<&'a parse::Ast> for Ast<'a> {
     fn from(ast: &'a parse::Ast) -> Self {
         let mut vs = Vec::new();
         let mut ds = Vec::new();
+        let mut aliases = Vec::new();
         let mut precedence_map = OP_PRECEDENCE.clone();
         for d in &ast.decls {
             match d {
@@ -181,6 +189,7 @@ impl<'a> From<&'a parse::Ast> for Ast<'a> {
                     precedence_map
                         .insert(name, (*associativity, *precedence));
                 }
+                parse::Decl::TypeAlias(a) => aliases.push(a),
             }
         }
         let op_precedence_map = OpPrecedenceMap::new(precedence_map);
@@ -190,6 +199,27 @@ impl<'a> From<&'a parse::Ast> for Ast<'a> {
                 .map(|v| variable_decl(v, &op_precedence_map))
                 .collect(),
             data_decl: ds,
+            type_alias_decl: aliases
+                .into_iter()
+                .map(|a| TypeAliasDecl {
+                    name: &a.name,
+                    body: (
+                        infix_op_sequence(op_sequence(
+                            &a.body.0,
+                            &op_precedence_map,
+                        )),
+                        Forall {
+                            type_variables: a
+                                .body
+                                .1
+                                .type_variables
+                                .iter()
+                                .map(|s| s.as_str())
+                                .collect(),
+                        },
+                    ),
+                })
+                .collect(),
         }
     }
 }
