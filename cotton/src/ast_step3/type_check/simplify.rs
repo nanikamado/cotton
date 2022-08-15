@@ -220,23 +220,20 @@ impl<'a> TypeVariableTracker<'a> {
     }
 
     pub fn normalize(mut self) -> Option<Self> {
-        self.subtype_relation = self
-            .subtype_relation
-            .into_iter()
-            .map(|(a, b)| {
-                simplify_subtype_rel(
-                    self.map.normalize_type(a),
-                    self.map.normalize_type(b),
-                )
-            })
-            .collect::<Option<Vec<_>>>()?
-            .into_iter()
-            .flatten()
-            .collect();
+        self = self.normalize_subtype_rel()?;
         let eqs = find_eq_types(&self.subtype_relation);
+        let eqs_is_empty = eqs.is_empty();
         for (from, to) in eqs {
             self.insert(from, to);
         }
+        if eqs_is_empty {
+            Some(self)
+        } else {
+            self.normalize()
+        }
+    }
+
+    fn normalize_subtype_rel(mut self) -> Option<Self> {
         self.subtype_relation = self
             .subtype_relation
             .into_iter()
