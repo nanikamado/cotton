@@ -598,30 +598,77 @@ fn possible_weakest<'a>(
     } else if up.is_empty() {
         None
     } else {
-        let up_fs: FxHashSet<_> = up
-            .iter()
-            .filter(|t| {
-                matches!(
-                    t.matchable_ref(),
-                    TypeMatchableRef::Fn(_, _)
+        let mut up = up.into_iter();
+        let mut t = up.next().unwrap().clone();
+        for up in up {
+            t = type_intersection(t, up.clone())?;
+        }
+        Some(t)
+    }
+}
+
+fn type_intersection<'a>(
+    a: Type<'a>,
+    b: Type<'a>,
+) -> Option<Type<'a>> {
+    use TypeMatchable::*;
+    match (a.matchable(), b.matchable()) {
+        (Normal { .. }, Fn(_, _)) | (Fn(_, _), Normal { .. }) => {
+            return Some(TypeMatchable::Empty.into());
+        }
+        (
+            Normal {
+                name: n1,
+                args: args1,
+                id: id1,
+            },
+            Normal {
+                name: _,
+                args: args2,
+                id: id2,
+            },
+        ) => {
+            if id1 == id2 {
+                return Some(
+                    TypeUnit::Normal {
+                        name: n1,
+                        args: args1
+                            .into_iter()
+                            .zip_eq(args2)
+                            .map(|(a1, a2)| type_intersection(a1, a2))
+                            .collect::<Option<_>>()?,
+                        id: id1,
+                    }
+                    .into(),
+                );
+            } else {
+                return Some(TypeMatchable::Empty.into());
+            }
+        }
+        (Fn(a1, r1), Fn(a2, r2)) => {
+            return Some(
+                TypeUnit::Fn(
+                    a1.into_iter().chain(a2.into_iter()).collect(),
+                    type_intersection(r1, r2)?,
                 )
-            })
-            .collect();
-        let up_ns: FxHashSet<_> = up
-            .iter()
-            .filter_map(|t| {
-                if let TypeMatchableRef::Normal { name, .. } =
-                    t.matchable_ref()
-                {
-                    Some(name)
-                } else {
-                    None
+                .into(),
+            );
                 }
-            })
-            .collect();
-        if !up_fs.is_empty() && !up_ns.is_empty() || up_ns.len() > 1 {
-            Some(TypeMatchable::Empty.into())
-        } else {
+        (a, b) => {
+            let a: Type = a.into();
+            let b: Type = b.into();
+            let ab = simplify_subtype_rel(a.clone(), b.clone());
+            if let Some(ab) = ab {
+                if ab.is_empty() {
+                    return Some(a);
+                }
+            }
+            let ba = simplify_subtype_rel(b.clone(), a);
+            if let Some(ba) = ba {
+                if ba.is_empty() {
+                    return Some(b);
+                }
+            }
             None
         }
     }
