@@ -22,7 +22,7 @@ fizzbuzz : I64 -> String | I64 =
         | _ /\ 0 => "Buzz"
         | _ /\ _ => n
 
-to_string =
+to_string : (String | I64) -> String =
     | n => n.i64_to_string
     | s => s
 
