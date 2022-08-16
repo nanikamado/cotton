@@ -439,12 +439,9 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
     if t.variable_requirements.is_empty() {
         let mut bounded_v = None;
         for (a, b) in &t.type_variable_tracker.subtype_relation {
-            match (a.matchable_ref(), b.matchable_ref()) {
-                (_, TypeMatchableRef::Variable(v)) => {
-                    bounded_v = Some((a.clone(), b.clone(), v));
-                    break;
-                }
-                _ => (),
+            if let TypeMatchableRef::Variable(v) = b.matchable_ref() {
+                bounded_v = Some((a.clone(), b.clone(), v));
+                break;
             }
         }
         // dbg!(&bounded_v);
@@ -685,7 +682,7 @@ fn type_intersection<'a>(
     use TypeMatchable::*;
     match (a.matchable(), b.matchable()) {
         (Normal { .. }, Fn(_, _)) | (Fn(_, _), Normal { .. }) => {
-            return Some(TypeMatchable::Empty.into());
+            Some(TypeMatchable::Empty.into())
         }
         (
             Normal {
@@ -700,7 +697,7 @@ fn type_intersection<'a>(
             },
         ) => {
             if id1 == id2 {
-                return Some(
+                Some(
                     TypeUnit::Normal {
                         name: n1,
                         args: args1
@@ -711,20 +708,18 @@ fn type_intersection<'a>(
                         id: id1,
                     }
                     .into(),
-                );
+                )
             } else {
-                return Some(TypeMatchable::Empty.into());
+                Some(TypeMatchable::Empty.into())
             }
         }
-        (Fn(a1, r1), Fn(a2, r2)) => {
-            return Some(
-                TypeUnit::Fn(
-                    a1.into_iter().chain(a2.into_iter()).collect(),
-                    type_intersection(r1, r2)?,
-                )
-                .into(),
-            );
-        }
+        (Fn(a1, r1), Fn(a2, r2)) => Some(
+            TypeUnit::Fn(
+                a1.into_iter().chain(a2.into_iter()).collect(),
+                type_intersection(r1, r2)?,
+            )
+            .into(),
+        ),
         (a, b) => {
             let a: Type = a.into();
             let b: Type = b.into();
