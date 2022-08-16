@@ -303,7 +303,7 @@ pub fn simplify_type<'a, T: TypeConstructor<'a>>(
         if !updated {
             debug_assert_eq!(t, _simplify_type(t.clone()).unwrap().0);
             break;
-        } else if i > 10 {
+        } else if i > 100 {
             log::debug!("loop count reached the limit.");
             break;
         }
@@ -328,7 +328,7 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
                 }
                 t = t.replace_num_option(cov, &s)?;
                 t = t.normalize()?;
-                break;
+                return Some((t, true));
             }
         }
     }
@@ -340,7 +340,7 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
             {
                 t = t.replace_num_option(cont, &s)?;
                 t = t.normalize()?;
-                break;
+                return Some((t, true));
             }
         }
     }
@@ -360,7 +360,7 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
                 }
                 t = t.replace_num_option(*a, &st)?;
                 t = t.normalize()?;
-                break;
+                return Some((t, true));
             }
             (_, Some(we)) if we.len() == 0 => {
                 t = t.replace_num_option(
@@ -368,7 +368,7 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
                     &TypeMatchable::Empty.into(),
                 )?;
                 t = t.normalize()?;
-                break;
+                return Some((t, true));
             }
             _ => (),
         }
@@ -388,7 +388,78 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
             {
                 t = t.replace_num_option(v, &new_t).unwrap();
                 t = t.normalize()?;
+                return Some((t, true));
             }
+        }
+    }
+    log::trace!("t{{4}} = {}", t);
+    let mut updated = false;
+    t.type_variable_tracker.subtype_relation = t
+        .type_variable_tracker
+        .subtype_relation
+        .clone()
+        .into_iter()
+        .map(|(sub, sup)| {
+            let sup = if sup.len() >= 2 {
+                sup.clone()
+                    .into_iter()
+                    .filter(|s| {
+                        if let TypeUnit::Variable(s) = s {
+                            if let Some(s) = t
+                                .type_variable_tracker
+                                .possible_weakest(*s)
+                            {
+                                let b = simplify_subtype_rel(
+                                    sub.clone(),
+                                    s,
+                                )
+                                .is_some();
+                                if !b {
+                                    updated = true;
+                                }
+                                b
+                            } else {
+                                true
+                            }
+                        } else {
+                            true
+                        }
+                    })
+                    .collect()
+            } else {
+                sup
+            };
+            (sub.clone(), sup)
+        })
+        .collect();
+    if updated {
+        return Some((t, true));
+    }
+    log::trace!("t{{5}} = {}", t);
+    if t.variable_requirements.is_empty() {
+        let mut bounded_v = None;
+        for (a, b) in &t.type_variable_tracker.subtype_relation {
+            match (a.matchable_ref(), b.matchable_ref()) {
+                (_, TypeMatchableRef::Variable(v)) => {
+                    bounded_v = Some((a.clone(), b.clone(), v));
+                    break;
+                }
+                _ => (),
+            }
+        }
+        // dbg!(&bounded_v);
+        if let Some((a, b, v)) = bounded_v {
+            log::trace!("t{{6}} = {}", t);
+            t.type_variable_tracker
+                .subtype_relation
+                .remove(&(a.clone(), b));
+            let a = a
+                .into_iter()
+                .chain(std::iter::once(TypeUnit::new_variable()))
+                .collect();
+            t = t.replace_num_option(v, &a)?;
+
+            return Some((t, true));
         }
     }
     let updated = fxhash::hash(&t) != hash_before_simplify;
@@ -653,7 +724,7 @@ fn type_intersection<'a>(
                 )
                 .into(),
             );
-                }
+        }
         (a, b) => {
             let a: Type = a.into();
             let b: Type = b.into();
