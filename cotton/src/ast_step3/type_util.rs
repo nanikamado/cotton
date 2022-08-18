@@ -211,7 +211,7 @@ impl<'a> IncompleteType<'a> {
         let IncompleteType {
             constructor,
             variable_requirements,
-            subtype_relation,
+            subtype_relations: subtype_relation,
         } = self;
         variable_requirements
             .iter()
@@ -249,7 +249,7 @@ impl<'a> IncompleteType<'a> {
         let IncompleteType {
             constructor,
             variable_requirements,
-            subtype_relation: subtype_relationship,
+            subtype_relations: subtype_relationship,
         } = self;
         IncompleteType {
             constructor: constructor.replace_num(from, to),
@@ -259,7 +259,7 @@ impl<'a> IncompleteType<'a> {
                     (name, t.replace_num(from, to), id)
                 })
                 .collect(),
-            subtype_relation: subtype_relationship
+            subtype_relations: subtype_relationship
                 .into_iter()
                 .map(|(a, b)| {
                     (a.replace_num(from, to), b.replace_num(from, to))

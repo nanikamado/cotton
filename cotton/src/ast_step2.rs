@@ -53,6 +53,11 @@ pub struct DataDecl<'a> {
     pub decl_id: DeclId,
 }
 
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
+)]
+pub struct SubtypeRelations<'a>(pub BTreeSet<(Type<'a>, Type<'a>)>);
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct IncompleteType<'a, T = Type<'a>>
 where
@@ -60,7 +65,7 @@ where
 {
     pub constructor: T,
     pub variable_requirements: Vec<(&'a str, Type<'a>, IdentId)>,
-    pub subtype_relation: BTreeSet<(Type<'a>, Type<'a>)>,
+    pub subtype_relations: SubtypeRelations<'a>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -178,7 +183,7 @@ impl<'a> From<Type<'a>> for IncompleteType<'a> {
         Self {
             constructor: t,
             variable_requirements: Default::default(),
-            subtype_relation: Default::default(),
+            subtype_relations: Default::default(),
         }
     }
 }
@@ -650,5 +655,58 @@ impl<'a> TypeAliasMap<'a> {
                 (new_t, Forall(forall))
             }
         })
+    }
+}
+
+impl<'a> IntoIterator for SubtypeRelations<'a> {
+    type Item = (Type<'a>, Type<'a>);
+    type IntoIter =
+        std::collections::btree_set::IntoIter<(Type<'a>, Type<'a>)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<'a, 'b> IntoIterator for &'b SubtypeRelations<'a> {
+    type Item = &'b (Type<'a>, Type<'a>);
+    type IntoIter =
+        std::collections::btree_set::Iter<'b, (Type<'a>, Type<'a>)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.iter()
+    }
+}
+
+impl<'a> FromIterator<(Type<'a>, Type<'a>)> for SubtypeRelations<'a> {
+    fn from_iter<T: IntoIterator<Item = (Type<'a>, Type<'a>)>>(
+        iter: T,
+    ) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl<'a> SubtypeRelations<'a> {
+    pub fn iter(
+        &self,
+    ) -> std::collections::btree_set::Iter<(Type<'a>, Type<'a>)> {
+        self.0.iter()
+    }
+
+    pub fn insert(&mut self, value: (Type<'a>, Type<'a>)) -> bool {
+        self.0.insert(value)
+    }
+
+    pub fn remove(&mut self, value: &(Type<'a>, Type<'a>)) -> bool {
+        self.0.remove(value)
+    }
+}
+
+impl<'a> Extend<(Type<'a>, Type<'a>)> for SubtypeRelations<'a> {
+    fn extend<T: IntoIterator<Item = (Type<'a>, Type<'a>)>>(
+        &mut self,
+        iter: T,
+    ) {
+        self.0.extend(iter)
     }
 }
