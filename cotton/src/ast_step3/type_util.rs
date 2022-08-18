@@ -61,6 +61,7 @@ impl<'a> TypeUnit<'a> {
                 }
             }
             Self::RecursiveAlias { alias, body } => {
+                debug_assert_ne!(alias, from);
                 (Self::RecursiveAlias {
                     alias,
                     body: body.replace_num(from, to),
@@ -195,14 +196,45 @@ impl<'a> Type<'a> {
 
     pub fn partition(self) -> Vec<Self> {
         let mut t = Vec::new();
-        for tu in self.iter() {
+        let s = self.disjunctive();
+        for tu in s.iter() {
             if tu.is_singleton() {
                 t.push(tu.clone().into());
             } else {
-                return vec![self];
+                return vec![s];
             }
         }
         t.into_iter().collect()
+    }
+
+    pub fn disjunctive(self) -> Self {
+        self.into_iter()
+            .flat_map(|tu| match tu {
+                TypeUnit::Normal { name, args, id } => {
+                    if args.is_empty() {
+                        vec![TypeUnit::Normal { name, args, id }]
+                    } else {
+                        args.into_iter()
+                            .map(|t| {
+                                // t.partition()
+                                t.disjunctive()
+                                    .into_iter()
+                                    .map(Type::from)
+                                    .collect_vec()
+                                // vec![t]
+                            })
+                            .multi_cartesian_product()
+                            .map(|args| TypeUnit::Normal {
+                                name,
+                                args,
+                                id,
+                            })
+                            .collect()
+                    }
+                }
+                tu => vec![tu],
+            })
+            .collect()
     }
 }
 

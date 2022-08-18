@@ -10,7 +10,7 @@ use hashbag::HashBag;
 use itertools::Itertools;
 use petgraph::{self, algo::tarjan_scc, graphmap::DiGraphMap};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     fmt::Display,
     iter::Extend,
     vec,
@@ -38,7 +38,8 @@ impl<'a> TypeVariableMap<'a> {
     }
 
     pub fn normalize_type(&mut self, t: Type<'a>) -> Type<'a> {
-        t.into_iter()
+        let tus: Vec<_> = t
+            .into_iter()
             .flat_map(|tu| match tu {
                 TypeUnit::Fn(arg, rtn) => TypeUnit::Fn(
                     self.normalize_type(arg),
@@ -64,24 +65,41 @@ impl<'a> TypeVariableMap<'a> {
                     }
                 }
                 TypeUnit::Normal { name, args, id } => {
-                    if args.is_empty() {
-                        TypeUnit::Normal { name, args, id }.into()
-                    } else {
-                        args.into_iter()
-                            .map(|t| {
-                                self.normalize_type(t).partition()
-                            })
-                            .multi_cartesian_product()
-                            .map(|args| TypeUnit::Normal {
-                                name,
-                                args,
-                                id,
-                            })
-                            .collect()
+                    TypeUnit::Normal {
+                        name,
+                        args: args
+                            .into_iter()
+                            .map(|t| self.normalize_type(t))
+                            .collect(),
+                        id,
                     }
+                    .into()
                 }
             })
-            .collect()
+            .collect::<Type>()
+            .into_iter()
+            .collect();
+        let mut needless = HashSet::new();
+        for (a, b) in tus.iter().tuple_combinations() {
+            if let Some(r) = simplify_subtype_rel(
+                a.clone().into(),
+                b.clone().into(),
+            ) {
+                if r.is_empty() {
+                    needless.insert(a.clone());
+                    continue;
+                }
+            }
+            if let Some(r) = simplify_subtype_rel(
+                b.clone().into(),
+                a.clone().into(),
+            ) {
+                if r.is_empty() {
+                    needless.insert(b.clone());
+                }
+            }
+        }
+        tus.into_iter().filter(|t| !needless.contains(t)).collect()
     }
 
     pub fn insert(
@@ -254,8 +272,11 @@ pub fn simplify_type<'a, T: TypeConstructor<'a>>(
         let updated = r.1;
         if !updated {
             debug_assert_eq!(
-                t,
-                _simplify_type(map, t.clone()).unwrap().0
+                t.clone().normalize(map),
+                _simplify_type(map, t.clone())
+                    .unwrap()
+                    .0
+                    .normalize(map)
             );
             break;
         } else if i > 100 {
@@ -263,7 +284,7 @@ pub fn simplify_type<'a, T: TypeConstructor<'a>>(
             break;
         }
     }
-    Some(t)
+    t.normalize(map)
 }
 
 fn _simplify_type<'a, T: TypeConstructor<'a>>(
@@ -393,6 +414,29 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
     }
     log::trace!("t{{5}} = {}", t);
     if t.variable_requirements.is_empty() {
+        let c = t.constructor.clone();
+        for v in t.constructor.all_type_variables() {
+            let st = t
+                .subtype_relations
+                .possible_strongest(map, v)
+                .unwrap_or_default();
+            if let Some(we) =
+                t.subtype_relations.possible_weakest(map, v)
+            {
+                let replaced_with_we = c
+                    .clone()
+                    .replace_num(v, &we)
+                    .map_type(|t| map.normalize_type(t));
+                let replaced_with_st = c
+                    .clone()
+                    .replace_num(v, &st)
+                    .map_type(|t| map.normalize_type(t));
+                if replaced_with_we == replaced_with_st {
+                    map.insert(&mut t.subtype_relations, v, st);
+                    return Some((t, true));
+                }
+            }
+        }
         let mut bounded_v = None;
         for (a, b) in &t.subtype_relations {
             if let TypeMatchableRef::Variable(v) = b.matchable_ref() {
@@ -400,9 +444,9 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
                 break;
             }
         }
-        // dbg!(&bounded_v);
         if let Some((a, b, v)) = bounded_v {
             log::trace!("t{{6}} = {}", t);
+            log::trace!("map = {map}");
             t.subtype_relations.remove(&(a.clone(), b));
             let a = a
                 .into_iter()
@@ -411,8 +455,66 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
             map.insert(&mut t.subtype_relations, v, a);
             return Some((t, true));
         }
+        let updated;
+        (t, updated) =
+            simplify_subtype_rel_for_identify_free_type_variables(t)?;
+        if updated {
+            return Some((t, true));
+        }
     }
     let updated = fxhash::hash(&t) != hash_before_simplify;
+    Some((t, updated))
+}
+
+fn simplify_subtype_rel_for_identify_free_type_variables<
+    'a,
+    T: TypeConstructor<'a>,
+>(
+    mut t: IncompleteType<'a, T>,
+) -> Option<(IncompleteType<'a, T>, bool)> {
+    let mut updated = false;
+    t.subtype_relations = t
+        .subtype_relations
+        .into_iter()
+        .map(|(a, b)| -> Option<_> {
+            if b.len() >= 2 {
+                let (variables, non_variables): (Vec<Type>, Vec<_>) =
+                    b.into_iter()
+                        .map(|t| {
+                            if t.all_type_variables().is_empty() {
+                                Err(t)
+                            } else {
+                                Ok(t.into())
+                            }
+                        })
+                        .partition_result();
+                updated = !variables.is_empty();
+                Some(
+                    variables
+                        .into_iter()
+                        .chain(
+                            if !non_variables.is_empty() {
+                                Some(
+                                    non_variables
+                                        .into_iter()
+                                        .collect(),
+                                )
+                            } else {
+                                None
+                            }
+                            .into_iter(),
+                        )
+                        .map(|t| (a.clone(), t))
+                        .collect(),
+                )
+            } else {
+                Some(vec![(a, b)])
+            }
+        })
+        .collect::<Option<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect();
     Some((t, updated))
 }
 
@@ -455,14 +557,7 @@ fn simplify_subtype_rel<'a>(
 ) -> Option<Vec<(Type<'a>, Type<'a>)>> {
     use TypeMatchable::*;
     match (sub.matchable(), sup.matchable()) {
-        (Union(cs), b) => Some(
-            cs.into_iter()
-                .map(|c| {
-                    simplify_subtype_rel(c.into(), b.clone().into())
-                })
-                .collect::<Option<Vec<_>>>()?
-                .concat(),
-        ),
+        (sub, sup) if sub == sup => Some(Vec::new()),
         (Fn(a1, r1), Fn(a2, r2)) => Some(
             [
                 simplify_subtype_rel(r1, r2)?,
@@ -472,14 +567,10 @@ fn simplify_subtype_rel<'a>(
         ),
         (
             Normal {
-                name: n1,
-                args: cs1,
-                ..
+                id: n1, args: cs1, ..
             },
             Normal {
-                name: n2,
-                args: cs2,
-                ..
+                id: n2, args: cs2, ..
             },
         ) => {
             if n1 == n2 {
@@ -499,7 +590,14 @@ fn simplify_subtype_rel<'a>(
         | (Normal { .. }, Fn(_, _))
         | (Fn(_, _), Empty)
         | (Normal { .. }, Empty) => None,
-        (sub, sup) if sub == sup => Some(Vec::new()),
+        (Union(cs), b) => Some(
+            cs.into_iter()
+                .map(|c| {
+                    simplify_subtype_rel(c.into(), b.clone().into())
+                })
+                .collect::<Option<Vec<_>>>()?
+                .concat(),
+        ),
         (Empty, _) => Some(Vec::new()),
         (a, Union(u)) if u.contains(&a.clone().into()) => {
             Some(Vec::new())
@@ -510,11 +608,18 @@ fn simplify_subtype_rel<'a>(
             Some(Vec::new())
         }
         (
-            Normal { name, args, id },
+            a @ (Normal { .. } | Fn(_, _)),
             RecursiveAlias { alias, body },
         ) => simplify_subtype_rel(
-            Normal { name, args, id }.into(),
+            a.into(),
             unwrap_recursive_alias(alias, body),
+        ),
+        (
+            RecursiveAlias { alias, body },
+            b @ (Normal { .. } | Fn(_, _) | Union(_)),
+        ) => simplify_subtype_rel(
+            unwrap_recursive_alias(alias, body),
+            b.into(),
         ),
         (
             RecursiveAlias {
@@ -533,20 +638,35 @@ fn simplify_subtype_rel<'a>(
         {
             Some(Vec::new())
         }
-        (t @ Normal { .. }, Union(tus)) => {
-            let t: Type = t.into();
-            let new_tus = tus
-                .clone()
-                .into_iter()
-                .filter(|tu| {
-                    simplify_subtype_rel(t.clone(), tu.clone().into())
-                        .is_some()
-                })
-                .collect();
-            if tus == new_tus {
-                Some(vec![(t, tus)])
+        (Normal { id, name, args }, Union(tus)) => {
+            let t: Type = Normal { id, name, args }.into();
+            let td = t.clone().disjunctive();
+            if t != td {
+                simplify_subtype_rel(td, tus.into_iter().collect())
             } else {
-                Some(simplify_subtype_rel(t.clone(), new_tus)?)
+                let t_is_singleton = t.is_singleton();
+                let new_tus = tus
+                    .clone()
+                    .into_iter()
+                    .filter(|tu| {
+                        (if let TypeUnit::Normal { id: id2, .. } = tu
+                        {
+                            id == *id2
+                        } else {
+                            true
+                        }) && (!t_is_singleton
+                            || simplify_subtype_rel(
+                                t.clone(),
+                                tu.clone().into(),
+                            )
+                            .is_some())
+                    })
+                    .collect();
+                if tus != new_tus {
+                    simplify_subtype_rel(td, new_tus)
+                } else {
+                    Some(vec![(t, tus)])
+                }
             }
         }
         (sub, sup) => {
@@ -855,6 +975,19 @@ impl<'a> Display for SubtypeRelations<'a> {
     }
 }
 
+impl<'a> Display for TypeVariableMap<'a> {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        write!(f, "[")?;
+        for (a, b) in &self.0 {
+            write!(f, "{a} : {b}, ")?;
+        }
+        write!(f, "]")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -914,36 +1047,6 @@ mod tests {
         assert_eq!(
             format!("{}", st),
             "I64 -> {I64 | String} forall\n--"
-        );
-    }
-
-    #[test]
-    fn simplify2() {
-        let src = r#"data a /\ b
-        infixl 3 /\
-        main : () -> () =
-            | () => ()
-        test : (True | False) /\ (True | False)
-        = ()
-        "#;
-        let ast = parse::parse(src);
-        let ast: ast_step1::Ast = (&ast).into();
-        let ast: ast_step2::Ast = ast.into();
-        let t = ast
-            .variable_decl
-            .iter()
-            .find(|d| d.name == "test")
-            .unwrap()
-            .type_annotation
-            .clone()
-            .unwrap()
-            .constructor
-            .clone();
-        let mut map: TypeVariableMap = Default::default();
-        let t = map.normalize_type(t);
-        assert_eq!(
-            format!("{}", t),
-            r"{/\(False, False) | /\(False, True) | /\(True, False) | /\(True, True)}"
         );
     }
 

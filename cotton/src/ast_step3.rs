@@ -6,7 +6,7 @@ use self::type_check::{type_check, ResolvedIdents, TypeVariableMap};
 use crate::ast_step2::{
     self,
     decl_id::DeclId,
-    types::{Type, TypeMatchable, TypeVariable},
+    types::{Type, TypeMatchable, TypeMatchableRef, TypeVariable},
     DataDecl, IncompleteType, Pattern, SubtypeRelations,
     TypeConstructor,
 };
@@ -62,6 +62,7 @@ impl<'a> From<ast_step2::Ast<'a>> for Ast<'a> {
             mut map,
         ) = type_check(&ast);
         log::trace!("{:?}", resolved_idents);
+        log::trace!("map : {}", map);
         log::debug!("subtype_relations: {}", subtype_relations);
         let variable_decl: Vec<_> = ast
             .variable_decl
@@ -168,10 +169,10 @@ fn expr<'a>(
             let type_args: Vec<_> = type_args
                 .into_iter()
                 .map(|(v, t)| {
-                    let v = map.find(v);
-                    let v = match v.matchable() {
-                        TypeMatchable::Variable(v) => v,
-                        _ => panic!(),
+                    let v_ = map.find(v);
+                    let v = match v_.matchable_ref() {
+                        TypeMatchableRef::Variable(v) => v,
+                        _ => panic!("{v} is not a variable"),
                     };
                     let t = remove_free_type_variables(
                         map.normalize_type(t),
