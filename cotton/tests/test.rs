@@ -119,3 +119,8 @@ fn list_without_types() {
 fn mutual_recursive_type_alias_fail() {
     test_test("mutual_recursive_type_alias_fail.cot").failure();
 }
+
+#[test]
+fn bin_tree() {
+    test_examples("bin_tree.cot", "ok\n");
+}
