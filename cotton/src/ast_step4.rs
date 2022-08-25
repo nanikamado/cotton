@@ -154,8 +154,8 @@ impl<'a> Monomorphics<'a> {
             verify_types_do_not_have_free_variables(&value)
                 .unwrap_or_else(|t| {
                     panic!(
-                        "could not identify type variable in {}",
-                        t
+                        "could not identify type variable in {}, {}",
+                        t.1, d.name
                     )
                 });
             self.0.insert(
@@ -290,10 +290,10 @@ impl<'a> Monomorphics<'a> {
 }
 
 fn verify_types_do_not_have_free_variables<'a, 'b>(
-    (e, t): &'b ExprWithType<'a>,
-) -> Result<(), &'b Type<'a>> {
-    if t.all_type_variables().is_empty() {
-        match e {
+    et: &'b ExprWithType<'a>,
+) -> Result<(), &'b ExprWithType<'a>> {
+    if et.1.all_type_variables().is_empty() {
+        match &et.0 {
             Expr::Lambda(arms) => arms.iter().try_for_each(|arm| {
                 verify_types_do_not_have_free_variables(&arm.expr)
             }),
@@ -308,6 +308,6 @@ fn verify_types_do_not_have_free_variables<'a, 'b>(
             ),
         }
     } else {
-        Err(t)
+        Err(et)
     }
 }

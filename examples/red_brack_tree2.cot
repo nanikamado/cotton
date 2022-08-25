@@ -1,0 +1,22 @@
+data E
+data T(n, t, t)
+
+data D0
+data D1
+data D2
+data D3
+data D4
+data D5
+data D6
+
+type Tree = E | T[A, Tree[A], Tree[A]] forall { A }
+type Ds = D0 | D1 | D2 | D3
+
+contains : Tree[Ds] -> () =
+    | E => ()
+    | T(D0 , _ , T(D0 , _ , _)) => ()
+    | T(D0 , _ , _) => ()
+    | _ => ()
+
+main =
+    | () => println("ok")

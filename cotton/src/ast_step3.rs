@@ -1,8 +1,9 @@
 mod type_check;
 pub mod type_util;
 
+pub use self::type_check::TypeVariableMap;
 pub use self::type_check::VariableId;
-use self::type_check::{type_check, ResolvedIdents, TypeVariableMap};
+use self::type_check::{type_check, ResolvedIdents};
 use crate::ast_step2::{
     self,
     decl_id::DeclId,
@@ -112,6 +113,7 @@ fn variable_decl<'a>(
                 )
             })
             .collect(),
+        pattern_restrictions: decl_type.pattern_restrictions.clone(),
     };
     let value = expr(
         d.value,
@@ -172,7 +174,7 @@ fn expr<'a>(
                     let v_ = map.find(v);
                     let v = match v_.matchable_ref() {
                         TypeMatchableRef::Variable(v) => v,
-                        _ => panic!("{v} is not a variable"),
+                        _ => panic!("{v_} is not a variable"),
                     };
                     let t = remove_free_type_variables(
                         map.normalize_type(t),
@@ -184,12 +186,14 @@ fn expr<'a>(
                 })
                 .collect();
             log::debug!(
-                "{} -- {} -- [{}]",
+                "{} -- {} -- [{}], type: {} ({})",
                 name,
                 ident_id,
                 type_args.iter().format_with(", ", |(v, t), f| f(
                     &format!("({v} ~> {t})")
-                ))
+                )),
+                t,
+                map.find(t)
             );
             Ident {
                 name,

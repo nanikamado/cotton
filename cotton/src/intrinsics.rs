@@ -124,6 +124,7 @@ pub enum IntrinsicType {
     Unit,
     True,
     False,
+    ArgumentTuple,
 }
 
 pub static INTRINSIC_TYPES: Lazy<

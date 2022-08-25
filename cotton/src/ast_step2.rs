@@ -15,9 +15,10 @@ use crate::{
         INTRINSIC_TYPES,
     },
 };
-use fxhash::FxHashMap;
+use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use std::collections::{BTreeSet, HashMap};
+use std::fmt::Display;
 pub use types::TypeConstructor;
 
 #[derive(
@@ -58,14 +59,33 @@ pub struct DataDecl<'a> {
 )]
 pub struct SubtypeRelations<'a>(pub BTreeSet<(Type<'a>, Type<'a>)>);
 
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
+pub enum PatternUnitForRestriction<'a> {
+    I64,
+    Str,
+    Constructor {
+        id: TypeId,
+        name: &'a str,
+        args: Vec<PatternUnitForRestriction<'a>>,
+    },
+    Binder(Type<'a>, DeclId),
+}
+
+pub type PatternForRestriction<'a> =
+    Vec<PatternUnitForRestriction<'a>>;
+pub type PatternRestrictions<'a> =
+    Vec<(Type<'a>, Vec<PatternUnitForRestriction<'a>>)>;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct IncompleteType<'a, T = Type<'a>>
 where
     T: TypeConstructor<'a>,
 {
     pub constructor: T,
-    pub variable_requirements: Vec<(&'a str, Type<'a>, IdentId)>,
+    pub variable_requirements:
+        Vec<(&'a str, Type<'a>, IdentId, TypeVariable)>,
     pub subtype_relations: SubtypeRelations<'a>,
+    pub pattern_restrictions: PatternRestrictions<'a>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -184,6 +204,7 @@ impl<'a> From<Type<'a>> for IncompleteType<'a> {
             constructor: t,
             variable_requirements: Default::default(),
             subtype_relations: Default::default(),
+            pattern_restrictions: Default::default(),
         }
     }
 }
@@ -708,5 +729,139 @@ impl<'a> Extend<(Type<'a>, Type<'a>)> for SubtypeRelations<'a> {
         iter: T,
     ) {
         self.0.extend(iter)
+    }
+}
+
+impl<'a> Display for PatternUnitForRestriction<'a> {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        match self {
+            PatternUnitForRestriction::I64 => write!(f, "I64Lit"),
+            PatternUnitForRestriction::Str => write!(f, "StrLit"),
+            PatternUnitForRestriction::Constructor {
+                id: _,
+                name,
+                args,
+            } => {
+                write!(
+                    f,
+                    "{name}({})",
+                    args.iter().map(|p| format!("{p}")).join(", ")
+                )
+            }
+            PatternUnitForRestriction::Binder(b, decl_id) => {
+                write!(f, "Bind({b}, id = {decl_id})")
+            }
+        }
+    }
+}
+
+impl<'a> PatternUnitForRestriction<'a> {
+    pub fn covariant_type_variables(&self) -> Vec<TypeVariable> {
+        match self {
+            PatternUnitForRestriction::I64
+            | PatternUnitForRestriction::Str => Default::default(),
+            PatternUnitForRestriction::Constructor {
+                args,
+                ..
+            } => args
+                .iter()
+                .flat_map(PatternUnitForRestriction::covariant_type_variables)
+                .collect(),
+            PatternUnitForRestriction::Binder(t, _) => {
+                t.covariant_type_variables()
+            }
+        }
+    }
+
+    pub fn contravariant_type_variables(&self) -> Vec<TypeVariable> {
+        match self {
+            PatternUnitForRestriction::I64
+            | PatternUnitForRestriction::Str => Default::default(),
+            PatternUnitForRestriction::Constructor {
+                args,
+                ..
+            } => args
+                .iter()
+                .flat_map(PatternUnitForRestriction::contravariant_type_variables)
+                .collect(),
+            PatternUnitForRestriction::Binder(t, _) => {
+                t.contravariant_type_variables()
+            }
+        }
+    }
+
+    pub fn all_type_variables_vec(&self) -> Vec<TypeVariable> {
+        match self {
+            PatternUnitForRestriction::I64
+            | PatternUnitForRestriction::Str => Default::default(),
+            PatternUnitForRestriction::Constructor {
+                args, ..
+            } => args
+                .iter()
+                .flat_map(
+                    PatternUnitForRestriction::all_type_variables_vec,
+                )
+                .collect(),
+            PatternUnitForRestriction::Binder(t, _) => {
+                t.all_type_variables_vec()
+            }
+        }
+    }
+
+    pub fn all_type_variables(&self) -> FxHashSet<TypeVariable> {
+        self.all_type_variables_vec().into_iter().collect()
+    }
+
+    pub fn decl_type_map(&self) -> Vec<(DeclId, &Type<'a>)> {
+        match self {
+            PatternUnitForRestriction::I64
+            | PatternUnitForRestriction::Str => Default::default(),
+            PatternUnitForRestriction::Constructor {
+                args, ..
+            } => {
+                args.iter().flat_map(|p| p.decl_type_map()).collect()
+            }
+            PatternUnitForRestriction::Binder(t, decl_id) => {
+                vec![(*decl_id, t)]
+            }
+        }
+    }
+
+    pub fn map_type<F>(self, f: F) -> Self
+    where
+        F: FnMut(Type<'a>) -> Type<'a>,
+    {
+        self.map_type_rec(f).0
+    }
+
+    fn map_type_rec<F>(self, mut f: F) -> (Self, F)
+    where
+        F: FnMut(Type<'a>) -> Type<'a>,
+    {
+        use PatternUnitForRestriction::*;
+        match self {
+            a @ (I64 | Str) => (a, f),
+            Constructor { id, name, args } => (
+                Constructor {
+                    id,
+                    name,
+                    args: {
+                        let mut new_args =
+                            Vec::with_capacity(args.len());
+                        for p in args {
+                            let new_p: PatternUnitForRestriction;
+                            (new_p, f) = p.map_type_rec(f);
+                            new_args.push(new_p);
+                        }
+                        new_args
+                    },
+                },
+                f,
+            ),
+            Binder(t, decl_id) => (Binder(f(t), decl_id), f),
+        }
     }
 }

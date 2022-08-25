@@ -2,9 +2,12 @@ pub use self::type_type::Type;
 pub use self::type_unit::TypeUnit;
 pub use self::type_unit::TypeVariable;
 use crate::ast_step2::TypeId;
+use crate::ast_step3::TypeVariableMap;
 use fxhash::FxHashSet;
 use itertools::Itertools;
 use std::{collections::BTreeSet, fmt::Display};
+
+use super::IncompleteType;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeMatchable<'a> {
@@ -131,6 +134,10 @@ mod type_type {
             self.0.is_superset(&value.0)
         }
 
+        pub fn contains_unit(&self, value: &TypeUnit) -> bool {
+            self.0.contains(value)
+        }
+
         // pub fn merge(self, other: Self) -> Self {
         //     let mut u = self.0;
         //     u.extend(other.0);
@@ -181,6 +188,10 @@ mod type_type {
                 _ => Union(&self.0),
             }
         }
+
+        pub fn union_in_place(&mut self, mut other: Self) {
+            self.0.append(&mut other.0);
+        }
     }
 
     impl<'a> FromIterator<TypeUnit<'a>> for Type<'a> {
@@ -217,8 +228,109 @@ impl<'a> From<TypeMatchable<'a>> for Type<'a> {
     }
 }
 
+#[derive(Debug, Hash, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct SingleTypeConstructor<'a> {
+    pub type_: Type<'a>,
+    pub contravariant_candidates_from_annotation:
+        Option<Vec<TypeVariable>>,
+}
+
+impl<'a> TypeConstructor<'a> for SingleTypeConstructor<'a> {
+    fn all_type_variables(&self) -> fxhash::FxHashSet<TypeVariable> {
+        self.type_.all_type_variables()
+    }
+
+    fn all_type_variables_vec(&self) -> Vec<TypeVariable> {
+        self.type_.all_type_variables_vec()
+    }
+
+    fn replace_num(
+        mut self,
+        from: TypeVariable,
+        to: &type_type::Type<'a>,
+    ) -> Self {
+        self.type_ = self.type_.replace_num(from, to);
+        self
+    }
+
+    fn covariant_type_variables(&self) -> Vec<TypeVariable> {
+        if self.contravariant_candidates_from_annotation.is_some() {
+            self.all_type_variables().into_iter().collect()
+        } else {
+            self.type_.covariant_type_variables()
+        }
+    }
+
+    fn contravariant_type_variables(&self) -> Vec<TypeVariable> {
+        if let Some(cs) =
+            self.contravariant_candidates_from_annotation.as_ref()
+        {
+            cs.clone()
+        } else {
+            self.type_.contravariant_type_variables()
+        }
+    }
+
+    fn find_recursive_alias(
+        &self,
+    ) -> Option<(TypeVariable, Type<'a>)> {
+        self.type_.find_recursive_alias()
+    }
+
+    fn replace_type(
+        mut self,
+        from: &TypeUnit<'a>,
+        to: &TypeUnit<'a>,
+    ) -> Self {
+        self.type_ = self.type_.replace_type(from, to);
+        self
+    }
+
+    fn replace_type_union(
+        mut self,
+        from: &Type,
+        to: &TypeUnit<'a>,
+    ) -> Self {
+        self.type_ = self.type_.replace_type_union(from, to);
+        self
+    }
+
+    fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(
+        mut self,
+        f: F,
+    ) -> Self {
+        self.type_ = self.type_.map_type(f);
+        self
+    }
+
+    fn normalize_contravariant_candidates_from_annotation(
+        mut self,
+        map: &mut TypeVariableMap,
+    ) -> Self {
+        self.contravariant_candidates_from_annotation =
+            self.contravariant_candidates_from_annotation.map(|a| {
+                a.into_iter()
+                    .flat_map(|t| {
+                        if let TypeMatchable::Variable(v) =
+                            map.find(t).matchable()
+                        {
+                            Some(v)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            });
+        self
+    }
+}
+
 impl<'a> TypeConstructor<'a> for Type<'a> {
     fn all_type_variables(&self) -> fxhash::FxHashSet<TypeVariable> {
+        self.all_type_variables_vec().into_iter().collect()
+    }
+
+    fn all_type_variables_vec(&self) -> Vec<TypeVariable> {
         self.iter().flat_map(|t| t.all_type_variables()).collect()
     }
 
@@ -323,6 +435,13 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
     ) -> Self {
         f(self)
     }
+
+    fn normalize_contravariant_candidates_from_annotation(
+        self,
+        _map: &mut TypeVariableMap<'a>,
+    ) -> Self {
+        self
+    }
 }
 
 fn marge_vec<T>(mut a: Vec<T>, mut b: Vec<T>) -> Vec<T> {
@@ -339,6 +458,7 @@ pub trait TypeConstructor<'a>:
     + std::hash::Hash
 {
     fn all_type_variables(&self) -> FxHashSet<TypeVariable>;
+    fn all_type_variables_vec(&self) -> Vec<TypeVariable>;
     fn replace_num(self, from: TypeVariable, to: &Type<'a>) -> Self;
     fn covariant_type_variables(&self) -> Vec<TypeVariable>;
     fn contravariant_type_variables(&self) -> Vec<TypeVariable>;
@@ -356,6 +476,10 @@ pub trait TypeConstructor<'a>:
         to: &TypeUnit<'a>,
     ) -> Self;
     fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(self, f: F) -> Self;
+    fn normalize_contravariant_candidates_from_annotation(
+        self,
+        map: &mut TypeVariableMap<'a>,
+    ) -> Self;
 }
 
 impl<'a> TypeUnit<'a> {
@@ -470,6 +594,41 @@ impl Display for TypeUnit<'_> {
             RecursiveAlias { alias, body } => {
                 write!(f, "rec[{} = {}]", alias, *body)
             }
+        }
+    }
+}
+
+impl Display for SingleTypeConstructor<'_> {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        write!(
+            f,
+            "{} (annotation: {})",
+            self.type_,
+            self.contravariant_candidates_from_annotation
+                .as_ref()
+                .map(|v| format!(
+                    "[{}]",
+                    v.iter().map(|v| format!("{v}")).join(", ")
+                ))
+                .unwrap_or_else(|| "None".to_string())
+        )
+    }
+}
+
+impl<'a> From<IncompleteType<'a, SingleTypeConstructor<'a>>>
+    for IncompleteType<'a, Type<'a>>
+{
+    fn from(
+        t: IncompleteType<'a, SingleTypeConstructor<'a>>,
+    ) -> Self {
+        IncompleteType {
+            constructor: t.constructor.type_,
+            variable_requirements: t.variable_requirements,
+            subtype_relations: t.subtype_relations,
+            pattern_restrictions: t.pattern_restrictions,
         }
     }
 }

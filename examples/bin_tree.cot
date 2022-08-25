@@ -32,12 +32,12 @@ contains : Tree[I64] -> I64 -> Bool =
         | _ /\ True => True
         | _ => b.contains(x)
 
-main
-= | () => do
-    test0 = E.contains(0)
-    test1 = E.insert(2).insert(4).insert(0).insert(0).insert(100).contains(0)
-    test2 = E.insert(2).insert(4).insert(0).insert(0).insert(100).contains(3)
-    (test0 /\ test1 /\ test2).
-        | False /\ True /\ False => "ok"
-        | _ => "ng"
-    .println
+main =
+    | () => do
+        test0 = E.contains(0)
+        test1 = E.insert(2).insert(4).insert(0).insert(0).insert(100).contains(0)
+        test2 = E.insert(2).insert(4).insert(0).insert(0).insert(100).contains(3)
+        (test0 /\ test1 /\ test2).
+            | False /\ True /\ False => "ok"
+            | _ => "ng"
+        .println
