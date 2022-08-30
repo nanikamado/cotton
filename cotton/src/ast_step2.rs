@@ -324,7 +324,6 @@ fn add_expr_in_do<'a>(
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
 ) -> Vec<ExprWithType<'a>> {
-    // dbg!(&es);
     match e {
         ast_step1::Expr::Decl(d) => {
             let d = variable_decl(
@@ -333,28 +332,34 @@ fn add_expr_in_do<'a>(
                 type_variable_names,
                 type_alias_map,
             );
-            match es.len() {
-                0 => {
-                    vec![d.value]
-                }
-                _ => {
-                    es.reverse();
-                    let l = Expr::Lambda(vec![FnArm {
-                        pattern: vec![PatternUnit::Binder(
-                            d.name, d.decl_id,
-                        )
-                        .into()],
-                        pattern_type: vec![None],
-                        expr: (Expr::Do(es), TypeVariable::new()),
-                    }]);
-                    vec![(
-                        Expr::Call(
-                            Box::new((l, TypeVariable::new())),
-                            Box::new(d.value),
-                        ),
+            if es.is_empty() {
+                vec![
+                    (
+                        Expr::Ident {
+                            name: "()",
+                            ident_id: new_ident_id(),
+                        },
                         TypeVariable::new(),
-                    )]
-                }
+                    ),
+                    d.value,
+                ]
+            } else {
+                es.reverse();
+                let l = Expr::Lambda(vec![FnArm {
+                    pattern: vec![PatternUnit::Binder(
+                        d.name, d.decl_id,
+                    )
+                    .into()],
+                    pattern_type: vec![None],
+                    expr: (Expr::Do(es), TypeVariable::new()),
+                }]);
+                vec![(
+                    Expr::Call(
+                        Box::new((l, TypeVariable::new())),
+                        Box::new(d.value),
+                    ),
+                    TypeVariable::new(),
+                )]
             }
         }
         e => {

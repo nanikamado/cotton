@@ -12,3 +12,4 @@ main : () -> () =
         b = "b"
         a.println
         b.println
+        c = "c"
