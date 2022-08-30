@@ -171,7 +171,7 @@ impl<'a> TypeUnit<'a> {
                 let mut diff_count = 0;
                 let mut diff_position = None;
                 for (i, (a1, a2)) in
-                    args1.into_iter().zip(args2).enumerate()
+                    args1.iter().zip(args2).enumerate()
                 {
                     if a1 != a2 {
                         diff_count += 1;
@@ -196,6 +196,28 @@ impl<'a> TypeUnit<'a> {
                 }
             }
             _ => None,
+        }
+    }
+
+    pub fn conjunctive(self) -> Self {
+        match self {
+            TypeUnit::Normal { name, args, id } => TypeUnit::Normal {
+                name,
+                args: args
+                    .into_iter()
+                    .map(Type::conjunctive)
+                    .collect(),
+                id,
+            },
+            TypeUnit::Fn(a, b) => {
+                TypeUnit::Fn(a.conjunctive(), b.conjunctive())
+            }
+            TypeUnit::Variable(v) => TypeUnit::Variable(v),
+            TypeUnit::RecursiveAlias { body } => {
+                TypeUnit::RecursiveAlias {
+                    body: body.conjunctive(),
+                }
+            }
         }
     }
 }
@@ -281,7 +303,8 @@ impl<'a> Type<'a> {
     }
 
     pub fn conjunctive(self) -> Self {
-        let mut ts: Vec<_> = self.into_iter().collect();
+        let mut ts: Vec<_> =
+            self.into_iter().map(TypeUnit::conjunctive).collect();
         let mut new_ts = Vec::new();
         'pop_loop: while let Some(last_t) = ts.pop() {
             for t in ts.iter_mut() {

@@ -32,7 +32,7 @@ impl<'a> TypeVariableMap<'a> {
             if t_new == t {
                 t
             } else {
-                let t_new = lift_recursive_alias(t_new);
+                let t_new = lift_recursive_alias(t_new.conjunctive());
                 self.0.insert(key, t_new.clone());
                 t_new
             }
@@ -55,11 +55,6 @@ impl<'a> TypeVariableMap<'a> {
                     let body = self.normalize_type(body);
                     match body.matchable() {
                         TypeMatchable::RecursiveAlias { .. } => {
-                            // body_inner.replace_num(
-                            //     alias,
-                            //     &TypeUnit::Variable(alias_inner)
-                            //         .into(),
-                            // );
                             unimplemented!()
                         }
                         body => TypeUnit::RecursiveAlias {
@@ -852,13 +847,6 @@ fn simplify_subtype_rel<'a>(
             )
         }
         (sub, sup) => {
-            // let sub: Type = sub.into();
-            // let sup: Type = sup.into();
-            // let subl = lift_recursive_alias(sub.clone());
-            // let supl = lift_recursive_alias(sup.clone());
-            // if subl != sub || supl != sup {
-            //     simplify_subtype_rel(subl, supl)
-            // } else {
             let sup: Type = sup.into();
             let c_sup = sup.clone().conjunctive();
             if sup == c_sup {
@@ -866,7 +854,6 @@ fn simplify_subtype_rel<'a>(
             } else {
                 simplify_subtype_rel(sub.into(), c_sup)
             }
-            // }
         }
     }
 }
@@ -880,6 +867,10 @@ where
         let r = &TypeUnit::RecursiveAlias { body: body.clone() };
         let v = TypeVariable::new();
         let t = t.replace_type(r, &TypeUnit::Variable(v));
+        let body = body.replace_num(
+            TypeVariable::RecursiveIndex(0),
+            &TypeUnit::Variable(v).into(),
+        );
         let t = t.replace_type_union(&body, &TypeUnit::Variable(v));
         t.replace_num(v, &r.clone().into())
     } else {
@@ -994,7 +985,7 @@ impl<'a> From<&PatternUnitForRestriction<'a>> for Type<'a> {
                 args,
             } => TypeUnit::Normal {
                 name,
-                args: args.into_iter().map(Type::from).collect(),
+                args: args.iter().map(Type::from).collect(),
                 id: *id,
             }
             .into(),
@@ -1202,32 +1193,16 @@ where
                 .pattern_restrictions
                 .into_iter()
                 .map(|(t, p)| {
-                    simplify_pattern_restriction(
+                    (
                         map.normalize_type(t),
                         p.into_iter()
                             .map(|p| map.normalize_pattern_unit(p))
                             .collect(),
-                        map,
                     )
                 })
-                .collect::<Option<Vec<_>>>()?
-                .into_iter()
-                .flatten()
                 .collect(),
         })
     }
-}
-
-fn simplify_pattern_restriction<'a>(
-    t: Type<'a>,
-    pattern: PatternForRestriction<'a>,
-    _map: &mut TypeVariableMap<'a>,
-) -> Option<Vec<(Type<'a>, PatternForRestriction<'a>)>> {
-    // if pattern.iter().all(|p| p.all_type_variables().is_empty()) {
-    //     Some(Vec::new())
-    // } else {
-    Some(vec![(t, pattern)])
-    // }
 }
 
 fn apply_type_to_pattern<'a>(
@@ -1250,31 +1225,39 @@ fn apply_type_to_pattern<'a>(
     let mut subtype_rels = SubtypeRelations::default();
     let mut not_sure = false;
     for p in pattern {
-        let d = format!("{ts}");
-        log::trace!("ts: {}", &d[..d.len().min(2000)]);
-        log::trace!("len: {}", d.len());
-        log::trace!("t_len: {}", ts.len());
-        log::trace!("p: {p}");
-        let (destructed_t, matched_t, subtype_r, decl_match) =
-            destruct_type_by_pattern(ts.clone(), p);
-        log::trace!("finished");
-        log::trace!("subtype_r: {subtype_r}");
-        subtype_rels.add_subtype_rels(subtype_r);
-        match matched_t {
-            DestructResult::NotSure(matched_t) => {
-                log::trace!("matched_t: {matched_t}");
-                let matched_t = matched_t.disjunctive();
-                ts = destructed_t
+        let TypeDestructResult {
+            remained,
+            matched,
+            bind_matched,
+            kind,
+        } = destruct_type_by_pattern(ts.clone(), p);
+        let subtype_r: SubtypeRelations = bind_matched
+            .iter()
+            .flat_map(|v| {
+                v.iter().map(|(decl_id, t)| {
+                    (
+                        t.clone(),
+                        decl_type_map_in_pattern[decl_id].clone(),
+                    )
+                })
+            })
+            .collect();
+        match kind {
+            DestructResultKind::NotSure => {
+                subtype_rels.add_subtype_rels(subtype_r);
+                let matched_t = matched.unwrap().disjunctive();
+                ts = remained
                     .into_iter()
                     .filter(|t| !matched_t.contains_unit(t))
                     .collect();
                 not_sure = true;
             }
-            DestructResult::Fail => (),
-            DestructResult::Ok(matched_t) => {
+            DestructResultKind::Fail => (),
+            DestructResultKind::Ok => {
+                subtype_rels.add_subtype_rels(subtype_r);
                 let mut decl_match_map: FxHashMap<DeclId, Type> =
                     Default::default();
-                for (decl_id, t) in decl_match.unwrap() {
+                for (decl_id, t) in bind_matched.unwrap() {
                     decl_match_map
                         .entry(decl_id)
                         .or_default()
@@ -1286,9 +1269,8 @@ fn apply_type_to_pattern<'a>(
                         t,
                     )
                 }
-                log::trace!("matched_t: {matched_t}");
-                let matched_t = matched_t.disjunctive();
-                ts = destructed_t
+                let matched_t = matched.unwrap().disjunctive();
+                ts = remained
                     .into_iter()
                     .filter(|t| !matched_t.contains_unit(t))
                     .collect();
@@ -1303,116 +1285,89 @@ fn apply_type_to_pattern<'a>(
     }
 }
 
-#[derive(Debug)]
-enum DestructResult<T> {
-    NotSure(T),
+enum DestructResultKind {
+    Ok,
+    NotSure,
     Fail,
-    Ok(T),
 }
 
-impl<T> DestructResult<T> {
-    fn map<F, U>(self, f: F) -> DestructResult<U>
-    where
-        F: FnOnce(T) -> U,
-    {
-        use DestructResult::*;
-        match self {
-            NotSure(a) => NotSure(f(a)),
-            Fail => Fail,
-            Ok(a) => Ok(f(a)),
-        }
-    }
-
-    fn merge<U>(
-        self,
-        other: DestructResult<U>,
-    ) -> DestructResult<(T, U)> {
-        use DestructResult::*;
-        match (self, other) {
-            (Ok(a), Ok(b)) => Ok((a, b)),
-            (Fail, _) | (_, Fail) => Fail,
-            (NotSure(a), Ok(b))
-            | (Ok(a), NotSure(b))
-            | (NotSure(a), NotSure(b)) => NotSure((a, b)),
-        }
-    }
+struct TypeDestructResult<'a> {
+    remained: Type<'a>,
+    matched: Option<Type<'a>>,
+    bind_matched: Option<Vec<(DeclId, Type<'a>)>>,
+    kind: DestructResultKind,
 }
 
 fn destruct_type_by_pattern<'a>(
     t: Type<'a>,
     pattern: &PatternUnitForRestriction<'a>,
-) -> (
-    Type<'a>,
-    DestructResult<Type<'a>>,
-    SubtypeRelations<'a>,
-    Option<Vec<(DeclId, Type<'a>)>>,
-) {
-    // log::trace!("t = {t}");
-    // log::trace!("patttern = {pattern}");
-    let mut r: Type = TypeMatchable::Empty.into();
+) -> TypeDestructResult<'a> {
+    let mut remained: Type = TypeMatchable::Empty.into();
     let mut destructed = false;
     let mut not_sure = false;
-    let mut matched_t: Type = TypeMatchable::Empty.into();
-    let mut subtype_rels = SubtypeRelations::default();
-    let mut decl_match = Vec::new();
+    let mut matched: Type = TypeMatchable::Empty.into();
+    let mut bind_matched = Vec::new();
     for tu in t {
-        let (tu, d, subtype_relations, dm) =
-            destruct_type_unit_by_pattern(tu, pattern);
-        subtype_rels.add_subtype_rels(subtype_relations);
-        match d {
-            DestructResult::NotSure(matched_type) => {
-                matched_t = matched_t.union(matched_type);
+        let TypeDestructResult {
+            remained: r,
+            matched: m,
+            bind_matched: bm,
+            kind,
+        } = destruct_type_unit_by_pattern(tu, pattern);
+        match kind {
+            DestructResultKind::NotSure => {
+                matched = matched.union(m.unwrap());
                 not_sure = true;
             }
-            DestructResult::Fail => (),
-            DestructResult::Ok(matched_type) => {
-                let mut dm = dm.unwrap();
-                matched_t = matched_t.union(matched_type);
+            DestructResultKind::Fail => (),
+            DestructResultKind::Ok => {
+                let mut dm = bm.unwrap();
+                matched = matched.union(m.unwrap());
                 destructed = true;
-                decl_match.append(&mut dm);
+                bind_matched.append(&mut dm);
             }
         }
-        r = r.union(tu);
+        remained = remained.union(r);
     }
     if not_sure {
-        (
-            r,
-            DestructResult::NotSure(matched_t),
-            subtype_rels,
-            Some(decl_match),
-        )
+        TypeDestructResult {
+            remained,
+            matched: Some(matched),
+            bind_matched: Some(bind_matched),
+            kind: DestructResultKind::NotSure,
+        }
     } else if destructed {
-        (
-            r,
-            DestructResult::Ok(matched_t),
-            subtype_rels,
-            Some(decl_match),
-        )
+        TypeDestructResult {
+            remained,
+            matched: Some(matched),
+            bind_matched: Some(bind_matched),
+            kind: DestructResultKind::Ok,
+        }
     } else {
-        (r, DestructResult::Fail, subtype_rels, None)
+        TypeDestructResult {
+            remained,
+            matched: None,
+            bind_matched: None,
+            kind: DestructResultKind::Fail,
+        }
     }
 }
 
 fn destruct_type_unit_by_pattern<'a>(
     t: TypeUnit<'a>,
     pattern: &PatternUnitForRestriction<'a>,
-) -> (
-    Type<'a>,
-    DestructResult<Type<'a>>,
-    SubtypeRelations<'a>,
-    Option<Vec<(DeclId, Type<'a>)>>,
-) {
+) -> TypeDestructResult<'a> {
     match (t, pattern) {
         (
             t,
             PatternUnitForRestriction::I64
             | PatternUnitForRestriction::Str,
-        ) => (
-            t.into(),
-            DestructResult::Ok(TypeMatchable::Empty.into()),
-            SubtypeRelations::default(),
-            Some(Vec::new()),
-        ),
+        ) => TypeDestructResult {
+            remained: t.into(),
+            matched: Some(TypeMatchable::Empty.into()),
+            bind_matched: Some(Vec::new()),
+            kind: DestructResultKind::Ok,
+        },
         (
             TypeUnit::Normal {
                 args: t_args,
@@ -1426,14 +1381,14 @@ fn destruct_type_unit_by_pattern<'a>(
             },
         ) if *p_id == t_id => {
             if t_args.is_empty() {
-                (
-                    TypeUnit::Normal {
+                TypeDestructResult {
+                    remained: TypeUnit::Normal {
                         args: t_args.clone(),
                         id: t_id,
                         name,
                     }
                     .into(),
-                    DestructResult::Ok(
+                    matched: Some(
                         TypeUnit::Normal {
                             args: t_args,
                             id: t_id,
@@ -1441,36 +1396,63 @@ fn destruct_type_unit_by_pattern<'a>(
                         }
                         .into(),
                     ),
-                    SubtypeRelations::default(),
-                    Some(Vec::new()),
-                )
+                    bind_matched: Some(Vec::new()),
+                    kind: DestructResultKind::Ok,
+                }
             } else {
-                let mut destructed = DestructResult::Ok(Vec::new());
-                let mut subtype_rels = SubtypeRelations::default();
+                let mut destructed = Some(Vec::new());
                 let mut args = Vec::new();
                 let mut decl_match = Some(Vec::new());
-                for (t, p) in t_args.into_iter().zip_eq(p_args) {
-                    let (t, d, s, dm) =
-                        destruct_type_by_pattern(t, p);
-                    subtype_rels.add_subtype_rels(s);
-                    destructed = destructed.merge(d).map(
-                        |(mut destructed, t)| {
-                            destructed.push(t);
-                            destructed
-                        },
-                    );
+                let mut not_sure = false;
+                for (t, p) in
+                    t_args.clone().into_iter().zip_eq(p_args)
+                {
+                    let TypeDestructResult {
+                        remained,
+                        matched,
+                        bind_matched,
+                        kind,
+                    } = destruct_type_by_pattern(t, p);
+                    let d = match kind {
+                        DestructResultKind::NotSure => {
+                            not_sure = true;
+                            matched.unwrap()
+                        }
+                        DestructResultKind::Fail => {
+                            return TypeDestructResult {
+                                remained: TypeUnit::Normal {
+                                    args: t_args,
+                                    id: t_id,
+                                    name,
+                                }
+                                .into(),
+                                matched: None,
+                                bind_matched: Some(Vec::new()),
+                                kind: DestructResultKind::Fail,
+                            };
+                        }
+                        DestructResultKind::Ok => matched.unwrap(),
+                    };
+                    destructed = destructed.map(|mut destructed| {
+                        destructed.push(d);
+                        destructed
+                    });
                     decl_match = decl_match.and_then(|mut d| {
-                        dm.map(|mut d2| {
+                        bind_matched.map(|mut d2| {
                             d.append(&mut d2);
                             d
                         })
                     });
                     args.push(
-                        t.into_iter().map(Type::from).collect_vec(),
+                        remained
+                            .into_iter()
+                            .map(Type::from)
+                            .collect_vec(),
                     );
                 }
-                (
-                    args.into_iter()
+                TypeDestructResult {
+                    remained: args
+                        .into_iter()
                         .multi_cartesian_product()
                         .map(|args| TypeUnit::Normal {
                             name,
@@ -1478,7 +1460,7 @@ fn destruct_type_unit_by_pattern<'a>(
                             id: t_id,
                         })
                         .collect(),
-                    destructed.map(|t| {
+                    matched: destructed.map(|t| {
                         TypeUnit::Normal {
                             name,
                             args: t,
@@ -1486,35 +1468,39 @@ fn destruct_type_unit_by_pattern<'a>(
                         }
                         .into()
                     }),
-                    subtype_rels,
-                    decl_match,
-                )
+                    bind_matched: decl_match,
+                    kind: if not_sure {
+                        DestructResultKind::NotSure
+                    } else {
+                        DestructResultKind::Ok
+                    },
+                }
             }
         }
-        (t, PatternUnitForRestriction::Binder(v, decl_id)) => {
+        (t, PatternUnitForRestriction::Binder(_, decl_id)) => {
             let t = Type::from(t);
-            (
-                t.clone(),
-                DestructResult::Ok(t.clone()),
-                [(t.clone(), v.clone())].into_iter().collect(),
-                Some(vec![(*decl_id, t)]),
-            )
+            TypeDestructResult {
+                remained: t.clone(),
+                matched: Some(t.clone()),
+                bind_matched: Some(vec![(*decl_id, t)]),
+                kind: DestructResultKind::Ok,
+            }
         }
-        (TypeUnit::Variable(v), _) => (
-            TypeUnit::Variable(v).into(),
-            DestructResult::NotSure(TypeUnit::Variable(v).into()),
-            SubtypeRelations::default(),
-            None,
-        ),
+        (TypeUnit::Variable(v), _) => TypeDestructResult {
+            remained: TypeUnit::Variable(v).into(),
+            matched: Some(TypeUnit::Variable(v).into()),
+            bind_matched: None,
+            kind: DestructResultKind::NotSure,
+        },
         (TypeUnit::RecursiveAlias { body }, p) => {
             destruct_type_by_pattern(unwrap_recursive_alias(body), p)
         }
-        (t, _) => (
-            t.into(),
-            DestructResult::Fail,
-            SubtypeRelations::default(),
-            None,
-        ),
+        (t, _) => TypeDestructResult {
+            remained: t.into(),
+            matched: None,
+            bind_matched: None,
+            kind: DestructResultKind::Fail,
+        },
     }
 }
 
@@ -1622,9 +1608,7 @@ impl<'a> Display for TypeVariableMap<'a> {
 
 #[cfg(test)]
 mod tests {
-    use stripmargin::StripMargin;
-
-    use super::{destruct_type_by_pattern, DestructResult};
+    use super::destruct_type_by_pattern;
     use crate::{
         ast_step1, ast_step2,
         ast_step2::{
@@ -1634,10 +1618,11 @@ mod tests {
         },
         ast_step3::type_check::simplify::{
             apply_type_to_pattern, simplify_subtype_rel,
-            simplify_type, TypeVariableMap,
+            simplify_type, TypeDestructResult, TypeVariableMap,
         },
         intrinsics::IntrinsicType,
     };
+    use stripmargin::StripMargin;
 
     #[test]
     fn simplify1() {
@@ -1685,7 +1670,7 @@ mod tests {
             pattern_restrictions: Default::default(),
         };
         let mut map: TypeVariableMap = Default::default();
-        let st = simplify_type(&mut map, t.into()).unwrap();
+        let st = simplify_type(&mut map, t).unwrap();
         assert_eq!(
             format!("{}", st),
             "I64 -> {I64 | String} forall\n--"
@@ -1730,17 +1715,6 @@ mod tests {
         assert_eq!(format!("{:?}", t), "None");
     }
 
-    impl<T> DestructResult<T> {
-        fn unwrap(self) -> T {
-            match self {
-                DestructResult::NotSure(_) | DestructResult::Fail => {
-                    panic!("unwrap faild")
-                }
-                DestructResult::Ok(a) => a,
-            }
-        }
-    }
-
     #[test]
     fn destruct_type_0() {
         let src = r#"data a /\ b
@@ -1781,15 +1755,18 @@ mod tests {
                     },
                 ],
             };
-            let (t, matched_t, _, _) =
-                destruct_type_by_pattern(t1, &p);
-            let matched_t = matched_t.unwrap();
+            let TypeDestructResult {
+                remained,
+                matched,
+                bind_matched: _,
+                kind: _,
+            } = destruct_type_by_pattern(t1, &p);
             assert_eq!(
-                format!("{t}"),
+                format!("{remained}"),
                 r#"{/\(False, False) | /\(False, True) | /\(True, False) | /\(True, True)}"#
             );
             assert_eq!(
-                format!("{}", matched_t),
+                format!("{}", matched.unwrap()),
                 r#"/\(False, False)"#
             )
         } else {
@@ -1860,24 +1837,28 @@ mod tests {
                 ),
             ],
         };
-        let (t, matched_t, _, _) = destruct_type_by_pattern(t1, &p);
-        let matched_t = matched_t.unwrap();
+        let TypeDestructResult {
+            remained,
+            matched,
+            bind_matched: _,
+            kind: _,
+        } = destruct_type_by_pattern(t1, &p);
         assert_eq!(
-            format!("{t}"),
+            format!("{remained}"),
             r#"{E | T((), E, rec[{E | T((), d0, d0)}]) 
               || T((), T((), rec[{E | T((), d0, d0)}], 
               |rec[{E | T((), d0, d0)}]), 
               |rec[{E | T((), d0, d0)}])}"#
                 .strip_margin()
-                .replace("\n", "")
+                .replace('\n', "")
         );
         assert_eq!(
-            format!("{}", matched_t),
+            format!("{}", matched.unwrap()),
             r#"T((), T((), rec[{E | T((), d0, d0)}], 
               |rec[{E | T((), d0, d0)}]), 
               |rec[{E | T((), d0, d0)}])"#
                 .strip_margin()
-                .replace("\n", "")
+                .replace('\n', "")
         )
     }
 
@@ -1914,32 +1895,51 @@ mod tests {
 
     #[test]
     fn apply_type_to_pattern_1() {
-        let v1 = TypeUnit::new_variable();
-        let t1 = Type::from_str("I64").union(v1.clone().into());
+        let src = r#"data a /\ b
+        infixl 3 /\
+        main : () -> () =
+            | () => ()
+        data A
+        data B
+        test1 : A = A
+        "#;
+        let ast = parse::parse(src);
+        let ast: ast_step1::Ast = (&ast).into();
+        let ast: ast_step2::Ast = ast.into();
+        let b_id = ast
+            .data_decl
+            .iter()
+            .find(|d| d.name == "B")
+            .unwrap()
+            .decl_id;
+        let b_id = TypeId::DeclId(b_id);
+        let t1 = ast
+            .variable_decl
+            .iter()
+            .find(|d| d.name == "test1")
+            .unwrap()
+            .type_annotation
+            .clone()
+            .unwrap()
+            .constructor
+            .clone();
         let v2 = TypeVariable::new();
         let r = apply_type_to_pattern(
-            Type::argument_tuple_from_arguments(vec![t1]),
+            Type::argument_tuple_from_arguments(vec![t1.clone(), t1]),
             &PatternUnitForRestriction::argument_tuple_from_arguments(
-                vec![
-                    vec![PatternUnitForRestriction::I64],
-                    vec![PatternUnitForRestriction::Binder(
+                vec![vec![
+                    PatternUnitForRestriction::Constructor {
+                        id: b_id,
+                        name: "B",
+                        args: Vec::new(),
+                    },
+                    PatternUnitForRestriction::Binder(
                         TypeUnit::Variable(v2).into(),
                         DeclId::new(),
-                    )],
-                ],
+                    ),
+                ]],
             ),
         );
-        let subtype_rels = r.unwrap();
-        assert_eq!(
-            format!("{}", subtype_rels),
-            format!(
-                r#"    I64 < {0},
-                  |    {1} < {0},
-                  |    t1 < {{I64 | {1}}},
-                  |"#,
-                v2, v1,
-            )
-            .strip_margin()
-        )
+        assert_eq!(r, None)
     }
 }

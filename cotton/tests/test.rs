@@ -124,3 +124,13 @@ fn mutual_recursive_type_alias_fail() {
 fn bin_tree() {
     test_examples("bin_tree.cot", "ok\n");
 }
+
+#[test]
+fn red_black_tree() {
+    test_examples("red_black_tree.cot", "ok\n");
+}
+
+#[test]
+fn to_string_fail() {
+    test_test("to_string.cot").failure();
+}

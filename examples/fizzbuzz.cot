@@ -15,22 +15,18 @@ data a /\ b
 
 infixl 3 /\
 
-fizzbuzz : I64 -> String | I64 =
+fizzbuzz : I64 -> String =
     | n => (n % 3 /\ n % 5).
         | 0 /\ 0 => "FizzBuzz"
         | 0 /\ _ => "Fizz"
         | _ /\ 0 => "Buzz"
-        | _ /\ _ => n
-
-to_string : (String | I64) -> String =
-    | n => n.i64_to_string
-    | s => s
+        | _ /\ _ => n.i64_to_string
 
 main : () -> () =
     | () =>
         1.loop(
             | 101 => End(())
             | i => do
-                i.fizzbuzz.to_string.println
+                i.fizzbuzz.println
                 Next(i + 1)
         )

@@ -683,11 +683,11 @@ impl<'a> TypeAliasMap<'a> {
     }
 }
 
-fn decrement_index_outside<'a>(t: Type<'a>) -> Type<'a> {
+fn decrement_index_outside(t: Type) -> Type {
     t.into_iter().map(decrement_index_outside_unit).collect()
 }
 
-fn decrement_index_outside_unit<'a>(t: TypeUnit<'a>) -> TypeUnit<'a> {
+fn decrement_index_outside_unit(t: TypeUnit) -> TypeUnit {
     match t {
         TypeUnit::Normal { name, args, id } => TypeUnit::Normal {
             name,

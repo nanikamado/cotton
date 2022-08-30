@@ -1,0 +1,11 @@
+(.) : a -> (a -> b) -> b forall {a, b} =
+    | a, f => f(a)
+
+infixl 10 .
+
+to_string : (String | I64) -> String =
+    | n => n.i64_to_string
+    | s => s
+
+main : () -> () =
+    | () => ()
