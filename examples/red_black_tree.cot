@@ -8,12 +8,12 @@ infixl 10 .
 
 infixl 5 >
 
-data a /\ b
+data A /\ B forall { A, B }
 
 infixl 3 /\
 
 data E
-data T(c, n, t, t)
+data T(C, N, T1, T2) forall { C, N, T1, T2 }
 
 data R
 data B
