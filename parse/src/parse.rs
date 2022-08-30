@@ -146,7 +146,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 )
             });
         let pattern_unit = constructor_pattern
-            .or(just(Token::Op("_".to_string()))
+            .or(just(Token::Ident("_".to_string()))
                 .map(|_| PatternUnit::Underscore))
             .or(ident.map(PatternUnit::Bind))
             .or(int.map(PatternUnit::Int))
