@@ -21,7 +21,6 @@ pub enum TypeMatchable<'a> {
     Variable(TypeVariable),
     Empty,
     RecursiveAlias {
-        alias: TypeVariable,
         body: Type<'a>,
     },
 }
@@ -38,7 +37,6 @@ pub enum TypeMatchableRef<'a> {
     Variable(TypeVariable),
     Empty,
     RecursiveAlias {
-        alias: TypeVariable,
         body: &'a Type<'a>,
     },
 }
@@ -46,12 +44,20 @@ pub enum TypeMatchableRef<'a> {
 mod type_unit {
     use super::Type;
     use crate::ast_step2::TypeId;
-    use std::cell::Cell;
+    use std::{cell::Cell, fmt::Display};
 
     #[derive(
         Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
     )]
-    pub struct TypeVariable(usize);
+    pub struct TypeVariableInner(usize);
+
+    #[derive(
+        Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
+    )]
+    pub enum TypeVariable {
+        Normal(TypeVariableInner),
+        RecursiveIndex(usize),
+    }
 
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub enum TypeUnit<'a> {
@@ -63,7 +69,6 @@ mod type_unit {
         Fn(Type<'a>, Type<'a>),
         Variable(TypeVariable),
         RecursiveAlias {
-            alias: TypeVariable,
             body: Type<'a>,
         },
     }
@@ -73,7 +78,7 @@ mod type_unit {
             VARIABLE_COUNT.with(|c| {
                 let t = c.get();
                 c.set(t + 1);
-                TypeVariable(t)
+                TypeVariable::Normal(TypeVariableInner(t))
             })
         }
     }
@@ -81,6 +86,26 @@ mod type_unit {
     impl TypeVariable {
         pub fn new() -> Self {
             Self::default()
+        }
+
+        pub fn recursive_index_zero() -> Self {
+            Self::RecursiveIndex(0)
+        }
+
+        pub fn increment_recursive_index(self) -> Self {
+            match self {
+                TypeVariable::Normal(n) => TypeVariable::Normal(n),
+                TypeVariable::RecursiveIndex(n) => {
+                    TypeVariable::RecursiveIndex(n + 1)
+                }
+            }
+        }
+
+        pub fn is_recursive_index(self) -> bool {
+            match self {
+                TypeVariable::Normal(_) => false,
+                TypeVariable::RecursiveIndex(_) => true,
+            }
         }
     }
 
@@ -94,9 +119,19 @@ mod type_unit {
         static VARIABLE_COUNT: Cell<usize> = Cell::new(0);
     }
 
-    impl From<&TypeVariable> for usize {
-        fn from(TypeVariable(n): &TypeVariable) -> Self {
-            *n
+    impl Display for TypeVariable {
+        fn fmt(
+            &self,
+            f: &mut std::fmt::Formatter<'_>,
+        ) -> std::fmt::Result {
+            match self {
+                TypeVariable::Normal(TypeVariableInner(n)) => {
+                    write!(f, "t{}", n)
+                }
+                TypeVariable::RecursiveIndex(n) => {
+                    write!(f, "d{}", n)
+                }
+            }
         }
     }
 }
@@ -158,8 +193,8 @@ mod type_type {
                     }
                     TypeUnit::Fn(arg, ret) => Fn(arg, ret),
                     TypeUnit::Variable(i) => Variable(i),
-                    TypeUnit::RecursiveAlias { alias, body } => {
-                        RecursiveAlias { alias, body }
+                    TypeUnit::RecursiveAlias { body } => {
+                        RecursiveAlias { body }
                     }
                 },
                 _ => TypeMatchable::Union(self),
@@ -178,11 +213,8 @@ mod type_type {
                     },
                     TypeUnit::Fn(arg, ret) => Fn(arg, ret),
                     TypeUnit::Variable(i) => Variable(*i),
-                    TypeUnit::RecursiveAlias { alias, body } => {
-                        RecursiveAlias {
-                            alias: *alias,
-                            body,
-                        }
+                    TypeUnit::RecursiveAlias { body } => {
+                        RecursiveAlias { body }
                     }
                 },
                 _ => Union(&self.0),
@@ -221,8 +253,8 @@ impl<'a> From<TypeMatchable<'a>> for Type<'a> {
                 TypeUnit::Variable(i).into()
             }
             TypeMatchable::Empty => Default::default(),
-            TypeMatchable::RecursiveAlias { alias, body } => {
-                TypeUnit::RecursiveAlias { alias, body }.into()
+            TypeMatchable::RecursiveAlias { body } => {
+                TypeUnit::RecursiveAlias { body }.into()
             }
         }
     }
@@ -271,9 +303,7 @@ impl<'a> TypeConstructor<'a> for SingleTypeConstructor<'a> {
         }
     }
 
-    fn find_recursive_alias(
-        &self,
-    ) -> Option<(TypeVariable, Type<'a>)> {
+    fn find_recursive_alias(&self) -> Option<Type<'a>> {
         self.type_.find_recursive_alias()
     }
 
@@ -360,12 +390,12 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
                 vec![n]
             }
             TypeMatchableRef::Empty => Default::default(),
-            TypeMatchableRef::RecursiveAlias { alias, body } => {
+            TypeMatchableRef::RecursiveAlias { body } => {
                 let mut vs: FxHashSet<_> = body
                     .covariant_type_variables()
                     .into_iter()
                     .collect();
-                vs.remove(&alias);
+                vs.remove(&TypeVariable::RecursiveIndex(0));
                 vs.into_iter().collect()
             }
         }
@@ -390,20 +420,18 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
                 .concat(),
             TypeMatchableRef::Variable(_)
             | TypeMatchableRef::Empty => Default::default(),
-            TypeMatchableRef::RecursiveAlias { alias, body } => {
+            TypeMatchableRef::RecursiveAlias { body } => {
                 let mut vs: FxHashSet<_> = body
                     .contravariant_type_variables()
                     .into_iter()
                     .collect();
-                vs.remove(&alias);
+                vs.remove(&TypeVariable::RecursiveIndex(0));
                 vs.into_iter().collect()
             }
         }
     }
 
-    fn find_recursive_alias(
-        &self,
-    ) -> Option<(TypeVariable, Type<'a>)> {
+    fn find_recursive_alias(&self) -> Option<Type<'a>> {
         self.iter().find_map(TypeUnit::find_recursive_alias)
     }
 
@@ -462,9 +490,7 @@ pub trait TypeConstructor<'a>:
     fn replace_num(self, from: TypeVariable, to: &Type<'a>) -> Self;
     fn covariant_type_variables(&self) -> Vec<TypeVariable>;
     fn contravariant_type_variables(&self) -> Vec<TypeVariable>;
-    fn find_recursive_alias(
-        &self,
-    ) -> Option<(TypeVariable, Type<'a>)>;
+    fn find_recursive_alias(&self) -> Option<Type<'a>>;
     fn replace_type(
         self,
         from: &TypeUnit<'a>,
@@ -483,9 +509,7 @@ pub trait TypeConstructor<'a>:
 }
 
 impl<'a> TypeUnit<'a> {
-    fn find_recursive_alias(
-        &self,
-    ) -> Option<(TypeVariable, Type<'a>)> {
+    fn find_recursive_alias(&self) -> Option<Type<'a>> {
         match self {
             TypeUnit::Normal { args, .. } => {
                 args.iter().find_map(Type::find_recursive_alias)
@@ -494,19 +518,8 @@ impl<'a> TypeUnit<'a> {
                 [a, r].iter().find_map(|a| a.find_recursive_alias())
             }
             TypeUnit::Variable(_) => None,
-            TypeUnit::RecursiveAlias { alias, body } => {
-                Some((*alias, body.clone()))
-            }
+            TypeUnit::RecursiveAlias { body } => Some(body.clone()),
         }
-    }
-}
-
-impl Display for TypeVariable {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
-        write!(f, "t{}", usize::from(self))
     }
 }
 
@@ -553,8 +566,8 @@ impl Display for Type<'_> {
             ),
             Variable(n) => write!(f, "{}", n),
             Empty => write!(f, "∅"),
-            RecursiveAlias { alias, body } => {
-                write!(f, "rec[{} = {}]", alias, *body)
+            RecursiveAlias { body } => {
+                write!(f, "rec[{}]", *body)
             }
         }
     }
@@ -591,8 +604,8 @@ impl Display for TypeUnit<'_> {
                 }
             }
             Variable(n) => write!(f, "{}", n),
-            RecursiveAlias { alias, body } => {
-                write!(f, "rec[{} = {}]", alias, *body)
+            RecursiveAlias { body } => {
+                write!(f, "rec[{}]", *body)
             }
         }
     }

@@ -17,7 +17,7 @@ use crate::{
 };
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::fmt::Display;
 pub use types::TypeConstructor;
 
@@ -218,7 +218,7 @@ impl<'a> From<PatternUnit<'a>> for Pattern<'a> {
 fn variable_decl<'a>(
     v: ast_step1::VariableDecl<'a>,
     data_decl_map: &FxHashMap<&'a str, DeclId>,
-    type_variable_names: &HashMap<&'a str, TypeVariable>,
+    type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
 ) -> VariableDecl<'a> {
     let mut type_variable_names = type_variable_names.clone();
@@ -253,7 +253,7 @@ fn variable_decl<'a>(
 fn expr<'a>(
     e: ast_step1::Expr<'a>,
     data_decl_map: &FxHashMap<&'a str, DeclId>,
-    type_variable_names: &HashMap<&'a str, TypeVariable>,
+    type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
 ) -> ExprWithType<'a> {
     use Expr::*;
@@ -321,7 +321,7 @@ fn add_expr_in_do<'a>(
     e: ast_step1::Expr<'a>,
     mut es: Vec<ExprWithType<'a>>,
     data_decl_map: &FxHashMap<&'a str, DeclId>,
-    type_variable_names: &HashMap<&'a str, TypeVariable>,
+    type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
 ) -> Vec<ExprWithType<'a>> {
     // dbg!(&es);
@@ -371,7 +371,7 @@ fn add_expr_in_do<'a>(
 fn fn_arm<'a>(
     arm: ast_step1::FnArm<'a>,
     data_decl_map: &FxHashMap<&'a str, DeclId>,
-    type_variable_names: &HashMap<&'a str, TypeVariable>,
+    type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
 ) -> FnArm<'a> {
     FnArm {
@@ -469,7 +469,7 @@ pub enum SearchMode {
 pub fn type_to_type<'a>(
     t: ast_step1::Type<'a>,
     data_decl_map: &FxHashMap<&'a str, DeclId>,
-    type_variable_names: &HashMap<&'a str, TypeVariable>,
+    type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
     search_type: SearchMode,
 ) -> Type<'a> {
@@ -612,7 +612,7 @@ impl<'a> TypeAliasMap<'a> {
         &mut self,
         name: &'a str,
         data_decl_map: &FxHashMap<&'a str, DeclId>,
-        type_variable_names: &HashMap<&'a str, TypeVariable>,
+        type_variable_names: &FxHashMap<&'a str, TypeVariable>,
         search_type: SearchMode,
     ) -> Option<(Type<'a>, Forall)> {
         debug_assert_ne!(search_type, SearchMode::Normal);
@@ -635,10 +635,16 @@ impl<'a> TypeAliasMap<'a> {
                 (t, Forall(new_forall))
             }
             ((t, _), _) => {
-                let mut type_variable_names =
-                    type_variable_names.clone();
-                let v = TypeVariable::new();
-                type_variable_names.insert(name, v);
+                let mut type_variable_names: FxHashMap<
+                    &'a str,
+                    TypeVariable,
+                > = type_variable_names
+                    .clone()
+                    .into_iter()
+                    .map(|(s, v)| (s, v.increment_recursive_index()))
+                    .collect();
+                type_variable_names
+                    .insert(name, TypeVariable::RecursiveIndex(0));
                 let forall =
                     t.1.clone()
                         .type_variables
@@ -656,13 +662,11 @@ impl<'a> TypeAliasMap<'a> {
                     self,
                     search_type,
                 );
-                let new_t = if new_t.all_type_variables().contains(&v)
+                let new_t = if new_t
+                    .all_type_variables()
+                    .contains(&TypeVariable::RecursiveIndex(0))
                 {
-                    TypeUnit::RecursiveAlias {
-                        alias: v,
-                        body: new_t,
-                    }
-                    .into()
+                    TypeUnit::RecursiveAlias { body: new_t }.into()
                 } else {
                     new_t
                 };
@@ -673,9 +677,39 @@ impl<'a> TypeAliasMap<'a> {
                             Forall(forall.clone()),
                         );
                 }
-                (new_t, Forall(forall))
+                (decrement_index_outside(new_t), Forall(forall))
             }
         })
+    }
+}
+
+fn decrement_index_outside<'a>(t: Type<'a>) -> Type<'a> {
+    t.into_iter().map(decrement_index_outside_unit).collect()
+}
+
+fn decrement_index_outside_unit<'a>(t: TypeUnit<'a>) -> TypeUnit<'a> {
+    match t {
+        TypeUnit::Normal { name, args, id } => TypeUnit::Normal {
+            name,
+            args: args
+                .into_iter()
+                .map(decrement_index_outside)
+                .collect(),
+            id,
+        },
+        TypeUnit::Fn(a, b) => TypeUnit::Fn(
+            decrement_index_outside(a),
+            decrement_index_outside(b),
+        ),
+        TypeUnit::Variable(v)
+            if v == TypeVariable::RecursiveIndex(1) =>
+        {
+            TypeUnit::Variable(TypeVariable::RecursiveIndex(0))
+        }
+        TypeUnit::Variable(v) => TypeUnit::Variable(v),
+        TypeUnit::RecursiveAlias { body } => {
+            TypeUnit::RecursiveAlias { body }
+        }
     }
 }
 

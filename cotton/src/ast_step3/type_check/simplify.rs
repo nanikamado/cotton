@@ -51,18 +51,18 @@ impl<'a> TypeVariableMap<'a> {
                 )
                 .into(),
                 TypeUnit::Variable(v) => self.find(v),
-                TypeUnit::RecursiveAlias { alias, body } => {
+                TypeUnit::RecursiveAlias { body } => {
                     let body = self.normalize_type(body);
                     match body.matchable() {
-                        TypeMatchable::RecursiveAlias {
-                            alias: alias_inner,
-                            body: body_inner,
-                        } => body_inner.replace_num(
-                            alias,
-                            &TypeUnit::Variable(alias_inner).into(),
-                        ),
+                        TypeMatchable::RecursiveAlias { .. } => {
+                            // body_inner.replace_num(
+                            //     alias,
+                            //     &TypeUnit::Variable(alias_inner)
+                            //         .into(),
+                            // );
+                            unimplemented!()
+                        }
                         body => TypeUnit::RecursiveAlias {
-                            alias,
                             body: body.into(),
                         }
                         .into(),
@@ -324,7 +324,11 @@ pub fn simplify_type<'a, T: TypeConstructor<'a>>(
                     .normalize(map)
             );
             break;
-        } else if i > 20 {
+        } else if i == 100 {
+            log::error!("loop count is about to reach the limit.");
+            log::debug!("old_t = {old_t}");
+            log::debug!("t = {t}");
+        } else if i > 100 {
             log::error!("loop count reached the limit.");
             log::debug!("old_t = {old_t}");
             log::debug!("t = {t}");
@@ -340,7 +344,7 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
     mut t: IncompleteType<'a, T>,
 ) -> Option<(IncompleteType<'a, T>, bool)> {
     let hash_before_simplify = fxhash::hash(&t);
-    log::trace!("t = {}", t);
+    log::debug!("t = {}", t);
     // log::trace!("map = {}", map);
     t = t.normalize(map)?;
     log::trace!("t{{0.5}} = {}", t);
@@ -785,42 +789,24 @@ fn simplify_subtype_rel<'a>(
         {
             Some(Vec::new())
         }
-        (a, RecursiveAlias { alias: _, body })
+        (a, RecursiveAlias { body })
             if body.contains(&a.clone().into()) =>
         {
             Some(Vec::new())
         }
+        (a @ (Normal { .. } | Fn(_, _)), RecursiveAlias { body }) => {
+            simplify_subtype_rel(
+                a.into(),
+                unwrap_recursive_alias(body),
+            )
+        }
         (
-            a @ (Normal { .. } | Fn(_, _)),
-            RecursiveAlias { alias, body },
-        ) => simplify_subtype_rel(
-            a.into(),
-            unwrap_recursive_alias(alias, body),
-        ),
-        (
-            RecursiveAlias { alias, body },
+            RecursiveAlias { body },
             b @ (Normal { .. } | Fn(_, _) | Union(_)),
         ) => simplify_subtype_rel(
-            unwrap_recursive_alias(alias, body),
+            unwrap_recursive_alias(body),
             b.into(),
         ),
-        (
-            RecursiveAlias {
-                alias: alias1,
-                body: body1,
-            },
-            RecursiveAlias {
-                alias: alias2,
-                body: body2,
-            },
-        ) if body1
-            == body2.clone().replace_num(
-                alias2,
-                &TypeUnit::Variable(alias1).into(),
-            ) =>
-        {
-            Some(Vec::new())
-        }
         (Normal { id, name, args }, Union(tus)) => {
             let t: Type = Normal { id, name, args }.into();
             let td = t.clone().disjunctive();
@@ -853,12 +839,16 @@ fn simplify_subtype_rel<'a>(
             }
         }
         (Variable(a), b) if Type::from(b.clone()).contains_num(a) => {
-            let v = TypeVariable::new();
-            let b = Type::from(b)
-                .replace_num(a, &TypeUnit::Variable(v).into());
+            let b = Type::from(b).replace_num(
+                a,
+                &TypeUnit::Variable(
+                    TypeVariable::recursive_index_zero(),
+                )
+                .into(),
+            );
             simplify_subtype_rel(
                 TypeUnit::Variable(a).into(),
-                TypeUnit::RecursiveAlias { alias: v, body: b }.into(),
+                TypeUnit::RecursiveAlias { body: b }.into(),
             )
         }
         (sub, sup) => {
@@ -869,7 +859,13 @@ fn simplify_subtype_rel<'a>(
             // if subl != sub || supl != sup {
             //     simplify_subtype_rel(subl, supl)
             // } else {
-            Some(vec![(sub.into(), sup.into())])
+            let sup: Type = sup.into();
+            let c_sup = sup.clone().conjunctive();
+            if sup == c_sup {
+                Some(vec![(sub.into(), sup)])
+            } else {
+                simplify_subtype_rel(sub.into(), c_sup)
+            }
             // }
         }
     }
@@ -880,24 +876,21 @@ fn lift_recursive_alias<'a, T>(t: T) -> T
 where
     T: TypeConstructor<'a>,
 {
-    if let Some((alias, body)) = t.find_recursive_alias() {
-        let r = &TypeUnit::RecursiveAlias {
-            alias,
-            body: body.clone(),
-        };
-        let t = t.replace_type(r, &TypeUnit::Variable(alias));
-        let t =
-            t.replace_type_union(&body, &TypeUnit::Variable(alias));
-        t.replace_num(alias, &r.clone().into())
+    if let Some(body) = t.find_recursive_alias() {
+        let r = &TypeUnit::RecursiveAlias { body: body.clone() };
+        let v = TypeVariable::new();
+        let t = t.replace_type(r, &TypeUnit::Variable(v));
+        let t = t.replace_type_union(&body, &TypeUnit::Variable(v));
+        t.replace_num(v, &r.clone().into())
     } else {
         t
     }
 }
 
-fn unwrap_recursive_alias(alias: TypeVariable, body: Type) -> Type {
+fn unwrap_recursive_alias(body: Type) -> Type {
     body.clone().replace_num(
-        alias,
-        &(TypeUnit::RecursiveAlias { alias, body }).into(),
+        TypeVariable::RecursiveIndex(0),
+        &(TypeUnit::RecursiveAlias { body }).into(),
     )
 }
 
@@ -938,11 +931,14 @@ fn possible_weakest<'a>(
     if up.len() == 1 {
         let up = up.into_iter().next().unwrap().clone();
         Some(if up.contains_num(t) {
-            let v = TypeVariable::new();
             TypeUnit::RecursiveAlias {
-                alias: v,
-                body: up
-                    .replace_num(t, &TypeUnit::Variable(v).into()),
+                body: up.replace_num(
+                    t,
+                    &TypeUnit::Variable(
+                        TypeVariable::RecursiveIndex(0),
+                    )
+                    .into(),
+                ),
             }
             .into()
         } else {
@@ -1112,12 +1108,15 @@ fn possible_strongest<'a>(
         down.iter().copied().cloned().flatten().collect()
     };
     if down.iter().any(|d| d.contains_num(t)) {
-        let v = TypeVariable::new();
         Some(
             TypeUnit::RecursiveAlias {
-                alias: v,
-                body: result
-                    .replace_num(t, &TypeUnit::Variable(v).into()),
+                body: result.replace_num(
+                    t,
+                    &TypeUnit::Variable(
+                        TypeVariable::RecursiveIndex(0),
+                    )
+                    .into(),
+                ),
             }
             .into(),
         )
@@ -1252,17 +1251,18 @@ fn apply_type_to_pattern<'a>(
     let mut not_sure = false;
     for p in pattern {
         let d = format!("{ts}");
-        log::trace!("ts: {}", &d[..d.len().min(800)]);
+        log::trace!("ts: {}", &d[..d.len().min(2000)]);
         log::trace!("len: {}", d.len());
         log::trace!("t_len: {}", ts.len());
         log::trace!("p: {p}");
         let (destructed_t, matched_t, subtype_r, decl_match) =
             destruct_type_by_pattern(ts.clone(), p);
         log::trace!("finished");
+        log::trace!("subtype_r: {subtype_r}");
         subtype_rels.add_subtype_rels(subtype_r);
         match matched_t {
             DestructResult::NotSure(matched_t) => {
-                // log::trace!("matched_t: {matched_t}");
+                log::trace!("matched_t: {matched_t}");
                 let matched_t = matched_t.disjunctive();
                 ts = destructed_t
                     .into_iter()
@@ -1286,7 +1286,7 @@ fn apply_type_to_pattern<'a>(
                         t,
                     )
                 }
-                // log::trace!("matched_t: {matched_t}");
+                log::trace!("matched_t: {matched_t}");
                 let matched_t = matched_t.disjunctive();
                 ts = destructed_t
                     .into_iter()
@@ -1506,11 +1506,8 @@ fn destruct_type_unit_by_pattern<'a>(
             SubtypeRelations::default(),
             None,
         ),
-        (TypeUnit::RecursiveAlias { alias, body }, p) => {
-            destruct_type_by_pattern(
-                unwrap_recursive_alias(alias, body),
-                p,
-            )
+        (TypeUnit::RecursiveAlias { body }, p) => {
+            destruct_type_by_pattern(unwrap_recursive_alias(body), p)
         }
         (t, _) => (
             t.into(),
@@ -1867,18 +1864,18 @@ mod tests {
         let matched_t = matched_t.unwrap();
         assert_eq!(
             format!("{t}"),
-            r#"{E | T((), E, rec[t8 = {E | T((), t8, t8)}]) 
-              || T((), T((), rec[t8 = {E | T((), t8, t8)}], 
-              |rec[t8 = {E | T((), t8, t8)}]), 
-              |rec[t8 = {E | T((), t8, t8)}])}"#
+            r#"{E | T((), E, rec[{E | T((), d0, d0)}]) 
+              || T((), T((), rec[{E | T((), d0, d0)}], 
+              |rec[{E | T((), d0, d0)}]), 
+              |rec[{E | T((), d0, d0)}])}"#
                 .strip_margin()
                 .replace("\n", "")
         );
         assert_eq!(
             format!("{}", matched_t),
-            r#"T((), T((), rec[t8 = {E | T((), t8, t8)}], 
-              |rec[t8 = {E | T((), t8, t8)}]), 
-              |rec[t8 = {E | T((), t8, t8)}])"#
+            r#"T((), T((), rec[{E | T((), d0, d0)}], 
+              |rec[{E | T((), d0, d0)}]), 
+              |rec[{E | T((), d0, d0)}])"#
                 .strip_margin()
                 .replace("\n", "")
         )
@@ -1886,6 +1883,37 @@ mod tests {
 
     #[test]
     fn apply_type_to_pattern_0() {
+        let v1 = TypeUnit::new_variable();
+        let t1 = Type::from_str("I64").union(v1.clone().into());
+        let v2 = TypeVariable::new();
+        let r = apply_type_to_pattern(
+            Type::argument_tuple_from_arguments(vec![t1]),
+            &PatternUnitForRestriction::argument_tuple_from_arguments(
+                vec![
+                    vec![PatternUnitForRestriction::I64],
+                    vec![PatternUnitForRestriction::Binder(
+                        TypeUnit::Variable(v2).into(),
+                        DeclId::new(),
+                    )],
+                ],
+            ),
+        );
+        let subtype_rels = r.unwrap();
+        assert_eq!(
+            format!("{}", subtype_rels),
+            format!(
+                r#"    I64 < {0},
+                  |    {1} < {0},
+                  |    t1 < {{I64 | {1}}},
+                  |"#,
+                v2, v1,
+            )
+            .strip_margin()
+        )
+    }
+
+    #[test]
+    fn apply_type_to_pattern_1() {
         let v1 = TypeUnit::new_variable();
         let t1 = Type::from_str("I64").union(v1.clone().into());
         let v2 = TypeVariable::new();

@@ -456,9 +456,7 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
             .collect()
     }
 
-    fn find_recursive_alias(
-        &self,
-    ) -> Option<(TypeVariable, Type<'a>)> {
+    fn find_recursive_alias(&self) -> Option<Type<'a>> {
         self.0
             .iter()
             .find_map(TypeConstructor::find_recursive_alias)

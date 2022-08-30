@@ -23,10 +23,11 @@ impl<'a> TypeUnit<'a> {
                 .chain(ret.all_type_variables_vec().into_iter())
                 .collect(),
             TypeUnit::Variable(i) => std::iter::once(*i).collect(),
-            TypeUnit::RecursiveAlias { alias, body } => {
-                let mut s = body.all_type_variables();
-                s.remove(alias);
-                s.into_iter().collect()
+            TypeUnit::RecursiveAlias { body } => {
+                let s = body.all_type_variables_vec();
+                s.into_iter()
+                    .filter(|d| !d.is_recursive_index())
+                    .collect()
             }
         }
     }
@@ -60,10 +61,12 @@ impl<'a> TypeUnit<'a> {
                     Self::Variable(n).into()
                 }
             }
-            Self::RecursiveAlias { alias, body } => {
-                debug_assert_ne!(alias, from);
+            Self::RecursiveAlias { body } => {
+                debug_assert_ne!(
+                    TypeVariable::recursive_index_zero(),
+                    from
+                );
                 (Self::RecursiveAlias {
-                    alias,
                     body: body.replace_num(from, to),
                 })
                 .into()
@@ -91,12 +94,9 @@ impl<'a> TypeUnit<'a> {
                 id,
             },
             Self::Variable(n) => Self::Variable(n),
-            Self::RecursiveAlias { alias, body } => {
-                Self::RecursiveAlias {
-                    alias,
-                    body: body.replace_type(from, to),
-                }
-            }
+            Self::RecursiveAlias { body } => Self::RecursiveAlias {
+                body: body.replace_type(from, to),
+            },
         }
     }
 
@@ -119,12 +119,9 @@ impl<'a> TypeUnit<'a> {
                 id,
             },
             Self::Variable(n) => Self::Variable(n),
-            Self::RecursiveAlias { alias, body } => {
-                Self::RecursiveAlias {
-                    alias,
-                    body: body.replace_type_union(from, to),
-                }
-            }
+            Self::RecursiveAlias { body } => Self::RecursiveAlias {
+                body: body.replace_type_union(from, to),
+            },
         }
     }
 
@@ -138,7 +135,7 @@ impl<'a> TypeUnit<'a> {
                     || r.contains_num(variable_num)
             }
             Self::Variable(n) => *n == variable_num,
-            Self::RecursiveAlias { alias: _, body } => {
+            Self::RecursiveAlias { body } => {
                 body.contains_num(variable_num)
             }
         }

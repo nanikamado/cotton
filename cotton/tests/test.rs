@@ -101,7 +101,7 @@ fn prime2() {
 
 #[test]
 fn mutal_recursive_type_alias() {
-    test_examples("mutual_recursive_type_alias.cot", "2\n");
+    test_examples("mutual_recursive_type_alias.cot", "2\n2\n");
 }
 
 #[test]
