@@ -134,3 +134,8 @@ fn red_black_tree() {
 fn to_string_fail() {
     test_test("to_string.cot").failure();
 }
+
+#[test]
+fn do_order() {
+    test_test("do_order.cot").stdout("a\na\nb\n").success();
+}

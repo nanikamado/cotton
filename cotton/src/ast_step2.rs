@@ -338,6 +338,7 @@ fn add_expr_in_do<'a>(
                     vec![d.value]
                 }
                 _ => {
+                    es.reverse();
                     let l = Expr::Lambda(vec![FnArm {
                         pattern: vec![PatternUnit::Binder(
                             d.name, d.decl_id,
