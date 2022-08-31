@@ -5,7 +5,7 @@ pub mod types;
 use self::types::TypeVariable;
 use self::{
     decl_id::DeclId,
-    ident_id::{new_ident_id, IdentId},
+    ident_id::IdentId,
     types::{Type, TypeUnit},
 };
 use crate::{
@@ -274,7 +274,7 @@ fn expr<'a>(
         ast_step1::Expr::StrLiteral(s) => StrLiteral(s),
         ast_step1::Expr::Ident(name) => Ident {
             name,
-            ident_id: new_ident_id(),
+            ident_id: IdentId::new(),
         },
         ast_step1::Expr::Decl(d) => {
             let d = variable_decl(
@@ -337,7 +337,7 @@ fn add_expr_in_do<'a>(
                     (
                         Expr::Ident {
                             name: "()",
-                            ident_id: new_ident_id(),
+                            ident_id: IdentId::new(),
                         },
                         TypeVariable::new(),
                     ),

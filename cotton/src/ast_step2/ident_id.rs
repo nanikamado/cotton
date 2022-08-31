@@ -5,12 +5,14 @@ use std::{cell::Cell, fmt::Display};
 )]
 pub struct IdentId(u32);
 
-pub fn new_ident_id() -> IdentId {
-    IDENT_COUNT.with(|c| {
-        let t = c.get();
-        c.set(t + 1);
-        IdentId(t)
-    })
+impl IdentId {
+    pub fn new() -> Self {
+        IDENT_COUNT.with(|c| {
+            let t = c.get();
+            c.set(t + 1);
+            IdentId(t)
+        })
+    }
 }
 
 thread_local! {
@@ -23,5 +25,11 @@ impl Display for IdentId {
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+impl Default for IdentId {
+    fn default() -> Self {
+        Self::new()
     }
 }
