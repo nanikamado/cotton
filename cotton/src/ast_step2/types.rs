@@ -26,18 +26,18 @@ pub enum TypeMatchable<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum TypeMatchableRef<'a> {
+pub enum TypeMatchableRef<'a, 'b> {
     Normal {
         name: &'a str,
-        args: &'a Vec<Type<'a>>,
+        args: &'b Vec<Type<'a>>,
         id: TypeId,
     },
-    Fn(&'a Type<'a>, &'a Type<'a>),
-    Union(&'a BTreeSet<TypeUnit<'a>>),
+    Fn(&'b Type<'a>, &'b Type<'a>),
+    Union(&'b BTreeSet<TypeUnit<'a>>),
     Variable(TypeVariable),
     Empty,
     RecursiveAlias {
-        body: &'a Type<'a>,
+        body: &'b Type<'a>,
     },
 }
 
@@ -98,6 +98,34 @@ mod type_unit {
                 TypeVariable::RecursiveIndex(n) => {
                     TypeVariable::RecursiveIndex(n + 1)
                 }
+            }
+        }
+
+        pub fn increment_recursive_index_with_bound(
+            self,
+            greater_than_or_equal_to: usize,
+        ) -> Self {
+            match self {
+                TypeVariable::RecursiveIndex(n)
+                    if n >= greater_than_or_equal_to =>
+                {
+                    TypeVariable::RecursiveIndex(n + 1)
+                }
+                n => n,
+            }
+        }
+
+        pub fn decrement_recursive_index_with_bound(
+            self,
+            greater_than_or_equal_to: usize,
+        ) -> Self {
+            match self {
+                TypeVariable::RecursiveIndex(n)
+                    if n >= greater_than_or_equal_to && n >= 1 =>
+                {
+                    TypeVariable::RecursiveIndex(n - 1)
+                }
+                n => n,
             }
         }
 
@@ -201,7 +229,9 @@ mod type_type {
             }
         }
 
-        pub fn matchable_ref(&self) -> TypeMatchableRef {
+        pub fn matchable_ref<'b>(
+            &'b self,
+        ) -> TypeMatchableRef<'a, 'b> {
             use TypeMatchableRef::*;
             match self.0.len() {
                 0 => Empty,
@@ -642,6 +672,8 @@ impl<'a> From<IncompleteType<'a, SingleTypeConstructor<'a>>>
             variable_requirements: t.variable_requirements,
             subtype_relations: t.subtype_relations,
             pattern_restrictions: t.pattern_restrictions,
+            already_considered_relations: t
+                .already_considered_relations,
         }
     }
 }

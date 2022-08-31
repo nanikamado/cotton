@@ -61,16 +61,13 @@ impl<'a> TypeUnit<'a> {
                     Self::Variable(n).into()
                 }
             }
-            Self::RecursiveAlias { body } => {
-                debug_assert_ne!(
-                    TypeVariable::recursive_index_zero(),
-                    from
-                );
-                (Self::RecursiveAlias {
-                    body: body.replace_num(from, to),
-                })
-                .into()
-            }
+            Self::RecursiveAlias { body } => (Self::RecursiveAlias {
+                body: body.replace_num(
+                    from.increment_recursive_index(),
+                    &to.clone().increment_recursive_index(0),
+                ),
+            })
+            .into(),
         }
     }
 
@@ -220,6 +217,78 @@ impl<'a> TypeUnit<'a> {
             }
         }
     }
+
+    fn increment_recursive_index(
+        self,
+        greater_than_or_equal_to: usize,
+    ) -> Self {
+        match self {
+            TypeUnit::Normal { name, args, id } => TypeUnit::Normal {
+                name,
+                args: args
+                    .into_iter()
+                    .map(|t| {
+                        t.increment_recursive_index(
+                            greater_than_or_equal_to,
+                        )
+                    })
+                    .collect(),
+                id,
+            },
+            TypeUnit::Fn(a, b) => TypeUnit::Fn(
+                a.increment_recursive_index(greater_than_or_equal_to),
+                b.increment_recursive_index(greater_than_or_equal_to),
+            ),
+            TypeUnit::Variable(v) => TypeUnit::Variable(
+                v.increment_recursive_index_with_bound(
+                    greater_than_or_equal_to,
+                ),
+            ),
+            TypeUnit::RecursiveAlias { body } => {
+                TypeUnit::RecursiveAlias {
+                    body: body.increment_recursive_index(
+                        greater_than_or_equal_to + 1,
+                    ),
+                }
+            }
+        }
+    }
+
+    fn decrement_recursive_index(
+        self,
+        greater_than_or_equal_to: usize,
+    ) -> Self {
+        match self {
+            TypeUnit::Normal { name, args, id } => TypeUnit::Normal {
+                name,
+                args: args
+                    .into_iter()
+                    .map(|t| {
+                        t.decrement_recursive_index(
+                            greater_than_or_equal_to,
+                        )
+                    })
+                    .collect(),
+                id,
+            },
+            TypeUnit::Fn(a, b) => TypeUnit::Fn(
+                a.decrement_recursive_index(greater_than_or_equal_to),
+                b.decrement_recursive_index(greater_than_or_equal_to),
+            ),
+            TypeUnit::Variable(v) => TypeUnit::Variable(
+                v.decrement_recursive_index_with_bound(
+                    greater_than_or_equal_to,
+                ),
+            ),
+            TypeUnit::RecursiveAlias { body } => {
+                TypeUnit::RecursiveAlias {
+                    body: body.decrement_recursive_index(
+                        greater_than_or_equal_to + 1,
+                    ),
+                }
+            }
+        }
+    }
 }
 
 impl<'a> Type<'a> {
@@ -317,6 +386,28 @@ impl<'a> Type<'a> {
         }
         new_ts.into_iter().collect()
     }
+
+    pub fn increment_recursive_index(
+        self,
+        greater_than_or_equal_to: usize,
+    ) -> Self {
+        self.into_iter()
+            .map(|t| {
+                t.increment_recursive_index(greater_than_or_equal_to)
+            })
+            .collect()
+    }
+
+    pub fn decrement_recursive_index(
+        self,
+        greater_than_or_equal_to: usize,
+    ) -> Self {
+        self.into_iter()
+            .map(|t| {
+                t.decrement_recursive_index(greater_than_or_equal_to)
+            })
+            .collect()
+    }
 }
 
 // impl<'a> PatternUnitForRestriction<'_> {
@@ -344,6 +435,7 @@ impl<'a> IncompleteType<'a> {
             variable_requirements,
             subtype_relations: subtype_relation,
             pattern_restrictions: _,
+            already_considered_relations: _,
         } = self;
         variable_requirements
             .iter()
@@ -402,6 +494,7 @@ where
             variable_requirements,
             subtype_relations: subtype_relationship,
             pattern_restrictions,
+            already_considered_relations,
         } = self;
         IncompleteType {
             constructor: constructor.map_type(&mut f),
@@ -416,6 +509,11 @@ where
                 .map(|(a, b)| (f(a), f(b)))
                 .collect(),
             pattern_restrictions,
+            already_considered_relations:
+                already_considered_relations
+                    .into_iter()
+                    .map(|(a, b)| (f(a), f(b)))
+                    .collect(),
         }
     }
 
