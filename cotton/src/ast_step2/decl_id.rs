@@ -5,12 +5,20 @@ use std::{cell::Cell, fmt::Display};
 )]
 pub struct DeclId(u32);
 
-pub fn new_decl_id() -> DeclId {
-    DECL_COUNT.with(|c| {
-        let t = c.get();
-        c.set(t + 1);
-        DeclId(t)
-    })
+impl DeclId {
+    pub fn new() -> Self {
+        DECL_COUNT.with(|c| {
+            let t = c.get();
+            c.set(t + 1);
+            DeclId(t)
+        })
+    }
+}
+
+impl Default for DeclId {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 thread_local! {

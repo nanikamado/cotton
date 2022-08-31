@@ -176,7 +176,13 @@ impl<'a> Type<'a> {
             name: t,
             args: Default::default(),
         };
-        type_to_type(t, &Default::default(), &Default::default())
+        type_to_type(
+            t,
+            &Default::default(),
+            &Default::default(),
+            &mut Default::default(),
+            crate::ast_step2::SearchMode::Normal,
+        )
     }
 
     pub fn arrow(self, other: Self) -> Self {

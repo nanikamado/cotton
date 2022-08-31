@@ -81,10 +81,17 @@ pub struct DataDecl {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+pub struct TypeAliasDecl {
+    pub name: String,
+    pub body: (Type, Forall),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Decl {
     Variable(VariableDecl),
     OpPrecedence(OpPrecedenceDecl),
     Data(DataDecl),
+    TypeAlias(TypeAliasDecl),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -326,10 +333,18 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         .map(|name| DataDecl { name, field_len: 2 });
     let data_decl = just(Token::Data)
         .ignore_then(data_decl_normal.or(data_decl_infix));
+    let type_alias_decl = just(Token::Type)
+        .ignore_then(ident)
+        .then_ignore(just(Token::Assign))
+        .then(type_)
+        .map(|(name, body)| {
+            Decl::TypeAlias(TypeAliasDecl { name, body })
+        });
     variable_decl
         .map(Decl::Variable)
         .or(op_precedence_decl.map(Decl::OpPrecedence))
         .or(data_decl.map(Decl::Data))
+        .or(type_alias_decl)
         .repeated()
         .at_least(1)
         .then_ignore(end())

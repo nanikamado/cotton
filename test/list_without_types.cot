@@ -1,5 +1,5 @@
-(.) : A -> (A -> B) -> B forall { A, B } =
-    | a, f => f(a)
+(.)
+= | a, f => f(a)
 
 infixl 10 .
 
@@ -11,14 +11,12 @@ data a .. b
 
 infixl 4 ..
 
-type List = () | (A /\ List) forall { A }
-
-range_to_list : (I64 .. I64) -> List[I64] =
+range_to_list =
     | a .. b => (a < b).
         | True => a /\ ((a + 1)..b).range_to_list
         | False => ()
 
-print_num_list : List[I64] -> () =
+print_num_list =
     | () => ()
     | h /\ t => do
         h.i64_to_string.println
