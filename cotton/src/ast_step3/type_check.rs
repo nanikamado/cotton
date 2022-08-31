@@ -128,6 +128,8 @@ pub fn type_check<'a>(
                 variable_requirements: t.variable_requirements,
                 subtype_relations: t.subtype_relations,
                 pattern_restrictions: t.pattern_restrictions,
+                already_considered_relations: t
+                    .already_considered_relations,
             },
         )
         .unwrap();
@@ -574,6 +576,7 @@ fn resolve_scc<'a>(
         variable_requirements,
         subtype_relations,
         pattern_restrictions,
+        already_considered_relations: Default::default(),
     };
     // Recursions are not resolved in this loop.
     while let Some((
@@ -644,6 +647,9 @@ fn resolve_scc<'a>(
                         subtype_relations: subtype_relation.clone(),
                         pattern_restrictions: improved_types
                             .pattern_restrictions
+                            .clone(),
+                        already_considered_relations: improved_types
+                            .already_considered_relations
                             .clone(),
                     },
                 )
@@ -889,6 +895,7 @@ fn min_type_incomplite<'a>(
                         .flatten()
                         .collect(),
                     pattern_restrictions,
+                    already_considered_relations: Default::default(),
                 },
                 resolved_idents,
                 ident_type_map.concat(),
@@ -922,6 +929,7 @@ fn min_type_incomplite<'a>(
                     subtype_relations: SubtypeRelations::default(),
                     pattern_restrictions:
                         PatternRestrictions::default(),
+                    already_considered_relations: Default::default(),
                 },
                 Default::default(),
                 vec![(*ident_id, *type_variable)],
@@ -972,6 +980,7 @@ fn min_type_incomplite<'a>(
                         a_t.pattern_restrictions,
                     ]
                     .concat(),
+                    already_considered_relations: Default::default(),
                 },
                 [resolved1, resolved2].concat(),
                 [ident_type_map1, ident_type_map2].concat(),
@@ -1016,6 +1025,7 @@ fn min_type_incomplite<'a>(
                     variable_requirements,
                     subtype_relations,
                     pattern_restrictions,
+                    already_considered_relations: Default::default(),
                 },
                 resolved_idents,
                 ident_type_map,

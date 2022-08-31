@@ -114,6 +114,9 @@ fn variable_decl<'a>(
             })
             .collect(),
         pattern_restrictions: decl_type.pattern_restrictions.clone(),
+        already_considered_relations: decl_type
+            .already_considered_relations
+            .clone(),
     };
     let value = expr(
         d.value,

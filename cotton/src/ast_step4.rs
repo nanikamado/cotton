@@ -153,9 +153,10 @@ impl<'a> Monomorphics<'a> {
             );
             verify_types_do_not_have_free_variables(&value)
                 .unwrap_or_else(|t| {
-                    panic!(
+                    log::error!(
                         "could not identify type variable in {}, {}",
-                        t.1, d.name
+                        t.1,
+                        d.name
                     )
                 });
             self.0.insert(

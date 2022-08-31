@@ -76,7 +76,9 @@ pub type PatternForRestriction<'a> =
 pub type PatternRestrictions<'a> =
     Vec<(Type<'a>, Vec<PatternUnitForRestriction<'a>>)>;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
+)]
 pub struct IncompleteType<'a, T = Type<'a>>
 where
     T: TypeConstructor<'a>,
@@ -85,6 +87,7 @@ where
     pub variable_requirements:
         Vec<(&'a str, Type<'a>, IdentId, TypeVariable)>,
     pub subtype_relations: SubtypeRelations<'a>,
+    pub already_considered_relations: SubtypeRelations<'a>,
     pub pattern_restrictions: PatternRestrictions<'a>,
 }
 
@@ -202,9 +205,7 @@ impl<'a> From<Type<'a>> for IncompleteType<'a> {
     fn from(t: Type<'a>) -> Self {
         Self {
             constructor: t,
-            variable_requirements: Default::default(),
-            subtype_relations: Default::default(),
-            pattern_restrictions: Default::default(),
+            ..Default::default()
         }
     }
 }
@@ -760,6 +761,14 @@ impl<'a> SubtypeRelations<'a> {
 
     pub fn remove(&mut self, value: &(Type<'a>, Type<'a>)) -> bool {
         self.0.remove(value)
+    }
+
+    pub fn contains(&self, value: &(Type<'a>, Type<'a>)) -> bool {
+        self.0.contains(value)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 
