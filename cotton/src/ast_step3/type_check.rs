@@ -342,6 +342,10 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
                 .collect(),
         )
     }
+
+    fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(self, f: F) -> Self {
+        Self(self.0.into_iter().map(f).collect())
+    }
 }
 
 /// Resolves names in strongly connected declarations.
@@ -384,8 +388,10 @@ fn resolve_scc<'a>(
     let mut unresolved_type = simplify::IncompleteType {
         constructor: SccTypeConstructor(types),
         variable_requirements,
-        subtype_relation,
-        type_variable_tracker: Default::default(),
+        type_variable_tracker: TypeVariableTracker {
+            map: Default::default(),
+            subtype_relation,
+        },
     };
     // Recursions are not resolved in this loop.
     while let Some((req_name, req_type, ident_id)) =
@@ -424,7 +430,10 @@ fn resolve_scc<'a>(
     );
     resolved_idents.append(&mut resolved);
     let variable_requirements = improved_types.variable_requirements;
-    let subtype_relation = improved_types.subtype_relation;
+    let subtype_relation = improved_types
+        .type_variable_tracker
+        .subtype_relation
+        .clone();
     (
         resolved_idents,
         improved_types
@@ -470,9 +479,12 @@ fn find_satisfied_types<'a, T: TypeConstructor<'a>>(
             if replace_variables {
                 (cand_t, type_args) = cand_t.change_variable_num();
             }
-            t.subtype_relation
-                .insert((cand_t.constructor, required_type.clone()));
-            t.subtype_relation.extend(cand_t.subtype_relation);
+            t.type_variable_tracker.add_subtype_rel(
+                cand_t.constructor,
+                required_type.clone(),
+            );
+            t.type_variable_tracker
+                .add_subtype_rels(cand_t.subtype_relation);
             let decl_id = candidate.decl_id;
             simplify::simplify_type(t).map(|type_of_improved_decl| {
                 SatisfiedType {
@@ -593,22 +605,31 @@ fn min_type_incomplite<'a>(
                     arm_min_type(arm, type_variable_tracker)
                 }));
             let resolved_idents = resolved_idents.concat();
-            let (args, rtns): (
-                Vec<types::Type<'a>>,
-                Vec<types::Type<'a>>,
-            ) = arm_types.into_iter().unzip();
-            let constructor: Type = if args.len() == 1 {
-                TypeUnit::Fn(
-                    args.into_iter().next().unwrap(),
-                    rtns.into_iter().next().unwrap(),
-                )
-            } else {
-                TypeUnit::Fn(
-                    args.into_iter().flatten().collect(),
-                    rtns.into_iter().flatten().collect(),
-                )
-            }
-            .into();
+            let arg_len =
+                arm_types.iter().map(Vec::len).min().unwrap() - 1;
+            let mut arm_types = arm_types
+                .into_iter()
+                .map(Vec::into_iter)
+                .collect_vec();
+            #[allow(clippy::needless_collect)]
+            let arg_types: Vec<Type> = (0..arg_len)
+                .map(|_| {
+                    let t: Type = arm_types
+                        .iter_mut()
+                        .flat_map(|arm_type| arm_type.next().unwrap())
+                        .collect();
+                    t
+                })
+                .collect();
+            let rtn_type: Type = arm_types
+                .into_iter()
+                .flat_map(types_to_fn_type)
+                .collect();
+            let constructor: Type = types_to_fn_type(
+                arg_types
+                    .into_iter()
+                    .chain(std::iter::once(rtn_type)),
+            );
             type_variable_tracker
                 .insert(*type_variable, constructor.clone());
             (
@@ -731,17 +752,29 @@ fn min_type_incomplite<'a>(
     }
 }
 
+fn types_to_fn_type<'a>(
+    types: impl DoubleEndedIterator<Item = Type<'a>>,
+) -> Type<'a> {
+    let mut ts = types.rev();
+    let mut r = ts.next().unwrap();
+    for t in ts {
+        r = TypeUnit::Fn(t, r).into()
+    }
+    r
+}
+
 type VariableRequirement<'a> = (&'a str, types::Type<'a>, IdentId);
 type SubtypeRelation<'a> =
     BTreeSet<(types::Type<'a>, types::Type<'a>)>;
 type IdentTypeMap = Vec<(IdentId, TypeVariable)>;
 
-/// Returns (argument type, return type), variable requirements, subtype relation, resolved idents.
+/// Returns `vec![argument type, argument type, ..., return type]`,
+/// variable requirements, subtype relation, resolved idents.
 fn arm_min_type<'a>(
     arm: &FnArm<'a>,
     type_variable_tracker: &mut TypeVariableTracker<'a>,
 ) -> (
-    (types::Type<'a>, types::Type<'a>),
+    Vec<types::Type<'a>>,
     Vec<VariableRequirement<'a>>,
     SubtypeRelation<'a>,
     Resolved,
@@ -749,14 +782,9 @@ fn arm_min_type<'a>(
 ) {
     let (body_type, mut resolved_idents, ident_type_map) =
         min_type_incomplite(&arm.expr, type_variable_tracker);
-    let (types, bindings): (Vec<_>, Vec<_>) =
+    let (mut ts, bindings): (Vec<_>, Vec<_>) =
         arm.pattern.iter().map(pattern_to_type).unzip();
-    let mut arm_type = body_type.constructor;
-    let mut types = types.into_iter();
-    let first_type = types.next().unwrap();
-    for pattern_type in types.rev() {
-        arm_type = TypeUnit::Fn(pattern_type, arm_type).into()
-    }
+    ts.push(body_type.constructor);
     let bindings: FxHashMap<&str, (DeclId, types::Type)> =
         bindings.into_iter().flatten().collect();
     let mut variable_requirements = Vec::new();
@@ -775,7 +803,7 @@ fn arm_min_type<'a>(
         }
     }
     (
-        (first_type, arm_type),
+        ts,
         variable_requirements,
         {
             let mut tmp = body_type.subtype_relation;

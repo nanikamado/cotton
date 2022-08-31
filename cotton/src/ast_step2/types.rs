@@ -316,6 +316,13 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
                 .collect()
         }
     }
+
+    fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(
+        self,
+        mut f: F,
+    ) -> Self {
+        f(self)
+    }
 }
 
 fn marge_vec<T>(mut a: Vec<T>, mut b: Vec<T>) -> Vec<T> {
@@ -348,6 +355,7 @@ pub trait TypeConstructor<'a>:
         from: &Type,
         to: &TypeUnit<'a>,
     ) -> Self;
+    fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(self, f: F) -> Self;
 }
 
 impl<'a> TypeUnit<'a> {
