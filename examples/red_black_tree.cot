@@ -25,7 +25,7 @@ type Bool = True | False
 
 insert : RBTree[I64] -> I64 -> RBTree[I64] =
     | t, x => t.insert_rec(x).
-        | T(_ , x, a, b) => T(B, x, a, b)
+        | T(_, x, a, b) => T(B, x, a, b)
         | E => E
 
 insert_rec : RBTree[I64] -> I64 -> RBTree[I64] =
@@ -49,7 +49,7 @@ balance : Color -> I64 -> RBTree[I64] -> RBTree[I64] -> RBTree[I64] =
 
 contains : RBTree[I64] -> I64 -> Bool =
     | E, _ => False
-    | T(_ , y, a, b), x => (x < y /\ x == y).
+    | T(_, y, a, b), x => (x < y /\ x == y).
         | True /\ _ => a.contains(x)
         | _ /\ True => True
         | _ => b.contains(x)

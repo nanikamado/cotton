@@ -191,6 +191,7 @@ fn lexer(
             && c != '"'
             && c != '('
             && c != ')'
+            && c != '_'
     })
     .repeated()
     .at_least(1)
