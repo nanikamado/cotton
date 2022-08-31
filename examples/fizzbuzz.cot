@@ -3,15 +3,15 @@
 
 infixl 10 .
 
-data Next(a)
-data End(a)
+data Next(A) forall { A }
+data End(A) forall { A }
 
 loop : a -> (a -> Next[a] | End[b]) -> b forall {a, b} =
     | init, f => init.f.
         | Next(a) => a.loop(f)
         | End(a) => a
 
-data a /\ b
+data A /\ B forall { A, B }
 
 infixl 3 /\
 

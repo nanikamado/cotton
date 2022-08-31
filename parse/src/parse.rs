@@ -214,14 +214,15 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 [vec![OpSequenceUnit::Operand(e)], oes].concat()
             })
     });
-    let type_ = type_.then(forall.or_not()).map(|(t, forall)| {
-        (
-            t,
-            forall.unwrap_or_else(|| Forall {
-                type_variables: Vec::new(),
-            }),
-        )
-    });
+    let type_ =
+        type_.then(forall.clone().or_not()).map(|(t, forall)| {
+            (
+                t,
+                forall.unwrap_or_else(|| Forall {
+                    type_variables: Vec::new(),
+                }),
+            )
+        });
     let variable_decl = recursive(|variable_decl| {
         let expr = recursive(|expr| {
             let lambda = just(Token::Bar)
@@ -332,7 +333,8 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         .then_ignore(ident)
         .map(|name| DataDecl { name, field_len: 2 });
     let data_decl = just(Token::Data)
-        .ignore_then(data_decl_normal.or(data_decl_infix));
+        .ignore_then(data_decl_infix.or(data_decl_normal))
+        .then_ignore(forall.or_not());
     let type_alias_decl = just(Token::Type)
         .ignore_then(ident)
         .then_ignore(just(Token::Assign))

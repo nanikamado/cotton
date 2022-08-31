@@ -8,12 +8,12 @@ infixl 10 .
 
 infixl 5 >
 
-data a /\ b
+data A /\ B forall { A, B }
 
 infixl 3 /\
 
 data E
-data T(n, t, t)
+data T(A, B, C) forall { A, B, C }
 
 type Tree = E | T[A, Tree[A], Tree[A]] forall { A }
 type Bool = True | False

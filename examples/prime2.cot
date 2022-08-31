@@ -10,11 +10,11 @@ infixl 10 .
 
 infixr 0 $
 
-data a /\ b
+data A /\ B forall { A, B }
 
 infixl 3 /\
 
-data a .. b
+data A .. B forall { A, B }
 
 infixl 4 ..
 
