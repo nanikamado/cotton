@@ -30,18 +30,18 @@ insert : RBTree[I64] -> I64 -> RBTree[I64] =
 
 insert_rec : RBTree[I64] -> I64 -> RBTree[I64] =
     | E, x => T(R, x, E, E)
-    | T(color, y, a, b), x => (x < y /\ x == y).
+    | T(color, y, a, b), x => (x < y /\ x > y).
         | True /\ _ => balance(color, y, a.insert_rec(x), b)
-        | _ /\ True => T(B, y, a, b)
-        | _ => balance(color, y, a, b.insert_rec(x))
+        | _ /\ True => balance(color, y, a, b.insert_rec(x))
+        | _ => T(B, y, a, b)
 
 balance : Color -> I64 -> RBTree[I64] -> RBTree[I64] -> RBTree[I64] =
     | B, u, T(R, v, T(R, w, t1, t2), t3), t4 =>
-        T(R, v, T(B, w, t1, t2), T(B, u, t3, t3))
+        T(R, v, T(B, w, t1, t2), T(B, u, t3, t4))
     | B, u, T(R, v, t1, T(R, w, t2, t3)), t4 =>
         T(R, w, T(B, v, t1, t2), T(B, u, t3, t4))
     | B, u, t1, T(R, v, T(R, w, t2, t3), t4) =>
-        T(R, w, T(B, u, t1, t2), T(R, w, t3, t4))
+        T(R, w, T(B, u, t1, t2), T(B, v, t3, t4))
     | B, u, t1, T(R, v, t2, T(R, w, t3, t4)) =>
         T(R, v, T(B, u, t1, t2), T(B, w, t3, t4))
     | color, u, t1, t2 =>
