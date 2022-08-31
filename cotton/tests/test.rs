@@ -101,7 +101,7 @@ fn prime2() {
 
 #[test]
 fn mutal_recursive_type_alias() {
-    test_examples("mutual_recursive_type_alias.cot", "2\n");
+    test_examples("mutual_recursive_type_alias.cot", "2\n2\n");
 }
 
 #[test]
@@ -118,4 +118,19 @@ fn list_without_types() {
 #[test]
 fn mutual_recursive_type_alias_fail() {
     test_test("mutual_recursive_type_alias_fail.cot").failure();
+}
+
+#[test]
+fn bin_tree() {
+    test_examples("bin_tree.cot", "ok\n");
+}
+
+#[test]
+fn red_black_tree() {
+    test_examples("red_black_tree.cot", "ok\n");
+}
+
+#[test]
+fn to_string_fail() {
+    test_test("to_string.cot").failure();
 }

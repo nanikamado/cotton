@@ -14,6 +14,7 @@ pub enum IntrinsicVariable {
     Percent,
     Lt,
     Neq,
+    Eq,
     Println,
     Print,
     I64ToString,
@@ -39,6 +40,7 @@ impl IntrinsicVariable {
             IntrinsicVariable::Percent => "%",
             IntrinsicVariable::Lt => "<",
             IntrinsicVariable::Neq => "!=",
+            IntrinsicVariable::Eq => "==",
             IntrinsicVariable::Println => "println",
             IntrinsicVariable::Print => "print",
             IntrinsicVariable::I64ToString => "i64_to_string",
@@ -88,7 +90,7 @@ pub static INTRINSIC_VARIABLES_TYPES: Lazy<
             )),
         ),
         (
-            IntrinsicVariable::Neq,
+            IntrinsicVariable::Eq,
             Type::from_str("I64").arrow(Type::from_str("I64").arrow(
                 Type::from_str("True").union(Type::from_str("False")),
             )),
@@ -122,6 +124,7 @@ pub enum IntrinsicType {
     Unit,
     True,
     False,
+    ArgumentTuple,
 }
 
 pub static INTRINSIC_TYPES: Lazy<
@@ -193,6 +196,7 @@ pub static OP_PRECEDENCE: Lazy<
         ("-", (Left, 6)),
         ("<", (Left, 5)),
         ("!=", (Left, 5)),
+        ("==", (Left, 5)),
         ("|", (Left, 2)),
         ("->", (Right, 1)),
     ]

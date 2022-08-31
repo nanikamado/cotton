@@ -13,7 +13,13 @@ div2 : Even -> I64 =
     | O => 0
     | S(S(n)) => 1 + n.div2
 
+
+minus1div2 : Odd -> I64 =
+    | S(O) => 0
+    | S(S(n)) => 1 + n.minus1div2
+
 main : () -> () =
     | () => do
         O.S.S.S.S.div2.i64_to_string.println
+        O.S.S.S.S.S.minus1div2.i64_to_string.println
 

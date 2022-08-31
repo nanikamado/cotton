@@ -6,3 +6,6 @@ members = [
 
 [profile.release]
 debug = true
+
+[profile.test]
+opt-level = 2
