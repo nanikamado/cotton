@@ -32,43 +32,64 @@ impl<'a> TypeUnit<'a> {
         }
     }
 
+    pub fn replace_num_with_update_flag(
+        self,
+        from: TypeVariable,
+        to: &Type<'a>,
+    ) -> (Type<'a>, bool) {
+        match self {
+            Self::Fn(args, rtn) => {
+                let (args, updated1) =
+                    args.replace_num_with_update_flag(from, to);
+                let (rtn, updated2) =
+                    rtn.replace_num_with_update_flag(from, to);
+                (Self::Fn(args, rtn).into(), updated1 || updated2)
+            }
+            Self::Normal { name, args, id } => {
+                let mut updated = false;
+                let args = args
+                    .into_iter()
+                    .map(|t| {
+                        let (t, u) =
+                            t.replace_num_with_update_flag(from, to);
+                        updated |= u;
+                        t
+                    })
+                    .collect_vec();
+                (
+                    if args.iter().any(|c| c.len() == 0) {
+                        Default::default()
+                    } else {
+                        Self::Normal { name, args, id }.into()
+                    },
+                    updated,
+                )
+            }
+            Self::Variable(n) => {
+                if n == from {
+                    (to.clone(), true)
+                } else {
+                    (Self::Variable(n).into(), false)
+                }
+            }
+            Self::RecursiveAlias { body } => {
+                let (body, updated) = body
+                    .replace_num_with_update_flag(
+                        from.increment_recursive_index(),
+                        &to.clone().increment_recursive_index(0),
+                    );
+                let t = (Self::RecursiveAlias { body }).into();
+                (t, updated)
+            }
+        }
+    }
+
     pub fn replace_num(
         self,
         from: TypeVariable,
         to: &Type<'a>,
     ) -> Type<'a> {
-        match self {
-            Self::Fn(args, rtn) => Self::Fn(
-                args.replace_num(from, to),
-                rtn.replace_num(from, to),
-            )
-            .into(),
-            Self::Normal { name, args, id } => {
-                let args = args
-                    .into_iter()
-                    .map(|t| t.replace_num(from, to))
-                    .collect_vec();
-                if args.iter().any(|c| c.len() == 0) {
-                    Default::default()
-                } else {
-                    Self::Normal { name, args, id }.into()
-                }
-            }
-            Self::Variable(n) => {
-                if n == from {
-                    to.clone()
-                } else {
-                    Self::Variable(n).into()
-                }
-            }
-            Self::RecursiveAlias { body } => (Self::RecursiveAlias {
-                body: body.replace_num(
-                    from.increment_recursive_index(),
-                    &to.clone().increment_recursive_index(0),
-                ),
-            })
-            .into(),
-        }
+        self.replace_num_with_update_flag(from, to).0
     }
 
     pub fn replace_type(
@@ -119,6 +140,62 @@ impl<'a> TypeUnit<'a> {
             Self::RecursiveAlias { body } => Self::RecursiveAlias {
                 body: body.replace_type_union(from, to),
             },
+        }
+    }
+
+    pub fn matchable_ref<'b>(&'b self) -> TypeMatchableRef<'a, 'b> {
+        use TypeMatchableRef::*;
+        match self {
+            TypeUnit::Normal { name, args, id } => Normal {
+                name,
+                args,
+                id: *id,
+            },
+            TypeUnit::Fn(a, b) => Fn(a, b),
+            TypeUnit::Variable(v) => Variable(*v),
+            TypeUnit::RecursiveAlias { body } => {
+                RecursiveAlias { body }
+            }
+        }
+    }
+
+    pub fn replace_type_union_with_update_flag(
+        self,
+        from: &Type,
+        to: &TypeUnit<'a>,
+    ) -> (Self, bool) {
+        if self.matchable_ref() == from.matchable_ref() {
+            return (to.clone(), true);
+        }
+        match self {
+            Self::Fn(args, rtn) => {
+                let (args, u1) = args
+                    .replace_type_union_with_update_flag(from, to);
+                let (rtn, u2) =
+                    rtn.replace_type_union_with_update_flag(from, to);
+                (Self::Fn(args, rtn), u1 || u2)
+            }
+            Self::Normal { name, args, id } => {
+                let mut updated = false;
+                let args = args
+                    .into_iter()
+                    .map(|t| {
+                        let (t, u) = t
+                            .replace_type_union_with_update_flag(
+                                from, to,
+                            );
+                        updated |= u;
+                        t
+                    })
+                    .collect();
+                (Self::Normal { name, args, id }, updated)
+            }
+            Self::Variable(n) => (Self::Variable(n), false),
+            Self::RecursiveAlias { body } => {
+                let (body, updated) = body
+                    .replace_type_union_with_update_flag(from, to);
+                (Self::RecursiveAlias { body }, updated)
+            }
         }
     }
 

@@ -3,11 +3,6 @@
 
 infixl 10 .
 
-(>) =
-    | a, b => a < b
-
-infixl 5 >
-
 data A /\ B forall { A, B }
 
 infixl 3 /\
@@ -21,38 +16,38 @@ data B
 type Color = R | B
 
 type RBTree = E | T[Color, A, RBTree[A], RBTree[A]] forall { A }
+type NonEmptyRBTree = T[Color, A, RBTree[A], RBTree[A]] forall { A }
+
 type Bool = True | False
 
-insert : RBTree[I64] -> I64 -> RBTree[I64] =
+insert : RBTree[I64] -> I64 -> NonEmptyRBTree[I64] =
     | t, x => t.insert_rec(x).
         | T(_, x, a, b) => T(B, x, a, b)
-        | E => E
 
-insert_rec : RBTree[I64] -> I64 -> RBTree[I64] =
+insert_rec : RBTree[I64] -> I64 -> NonEmptyRBTree[I64] =
     | E, x => T(R, x, E, E)
-    | T(color, y, a, b), x => (x < y /\ x > y).
-        | True /\ _ => balance(color, y, a.insert_rec(x), b)
-        | _ /\ True => balance(color, y, a, b.insert_rec(x))
+    | T(color, y, a, b), x => (x < y /\ y < x).
+        | True /\ _ => T(color, y, a.insert_rec(x), b).balance
+        | _ /\ True => T(color, y, a, b.insert_rec(x)).balance
         | _ => T(B, y, a, b)
 
-balance : Color -> I64 -> RBTree[I64] -> RBTree[I64] -> RBTree[I64] =
-    | B, u, T(R, v, T(R, w, t1, t2), t3), t4 =>
+balance : NonEmptyRBTree[I64] -> NonEmptyRBTree[I64] =
+    | T(B, u, T(R, v, T(R, w, t1, t2), t3), t4) =>
         T(R, v, T(B, w, t1, t2), T(B, u, t3, t4))
-    | B, u, T(R, v, t1, T(R, w, t2, t3)), t4 =>
+    | T(B, u, T(R, v, t1, T(R, w, t2, t3)), t4) =>
         T(R, w, T(B, v, t1, t2), T(B, u, t3, t4))
-    | B, u, t1, T(R, v, T(R, w, t2, t3), t4) =>
+    | T(B, u, t1, T(R, v, T(R, w, t2, t3), t4)) =>
         T(R, w, T(B, u, t1, t2), T(B, v, t3, t4))
-    | B, u, t1, T(R, v, t2, T(R, w, t3, t4)) =>
+    | T(B, u, t1, T(R, v, t2, T(R, w, t3, t4))) =>
         T(R, v, T(B, u, t1, t2), T(B, w, t3, t4))
-    | color, u, t1, t2 =>
-        T(color, u, t1, t2)
+    | t => t
 
 contains : RBTree[I64] -> I64 -> Bool =
     | E, _ => False
-    | T(_, y, a, b), x => (x < y /\ x == y).
+    | T(_, y, a, b), x => (x < y /\ y < x).
         | True /\ _ => a.contains(x)
-        | _ /\ True => True
-        | _ => b.contains(x)
+        | _ /\ True => b.contains(x)
+        | _ => True
 
 main =
     | () => do
