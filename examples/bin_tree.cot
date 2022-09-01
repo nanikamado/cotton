@@ -3,9 +3,6 @@
 
 infixl 10 .
 
-(>) =
-    | a, b => a < b
-
 infixl 5 >
 
 data A /\ B forall { A, B }
@@ -20,17 +17,17 @@ type Bool = True | False
 
 insert : Tree[I64] -> I64 -> Tree[I64] =
     | E, x => T(x, E, E)
-    | T(y, a, b), x => (x < y /\ x == y).
+    | T(y, a, b), x => (x < y /\ y < x).
         | True /\ _ => T(y, a.insert(x), b)
-        | _ /\ True => T(y, a, b)
-        | _ => T(y, a, b.insert(x))
+        | _ /\ True => T(y, a, b.insert(x))
+        | _ => T(y, a, b)
 
 contains : Tree[I64] -> I64 -> Bool =
     | E, _ => False
-    | T(y, a, b), x => (x < y /\ x == y).
+    | T(y, a, b), x => (x < y /\ y < x).
         | True /\ _ => a.contains(x)
-        | _ /\ True => True
-        | _ => b.contains(x)
+        | _ /\ True => b.contains(x)
+        | _ => True
 
 main =
     | () => do

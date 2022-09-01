@@ -315,6 +315,17 @@ impl<'a> TypeConstructor<'a> for SingleTypeConstructor<'a> {
         self
     }
 
+    fn replace_num_with_update_flag(
+        mut self,
+        from: TypeVariable,
+        to: &Type<'a>,
+    ) -> (Self, bool) {
+        let updated;
+        (self.type_, updated) =
+            self.type_.replace_num_with_update_flag(from, to);
+        (self, updated)
+    }
+
     fn covariant_type_variables(&self) -> Vec<TypeVariable> {
         if self.contravariant_candidates_from_annotation.is_some() {
             self.all_type_variables().into_iter().collect()
@@ -353,6 +364,17 @@ impl<'a> TypeConstructor<'a> for SingleTypeConstructor<'a> {
     ) -> Self {
         self.type_ = self.type_.replace_type_union(from, to);
         self
+    }
+
+    fn replace_type_union_with_update_flag(
+        mut self,
+        from: &Type,
+        to: &TypeUnit<'a>,
+    ) -> (Self, bool) {
+        let updated;
+        (self.type_, updated) =
+            self.type_.replace_type_union_with_update_flag(from, to);
+        (self, updated)
     }
 
     fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(
@@ -395,9 +417,25 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
     }
 
     fn replace_num(self, from: TypeVariable, to: &Self) -> Self {
-        self.into_iter()
-            .flat_map(|t| t.replace_num(from, to).into_iter())
-            .collect()
+        self.replace_num_with_update_flag(from, to).0
+    }
+
+    fn replace_num_with_update_flag(
+        self,
+        from: TypeVariable,
+        to: &Self,
+    ) -> (Self, bool) {
+        let mut updated = false;
+        let t = self
+            .into_iter()
+            .flat_map(|t| {
+                let (t2, u) =
+                    t.replace_num_with_update_flag(from, to);
+                updated |= u;
+                t2.into_iter()
+            })
+            .collect();
+        (t, updated)
     }
 
     fn covariant_type_variables(&self) -> Vec<TypeVariable> {
@@ -487,6 +525,31 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
         }
     }
 
+    fn replace_type_union_with_update_flag(
+        self,
+        from: &Type,
+        to: &TypeUnit<'a>,
+    ) -> (Self, bool) {
+        if self == *from {
+            (to.clone().into(), true)
+        } else {
+            let mut updated = false;
+            (
+                self.into_iter()
+                    .map(|t| {
+                        let (t, u) = t
+                            .replace_type_union_with_update_flag(
+                                from, to,
+                            );
+                        updated |= u;
+                        t
+                    })
+                    .collect(),
+                updated,
+            )
+        }
+    }
+
     fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(
         self,
         mut f: F,
@@ -518,6 +581,11 @@ pub trait TypeConstructor<'a>:
     fn all_type_variables(&self) -> FxHashSet<TypeVariable>;
     fn all_type_variables_vec(&self) -> Vec<TypeVariable>;
     fn replace_num(self, from: TypeVariable, to: &Type<'a>) -> Self;
+    fn replace_num_with_update_flag(
+        self,
+        from: TypeVariable,
+        to: &Type<'a>,
+    ) -> (Self, bool);
     fn covariant_type_variables(&self) -> Vec<TypeVariable>;
     fn contravariant_type_variables(&self) -> Vec<TypeVariable>;
     fn find_recursive_alias(&self) -> Option<Type<'a>>;
@@ -531,6 +599,11 @@ pub trait TypeConstructor<'a>:
         from: &Type,
         to: &TypeUnit<'a>,
     ) -> Self;
+    fn replace_type_union_with_update_flag(
+        self,
+        from: &Type,
+        to: &TypeUnit<'a>,
+    ) -> (Self, bool);
     fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(self, f: F) -> Self;
     fn normalize_contravariant_candidates_from_annotation(
         self,

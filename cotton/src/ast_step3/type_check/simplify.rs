@@ -87,7 +87,7 @@ impl<'a> TypeVariableMap<'a> {
             if let Some(r) = simplify_subtype_rel(
                 a.clone().into(),
                 b.clone().into(),
-                &Default::default(),
+                &mut Default::default(),
             ) {
                 if r.is_empty() {
                     needless.insert(a.clone());
@@ -97,7 +97,7 @@ impl<'a> TypeVariableMap<'a> {
             if let Some(r) = simplify_subtype_rel(
                 b.clone().into(),
                 a.clone().into(),
-                &Default::default(),
+                &mut Default::default(),
             ) {
                 if r.is_empty() {
                     needless.insert(b.clone());
@@ -256,7 +256,7 @@ impl<'a> SubtypeRelations<'a> {
     pub fn normalize(
         mut self,
         map: &mut TypeVariableMap<'a>,
-        already_considered_relations: &SubtypeRelations,
+        already_considered_relations: &mut SubtypeRelations<'a>,
     ) -> Option<Self> {
         self = self.normalize_subtype_rel(
             map,
@@ -277,7 +277,7 @@ impl<'a> SubtypeRelations<'a> {
     fn normalize_subtype_rel(
         mut self,
         map: &mut TypeVariableMap<'a>,
-        already_considered_relations: &SubtypeRelations,
+        already_considered_relations: &mut SubtypeRelations<'a>,
     ) -> Option<Self> {
         self = self
             .into_iter()
@@ -490,11 +490,6 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
             return Some((t, true));
         }
     }
-    let updated;
-    (t, updated) = simplify_recursive_alias_restriction(t);
-    if updated {
-        return Some((t, true));
-    }
     log::trace!("t{{4}} = {}", t);
     let mut updated = false;
     t.subtype_relations = t
@@ -518,7 +513,9 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
                                 let b = simplify_subtype_rel(
                                     sub.clone(),
                                     s,
-                                    &t.already_considered_relations,
+                                    &mut t
+                                        .already_considered_relations
+                                        .clone(),
                                 )
                                 .is_some();
                                 if !b {
@@ -748,7 +745,7 @@ fn find_eq_types<'a>(
 fn simplify_subtype_rel<'a>(
     sub: Type<'a>,
     sup: Type<'a>,
-    already_considered_relations: &SubtypeRelations,
+    already_considered_relations: &mut SubtypeRelations<'a>,
 ) -> Option<Vec<(Type<'a>, Type<'a>)>> {
     if sub == sup
         || already_considered_relations
@@ -822,7 +819,7 @@ fn simplify_subtype_rel<'a>(
                 simplify_subtype_rel(
                     a.clone().into(),
                     b.clone().into(),
-                    already_considered_relations,
+                    &mut already_considered_relations.clone(),
                 )
                 .map(|s| s.is_empty())
                 .unwrap_or(false)
@@ -848,14 +845,16 @@ fn simplify_subtype_rel<'a>(
         ) => {
             let b: Type = b.into();
             if b.find_recursive_alias().is_some() {
-                Some(vec![(RecursiveAlias { body }.into(), b)])
-            } else {
-                simplify_subtype_rel(
-                    unwrap_recursive_alias(body),
-                    b,
-                    already_considered_relations,
-                )
+                already_considered_relations.insert((
+                    RecursiveAlias { body: body.clone() }.into(),
+                    b.clone(),
+                ));
             }
+            simplify_subtype_rel(
+                unwrap_recursive_alias(body),
+                b,
+                already_considered_relations,
+            )
         }
         (Normal { id, name, args }, Union(tus)) => {
             let t: Type = Normal { id, name, args }.into();
@@ -940,8 +939,16 @@ where
             TypeVariable::RecursiveIndex(0),
             &TypeUnit::Variable(v).into(),
         );
-        let t = t.replace_type_union(&body, &TypeUnit::Variable(v));
-        t.replace_num(v, &r.clone().into())
+        let (t, updated) = t.replace_type_union_with_update_flag(
+            &body,
+            &TypeUnit::Variable(v),
+        );
+        let t = t.replace_num(v, &r.clone().into());
+        if updated {
+            lift_recursive_alias(t)
+        } else {
+            t
+        }
     } else {
         t
     }
@@ -952,38 +959,6 @@ fn unwrap_recursive_alias(body: Type) -> Type {
         TypeVariable::RecursiveIndex(0),
         &(TypeUnit::RecursiveAlias { body }).into(),
     )
-}
-
-fn simplify_recursive_alias_restriction<
-    'a,
-    T: TypeConstructor<'a>,
->(
-    mut t: IncompleteType<'a, T>,
-) -> (IncompleteType<'a, T>, bool) {
-    use TypeMatchableRef::*;
-    let mut updated = false;
-    t.subtype_relations = t
-        .subtype_relations
-        .into_iter()
-        .filter_map(|ab| {
-            match (ab.0.matchable_ref(), ab.1.matchable_ref()) {
-                _ if t.already_considered_relations.contains(&ab) => {
-                    panic!()
-                }
-                (RecursiveAlias { body }, _)
-                    if ab.1.find_recursive_alias().is_some() =>
-                {
-                    updated = true;
-                    let body = body.clone();
-                    let b = ab.1.clone();
-                    t.already_considered_relations.insert(ab);
-                    Some((unwrap_recursive_alias(body), b))
-                }
-                _ => Some(ab),
-            }
-        })
-        .collect();
-    (t, updated)
 }
 
 fn possible_weakest<'a>(
@@ -1148,7 +1123,7 @@ fn type_intersection<'a>(
             let ab = simplify_subtype_rel(
                 a.clone(),
                 b.clone(),
-                &Default::default(),
+                &mut Default::default(),
             );
             if let Some(ab) = ab {
                 if ab.is_empty() {
@@ -1158,7 +1133,7 @@ fn type_intersection<'a>(
             let ba = simplify_subtype_rel(
                 b.clone(),
                 a,
-                &Default::default(),
+                &mut Default::default(),
             );
             if let Some(ba) = ba {
                 if ba.is_empty() {
@@ -1283,7 +1258,7 @@ where
     ) -> Option<Self> {
         self.subtype_relations = self
             .subtype_relations
-            .normalize(map, &self.already_considered_relations)?;
+            .normalize(map, &mut self.already_considered_relations)?;
         Some(Self {
             constructor: self
                 .constructor
@@ -1835,7 +1810,7 @@ mod tests {
         let t = simplify_subtype_rel(
             t1.clone(),
             t2.clone(),
-            &Default::default(),
+            &mut Default::default(),
         );
         assert_eq!(format!("{:?}", t), "None");
     }

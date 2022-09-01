@@ -436,12 +436,21 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
     }
 
     fn replace_num(self, from: TypeVariable, to: &Type<'a>) -> Self {
-        SccTypeConstructor(
-            self.0
-                .into_iter()
-                .map(|t| t.replace_num(from, to))
-                .collect(),
-        )
+        self.replace_num_with_update_flag(from, to).0
+    }
+
+    fn replace_num_with_update_flag(
+        self,
+        from: TypeVariable,
+        to: &Type<'a>,
+    ) -> (Self, bool) {
+        let mut updated = false;
+        let t = self.map_type(|t| {
+            let (t, u) = t.replace_num_with_update_flag(from, to);
+            updated = u;
+            t
+        });
+        (t, updated)
     }
 
     fn covariant_type_variables(&self) -> Vec<TypeVariable> {
@@ -488,6 +497,21 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
                 .map(|t| t.replace_type_union(from, to))
                 .collect(),
         )
+    }
+
+    fn replace_type_union_with_update_flag(
+        self,
+        from: &Type,
+        to: &TypeUnit<'a>,
+    ) -> (Self, bool) {
+        let mut updated = false;
+        let t = self.map_type(|t| {
+            let (t, u) =
+                t.replace_type_union_with_update_flag(from, to);
+            updated = u;
+            t
+        });
+        (t, updated)
     }
 
     fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(
