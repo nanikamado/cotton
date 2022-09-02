@@ -139,3 +139,8 @@ fn to_string_fail() {
 fn do_order() {
     test_test("do_order.cot").stdout("a\na\nb\n").success();
 }
+
+#[test]
+fn fold() {
+    test_examples("fold.cot", "15\n120\n");
+}

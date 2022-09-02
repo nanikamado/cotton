@@ -68,6 +68,7 @@ static PRIMITIVES_DEF: Lazy<FxHashMap<IntrinsicVariable, &str>> =
             (Lt, "a => b => $$bool(a < b)"),
             (Minus, "a => b => a - b"),
             (Plus, "a => b => a + b"),
+            (Multi, "a => b => a * b"),
             (Print, "a => process.stdout.write(a)"),
             (Println, "a => console.log(a)"),
             (True, "{name: '$True$True'}"),

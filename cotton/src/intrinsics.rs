@@ -12,6 +12,7 @@ pub enum IntrinsicVariable {
     Minus,
     Plus,
     Percent,
+    Multi,
     Lt,
     Neq,
     Eq,
@@ -38,6 +39,7 @@ impl IntrinsicVariable {
             IntrinsicVariable::Minus => "-",
             IntrinsicVariable::Plus => "+",
             IntrinsicVariable::Percent => "%",
+            IntrinsicVariable::Multi => "*",
             IntrinsicVariable::Lt => "<",
             IntrinsicVariable::Neq => "!=",
             IntrinsicVariable::Eq => "==",
@@ -73,6 +75,12 @@ pub static INTRINSIC_VARIABLES_TYPES: Lazy<
         ),
         (
             IntrinsicVariable::Percent,
+            Type::from_str("I64").arrow(
+                Type::from_str("I64").arrow(Type::from_str("I64")),
+            ),
+        ),
+        (
+            IntrinsicVariable::Multi,
             Type::from_str("I64").arrow(
                 Type::from_str("I64").arrow(Type::from_str("I64")),
             ),
@@ -192,6 +200,7 @@ pub static OP_PRECEDENCE: Lazy<
     use Associativity::*;
     [
         ("%", (Left, 7)),
+        ("*", (Left, 7)),
         ("+", (Left, 6)),
         ("-", (Left, 6)),
         ("<", (Left, 5)),
