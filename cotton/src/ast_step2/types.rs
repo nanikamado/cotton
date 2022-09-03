@@ -405,6 +405,10 @@ impl<'a> TypeConstructor<'a> for SingleTypeConstructor<'a> {
             });
         self
     }
+
+    fn contains_variable(&self, v: TypeVariable) -> bool {
+        self.type_.contains_variable(v)
+    }
 }
 
 impl<'a> TypeConstructor<'a> for Type<'a> {
@@ -563,6 +567,10 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
     ) -> Self {
         self
     }
+
+    fn contains_variable(&self, v: TypeVariable) -> bool {
+        self.iter().any(|t| t.contains_variable(v))
+    }
 }
 
 fn marge_vec<T>(mut a: Vec<T>, mut b: Vec<T>) -> Vec<T> {
@@ -580,6 +588,7 @@ pub trait TypeConstructor<'a>:
 {
     fn all_type_variables(&self) -> FxHashSet<TypeVariable>;
     fn all_type_variables_vec(&self) -> Vec<TypeVariable>;
+    fn contains_variable(&self, v: TypeVariable) -> bool;
     fn replace_num(self, from: TypeVariable, to: &Type<'a>) -> Self;
     fn replace_num_with_update_flag(
         self,

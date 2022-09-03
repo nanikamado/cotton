@@ -542,6 +542,10 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
             })
             .collect())
     }
+
+    fn contains_variable(&self, v: TypeVariable) -> bool {
+        self.0.iter().any(|s| s.contains_variable(v))
+    }
 }
 
 /// Resolves names in strongly connected declarations.

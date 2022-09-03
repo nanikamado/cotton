@@ -669,10 +669,9 @@ impl<'a> TypeAliasMap<'a> {
                     self,
                     search_type,
                 );
-                let new_t = if new_t
-                    .all_type_variables()
-                    .contains(&TypeVariable::RecursiveIndex(0))
-                {
+                let new_t = if new_t.contains_variable(
+                    TypeVariable::RecursiveIndex(0),
+                ) {
                     TypeUnit::RecursiveAlias { body: new_t }.into()
                 } else {
                     new_t
@@ -708,12 +707,9 @@ fn decrement_index_outside_unit(t: TypeUnit) -> TypeUnit {
             decrement_index_outside(a),
             decrement_index_outside(b),
         ),
-        TypeUnit::Variable(v)
-            if v == TypeVariable::RecursiveIndex(1) =>
-        {
-            TypeUnit::Variable(TypeVariable::RecursiveIndex(0))
-        }
-        TypeUnit::Variable(v) => TypeUnit::Variable(v),
+        TypeUnit::Variable(v) => TypeUnit::Variable(
+            v.decrement_recursive_index_with_bound(1),
+        ),
         TypeUnit::RecursiveAlias { body } => {
             TypeUnit::RecursiveAlias { body }
         }

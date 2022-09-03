@@ -199,19 +199,22 @@ impl<'a> TypeUnit<'a> {
         }
     }
 
-    pub fn contains_num(&self, variable_num: TypeVariable) -> bool {
+    pub fn contains_variable(
+        &self,
+        variable_num: TypeVariable,
+    ) -> bool {
         match self {
             Self::Normal { args, .. } => {
-                args.iter().any(|c| c.contains_num(variable_num))
+                args.iter().any(|c| c.contains_variable(variable_num))
             }
             Self::Fn(a, r) => {
-                a.contains_num(variable_num)
-                    || r.contains_num(variable_num)
+                a.contains_variable(variable_num)
+                    || r.contains_variable(variable_num)
             }
             Self::Variable(n) => *n == variable_num,
-            Self::RecursiveAlias { body } => {
-                body.contains_num(variable_num)
-            }
+            Self::RecursiveAlias { body } => body.contains_variable(
+                variable_num.increment_recursive_index(),
+            ),
         }
     }
 
@@ -259,7 +262,8 @@ impl<'a> TypeUnit<'a> {
                     let mut args = args1.clone();
                     args[diff_position] = args1[diff_position]
                         .clone()
-                        .union(args2[diff_position].clone());
+                        .union(args2[diff_position].clone())
+                        .conjunctive();
                     Some(Normal {
                         name,
                         args,
@@ -377,10 +381,6 @@ impl<'a> Type<'a> {
             Fn(a, b) => a.is_singleton() && b.is_singleton(),
             _ => false,
         }
-    }
-
-    pub fn contains_num(&self, variable_num: TypeVariable) -> bool {
-        self.iter().any(|t| t.contains_num(variable_num))
     }
 
     pub fn from_str(t: &'static str) -> Self {

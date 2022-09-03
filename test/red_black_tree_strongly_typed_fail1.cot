@@ -1,0 +1,73 @@
+(.) =
+    | a, f => f(a)
+
+infixl 10 .
+
+data A /\ B forall { A, B }
+
+infixl 3 /\
+
+data E
+data T(C, N, T1, T2) forall { C, N, T1, T2 }
+
+data R
+data B
+
+type Color = R | B
+type Bool = True | False
+
+type NonEmptyRBTree = T[B, A, Node[A], Node[A]] forall { A }
+type RBTree = E | NonEmptyRBTree[A] forall { A }
+type RedNode = T[R, A, RBTree[A], RBTree[A]] forall { A }
+type Node = RBTree[A] | RedNode[A] forall { A }
+type NonEmptyNode = NonEmptyRBTree[A] | RedNode[A] forall { A }
+type NonEmptyIncompleteTree = T[Color, A, Node[A], Node[A]] forall { A }
+type Incomplete = E | T[Color, A, Node[A], Node[A]] forall { A }
+type BlanceInput = T[B, A, Incomplete[A], Node[A]] | T[B, A, Node[A], Incomplete[A]] forall { A }
+type Tree = E | T[Color, A, Tree[A], Tree[A]] forall { A }
+
+insert : Tree[I64] -> I64 -> NonEmptyRBTree[I64] =
+    | t, x => t.insert_rec(x).
+        | T(_, x, a, b) => T(B, x, a, b)
+
+insert_rec : Node[I64] -> I64 -> NonEmptyIncompleteTree[I64] =
+    | T(R, y, a, b), x => (x < y /\ y < x).
+        | True /\ _ => T(R, y, a.insert_rec_black(x), b)
+        | _ /\ True => T(R, y, a, b.insert_rec_black(x))
+        | _ => T(B, y, a, b)
+    | t, x => t.insert_rec_black(x)
+
+insert_rec_black : RBTree[I64] -> I64 -> NonEmptyNode[I64] =
+    | E, x => T(R, x, E, E)
+    | T(B, y, a, b), x => (x < y /\ y < x).
+        | True /\ _ => T(B, y, a.insert_rec(x), b).balance
+        | _ /\ True => T(B, y, a, b.insert_rec(x)).balance
+        | _ => T(B, y, a, b)
+
+balance : BlanceInput[I64] -> NonEmptyNode[I64] =
+    | T(B, u, T(R, v, T(R, w, t1, t2), t3), t4) =>
+        T(R, v, T(B, w, t1, t2), T(B, u, t3, t4))
+    | T(B, u, T(R, v, t1, T(R, w, t2, t3)), t4) =>
+        T(R, w, T(B, v, t1, t2), T(B, u, t3, t4))
+    | T(B, u, t1, T(R, v, T(R, w, t2, t3), t4)) =>
+        T(R, w, T(B, u, t1, t2), T(B, v, t3, t4))
+    | T(B, u, t1, T(R, v, t2, T(R, w, t3, t4))) =>
+        T(R, v, T(B, u, t1, t2), T(B, w, t3, t4))
+    | t => t
+
+contains : Tree[I64] -> I64 -> Bool =
+    | E, _ => False
+    | T(_, y, a, b), x => (x < y /\ y < x).
+        | True /\ _ => a.contains(x)
+        | _ /\ True => b.contains(x)
+        | _ => True
+
+main =
+    | () => do
+        test0 = E.contains(0)
+        test1 = E.insert(2).insert(4).insert(0).insert(0).insert(100).contains(0)
+        test2 = E.insert(2).insert(4).insert(0).insert(0).insert(100).contains(3)
+        (test0 /\ test1 /\ test2).
+            | False /\ True /\ False => "ok"
+            | _ => "ng"
+        .println
