@@ -144,3 +144,18 @@ fn do_order() {
 fn fold() {
     test_examples("fold.cot", "15\n120\n");
 }
+
+#[test]
+fn red_black_tree_strongly_typed() {
+    test_examples("red_black_tree_strongly_typed.cot", "ok\n");
+}
+
+#[test]
+fn red_black_tree_strongly_typed_fail1() {
+    test_test("red_black_tree_strongly_typed_fail1.cot").failure();
+}
+
+#[test]
+fn red_black_tree_strongly_typed_fail2() {
+    test_test("red_black_tree_strongly_typed_fail2.cot").failure();
+}

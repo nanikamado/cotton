@@ -841,7 +841,10 @@ fn simplify_subtype_rel<'a>(
         }
         (
             RecursiveAlias { body },
-            b @ (Normal { .. } | Fn(_, _) | Union(_)),
+            b @ (Normal { .. }
+            | Fn(_, _)
+            | Union(_)
+            | RecursiveAlias { .. }),
         ) => {
             let b: Type = b.into();
             if b.find_recursive_alias().is_some() {
@@ -866,7 +869,6 @@ fn simplify_subtype_rel<'a>(
                     already_considered_relations,
                 )
             } else {
-                let t_is_singleton = t.is_singleton();
                 let new_tus = tus
                     .clone()
                     .into_iter()
@@ -876,13 +878,12 @@ fn simplify_subtype_rel<'a>(
                             id == *id2
                         } else {
                             true
-                        }) && (!t_is_singleton
-                            || simplify_subtype_rel(
-                                t.clone(),
-                                tu.clone().into(),
-                                already_considered_relations,
-                            )
-                            .is_some())
+                        }) && (simplify_subtype_rel(
+                            t.clone(),
+                            tu.clone().into(),
+                            already_considered_relations,
+                        )
+                        .is_some())
                     })
                     .collect();
                 if tus != new_tus {
@@ -896,7 +897,10 @@ fn simplify_subtype_rel<'a>(
                 }
             }
         }
-        (Variable(a), b) if Type::from(b.clone()).contains_num(a) => {
+        (Variable(a), b)
+            if Type::from(b.clone()).contains_variable(a)
+                && !a.is_recursive_index() =>
+        {
             let b = Type::from(b).replace_num(
                 a,
                 &TypeUnit::Variable(
@@ -969,7 +973,7 @@ fn possible_weakest<'a>(
 ) -> Option<Type<'a>> {
     if variable_requirements
         .iter()
-        .any(|(_, req_t, _, _)| req_t.contains_num(t))
+        .any(|(_, req_t, _, _)| req_t.contains_variable(t))
     {
         return None;
     }
@@ -997,7 +1001,7 @@ fn possible_weakest<'a>(
     }
     if up.len() == 1 {
         let up = up.into_iter().next().unwrap().clone();
-        Some(if up.contains_num(t) {
+        Some(if up.contains_variable(t) {
             TypeUnit::RecursiveAlias {
                 body: up.replace_num(
                     t,
@@ -1154,7 +1158,7 @@ fn possible_strongest<'a>(
     let mut down = Vec::new();
     if variable_requirements
         .iter()
-        .any(|(_, req_t, _, _)| req_t.contains_num(t))
+        .any(|(_, req_t, _, _)| req_t.contains_variable(t))
     {
         return None;
     }
@@ -1182,7 +1186,7 @@ fn possible_strongest<'a>(
     } else {
         down.iter().copied().cloned().flatten().collect()
     };
-    if down.iter().any(|d| d.contains_num(t)) {
+    if down.iter().any(|d| d.contains_variable(t)) {
         Some(
             TypeUnit::RecursiveAlias {
                 body: result.replace_num(
@@ -1310,6 +1314,7 @@ fn apply_type_to_pattern<'a>(
         "pattern = {}",
         pattern.iter().map(|p| format!("{}", p)).join(" | ")
     );
+    ts = ts.disjunctive();
     let decl_type_map_in_pattern: FxHashMap<DeclId, Type> = pattern
         .iter()
         .flat_map(|p| p.decl_type_map())
@@ -1378,6 +1383,7 @@ fn apply_type_to_pattern<'a>(
     }
 }
 
+#[derive(Debug)]
 enum DestructResultKind {
     Ok,
     NotSure,

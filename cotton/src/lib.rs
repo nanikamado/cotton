@@ -12,7 +12,7 @@ use simplelog::{
     TerminalMode,
 };
 use std::{
-    io::ErrorKind,
+    io::{ErrorKind, Write},
     process::{exit, Command, Stdio},
 };
 
@@ -65,13 +65,17 @@ pub fn run(
         if output_js {
             println!("{}", js);
         } else {
-            Command::new("node")
-                .arg("--eval")
-                .arg(js)
+            let mut child = Command::new("node")
+                .stdin(Stdio::piped())
                 .spawn()
-                .unwrap()
-                .wait()
                 .unwrap();
+            child
+                .stdin
+                .as_mut()
+                .unwrap()
+                .write_all(js.as_bytes())
+                .unwrap();
+            child.wait().unwrap();
         }
     }
 }
