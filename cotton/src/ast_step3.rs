@@ -51,7 +51,6 @@ pub enum Expr<'a> {
 #[derive(Debug, PartialEq, Clone)]
 pub struct FnArm<'a> {
     pub pattern: Vec<Pattern<'a>>,
-    pub pattern_type: Vec<Option<Type<'a>>>,
     pub expr: ExprWithType<'a>,
 }
 
@@ -266,7 +265,6 @@ fn fn_arm<'a>(
     );
     FnArm {
         pattern: normalize_types_in_pattern(arm.pattern, map),
-        pattern_type: arm.pattern_type,
         expr,
     }
 }
