@@ -5,6 +5,7 @@ use crate::{
         types::{Type, TypeMatchableRef, TypeUnit, TypeVariable},
         IncompleteType, TypeConstructor,
     },
+    ast_step3::type_check::simplify_subtype_rel,
 };
 use fxhash::FxHashSet;
 use itertools::Itertools;
@@ -273,7 +274,31 @@ impl<'a> TypeUnit<'a> {
                     None
                 }
             }
-            _ => None,
+            (a, b) => {
+                let a = a.clone();
+                let b = b.clone();
+                if simplify_subtype_rel(
+                    a.clone().into(),
+                    b.clone().into(),
+                    &mut Default::default(),
+                )
+                .map(|v| v.is_empty())
+                .unwrap_or(false)
+                {
+                    Some(b)
+                } else if simplify_subtype_rel(
+                    b.into(),
+                    a.clone().into(),
+                    &mut Default::default(),
+                )
+                .map(|v| v.is_empty())
+                .unwrap_or(false)
+                {
+                    Some(a)
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -627,6 +652,34 @@ mod tests {
         assert_eq!(
             format!("{}", t.conjunctive()),
             r#"/\({False | True}, {False | True})"#
+        );
+    }
+
+    #[test]
+    fn conjunctive_1() {
+        let src = r#"data a /\ b
+        infixr 3 /\
+        main : () -> () =
+            | () => ()
+        type List = () | A /\ List[A] forall { A }
+        test1 : List[() | I64] | List[I64] = ()
+        "#;
+        let ast = parse::parse(src);
+        let ast: ast_step1::Ast = (&ast).into();
+        let ast: ast_step2::Ast = ast.into();
+        let t = ast
+            .variable_decl
+            .iter()
+            .find(|d| d.name == "test1")
+            .unwrap()
+            .type_annotation
+            .clone()
+            .unwrap()
+            .constructor
+            .clone();
+        assert_eq!(
+            format!("{}", t.conjunctive()),
+            r#"rec[{() | /\({() | I64}, d0)}]"#
         );
     }
 }

@@ -742,7 +742,7 @@ fn find_eq_types<'a>(
     r
 }
 
-fn simplify_subtype_rel<'a>(
+pub fn simplify_subtype_rel<'a>(
     sub: Type<'a>,
     sup: Type<'a>,
     already_considered_relations: &mut SubtypeRelations<'a>,

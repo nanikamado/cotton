@@ -1,6 +1,6 @@
 mod simplify;
 
-pub use self::simplify::TypeVariableMap;
+pub use self::simplify::{simplify_subtype_rel, TypeVariableMap};
 use crate::{
     ast_step2::{
         self,
