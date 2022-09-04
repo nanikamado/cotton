@@ -130,7 +130,7 @@ pub enum PatternUnit<'a> {
         id: ConstructorId<'a>,
         args: Vec<Pattern<'a>>,
     },
-    Binder(&'a str, DeclId),
+    Binder(&'a str, DeclId, Type<'a>),
     Underscore,
     TypeRestriction(Pattern<'a>, Type<'a>),
 }
@@ -348,7 +348,9 @@ fn add_expr_in_do<'a>(
                 es.reverse();
                 let l = Expr::Lambda(vec![FnArm {
                     pattern: vec![PatternUnit::Binder(
-                        d.name, d.decl_id,
+                        d.name,
+                        d.decl_id,
+                        TypeUnit::new_variable().into(),
                     )
                     .into()],
                     pattern_type: vec![None],
@@ -458,9 +460,11 @@ fn pattern<'a>(
                     .collect(),
             }
         }
-        ast_step1::Pattern::Binder(name) => {
-            Binder(name, DeclId::new())
-        }
+        ast_step1::Pattern::Binder(name) => Binder(
+            name,
+            DeclId::new(),
+            TypeUnit::new_variable().into(),
+        ),
         ast_step1::Pattern::Underscore => Underscore,
     }
     .into()

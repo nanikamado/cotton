@@ -1170,18 +1170,13 @@ fn pattern_unit_to_type<'a>(
                 },
             )
         }
-        Binder(name, decl_id) => {
-            let v = TypeVariable::new();
-            let t: types::Type = TypeUnit::Variable(v).into();
-            (
-                t.clone(),
-                vec![(*name, (*decl_id, t))].into_iter().collect(),
-                PatternUnitForRestriction::Binder(
-                    TypeUnit::Variable(v).into(),
-                    *decl_id,
-                ),
-            )
-        }
+        Binder(name, decl_id, t) => (
+            t.clone(),
+            vec![(*name, (*decl_id, t.clone()))]
+                .into_iter()
+                .collect(),
+            PatternUnitForRestriction::Binder(t.clone(), *decl_id),
+        ),
         Underscore => {
             let v = TypeVariable::new();
             (
