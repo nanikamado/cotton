@@ -1,3 +1,4 @@
+use super::VariableRequirement;
 use crate::{
     ast_step1,
     ast_step2::{
@@ -541,7 +542,7 @@ impl<'a> IncompleteType<'a> {
         } = self;
         variable_requirements
             .iter()
-            .flat_map(|(_, t, _, _)| t.all_type_variables())
+            .flat_map(|req| req.required_type.all_type_variables())
             .chain(subtype_relation.iter().flat_map(|(a, b)| {
                 let mut a = a.all_type_variables();
                 a.extend(b.all_type_variables());
@@ -560,7 +561,7 @@ impl<'a> IncompleteType<'a> {
 
     pub fn change_variable_num(
         mut self,
-    ) -> (Self, Vec<(TypeVariable, TypeVariable)>) {
+    ) -> (Self, Vec<(TypeVariable, Type<'static>)>) {
         let anos = self.all_type_variables();
         let mut variable_map = Vec::new();
         for a in anos {
@@ -569,7 +570,8 @@ impl<'a> IncompleteType<'a> {
                 a,
                 &TypeUnit::Variable(new_variable).into(),
             );
-            variable_map.push((a, new_variable));
+            variable_map
+                .push((a, TypeUnit::Variable(new_variable).into()));
         }
         (self, variable_map)
     }
@@ -602,9 +604,19 @@ where
             constructor: constructor.map_type(&mut f),
             variable_requirements: variable_requirements
                 .into_iter()
-                .map(|(name, t, id, type_variable)| {
-                    (name, f(t), id, type_variable)
-                })
+                .map(
+                    |VariableRequirement {
+                         name,
+                         required_type,
+                         ident,
+                         local_env,
+                     }| VariableRequirement {
+                        name,
+                        required_type: f(required_type),
+                        ident,
+                        local_env,
+                    },
+                )
                 .collect(),
             subtype_relations: subtype_relationship
                 .into_iter()

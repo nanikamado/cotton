@@ -4,7 +4,7 @@ use chumsky::{prelude::*, Error, Stream};
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Forall {
-    pub type_variables: Vec<String>,
+    pub type_variables: Vec<(String, Vec<String>)>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -87,11 +87,18 @@ pub struct TypeAliasDecl {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+pub struct InterfaceDecl {
+    pub name: String,
+    pub variables: Vec<(String, Type, Forall)>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Decl {
     Variable(VariableDecl),
     OpPrecedence(OpPrecedenceDecl),
     Data(DataDecl),
     TypeAlias(TypeAliasDecl),
+    Interface(InterfaceDecl),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -174,10 +181,22 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         .at_least(1);
     let forall = just(Token::Forall)
         .ignore_then(indented(
-            ident.separated_by(just(Token::Comma)).allow_trailing(),
+            ident
+                .then(
+                    just(Token::Colon)
+                        .ignore_then(ident.separated_by(just(
+                            Token::Op("&".to_string()),
+                        )))
+                        .or_not(),
+                )
+                .separated_by(just(Token::Comma))
+                .allow_trailing(),
         ))
         .map(|type_variable_names| Forall {
-            type_variables: type_variable_names,
+            type_variables: type_variable_names
+                .into_iter()
+                .map(|(n, t)| (n, t.into_iter().flatten().collect()))
+                .collect(),
         });
     let type_ = recursive(|type_| {
         let type_unit = ident.map(TypeUnit::Ident).or(type_
@@ -316,6 +335,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
     let data_decl_normal = capital_head_ident
         .then(
             ident_or_op
+                .clone()
                 .separated_by(just(Token::Comma))
                 .allow_trailing()
                 .delimited_by(
@@ -338,15 +358,33 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
     let type_alias_decl = just(Token::Type)
         .ignore_then(ident)
         .then_ignore(just(Token::Assign))
-        .then(type_)
+        .then(type_.clone())
         .map(|(name, body)| {
             Decl::TypeAlias(TypeAliasDecl { name, body })
+        });
+    let interface_decl = ident
+        .delimited_by(just(Token::Interface), just(Token::Where))
+        .then(indented(
+            ident_or_op
+                .then_ignore(just(Token::Colon))
+                .then(type_)
+                .repeated(),
+        ))
+        .map(|(name, vs)| {
+            Decl::Interface(InterfaceDecl {
+                name,
+                variables: vs
+                    .into_iter()
+                    .map(|(n, (t, forall))| (n, t, forall))
+                    .collect(),
+            })
         });
     variable_decl
         .map(Decl::Variable)
         .or(op_precedence_decl.map(Decl::OpPrecedence))
         .or(data_decl.map(Decl::Data))
         .or(type_alias_decl)
+        .or(interface_decl)
         .repeated()
         .at_least(1)
         .then_ignore(end())

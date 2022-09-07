@@ -22,6 +22,7 @@ pub enum IntrinsicVariable {
     True,
     False,
     Unit,
+    Append,
 }
 
 impl Display for IntrinsicVariable {
@@ -49,6 +50,7 @@ impl IntrinsicVariable {
             IntrinsicVariable::True => "True",
             IntrinsicVariable::False => "False",
             IntrinsicVariable::Unit => "()",
+            IntrinsicVariable::Append => "<>",
         }
     }
 
@@ -118,6 +120,13 @@ pub static INTRINSIC_VARIABLES_TYPES: Lazy<
         (IntrinsicVariable::True, Type::from_str("True")),
         (IntrinsicVariable::False, Type::from_str("False")),
         (IntrinsicVariable::Unit, Type::from_str("()")),
+        (
+            IntrinsicVariable::Append,
+            Type::from_str("String").arrow(
+                Type::from_str("String")
+                    .arrow(Type::from_str("String")),
+            ),
+        ),
     ]
     .into_iter()
     .collect()
@@ -206,6 +215,7 @@ pub static OP_PRECEDENCE: Lazy<
         ("<", (Left, 5)),
         ("!=", (Left, 5)),
         ("==", (Left, 5)),
+        ("<>", (Left, 3)),
         ("|", (Left, 2)),
         ("->", (Right, 1)),
     ]

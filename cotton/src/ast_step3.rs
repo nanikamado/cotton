@@ -1,18 +1,20 @@
 mod type_check;
 pub mod type_util;
 
-pub use self::type_check::TypeVariableMap;
-pub use self::type_check::VariableId;
-use self::type_check::{type_check, ResolvedIdents};
+use self::type_check::type_check;
+pub use self::type_check::{
+    ResolvedIdents, TypeVariableMap, VariableId, VariableRequirement,
+};
+use crate::ast_step2::ident_id::IdentId;
 use crate::ast_step2::{
     self,
     decl_id::DeclId,
-    types::{Type, TypeMatchable, TypeMatchableRef, TypeVariable},
+    types::{Type, TypeMatchable, TypeVariable},
     DataDecl, IncompleteType, Pattern, SubtypeRelations,
     TypeConstructor,
 };
+pub use crate::ast_step3::type_check::ResolvedIdent;
 use fxhash::{FxHashMap, FxHashSet};
-use itertools::Itertools;
 
 /// # Difference between `ast_step2::Ast` and `ast_step3::Ast`
 /// - The names of variables are resolved.
@@ -21,6 +23,7 @@ pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl<'a>>,
     pub entry_point: DeclId,
+    pub resolved_idents: ResolvedIdents<'a>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -38,11 +41,7 @@ pub enum Expr<'a> {
     Lambda(Vec<FnArm<'a>>),
     Number(&'a str),
     StrLiteral(&'a str),
-    Ident {
-        name: &'a str,
-        variable_id: VariableId,
-        type_args: Vec<(TypeVariable, Type<'a>)>,
-    },
+    Ident { name: &'a str, ident_id: IdentId },
     Call(Box<ExprWithType<'a>>, Box<ExprWithType<'a>>),
     Do(Vec<ExprWithType<'a>>),
 }
@@ -68,7 +67,7 @@ impl<'a> From<ast_step2::Ast<'a>> for Ast<'a> {
         let variable_decl: Vec<_> = ast
             .variable_decl
             .into_iter()
-            .map(move |d| {
+            .map(|d| {
                 variable_decl(
                     d,
                     &resolved_idents,
@@ -85,6 +84,7 @@ impl<'a> From<ast_step2::Ast<'a>> for Ast<'a> {
             variable_decl,
             data_decl: ast.data_decl,
             entry_point: ast.entry_point,
+            resolved_idents,
         }
     }
 }
@@ -161,48 +161,7 @@ fn expr<'a>(
         ast_step2::Expr::Number(a) => Number(a),
         ast_step2::Expr::StrLiteral(a) => StrLiteral(a),
         ast_step2::Expr::Ident { name, ident_id } => {
-            let (variable_id, type_args) = resolved_idents
-                .get(&ident_id)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "{:?} not found in resolved_idents. \
-                        name: {:?}",
-                        ident_id, name
-                    )
-                })
-                .clone();
-            let type_args: Vec<_> = type_args
-                .into_iter()
-                .map(|(v, t)| {
-                    let v_ = map.find(v);
-                    let v = match v_.matchable_ref() {
-                        TypeMatchableRef::Variable(v) => v,
-                        _ => panic!("{v_} is not a variable"),
-                    };
-                    let t = remove_free_type_variables(
-                        map.normalize_type(t),
-                        fixed_variables,
-                        subtype_relations,
-                        map,
-                    );
-                    (v, t)
-                })
-                .collect();
-            log::debug!(
-                "{} -- {} -- [{}], type: {} ({})",
-                name,
-                ident_id,
-                type_args.iter().format_with(", ", |(v, t), f| f(
-                    &format!("({v} ~> {t})")
-                )),
-                t,
-                map.find(t)
-            );
-            Ident {
-                name,
-                variable_id,
-                type_args,
-            }
+            Ident { name, ident_id }
         }
         ast_step2::Expr::Call(f, a) => Call(
             expr(

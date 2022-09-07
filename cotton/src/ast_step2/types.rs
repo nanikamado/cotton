@@ -388,11 +388,12 @@ impl<'a> TypeConstructor<'a> for SingleTypeConstructor<'a> {
     fn normalize_contravariant_candidates_from_annotation(
         mut self,
         map: &mut TypeVariableMap,
-    ) -> Self {
-        self.contravariant_candidates_from_annotation =
-            self.contravariant_candidates_from_annotation.map(|a| {
+    ) -> Option<Self> {
+        if let Some(a) = self.contravariant_candidates_from_annotation
+        {
+            self.contravariant_candidates_from_annotation = Some(
                 a.into_iter()
-                    .flat_map(|t| {
+                    .map(|t| {
                         if let TypeMatchable::Variable(v) =
                             map.find(t).matchable()
                         {
@@ -401,9 +402,10 @@ impl<'a> TypeConstructor<'a> for SingleTypeConstructor<'a> {
                             None
                         }
                     })
-                    .collect()
-            });
-        self
+                    .collect::<Option<_>>()?,
+            )
+        };
+        Some(self)
     }
 
     fn contains_variable(&self, v: TypeVariable) -> bool {
@@ -564,8 +566,8 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
     fn normalize_contravariant_candidates_from_annotation(
         self,
         _map: &mut TypeVariableMap<'a>,
-    ) -> Self {
-        self
+    ) -> Option<Self> {
+        Some(self)
     }
 
     fn contains_variable(&self, v: TypeVariable) -> bool {
@@ -617,7 +619,7 @@ pub trait TypeConstructor<'a>:
     fn normalize_contravariant_candidates_from_annotation(
         self,
         map: &mut TypeVariableMap<'a>,
-    ) -> Self;
+    ) -> Option<Self>;
 }
 
 impl<'a> TypeUnit<'a> {

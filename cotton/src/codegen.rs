@@ -76,6 +76,7 @@ static PRIMITIVES_DEF: Lazy<FxHashMap<IntrinsicVariable, &str>> =
             (Percent, "a => b => a % b"),
             (Neq, "a => b => $$bool(a !== b)"),
             (Eq, "a => b => $$bool(a === b)"),
+            (Append, "a => b => a + b"),
             (Unit, "{name: '$Unit$unicode_28_29'}"),
         ]
         .iter()
