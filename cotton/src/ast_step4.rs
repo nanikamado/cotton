@@ -158,7 +158,9 @@ impl<'a> Monomorphics<'a, '_> {
             {
                 value = Expr::Lambda(vec![FnArm {
                     pattern: vec![vec![PatternUnit::Binder(
-                        name, decl_id,
+                        name,
+                        decl_id,
+                        t.clone(),
                     )]],
                     expr: (value, value_t.clone()),
                 }]);

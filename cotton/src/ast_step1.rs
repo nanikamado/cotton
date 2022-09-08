@@ -65,7 +65,6 @@ pub enum Expr<'a> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FnArm<'a> {
     pub pattern: Vec<Pattern<'a>>,
-    pub pattern_type: Vec<Option<Type<'a>>>,
     pub expr: Expr<'a>,
 }
 
@@ -541,18 +540,6 @@ fn fn_arm<'a>(
             .iter()
             .map(|s| {
                 infix_op_sequence(op_sequence(s, op_precedence_map))
-            })
-            .collect(),
-        pattern_type: a
-            .pattern_type
-            .iter()
-            .map(|t| {
-                t.as_ref().map(|t| {
-                    infix_op_sequence(op_sequence(
-                        t,
-                        op_precedence_map,
-                    ))
-                })
             })
             .collect(),
         expr: infix_op_sequence(op_sequence(

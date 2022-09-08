@@ -1,5 +1,5 @@
 use crate::{
-    ast_step2::{decl_id::DeclId, Pattern, PatternUnit},
+    ast_step2::{decl_id::DeclId, types::Type, Pattern, PatternUnit},
     ast_step4::{
         Ast, DataDecl, Expr, ExprWithType, FnArm, VariableDecl,
     },
@@ -143,10 +143,16 @@ fn fn_arm(e: &FnArm, name_count: u32) -> String {
             cond,
             binds
                 .iter()
-                .map(|(s, _, id)| format!("${}${}=>", id, s))
+                .map(|(s, _, id, t)| format!(
+                    "${}${}/* : {} */=>",
+                    id, s, t
+                ))
                 .join(""),
             expr(&e.expr, name_count + e.pattern.len() as u32),
-            binds.iter().map(|(_, n, _)| format!("({})", n)).join(""),
+            binds
+                .iter()
+                .map(|(_, n, _, _)| format!("({})", n))
+                .join(""),
         )
     }
 }
@@ -204,7 +210,7 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
 fn bindings<'a>(
     pattern: &'a [Pattern],
     name_count: u32,
-) -> Vec<(&'a str, String, DeclId)> {
+) -> Vec<(&'a str, String, DeclId, &'a Type<'a>)> {
     _bindings(
         pattern,
         (0..pattern.len())
@@ -216,15 +222,15 @@ fn bindings<'a>(
 fn _bindings<'a>(
     pattern: &'a [Pattern],
     names: Vec<String>,
-) -> Vec<(&'a str, String, DeclId)> {
+) -> Vec<(&'a str, String, DeclId, &'a Type<'a>)> {
     pattern
         .iter()
         .zip(names)
         .flat_map(|(p, n)| {
             if p.len() == 1 {
                 match &p[0] {
-                    PatternUnit::Binder(a, id) => {
-                        vec![(&a[..], n, *id)]
+                    PatternUnit::Binder(a, id, t) => {
+                        vec![(&a[..], n, *id, t)]
                     }
                     PatternUnit::Constructor { args, .. } => {
                         _bindings(

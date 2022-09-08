@@ -1,11 +1,12 @@
 mod type_check;
 pub mod type_util;
 
-use self::type_check::type_check;
 pub use self::type_check::{
-    ResolvedIdents, TypeVariableMap, VariableId, VariableRequirement,
+    type_check, ResolvedIdents, TypeVariableMap, VariableId,
+    VariableRequirement,
 };
 use crate::ast_step2::ident_id::IdentId;
+use crate::ast_step2::PatternUnit;
 use crate::ast_step2::{
     self,
     decl_id::DeclId,
@@ -49,7 +50,6 @@ pub enum Expr<'a> {
 #[derive(Debug, PartialEq, Clone)]
 pub struct FnArm<'a> {
     pub pattern: Vec<Pattern<'a>>,
-    pub pattern_type: Vec<Option<Type<'a>>>,
     pub expr: ExprWithType<'a>,
 }
 
@@ -223,9 +223,34 @@ fn fn_arm<'a>(
         map,
     );
     FnArm {
-        pattern: arm.pattern,
-        pattern_type: arm.pattern_type,
+        pattern: normalize_types_in_pattern(arm.pattern, map),
         expr,
+    }
+}
+
+fn normalize_types_in_pattern<'a>(
+    pattern: Vec<Pattern<'a>>,
+    map: &mut TypeVariableMap<'a>,
+) -> Vec<Pattern<'a>> {
+    pattern
+        .into_iter()
+        .map(|p| {
+            p.into_iter()
+                .map(|p| normalize_types_in_pattern_unit(p, map))
+                .collect()
+        })
+        .collect()
+}
+
+fn normalize_types_in_pattern_unit<'a>(
+    pattern: PatternUnit<'a>,
+    map: &mut TypeVariableMap<'a>,
+) -> PatternUnit<'a> {
+    match pattern {
+        PatternUnit::Binder(name, ident_id, t) => {
+            PatternUnit::Binder(name, ident_id, map.normalize_type(t))
+        }
+        p => p,
     }
 }
 

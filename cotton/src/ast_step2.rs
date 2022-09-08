@@ -115,7 +115,6 @@ pub enum Expr<'a> {
 #[derive(Debug, PartialEq, Clone)]
 pub struct FnArm<'a> {
     pub pattern: Vec<Pattern<'a>>,
-    pub pattern_type: Vec<Option<Type<'a>>>,
     pub expr: ExprWithType<'a>,
 }
 
@@ -131,7 +130,7 @@ pub enum PatternUnit<'a> {
         id: ConstructorId<'a>,
         args: Vec<Pattern<'a>>,
     },
-    Binder(&'a str, DeclId),
+    Binder(&'a str, DeclId, Type<'a>),
     Underscore,
     TypeRestriction(Pattern<'a>, Type<'a>),
 }
@@ -427,10 +426,11 @@ fn add_expr_in_do<'a>(
                 es.reverse();
                 let l = Expr::Lambda(vec![FnArm {
                     pattern: vec![PatternUnit::Binder(
-                        d.name, d.decl_id,
+                        d.name,
+                        d.decl_id,
+                        TypeUnit::new_variable().into(),
                     )
                     .into()],
-                    pattern_type: vec![None],
                     expr: (Expr::Do(es), TypeVariable::new()),
                 }]);
                 vec![(
@@ -470,21 +470,6 @@ fn fn_arm<'a>(
             .pattern
             .into_iter()
             .map(|p| pattern(p, data_decl_map))
-            .collect(),
-        pattern_type: arm
-            .pattern_type
-            .into_iter()
-            .map(|o| {
-                o.map(|t| {
-                    type_to_type(
-                        t,
-                        data_decl_map,
-                        type_variable_names,
-                        type_alias_map,
-                        SearchMode::Normal,
-                    )
-                })
-            })
             .collect(),
         expr: expr(
             arm.expr,
@@ -543,9 +528,11 @@ fn pattern<'a>(
                     .collect(),
             }
         }
-        ast_step1::Pattern::Binder(name) => {
-            Binder(name, DeclId::new())
-        }
+        ast_step1::Pattern::Binder(name) => Binder(
+            name,
+            DeclId::new(),
+            TypeUnit::new_variable().into(),
+        ),
         ast_step1::Pattern::Underscore => Underscore,
     }
     .into()
