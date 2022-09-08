@@ -1,13 +1,12 @@
 pub use self::type_type::Type;
 pub use self::type_unit::TypeUnit;
 pub use self::type_unit::TypeVariable;
+use super::IncompleteType;
 use crate::ast_step2::TypeId;
 use crate::ast_step3::TypeVariableMap;
 use fxhash::FxHashSet;
 use itertools::Itertools;
 use std::{collections::BTreeSet, fmt::Display};
-
-use super::IncompleteType;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeMatchable<'a> {
@@ -158,9 +157,8 @@ mod type_unit {
 }
 
 mod type_type {
-    use std::{collections::BTreeSet, iter::FromIterator};
-
     use super::{TypeMatchable, TypeMatchableRef, TypeUnit};
+    use std::{collections::BTreeSet, iter::FromIterator};
 
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
     pub struct Type<'a>(BTreeSet<TypeUnit<'a>>);
