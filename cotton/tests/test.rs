@@ -168,3 +168,13 @@ fn rfold_with_empty() {
         .stdout("abc\n6\n")
         .success();
 }
+
+#[test]
+fn tuple_infer() {
+    test_test("tuple_infer.cot").stdout("b\n").success();
+}
+
+#[test]
+fn tuple_infer_fail() {
+    test_test("tuple_infer_fail.cot").failure();
+}

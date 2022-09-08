@@ -1309,48 +1309,38 @@ fn apply_type_to_pattern<'a>(
         None
     } else {
         if not_sure {
-            if let Some(pattern_t) = pattern_to_type(pattern) {
-                subtype_rels.add_subtype_rels(simplify_subtype_rel(
-                    t,
-                    pattern_t.conjunctive(),
-                    &mut Default::default(),
-                )?);
-            }
+            let pattern_t = pattern_to_type(pattern);
+            subtype_rels.add_subtype_rels(simplify_subtype_rel(
+                t,
+                pattern_t.conjunctive(),
+                &mut Default::default(),
+            )?);
         }
         Some(subtype_rels)
     }
 }
 
-fn pattern_unit_to_type<'a>(
-    p: &PatternUnitForRestriction<'a>,
-) -> Option<Type<'a>> {
+fn pattern_unit_to_type<'a>(p: &PatternUnitForRestriction<'a>) -> Type<'a> {
     use PatternUnitForRestriction::*;
     match p {
-        I64 => Some(Type::from_str("I64")),
-        Str => Some(Type::from_str("String")),
-        Constructor { id, args, name } => Some(
-            TypeUnit::Normal {
-                name,
-                args: args
-                    .iter()
-                    .map(|t| pattern_to_type(&[t.clone()]))
-                    .collect::<Option<_>>()?,
-                id: *id,
-            }
-            .into(),
-        ),
-        Binder(_, _) => None,
+        I64 => Type::from_str("I64"),
+        Str => Type::from_str("String"),
+        Constructor { id, args, name } => TypeUnit::Normal {
+            name,
+            args: args.iter().map(|t| pattern_to_type(&[t.clone()])).collect(),
+            id: *id,
+        }
+        .into(),
+        Binder(t, _) => t.clone(),
     }
 }
 
-fn pattern_to_type<'a>(
-    p: &[PatternUnitForRestriction<'a>],
-) -> Option<Type<'a>> {
+fn pattern_to_type<'a>(p: &[PatternUnitForRestriction<'a>]) -> Type<'a> {
     let mut t = Type::default();
     for p in p {
-        t = t.union(pattern_unit_to_type(p)?);
+        t = t.union(pattern_unit_to_type(p));
     }
-    Some(t)
+    t
 }
 
 #[derive(Debug)]

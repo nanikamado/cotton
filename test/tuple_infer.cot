@@ -1,0 +1,16 @@
+(.) : a -> (a -> b) -> b forall {a, b} =
+    | a, f => f(a)
+
+infixl 10 .
+
+data A /\ B forall { A, B }
+
+infixl 3 /\
+
+g = | a, b =>
+    (a /\ b).
+        | True /\ True => "a"
+        | _ /\ False => "b"
+
+main = | () => do
+    g((), False).println
