@@ -50,10 +50,7 @@ fn helloworld() {
 
 #[test]
 fn list() {
-    test_examples(
-        "list.cot",
-        &(0..100).map(|i| format!("{}\n", i)).join(""),
-    );
+    test_examples("list.cot", &(0..100).map(|i| format!("{}\n", i)).join(""));
 }
 
 #[test]
@@ -162,10 +159,7 @@ fn red_black_tree_strongly_typed_fail2() {
 
 #[test]
 fn interface() {
-    test_examples(
-        "interface.cot",
-        "HogeeeeeeHogeeeeee\nFugaaaaaaFugaaaaaa\n",
-    );
+    test_examples("interface.cot", "HogeeeeeeHogeeeeee\nFugaaaaaaFugaaaaaa\n");
 }
 
 #[test]

@@ -83,46 +83,31 @@ where
                 std::cmp::Ordering::Less => {
                     let mut dedent_level = -indent_level_delta;
                     while dedent_level > 0 {
-                        let ignored_indents_h =
-                            ignored_indents.pop().unwrap();
+                        let ignored_indents_h = ignored_indents.pop().unwrap();
                         if ignored_indents_h >= dedent_level {
-                            ignored_indents.push(
-                                ignored_indents_h - dedent_level,
-                            );
+                            ignored_indents
+                                .push(ignored_indents_h - dedent_level);
                             break;
                         } else {
                             dedent_level -= ignored_indents_h + 1;
-                            tokens.push((
-                                dedent_tok.clone(),
-                                ident_span.clone(),
-                            ));
+                            tokens
+                                .push((dedent_tok.clone(), ident_span.clone()));
                         }
                     }
                 }
                 std::cmp::Ordering::Equal => (),
                 std::cmp::Ordering::Greater => {
-                    let requrires_ident_case =
-                        line[0].0 == Token::Bar;
+                    let requrires_ident_case = line[0].0 == Token::Bar;
                     if requires_indent
                         && requrires_ident_case
                         && indent_level_delta >= 2
                     {
-                        tokens.push((
-                            indent_tok.clone(),
-                            ident_span.clone(),
-                        ));
-                        tokens.push((
-                            indent_tok.clone(),
-                            ident_span.clone(),
-                        ));
+                        tokens.push((indent_tok.clone(), ident_span.clone()));
+                        tokens.push((indent_tok.clone(), ident_span.clone()));
                         ignored_indents.push(indent_level_delta);
                         ignored_indents.push(indent_level_delta - 2);
-                    } else if requires_indent || requrires_ident_case
-                    {
-                        tokens.push((
-                            indent_tok.clone(),
-                            ident_span.clone(),
-                        ));
+                    } else if requires_indent || requrires_ident_case {
+                        tokens.push((indent_tok.clone(), ident_span.clone()));
                         ignored_indents.push(indent_level_delta - 1);
                     } else {
                         *ignored_indents.last_mut().unwrap() +=
@@ -130,21 +115,16 @@ where
                     }
                 }
             }
-            requires_indent = line
-                .last()
-                .map(|t| t.requires_indent())
-                .unwrap_or(false);
+            requires_indent =
+                line.last().map(|t| t.requires_indent()).unwrap_or(false);
             if line[0].0 == Token::OpenParenWithoutPad {
                 line[0].0 = Token::Paren('(');
             }
             tokens.append(&mut line);
         }
         tokens.extend(
-            (iter::repeat((
-                dedent_tok.clone(),
-                src_len - 1..src_len,
-            )))
-            .take(ignored_indents.len() - 1),
+            (iter::repeat((dedent_tok.clone(), src_len - 1..src_len)))
+                .take(ignored_indents.len() - 1),
         );
         tokens
     })

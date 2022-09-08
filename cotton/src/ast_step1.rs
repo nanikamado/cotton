@@ -88,9 +88,7 @@ pub enum OpSequenceUnit<'a, T> {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct OpPrecedenceMap<'a>(
-    FxHashMap<&'a str, (Associativity, i32)>,
-);
+pub struct OpPrecedenceMap<'a>(FxHashMap<&'a str, (Associativity, i32)>);
 
 impl<'a> OpPrecedenceMap<'a> {
     pub fn new(m: FxHashMap<&'a str, (Associativity, i32)>) -> Self {
@@ -193,8 +191,7 @@ impl<'a> From<&'a parse::Ast> for Ast<'a> {
                     associativity,
                     precedence,
                 }) => {
-                    precedence_map
-                        .insert(name, (*associativity, *precedence));
+                    precedence_map.insert(name, (*associativity, *precedence));
                 }
                 parse::Decl::TypeAlias(a) => aliases.push(a),
                 parse::Decl::Interface(a) => interfaces.push(a),
@@ -245,17 +242,12 @@ impl<'a> From<&'a parse::Ast> for Ast<'a> {
 }
 
 impl<'a> From<&'a parse::Forall> for Forall<'a> {
-    fn from(
-        parse::Forall { type_variables }: &'a parse::Forall,
-    ) -> Self {
+    fn from(parse::Forall { type_variables }: &'a parse::Forall) -> Self {
         Forall {
             type_variables: type_variables
                 .iter()
                 .map(|(name, ts)| {
-                    (
-                        name.as_str(),
-                        ts.iter().map(String::as_str).collect(),
-                    )
+                    (name.as_str(), ts.iter().map(String::as_str).collect())
                 })
                 .collect(),
         }
@@ -268,28 +260,17 @@ fn variable_decl<'a>(
 ) -> VariableDecl<'a> {
     VariableDecl {
         name: &v.name,
-        type_annotation: v.type_annotation.as_ref().map(
-            |(s, forall)| {
-                (
-                    infix_op_sequence(op_sequence(
-                        s,
-                        op_precedence_map,
-                    )),
-                    forall.into(),
-                )
-            },
-        ),
-        value: infix_op_sequence(op_sequence(
-            &v.expr,
-            op_precedence_map,
-        )),
+        type_annotation: v.type_annotation.as_ref().map(|(s, forall)| {
+            (
+                infix_op_sequence(op_sequence(s, op_precedence_map)),
+                forall.into(),
+            )
+        }),
+        value: infix_op_sequence(op_sequence(&v.expr, op_precedence_map)),
     }
 }
 
-fn apply_type_op<
-    'a,
-    T: AddArgument + IdentFromStr<'a> + Clone + Debug,
->(
+fn apply_type_op<'a, T: AddArgument + IdentFromStr<'a> + Clone + Debug>(
     mut sequence: IndexList<OpSequenceUnit<'a, T>>,
     i: Index,
 ) -> IndexList<OpSequenceUnit<T>> {
@@ -301,9 +282,7 @@ fn apply_type_op<
         Some(OpSequenceUnit::Operator(name, _, _)) => {
             match sequence.get_mut(i_prev).unwrap() {
                 OpSequenceUnit::Operand(e1) => {
-                    if let OpSequenceUnit::Operand(e2) =
-                        s_i_next.unwrap()
-                    {
+                    if let OpSequenceUnit::Operand(e2) = s_i_next.unwrap() {
                         *e1 = T::ident_from_str(name)
                             .add_argument(e1.clone())
                             .add_argument(e2);
@@ -341,10 +320,7 @@ fn apply_type_op<
     sequence
 }
 
-fn op_apply_left<
-    'a,
-    T: AddArgument + IdentFromStr<'a> + Clone + Debug,
->(
+fn op_apply_left<'a, T: AddArgument + IdentFromStr<'a> + Clone + Debug>(
     mut sequence: Vec<OpSequenceUnit<'a, T>>,
     precedence: i32,
 ) -> Vec<OpSequenceUnit<T>> {
@@ -368,10 +344,7 @@ fn op_apply_left<
     sequence.drain_iter().collect()
 }
 
-fn op_apply_right<
-    'a,
-    T: AddArgument + IdentFromStr<'a> + Clone + Debug,
->(
+fn op_apply_right<'a, T: AddArgument + IdentFromStr<'a> + Clone + Debug>(
     mut sequence: Vec<OpSequenceUnit<'a, T>>,
     precedence: i32,
 ) -> Vec<OpSequenceUnit<T>> {
@@ -408,27 +381,17 @@ pub fn infix_op_sequence<
                 if let Some(Associativity::Right) =
                     precedence_list.insert(*p, Associativity::Left)
                 {
-                    panic!(
-                        "cannot mix infixl {} and infixr {}",
-                        p, p
-                    );
+                    panic!("cannot mix infixl {} and infixr {}", p, p);
                 }
             }
             OpSequenceUnit::Operator(_, Associativity::Right, p) => {
                 if let Some(Associativity::Left) =
                     precedence_list.insert(*p, Associativity::Right)
                 {
-                    panic!(
-                        "cannot mix infixl {} and infixr {}",
-                        p, p
-                    );
+                    panic!("cannot mix infixl {} and infixr {}", p, p);
                 }
             }
-            OpSequenceUnit::Operator(
-                _,
-                Associativity::UnaryLeft,
-                p,
-            ) => {
+            OpSequenceUnit::Operator(_, Associativity::UnaryLeft, p) => {
                 precedence_list.insert(*p, Associativity::Right);
             }
             OpSequenceUnit::Apply(_) => {
@@ -504,9 +467,7 @@ impl<'a> ConvertWithOpPrecedenceMap for &'a parse::ExprUnit {
         use Expr::*;
         match self {
             parse::ExprUnit::Case(arms) => Lambda(
-                arms.iter()
-                    .map(|a| fn_arm(a, op_precedence_map))
-                    .collect(),
+                arms.iter().map(|a| fn_arm(a, op_precedence_map)).collect(),
             ),
             parse::ExprUnit::Int(a) => Number(a),
             parse::ExprUnit::Str(a) => StrLiteral(a),
@@ -519,12 +480,7 @@ impl<'a> ConvertWithOpPrecedenceMap for &'a parse::ExprUnit {
             }
             parse::ExprUnit::Do(es) => Do(es
                 .iter()
-                .map(|e| {
-                    infix_op_sequence(op_sequence(
-                        e,
-                        op_precedence_map,
-                    ))
-                })
+                .map(|e| infix_op_sequence(op_sequence(e, op_precedence_map)))
                 .collect()),
         }
     }
@@ -538,14 +494,9 @@ fn fn_arm<'a>(
         pattern: a
             .pattern
             .iter()
-            .map(|s| {
-                infix_op_sequence(op_sequence(s, op_precedence_map))
-            })
+            .map(|s| infix_op_sequence(op_sequence(s, op_precedence_map)))
             .collect(),
-        expr: infix_op_sequence(op_sequence(
-            &a.expr,
-            op_precedence_map,
-        )),
+        expr: infix_op_sequence(op_sequence(&a.expr, op_precedence_map)),
     }
 }
 
@@ -556,20 +507,15 @@ impl<'a> ConvertWithOpPrecedenceMap for &'a parse::PatternUnit {
         match self {
             parse::PatternUnit::Int(a) => Pattern::Number(a),
             parse::PatternUnit::Str(a) => Pattern::StrLiteral(a),
-            parse::PatternUnit::Constructor(name, ps) => {
-                Pattern::Constructor {
-                    name,
-                    args: ps
-                        .iter()
-                        .map(|p| {
-                            infix_op_sequence(op_sequence(
-                                p,
-                                op_precedence_map,
-                            ))
-                        })
-                        .collect(),
-                }
-            }
+            parse::PatternUnit::Constructor(name, ps) => Pattern::Constructor {
+                name,
+                args: ps
+                    .iter()
+                    .map(|p| {
+                        infix_op_sequence(op_sequence(p, op_precedence_map))
+                    })
+                    .collect(),
+            },
             parse::PatternUnit::Bind(a) => Pattern::Binder(a),
             parse::PatternUnit::Underscore => Pattern::Underscore,
         }

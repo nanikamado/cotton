@@ -1,8 +1,6 @@
 use crate::{
     ast_step2::{decl_id::DeclId, types::Type, Pattern, PatternUnit},
-    ast_step4::{
-        Ast, DataDecl, Expr, ExprWithType, FnArm, VariableDecl,
-    },
+    ast_step4::{Ast, DataDecl, Expr, ExprWithType, FnArm, VariableDecl},
     intrinsics::IntrinsicVariable,
 };
 use fxhash::FxHashMap;
@@ -105,24 +103,17 @@ fn expr((e, t): &ExprWithType, name_count: u32) -> String {
                 variable_id,
                 convert_name(info),
                 info,
-                type_args.iter().format_with("", |args, f| f(
-                    &format!(
-                        "[args: ({})]",
-                        args.iter().format(", ")
-                    )
-                ))
+                type_args.iter().format_with("", |args, f| f(&format!(
+                    "[args: ({})]",
+                    args.iter().format(", ")
+                )))
             )
         }
-        Expr::Call(f, a) => format!(
-            "{}({})",
-            expr(f, name_count),
-            expr(a, name_count)
-        ),
+        Expr::Call(f, a) => {
+            format!("{}({})", expr(f, name_count), expr(a, name_count))
+        }
         Expr::DoBlock(exprs) => {
-            format!(
-                "({})",
-                exprs.iter().map(|e| expr(e, name_count)).join(",")
-            )
+            format!("({})", exprs.iter().map(|e| expr(e, name_count)).join(","))
         }
     };
     format!("{s} /*: {t} */")
@@ -143,16 +134,10 @@ fn fn_arm(e: &FnArm, name_count: u32) -> String {
             cond,
             binds
                 .iter()
-                .map(|(s, _, id, t)| format!(
-                    "${}${}/* : {} */=>",
-                    id, s, t
-                ))
+                .map(|(s, _, id, t)| format!("${}${}/* : {} */=>", id, s, t))
                 .join(""),
             expr(&e.expr, name_count + e.pattern.len() as u32),
-            binds
-                .iter()
-                .map(|(_, n, _, _)| format!("({})", n))
-                .join(""),
+            binds.iter().map(|(_, n, _, _)| format!("({})", n)).join(""),
         )
     }
 }
@@ -232,14 +217,12 @@ fn _bindings<'a>(
                     PatternUnit::Binder(a, id, t) => {
                         vec![(&a[..], n, *id, t)]
                     }
-                    PatternUnit::Constructor { args, .. } => {
-                        _bindings(
-                            args,
-                            (0..args.len())
-                                .map(|i| format!("{}[{}]", n, i))
-                                .collect(),
-                        )
-                    }
+                    PatternUnit::Constructor { args, .. } => _bindings(
+                        args,
+                        (0..args.len())
+                            .map(|i| format!("{}[{}]", n, i))
+                            .collect(),
+                    ),
                     _ => Vec::new(),
                 }
             } else {
@@ -254,10 +237,7 @@ fn convert_name(name: &str) -> String {
         name.to_string()
     } else {
         "unicode".to_string()
-            + &name
-                .chars()
-                .map(|c| format! {"_{:x}",c as u32})
-                .join("")
+            + &name.chars().map(|c| format! {"_{:x}",c as u32}).join("")
     }
 }
 

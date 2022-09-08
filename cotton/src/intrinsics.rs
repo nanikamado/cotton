@@ -26,10 +26,7 @@ pub enum IntrinsicVariable {
 }
 
 impl Display for IntrinsicVariable {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         std::fmt::Debug::fmt(self, f)
     }
 }
@@ -59,82 +56,74 @@ impl IntrinsicVariable {
     }
 }
 
-pub static INTRINSIC_VARIABLES_TYPES: Lazy<
-    FxHashMap<IntrinsicVariable, Type>,
-> = Lazy::new(|| {
-    vec![
-        (
-            IntrinsicVariable::Minus,
-            Type::from_str("I64").arrow(
-                Type::from_str("I64").arrow(Type::from_str("I64")),
+pub static INTRINSIC_VARIABLES_TYPES: Lazy<FxHashMap<IntrinsicVariable, Type>> =
+    Lazy::new(|| {
+        vec![
+            (
+                IntrinsicVariable::Minus,
+                Type::from_str("I64")
+                    .arrow(Type::from_str("I64").arrow(Type::from_str("I64"))),
             ),
-        ),
-        (
-            IntrinsicVariable::Plus,
-            Type::from_str("I64").arrow(
-                Type::from_str("I64").arrow(Type::from_str("I64")),
+            (
+                IntrinsicVariable::Plus,
+                Type::from_str("I64")
+                    .arrow(Type::from_str("I64").arrow(Type::from_str("I64"))),
             ),
-        ),
-        (
-            IntrinsicVariable::Percent,
-            Type::from_str("I64").arrow(
-                Type::from_str("I64").arrow(Type::from_str("I64")),
+            (
+                IntrinsicVariable::Percent,
+                Type::from_str("I64")
+                    .arrow(Type::from_str("I64").arrow(Type::from_str("I64"))),
             ),
-        ),
-        (
-            IntrinsicVariable::Multi,
-            Type::from_str("I64").arrow(
-                Type::from_str("I64").arrow(Type::from_str("I64")),
+            (
+                IntrinsicVariable::Multi,
+                Type::from_str("I64")
+                    .arrow(Type::from_str("I64").arrow(Type::from_str("I64"))),
             ),
-        ),
-        (
-            IntrinsicVariable::Lt,
-            Type::from_str("I64").arrow(Type::from_str("I64").arrow(
-                Type::from_str("True").union(Type::from_str("False")),
-            )),
-        ),
-        (
-            IntrinsicVariable::Neq,
-            Type::from_str("I64").arrow(Type::from_str("I64").arrow(
-                Type::from_str("True").union(Type::from_str("False")),
-            )),
-        ),
-        (
-            IntrinsicVariable::Eq,
-            Type::from_str("I64").arrow(Type::from_str("I64").arrow(
-                Type::from_str("True").union(Type::from_str("False")),
-            )),
-        ),
-        (
-            IntrinsicVariable::Println,
-            Type::from_str("String").arrow(Type::from_str("()")),
-        ),
-        (
-            IntrinsicVariable::Print,
-            Type::from_str("String").arrow(Type::from_str("()")),
-        ),
-        (
-            IntrinsicVariable::I64ToString,
-            Type::from_str("I64").arrow(Type::from_str("String")),
-        ),
-        (IntrinsicVariable::True, Type::from_str("True")),
-        (IntrinsicVariable::False, Type::from_str("False")),
-        (IntrinsicVariable::Unit, Type::from_str("()")),
-        (
-            IntrinsicVariable::Append,
-            Type::from_str("String").arrow(
-                Type::from_str("String")
-                    .arrow(Type::from_str("String")),
+            (
+                IntrinsicVariable::Lt,
+                Type::from_str("I64").arrow(Type::from_str("I64").arrow(
+                    Type::from_str("True").union(Type::from_str("False")),
+                )),
             ),
-        ),
-    ]
-    .into_iter()
-    .collect()
-});
+            (
+                IntrinsicVariable::Neq,
+                Type::from_str("I64").arrow(Type::from_str("I64").arrow(
+                    Type::from_str("True").union(Type::from_str("False")),
+                )),
+            ),
+            (
+                IntrinsicVariable::Eq,
+                Type::from_str("I64").arrow(Type::from_str("I64").arrow(
+                    Type::from_str("True").union(Type::from_str("False")),
+                )),
+            ),
+            (
+                IntrinsicVariable::Println,
+                Type::from_str("String").arrow(Type::from_str("()")),
+            ),
+            (
+                IntrinsicVariable::Print,
+                Type::from_str("String").arrow(Type::from_str("()")),
+            ),
+            (
+                IntrinsicVariable::I64ToString,
+                Type::from_str("I64").arrow(Type::from_str("String")),
+            ),
+            (IntrinsicVariable::True, Type::from_str("True")),
+            (IntrinsicVariable::False, Type::from_str("False")),
+            (IntrinsicVariable::Unit, Type::from_str("()")),
+            (
+                IntrinsicVariable::Append,
+                Type::from_str("String").arrow(
+                    Type::from_str("String").arrow(Type::from_str("String")),
+                ),
+            ),
+        ]
+        .into_iter()
+        .collect()
+    });
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IntrinsicType {
     String,
     I64,
@@ -144,25 +133,22 @@ pub enum IntrinsicType {
     ArgumentTuple,
 }
 
-pub static INTRINSIC_TYPES: Lazy<
-    FxHashMap<&'static str, IntrinsicType>,
-> = Lazy::new(|| {
-    [
-        ("String", IntrinsicType::String),
-        ("I64", IntrinsicType::I64),
-        ("()", IntrinsicType::Unit),
-        ("True", IntrinsicType::True),
-        ("False", IntrinsicType::False),
-    ]
-    .map(|(n, t)| (n, t))
-    .iter()
-    .cloned()
-    .collect()
-});
+pub static INTRINSIC_TYPES: Lazy<FxHashMap<&'static str, IntrinsicType>> =
+    Lazy::new(|| {
+        [
+            ("String", IntrinsicType::String),
+            ("I64", IntrinsicType::I64),
+            ("()", IntrinsicType::Unit),
+            ("True", IntrinsicType::True),
+            ("False", IntrinsicType::False),
+        ]
+        .map(|(n, t)| (n, t))
+        .iter()
+        .cloned()
+        .collect()
+    });
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IntrinsicConstructor {
     Unit,
     True,
@@ -203,23 +189,22 @@ impl From<IntrinsicConstructor> for IntrinsicType {
     }
 }
 
-pub static OP_PRECEDENCE: Lazy<
-    FxHashMap<&'static str, (Associativity, i32)>,
-> = Lazy::new(|| {
-    use Associativity::*;
-    [
-        ("%", (Left, 7)),
-        ("*", (Left, 7)),
-        ("+", (Left, 6)),
-        ("-", (Left, 6)),
-        ("<", (Left, 5)),
-        ("!=", (Left, 5)),
-        ("==", (Left, 5)),
-        ("<>", (Left, 3)),
-        ("|", (Left, 2)),
-        ("->", (Right, 1)),
-    ]
-    .iter()
-    .copied()
-    .collect()
-});
+pub static OP_PRECEDENCE: Lazy<FxHashMap<&'static str, (Associativity, i32)>> =
+    Lazy::new(|| {
+        use Associativity::*;
+        [
+            ("%", (Left, 7)),
+            ("*", (Left, 7)),
+            ("+", (Left, 6)),
+            ("-", (Left, 6)),
+            ("<", (Left, 5)),
+            ("!=", (Left, 5)),
+            ("==", (Left, 5)),
+            ("<>", (Left, 3)),
+            ("|", (Left, 2)),
+            ("->", (Right, 1)),
+        ]
+        .iter()
+        .copied()
+        .collect()
+    });

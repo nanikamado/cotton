@@ -114,10 +114,8 @@ fn indented<'a, O: 'a + Clone, E: 'a + Error<Token> + Clone>(
         indented
             .clone()
             .delimited_by(just(Token::Indent), just(Token::Dedent))
-            .or(indented.delimited_by(
-                just(Token::Paren('{')),
-                just(Token::Paren('}')),
-            ))
+            .or(indented
+                .delimited_by(just(Token::Paren('{')), just(Token::Paren('}'))))
     })
 }
 
@@ -131,26 +129,19 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
     let ident = ident.or(capital_head_ident);
     let open_paren =
         just(Token::Paren('(')).or(just(Token::OpenParenWithoutPad));
-    let ident_or_op = ident.or(
-        op.delimited_by(open_paren.clone(), just(Token::Paren(')')))
-    );
+    let ident_or_op =
+        ident.or(op.delimited_by(open_paren.clone(), just(Token::Paren(')'))));
     let pattern = recursive(|pattern| {
         let constructor_pattern = capital_head_ident
             .then(
                 pattern
                     .separated_by(just(Token::Comma))
                     .allow_trailing()
-                    .delimited_by(
-                        open_paren.clone(),
-                        just(Token::Paren(')')),
-                    )
+                    .delimited_by(open_paren.clone(), just(Token::Paren(')')))
                     .or_not(),
             )
             .map(|(name, args)| {
-                PatternUnit::Constructor(
-                    name,
-                    args.unwrap_or_default(),
-                )
+                PatternUnit::Constructor(name, args.unwrap_or_default())
             });
         let pattern_unit = constructor_pattern
             .or(just(Token::Ident("_".to_string()))
@@ -163,17 +154,12 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
             .then(
                 op.then(pattern_unit.clone())
                     .map(|(o, e)| {
-                        vec![
-                            OpSequenceUnit::Op(o),
-                            OpSequenceUnit::Operand(e),
-                        ]
+                        vec![OpSequenceUnit::Op(o), OpSequenceUnit::Operand(e)]
                     })
                     .repeated()
                     .flatten(),
             )
-            .map(|(e, oes)| {
-                [vec![OpSequenceUnit::Operand(e)], oes].concat()
-            })
+            .map(|(e, oes)| [vec![OpSequenceUnit::Operand(e)], oes].concat())
     });
     let patterns = pattern
         .separated_by(just(Token::Comma))
@@ -184,9 +170,10 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
             ident
                 .then(
                     just(Token::Colon)
-                        .ignore_then(ident.separated_by(just(
-                            Token::Op("&".to_string()),
-                        )))
+                        .ignore_then(
+                            ident
+                                .separated_by(just(Token::Op("&".to_string()))),
+                        )
                         .or_not(),
                 )
                 .separated_by(just(Token::Comma))
@@ -207,41 +194,30 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
             .separated_by(just(Token::Comma))
             .at_least(1)
             .allow_trailing()
-            .delimited_by(
-                just(Token::Paren('[')),
-                just(Token::Paren(']')),
-            )
-            .map(|es| {
-                es.into_iter().map(OpSequenceUnit::Apply).collect()
-            });
+            .delimited_by(just(Token::Paren('[')), just(Token::Paren(']')))
+            .map(|es| es.into_iter().map(OpSequenceUnit::Apply).collect());
         type_unit
             .clone()
             .then(
                 op.or(just(Token::Bar).map(|_| "|".to_string()))
                     .then(type_unit.clone())
                     .map(|(o, e)| {
-                        vec![
-                            OpSequenceUnit::Op(o),
-                            OpSequenceUnit::Operand(e),
-                        ]
+                        vec![OpSequenceUnit::Op(o), OpSequenceUnit::Operand(e)]
                     })
                     .or(apply)
                     .repeated()
                     .flatten(),
             )
-            .map(|(e, oes)| {
-                [vec![OpSequenceUnit::Operand(e)], oes].concat()
-            })
+            .map(|(e, oes)| [vec![OpSequenceUnit::Operand(e)], oes].concat())
     });
-    let type_ =
-        type_.then(forall.clone().or_not()).map(|(t, forall)| {
-            (
-                t,
-                forall.unwrap_or_else(|| Forall {
-                    type_variables: Vec::new(),
-                }),
-            )
-        });
+    let type_ = type_.then(forall.clone().or_not()).map(|(t, forall)| {
+        (
+            t,
+            forall.unwrap_or_else(|| Forall {
+                type_variables: Vec::new(),
+            }),
+        )
+    });
     let variable_decl = recursive(|variable_decl| {
         let expr = recursive(|expr| {
             let lambda = just(Token::Bar)
@@ -258,9 +234,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 });
             let case = just(Token::Case)
                 .or_not()
-                .ignore_then(indented(
-                    lambda.clone().repeated().at_least(1),
-                ))
+                .ignore_then(indented(lambda.clone().repeated().at_least(1)))
                 .map(ExprUnit::Case);
             let do_ = just(Token::Do)
                 .ignore_then(indented(expr.clone().repeated()))
@@ -284,11 +258,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                     just(Token::OpenParenWithoutPad),
                     just(Token::Paren(')')),
                 )
-                .map(|es| {
-                    es.into_iter()
-                        .map(OpSequenceUnit::Apply)
-                        .collect()
-                });
+                .map(|es| es.into_iter().map(OpSequenceUnit::Apply).collect());
             expr_unit
                 .clone()
                 .then(
@@ -309,11 +279,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         });
         ident_or_op
             .clone()
-            .then(
-                just(Token::Colon)
-                    .ignore_then(type_.clone())
-                    .or_not(),
-            )
+            .then(just(Token::Colon).ignore_then(type_.clone()).or_not())
             .then_ignore(just(Token::Assign))
             .then(expr)
             .map(|((name, type_annotation), expr)| VariableDecl {
@@ -359,9 +325,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         .ignore_then(ident)
         .then_ignore(just(Token::Assign))
         .then(type_.clone())
-        .map(|(name, body)| {
-            Decl::TypeAlias(TypeAliasDecl { name, body })
-        });
+        .map(|(name, body)| Decl::TypeAlias(TypeAliasDecl { name, body }));
     let interface_decl = ident
         .delimited_by(just(Token::Interface), just(Token::Where))
         .then(indented(
@@ -390,25 +354,16 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         .then_ignore(end())
 }
 
-pub(crate) fn parse(
-    ts: Vec<(Token, Span)>,
-    src: &str,
-    src_len: usize,
-) -> Ast {
-    let r = parser().parse(Stream::from_iter(
-        src_len..src_len + 1,
-        ts.into_iter(),
-    ));
+pub(crate) fn parse(ts: Vec<(Token, Span)>, src: &str, src_len: usize) -> Ast {
+    let r =
+        parser().parse(Stream::from_iter(src_len..src_len + 1, ts.into_iter()));
     match r {
         Ok(decls) => Ast { decls },
         Err(es) => {
             for e in es {
                 let e = e.map(|c| format!("{:?}", c));
-                let report = Report::build(
-                    ReportKind::Error,
-                    (),
-                    e.span().start,
-                );
+                let report =
+                    Report::build(ReportKind::Error, (), e.span().start);
                 let report = match e.reason() {
                     chumsky::error::SimpleReason::Unclosed {
                         span,
@@ -431,65 +386,45 @@ pub(crate) fn parse(
                                 .with_message(format!(
                                     "Must be closed before this {}",
                                     e.found()
-                                        .unwrap_or(
-                                            &"end of file"
-                                                .to_string()
-                                        )
+                                        .unwrap_or(&"end of file".to_string())
                                         .fg(Color::Red)
                                 ))
                                 .with_color(Color::Red),
                         ),
-                    chumsky::error::SimpleReason::Unexpected => {
-                        report
-                            .with_message(format!(
-                                "{}, expected {}",
-                                if e.found().is_some() {
-                                    "Unexpected token in input"
-                                } else {
-                                    "Unexpected end of input"
-                                },
-                                if e.expected().len() == 0 {
-                                    "something else".to_string()
-                                } else {
-                                    e.expected()
-                                        .map(
-                                            |expected| match expected
-                                            {
-                                                Some(expected) => {
-                                                    expected
-                                                        .to_string()
-                                                }
-                                                None => {
-                                                    "end of input"
-                                                        .to_string()
-                                                }
-                                            },
-                                        )
-                                        .collect::<Vec<_>>()
-                                        .join(", ")
-                                }
-                            ))
-                            .with_label(
-                                Label::new(e.span())
-                                    .with_message(format!(
-                                        "Unexpected token {}",
-                                        e.found()
-                                            .unwrap_or(
-                                                &"end of file"
-                                                    .to_string()
-                                            )
-                                            .fg(Color::Red)
-                                    ))
-                                    .with_color(Color::Red),
-                            )
-                    }
+                    chumsky::error::SimpleReason::Unexpected => report
+                        .with_message(format!(
+                            "{}, expected {}",
+                            if e.found().is_some() {
+                                "Unexpected token in input"
+                            } else {
+                                "Unexpected end of input"
+                            },
+                            if e.expected().len() == 0 {
+                                "something else".to_string()
+                            } else {
+                                e.expected()
+                                    .map(|expected| match expected {
+                                        Some(expected) => expected.to_string(),
+                                        None => "end of input".to_string(),
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            }
+                        ))
+                        .with_label(
+                            Label::new(e.span())
+                                .with_message(format!(
+                                    "Unexpected token {}",
+                                    e.found()
+                                        .unwrap_or(&"end of file".to_string())
+                                        .fg(Color::Red)
+                                ))
+                                .with_color(Color::Red),
+                        ),
                     chumsky::error::SimpleReason::Custom(msg) => {
                         report.with_message(msg).with_label(
                             Label::new(e.span())
-                                .with_message(format!(
-                                    "{}",
-                                    msg.fg(Color::Red)
-                                ))
+                                .with_message(format!("{}", msg.fg(Color::Red)))
                                 .with_color(Color::Red),
                         )
                     }

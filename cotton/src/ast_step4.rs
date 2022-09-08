@@ -83,12 +83,9 @@ impl<'a> From<ast_step3::Ast<'a>> for Ast<'a> {
 
 #[derive(Debug, PartialEq, Clone)]
 struct Monomorphics<'a, 'b> {
-    map: FxHashMap<
-        (DeclId, BTreeMap<TypeVariable, Type<'a>>),
-        VariableDecl<'a>,
-    >,
-    variable_decls:
-        FxHashMap<DeclId, &'b ast_step3::VariableDecl<'a>>,
+    map:
+        FxHashMap<(DeclId, BTreeMap<TypeVariable, Type<'a>>), VariableDecl<'a>>,
+    variable_decls: FxHashMap<DeclId, &'b ast_step3::VariableDecl<'a>>,
     data_decls: FxHashMap<DeclId, &'b ast_step2::DataDecl<'a>>,
     resolved_idents: &'b ResolvedIdents<'a>,
 }
@@ -107,14 +104,13 @@ fn variable_decl<'a>(
                 (did, d)
             })
             .collect();
-    let data_decls: FxHashMap<DeclId, &ast_step2::DataDecl<'a>> =
-        data_decls
-            .iter()
-            .map(|d| {
-                let did = d.decl_id;
-                (did, d)
-            })
-            .collect();
+    let data_decls: FxHashMap<DeclId, &ast_step2::DataDecl<'a>> = data_decls
+        .iter()
+        .map(|d| {
+            let did = d.decl_id;
+            (did, d)
+        })
+        .collect();
     log::debug!("decl_decls: {:?}", variable_decls.keys());
     let mut monomorphics = Monomorphics {
         map: Default::default(),
@@ -128,8 +124,7 @@ fn variable_decl<'a>(
         Default::default(),
         Default::default(),
     );
-    let decls =
-        monomorphics.map.into_iter().map(|(_, d)| d).collect();
+    let decls = monomorphics.map.into_iter().map(|(_, d)| d).collect();
     (decls, entry_point)
 }
 
@@ -143,19 +138,16 @@ impl<'a> Monomorphics<'a, '_> {
     ) -> DeclId {
         if let Some(d) = trace.get(&old_decl_id) {
             *d
-        } else if let Some(d) =
-            self.map.get(&(old_decl_id, type_args.clone()))
+        } else if let Some(d) = self.map.get(&(old_decl_id, type_args.clone()))
         {
             d.decl_id
-        } else if let Some(d) = self.variable_decls.get(&old_decl_id)
-        {
+        } else if let Some(d) = self.variable_decls.get(&old_decl_id) {
             let d = (*d).clone();
             let new_decl_id = DeclId::new();
             trace.insert(old_decl_id, new_decl_id);
             let (mut value, mut value_t) =
                 self.monomorphy_expr(d.value, &type_args, trace);
-            for (decl_id, name, t) in implicit_args.into_iter().rev()
-            {
+            for (decl_id, name, t) in implicit_args.into_iter().rev() {
                 value = Expr::Lambda(vec![FnArm {
                     pattern: vec![vec![PatternUnit::Binder(
                         name,
@@ -167,13 +159,14 @@ impl<'a> Monomorphics<'a, '_> {
                 value_t = TypeUnit::Fn(t, value_t).into();
             }
             let value = (value, value_t);
-            verify_types_do_not_have_free_variables(&value)
-                .unwrap_or_else(|t| {
+            verify_types_do_not_have_free_variables(&value).unwrap_or_else(
+                |t| {
                     panic!(
                         "could not identify type variable in {}, {}",
                         t.1, d.name
                     )
-                });
+                },
+            );
             self.map.insert(
                 (old_decl_id, type_args),
                 VariableDecl {
@@ -203,10 +196,7 @@ impl<'a> Monomorphics<'a, '_> {
             VariableId::Decl(decl_id) => {
                 if let Some(d) = self.data_decls.get(&decl_id) {
                     new_type_args = Some(
-                        d.fields
-                            .iter()
-                            .map(|v| type_args[v].clone())
-                            .collect(),
+                        d.fields.iter().map(|v| type_args[v].clone()).collect(),
                     );
                     VariableId::Decl(decl_id)
                 } else {
@@ -217,9 +207,7 @@ impl<'a> Monomorphics<'a, '_> {
                             resolved_item
                                 .implicit_args
                                 .iter()
-                                .map(|(i, name, t, _)| {
-                                    (*i, *name, t.clone())
-                                })
+                                .map(|(i, name, t, _)| (*i, *name, t.clone()))
                                 .collect(),
                             trace,
                         ),
@@ -244,11 +232,8 @@ impl<'a> Monomorphics<'a, '_> {
             ast_step3::Expr::Lambda(arms) => Expr::Lambda(
                 arms.into_iter()
                     .map(|a| {
-                        let expr = self.monomorphy_expr(
-                            a.expr,
-                            t_args,
-                            trace.clone(),
-                        );
+                        let expr =
+                            self.monomorphy_expr(a.expr, t_args, trace.clone());
                         FnArm {
                             pattern: a.pattern,
                             expr,
@@ -280,23 +265,15 @@ impl<'a> Monomorphics<'a, '_> {
                 for (_, _, implicit_arg_t, _) in
                     resolved_item.implicit_args.iter().rev()
                 {
-                    fn_t = TypeUnit::Fn(implicit_arg_t.clone(), fn_t)
-                        .into();
+                    fn_t = TypeUnit::Fn(implicit_arg_t.clone(), fn_t).into();
                     ts.push(fn_t.clone());
                 }
-                for (
-                    (_, name, implicit_arg_t, resolved_item),
-                    fn_t,
-                ) in resolved_item
-                    .implicit_args
-                    .iter()
-                    .zip(ts.into_iter().rev())
+                for ((_, name, implicit_arg_t, resolved_item), fn_t) in
+                    resolved_item.implicit_args.iter().zip(ts.into_iter().rev())
                 {
                     let (variable_id, type_args) = self
                         .get_variable_id_from_resolved_item(
-                            &resolved_item
-                                .clone()
-                                .replace_variables(t_args),
+                            &resolved_item.clone().replace_variables(t_args),
                             trace.clone(),
                         );
                     value = Expr::Call(
@@ -314,19 +291,14 @@ impl<'a> Monomorphics<'a, '_> {
                 value
             }
             ast_step3::Expr::Call(f, a) => Expr::Call(
-                self.monomorphy_expr(*f, t_args, trace.clone())
-                    .into(),
+                self.monomorphy_expr(*f, t_args, trace.clone()).into(),
                 self.monomorphy_expr(*a, t_args, trace).into(),
             ),
             ast_step3::Expr::Do(exprs) => Expr::DoBlock(
                 exprs
                     .into_iter()
                     .map(|expr| {
-                        self.monomorphy_expr(
-                            expr,
-                            t_args,
-                            trace.clone(),
-                        )
+                        self.monomorphy_expr(expr, t_args, trace.clone())
                     })
                     .collect(),
             ),
@@ -343,15 +315,15 @@ fn verify_types_do_not_have_free_variables<'a, 'b>(
             Expr::Lambda(arms) => arms.iter().try_for_each(|arm| {
                 verify_types_do_not_have_free_variables(&arm.expr)
             }),
-            Expr::Number(_)
-            | Expr::StrLiteral(_)
-            | Expr::Ident { .. } => Ok(()),
-            Expr::Call(e1, e2) => [e1, e2].iter().try_for_each(|e| {
-                verify_types_do_not_have_free_variables(e)
-            }),
-            Expr::DoBlock(es) => es.iter().try_for_each(
-                verify_types_do_not_have_free_variables,
-            ),
+            Expr::Number(_) | Expr::StrLiteral(_) | Expr::Ident { .. } => {
+                Ok(())
+            }
+            Expr::Call(e1, e2) => [e1, e2]
+                .iter()
+                .try_for_each(|e| verify_types_do_not_have_free_variables(e)),
+            Expr::DoBlock(es) => es
+                .iter()
+                .try_for_each(verify_types_do_not_have_free_variables),
         }
     } else {
         Err(et)

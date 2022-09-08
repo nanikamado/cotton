@@ -11,8 +11,7 @@ use crate::ast_step2::{
     self,
     decl_id::DeclId,
     types::{Type, TypeMatchable, TypeVariable},
-    DataDecl, IncompleteType, Pattern, SubtypeRelations,
-    TypeConstructor,
+    DataDecl, IncompleteType, Pattern, SubtypeRelations, TypeConstructor,
 };
 pub use crate::ast_step3::type_check::ResolvedIdent;
 use fxhash::{FxHashMap, FxHashSet};
@@ -55,12 +54,8 @@ pub struct FnArm<'a> {
 
 impl<'a> From<ast_step2::Ast<'a>> for Ast<'a> {
     fn from(ast: ast_step2::Ast<'a>) -> Self {
-        let (
-            resolved_idents,
-            types_of_decls,
-            mut subtype_relations,
-            mut map,
-        ) = type_check(&ast);
+        let (resolved_idents, types_of_decls, mut subtype_relations, mut map) =
+            type_check(&ast);
         log::trace!("{:?}", resolved_idents);
         log::trace!("map : {}", map);
         log::debug!("subtype_relations: {}", subtype_relations);
@@ -99,18 +94,14 @@ fn variable_decl<'a>(
     let decl_type = types_of_decls.get(&d.decl_id).unwrap();
     assert_eq!(0, decl_type.variable_requirements.len());
     let type_ = IncompleteType {
-        constructor: map
-            .normalize_type(decl_type.constructor.clone()),
+        constructor: map.normalize_type(decl_type.constructor.clone()),
         variable_requirements: Vec::new(),
         subtype_relations: decl_type
             .subtype_relations
             .0
             .iter()
             .map(|(a, b)| {
-                (
-                    map.normalize_type(a.clone()),
-                    map.normalize_type(b.clone()),
-                )
+                (map.normalize_type(a.clone()), map.normalize_type(b.clone()))
             })
             .collect(),
         pattern_restrictions: decl_type.pattern_restrictions.clone(),
@@ -160,9 +151,7 @@ fn expr<'a>(
         ),
         ast_step2::Expr::Number(a) => Number(a),
         ast_step2::Expr::StrLiteral(a) => StrLiteral(a),
-        ast_step2::Expr::Ident { name, ident_id } => {
-            Ident { name, ident_id }
-        }
+        ast_step2::Expr::Ident { name, ident_id } => Ident { name, ident_id },
         ast_step2::Expr::Call(f, a) => Call(
             expr(
                 *f,
@@ -262,11 +251,7 @@ fn remove_free_type_variables<'a>(
 ) -> Type<'a> {
     for v in t.all_type_variables() {
         if !fixed_variables.contains(&v) {
-            map.insert(
-                subtype_relatoins,
-                v,
-                TypeMatchable::Empty.into(),
-            );
+            map.insert(subtype_relatoins, v, TypeMatchable::Empty.into());
         }
     }
     map.normalize_type(t)

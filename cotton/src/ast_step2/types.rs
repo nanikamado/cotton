@@ -46,14 +46,10 @@ mod type_unit {
     use crate::ast_step2::TypeId;
     use std::{cell::Cell, fmt::Display};
 
-    #[derive(
-        Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
-    )]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct TypeVariableInner(usize);
 
-    #[derive(
-        Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
-    )]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub enum TypeVariable {
         Normal(TypeVariableInner),
         RecursiveIndex(usize),
@@ -148,10 +144,7 @@ mod type_unit {
     }
 
     impl Display for TypeVariable {
-        fn fmt(
-            &self,
-            f: &mut std::fmt::Formatter<'_>,
-        ) -> std::fmt::Result {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
                 TypeVariable::Normal(TypeVariableInner(n)) => {
                     write!(f, "t{}", n)
@@ -169,16 +162,13 @@ mod type_type {
 
     use super::{TypeMatchable, TypeMatchableRef, TypeUnit};
 
-    #[derive(
-        Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
-    )]
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
     pub struct Type<'a>(BTreeSet<TypeUnit<'a>>);
 
     impl<'a> IntoIterator for Type<'a> {
         type Item = TypeUnit<'a>;
 
-        type IntoIter =
-            std::collections::btree_set::IntoIter<Self::Item>;
+        type IntoIter = std::collections::btree_set::IntoIter<Self::Item>;
 
         fn into_iter(self) -> Self::IntoIter {
             self.0.into_iter()
@@ -188,8 +178,7 @@ mod type_type {
     impl<'a> Type<'a> {
         pub fn iter<'b>(
             &'b self,
-        ) -> std::collections::btree_set::Iter<'b, TypeUnit<'a>>
-        {
+        ) -> std::collections::btree_set::Iter<'b, TypeUnit<'a>> {
             self.0.iter()
         }
 
@@ -229,9 +218,7 @@ mod type_type {
             }
         }
 
-        pub fn matchable_ref<'b>(
-            &'b self,
-        ) -> TypeMatchableRef<'a, 'b> {
+        pub fn matchable_ref<'b>(&'b self) -> TypeMatchableRef<'a, 'b> {
             use TypeMatchableRef::*;
             match self.0.len() {
                 0 => Empty,
@@ -257,9 +244,7 @@ mod type_type {
     }
 
     impl<'a> FromIterator<TypeUnit<'a>> for Type<'a> {
-        fn from_iter<T: IntoIterator<Item = TypeUnit<'a>>>(
-            iter: T,
-        ) -> Self {
+        fn from_iter<T: IntoIterator<Item = TypeUnit<'a>>>(iter: T) -> Self {
             Type(iter.into_iter().collect())
         }
     }
@@ -279,9 +264,7 @@ impl<'a> From<TypeMatchable<'a>> for Type<'a> {
             }
             TypeMatchable::Fn(a, b) => TypeUnit::Fn(a, b).into(),
             TypeMatchable::Union(u) => u,
-            TypeMatchable::Variable(i) => {
-                TypeUnit::Variable(i).into()
-            }
+            TypeMatchable::Variable(i) => TypeUnit::Variable(i).into(),
             TypeMatchable::Empty => Default::default(),
             TypeMatchable::RecursiveAlias { body } => {
                 TypeUnit::RecursiveAlias { body }.into()
@@ -293,8 +276,7 @@ impl<'a> From<TypeMatchable<'a>> for Type<'a> {
 #[derive(Debug, Hash, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SingleTypeConstructor<'a> {
     pub type_: Type<'a>,
-    pub contravariant_candidates_from_annotation:
-        Option<Vec<TypeVariable>>,
+    pub contravariant_candidates_from_annotation: Option<Vec<TypeVariable>>,
 }
 
 impl<'a> TypeConstructor<'a> for SingleTypeConstructor<'a> {
@@ -335,8 +317,7 @@ impl<'a> TypeConstructor<'a> for SingleTypeConstructor<'a> {
     }
 
     fn contravariant_type_variables(&self) -> Vec<TypeVariable> {
-        if let Some(cs) =
-            self.contravariant_candidates_from_annotation.as_ref()
+        if let Some(cs) = self.contravariant_candidates_from_annotation.as_ref()
         {
             cs.clone()
         } else {
@@ -348,20 +329,12 @@ impl<'a> TypeConstructor<'a> for SingleTypeConstructor<'a> {
         self.type_.find_recursive_alias()
     }
 
-    fn replace_type(
-        mut self,
-        from: &TypeUnit<'a>,
-        to: &TypeUnit<'a>,
-    ) -> Self {
+    fn replace_type(mut self, from: &TypeUnit<'a>, to: &TypeUnit<'a>) -> Self {
         self.type_ = self.type_.replace_type(from, to);
         self
     }
 
-    fn replace_type_union(
-        mut self,
-        from: &Type,
-        to: &TypeUnit<'a>,
-    ) -> Self {
+    fn replace_type_union(mut self, from: &Type, to: &TypeUnit<'a>) -> Self {
         self.type_ = self.type_.replace_type_union(from, to);
         self
     }
@@ -377,10 +350,7 @@ impl<'a> TypeConstructor<'a> for SingleTypeConstructor<'a> {
         (self, updated)
     }
 
-    fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(
-        mut self,
-        f: F,
-    ) -> Self {
+    fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(mut self, f: F) -> Self {
         self.type_ = self.type_.map_type(f);
         self
     }
@@ -389,8 +359,7 @@ impl<'a> TypeConstructor<'a> for SingleTypeConstructor<'a> {
         mut self,
         map: &mut TypeVariableMap,
     ) -> Option<Self> {
-        if let Some(a) = self.contravariant_candidates_from_annotation
-        {
+        if let Some(a) = self.contravariant_candidates_from_annotation {
             self.contravariant_candidates_from_annotation = Some(
                 a.into_iter()
                     .map(|t| {
@@ -435,8 +404,7 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
         let t = self
             .into_iter()
             .flat_map(|t| {
-                let (t2, u) =
-                    t.replace_num_with_update_flag(from, to);
+                let (t2, u) = t.replace_num_with_update_flag(from, to);
                 updated |= u;
                 t2.into_iter()
             })
@@ -456,19 +424,15 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
                 .collect(),
             TypeMatchableRef::Union(cs) => cs
                 .iter()
-                .map(|c| {
-                    Type::from(c.clone()).covariant_type_variables()
-                })
+                .map(|c| Type::from(c.clone()).covariant_type_variables())
                 .concat(),
             TypeMatchableRef::Variable(n) => {
                 vec![n]
             }
             TypeMatchableRef::Empty => Default::default(),
             TypeMatchableRef::RecursiveAlias { body } => {
-                let mut vs: FxHashSet<_> = body
-                    .covariant_type_variables()
-                    .into_iter()
-                    .collect();
+                let mut vs: FxHashSet<_> =
+                    body.covariant_type_variables().into_iter().collect();
                 vs.remove(&TypeVariable::RecursiveIndex(0));
                 vs.into_iter().collect()
             }
@@ -487,18 +451,14 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
                 .concat(),
             TypeMatchableRef::Union(cs) => cs
                 .iter()
-                .map(|c| {
-                    Type::from(c.clone())
-                        .contravariant_type_variables()
-                })
+                .map(|c| Type::from(c.clone()).contravariant_type_variables())
                 .concat(),
-            TypeMatchableRef::Variable(_)
-            | TypeMatchableRef::Empty => Default::default(),
+            TypeMatchableRef::Variable(_) | TypeMatchableRef::Empty => {
+                Default::default()
+            }
             TypeMatchableRef::RecursiveAlias { body } => {
-                let mut vs: FxHashSet<_> = body
-                    .contravariant_type_variables()
-                    .into_iter()
-                    .collect();
+                let mut vs: FxHashSet<_> =
+                    body.contravariant_type_variables().into_iter().collect();
                 vs.remove(&TypeVariable::RecursiveIndex(0));
                 vs.into_iter().collect()
             }
@@ -509,19 +469,11 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
         self.iter().find_map(TypeUnit::find_recursive_alias)
     }
 
-    fn replace_type(
-        self,
-        from: &TypeUnit<'a>,
-        to: &TypeUnit<'a>,
-    ) -> Self {
+    fn replace_type(self, from: &TypeUnit<'a>, to: &TypeUnit<'a>) -> Self {
         self.into_iter().map(|t| t.replace_type(from, to)).collect()
     }
 
-    fn replace_type_union(
-        self,
-        from: &Type,
-        to: &TypeUnit<'a>,
-    ) -> Self {
+    fn replace_type_union(self, from: &Type, to: &TypeUnit<'a>) -> Self {
         if self == *from {
             to.clone().into()
         } else {
@@ -543,10 +495,8 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
             (
                 self.into_iter()
                     .map(|t| {
-                        let (t, u) = t
-                            .replace_type_union_with_update_flag(
-                                from, to,
-                            );
+                        let (t, u) =
+                            t.replace_type_union_with_update_flag(from, to);
                         updated |= u;
                         t
                     })
@@ -556,10 +506,7 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
         }
     }
 
-    fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(
-        self,
-        mut f: F,
-    ) -> Self {
+    fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(self, mut f: F) -> Self {
         f(self)
     }
 
@@ -581,12 +528,7 @@ fn marge_vec<T>(mut a: Vec<T>, mut b: Vec<T>) -> Vec<T> {
 }
 
 pub trait TypeConstructor<'a>:
-    Sized
-    + std::fmt::Debug
-    + std::fmt::Display
-    + Eq
-    + Clone
-    + std::hash::Hash
+    Sized + std::fmt::Debug + std::fmt::Display + Eq + Clone + std::hash::Hash
 {
     fn all_type_variables(&self) -> FxHashSet<TypeVariable>;
     fn all_type_variables_vec(&self) -> Vec<TypeVariable>;
@@ -600,16 +542,8 @@ pub trait TypeConstructor<'a>:
     fn covariant_type_variables(&self) -> Vec<TypeVariable>;
     fn contravariant_type_variables(&self) -> Vec<TypeVariable>;
     fn find_recursive_alias(&self) -> Option<Type<'a>>;
-    fn replace_type(
-        self,
-        from: &TypeUnit<'a>,
-        to: &TypeUnit<'a>,
-    ) -> Self;
-    fn replace_type_union(
-        self,
-        from: &Type,
-        to: &TypeUnit<'a>,
-    ) -> Self;
+    fn replace_type(self, from: &TypeUnit<'a>, to: &TypeUnit<'a>) -> Self;
+    fn replace_type_union(self, from: &Type, to: &TypeUnit<'a>) -> Self;
     fn replace_type_union_with_update_flag(
         self,
         from: &Type,
@@ -638,10 +572,7 @@ impl<'a> TypeUnit<'a> {
 }
 
 impl Display for Type<'_> {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use TypeMatchableRef::*;
         match self.matchable_ref() {
             Normal { name, args, .. } => {
@@ -652,9 +583,7 @@ impl Display for Type<'_> {
                         f,
                         "{}({})",
                         name,
-                        args.iter()
-                            .map(|c| format!("{}", c))
-                            .join(", ")
+                        args.iter().map(|c| format!("{}", c)).join(", ")
                     )
                 }
             }
@@ -688,10 +617,7 @@ impl Display for Type<'_> {
 }
 
 impl Display for TypeUnit<'_> {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use TypeUnit::*;
         match self {
             Normal { name, args, .. } => {
@@ -702,16 +628,12 @@ impl Display for TypeUnit<'_> {
                         f,
                         "{}({})",
                         name,
-                        args.iter()
-                            .map(|c| format!("{}", c))
-                            .join(", ")
+                        args.iter().map(|c| format!("{}", c)).join(", ")
                     )
                 }
             }
             Fn(arg, rtn) => {
-                if let TypeMatchableRef::Fn(_, _) =
-                    arg.matchable_ref()
-                {
+                if let TypeMatchableRef::Fn(_, _) = arg.matchable_ref() {
                     write!(f, "({}) -> {}", arg, rtn)
                 } else {
                     write!(f, "{} -> {}", arg, rtn)
@@ -726,10 +648,7 @@ impl Display for TypeUnit<'_> {
 }
 
 impl Display for SingleTypeConstructor<'_> {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
             "{} (annotation: {})",
@@ -748,16 +667,13 @@ impl Display for SingleTypeConstructor<'_> {
 impl<'a> From<IncompleteType<'a, SingleTypeConstructor<'a>>>
     for IncompleteType<'a, Type<'a>>
 {
-    fn from(
-        t: IncompleteType<'a, SingleTypeConstructor<'a>>,
-    ) -> Self {
+    fn from(t: IncompleteType<'a, SingleTypeConstructor<'a>>) -> Self {
         IncompleteType {
             constructor: t.constructor.type_,
             variable_requirements: t.variable_requirements,
             subtype_relations: t.subtype_relations,
             pattern_restrictions: t.pattern_restrictions,
-            already_considered_relations: t
-                .already_considered_relations,
+            already_considered_relations: t.already_considered_relations,
         }
     }
 }

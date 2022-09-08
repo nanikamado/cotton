@@ -27,9 +27,7 @@ impl<'a> TypeUnit<'a> {
             TypeUnit::Variable(i) => std::iter::once(*i).collect(),
             TypeUnit::RecursiveAlias { body } => {
                 let s = body.all_type_variables_vec();
-                s.into_iter()
-                    .filter(|d| !d.is_recursive_index())
-                    .collect()
+                s.into_iter().filter(|d| !d.is_recursive_index()).collect()
             }
         }
     }
@@ -52,8 +50,7 @@ impl<'a> TypeUnit<'a> {
                 let args = args
                     .into_iter()
                     .map(|t| {
-                        let (t, u) =
-                            t.replace_num_with_update_flag(from, to);
+                        let (t, u) = t.replace_num_with_update_flag(from, to);
                         updated |= u;
                         t
                     })
@@ -75,30 +72,21 @@ impl<'a> TypeUnit<'a> {
                 }
             }
             Self::RecursiveAlias { body } => {
-                let (body, updated) = body
-                    .replace_num_with_update_flag(
-                        from.increment_recursive_index(),
-                        &to.clone().increment_recursive_index(0),
-                    );
+                let (body, updated) = body.replace_num_with_update_flag(
+                    from.increment_recursive_index(),
+                    &to.clone().increment_recursive_index(0),
+                );
                 let t = (Self::RecursiveAlias { body }).into();
                 (t, updated)
             }
         }
     }
 
-    pub fn replace_num(
-        self,
-        from: TypeVariable,
-        to: &Type<'a>,
-    ) -> Type<'a> {
+    pub fn replace_num(self, from: TypeVariable, to: &Type<'a>) -> Type<'a> {
         self.replace_num_with_update_flag(from, to).0
     }
 
-    pub fn replace_type(
-        self,
-        from: &TypeUnit<'a>,
-        to: &TypeUnit<'a>,
-    ) -> Self {
+    pub fn replace_type(self, from: &TypeUnit<'a>, to: &TypeUnit<'a>) -> Self {
         match self {
             t if t == *from => to.clone(),
             Self::Fn(args, rtn) => Self::Fn(
@@ -120,11 +108,7 @@ impl<'a> TypeUnit<'a> {
         }
     }
 
-    pub fn replace_type_union(
-        self,
-        from: &Type,
-        to: &TypeUnit<'a>,
-    ) -> Self {
+    pub fn replace_type_union(self, from: &Type, to: &TypeUnit<'a>) -> Self {
         match self {
             Self::Fn(args, rtn) => Self::Fn(
                 args.replace_type_union(from, to),
@@ -155,9 +139,7 @@ impl<'a> TypeUnit<'a> {
             },
             TypeUnit::Fn(a, b) => Fn(a, b),
             TypeUnit::Variable(v) => Variable(*v),
-            TypeUnit::RecursiveAlias { body } => {
-                RecursiveAlias { body }
-            }
+            TypeUnit::RecursiveAlias { body } => RecursiveAlias { body },
         }
     }
 
@@ -171,8 +153,8 @@ impl<'a> TypeUnit<'a> {
         }
         match self {
             Self::Fn(args, rtn) => {
-                let (args, u1) = args
-                    .replace_type_union_with_update_flag(from, to);
+                let (args, u1) =
+                    args.replace_type_union_with_update_flag(from, to);
                 let (rtn, u2) =
                     rtn.replace_type_union_with_update_flag(from, to);
                 (Self::Fn(args, rtn), u1 || u2)
@@ -182,10 +164,8 @@ impl<'a> TypeUnit<'a> {
                 let args = args
                     .into_iter()
                     .map(|t| {
-                        let (t, u) = t
-                            .replace_type_union_with_update_flag(
-                                from, to,
-                            );
+                        let (t, u) =
+                            t.replace_type_union_with_update_flag(from, to);
                         updated |= u;
                         t
                     })
@@ -194,17 +174,14 @@ impl<'a> TypeUnit<'a> {
             }
             Self::Variable(n) => (Self::Variable(n), false),
             Self::RecursiveAlias { body } => {
-                let (body, updated) = body
-                    .replace_type_union_with_update_flag(from, to);
+                let (body, updated) =
+                    body.replace_type_union_with_update_flag(from, to);
                 (Self::RecursiveAlias { body }, updated)
             }
         }
     }
 
-    pub fn contains_variable(
-        &self,
-        variable_num: TypeVariable,
-    ) -> bool {
+    pub fn contains_variable(&self, variable_num: TypeVariable) -> bool {
         match self {
             Self::Normal { args, .. } => {
                 args.iter().any(|c| c.contains_variable(variable_num))
@@ -214,9 +191,9 @@ impl<'a> TypeUnit<'a> {
                     || r.contains_variable(variable_num)
             }
             Self::Variable(n) => *n == variable_num,
-            Self::RecursiveAlias { body } => body.contains_variable(
-                variable_num.increment_recursive_index(),
-            ),
+            Self::RecursiveAlias { body } => {
+                body.contains_variable(variable_num.increment_recursive_index())
+            }
         }
     }
 
@@ -225,9 +202,7 @@ impl<'a> TypeUnit<'a> {
             TypeUnit::Normal { args, .. } => {
                 args.iter().all(|c| c.is_singleton())
             }
-            TypeUnit::Fn(a, b) => {
-                a.is_singleton() && b.is_singleton()
-            }
+            TypeUnit::Fn(a, b) => a.is_singleton() && b.is_singleton(),
             _ => false,
         }
     }
@@ -249,9 +224,7 @@ impl<'a> TypeUnit<'a> {
             ) if id1 == id2 => {
                 let mut diff_count = 0;
                 let mut diff_position = None;
-                for (i, (a1, a2)) in
-                    args1.iter().zip(args2).enumerate()
-                {
+                for (i, (a1, a2)) in args1.iter().zip(args2).enumerate() {
                     if a1 != a2 {
                         diff_count += 1;
                         diff_position = Some(i);
@@ -307,21 +280,16 @@ impl<'a> TypeUnit<'a> {
         match self {
             TypeUnit::Normal { name, args, id } => TypeUnit::Normal {
                 name,
-                args: args
-                    .into_iter()
-                    .map(Type::conjunctive)
-                    .collect(),
+                args: args.into_iter().map(Type::conjunctive).collect(),
                 id,
             },
             TypeUnit::Fn(a, b) => {
                 TypeUnit::Fn(a.conjunctive(), b.conjunctive())
             }
             TypeUnit::Variable(v) => TypeUnit::Variable(v),
-            TypeUnit::RecursiveAlias { body } => {
-                TypeUnit::RecursiveAlias {
-                    body: body.conjunctive(),
-                }
-            }
+            TypeUnit::RecursiveAlias { body } => TypeUnit::RecursiveAlias {
+                body: body.conjunctive(),
+            },
         }
     }
 
@@ -335,9 +303,7 @@ impl<'a> TypeUnit<'a> {
                 args: args
                     .into_iter()
                     .map(|t| {
-                        t.increment_recursive_index(
-                            greater_than_or_equal_to,
-                        )
+                        t.increment_recursive_index(greater_than_or_equal_to)
                     })
                     .collect(),
                 id,
@@ -346,18 +312,15 @@ impl<'a> TypeUnit<'a> {
                 a.increment_recursive_index(greater_than_or_equal_to),
                 b.increment_recursive_index(greater_than_or_equal_to),
             ),
-            TypeUnit::Variable(v) => TypeUnit::Variable(
-                v.increment_recursive_index_with_bound(
+            TypeUnit::Variable(v) => {
+                TypeUnit::Variable(v.increment_recursive_index_with_bound(
                     greater_than_or_equal_to,
-                ),
-            ),
-            TypeUnit::RecursiveAlias { body } => {
-                TypeUnit::RecursiveAlias {
-                    body: body.increment_recursive_index(
-                        greater_than_or_equal_to + 1,
-                    ),
-                }
+                ))
             }
+            TypeUnit::RecursiveAlias { body } => TypeUnit::RecursiveAlias {
+                body: body
+                    .increment_recursive_index(greater_than_or_equal_to + 1),
+            },
         }
     }
 
@@ -371,9 +334,7 @@ impl<'a> TypeUnit<'a> {
                 args: args
                     .into_iter()
                     .map(|t| {
-                        t.decrement_recursive_index(
-                            greater_than_or_equal_to,
-                        )
+                        t.decrement_recursive_index(greater_than_or_equal_to)
                     })
                     .collect(),
                 id,
@@ -382,18 +343,15 @@ impl<'a> TypeUnit<'a> {
                 a.decrement_recursive_index(greater_than_or_equal_to),
                 b.decrement_recursive_index(greater_than_or_equal_to),
             ),
-            TypeUnit::Variable(v) => TypeUnit::Variable(
-                v.decrement_recursive_index_with_bound(
+            TypeUnit::Variable(v) => {
+                TypeUnit::Variable(v.decrement_recursive_index_with_bound(
                     greater_than_or_equal_to,
-                ),
-            ),
-            TypeUnit::RecursiveAlias { body } => {
-                TypeUnit::RecursiveAlias {
-                    body: body.decrement_recursive_index(
-                        greater_than_or_equal_to + 1,
-                    ),
-                }
+                ))
             }
+            TypeUnit::RecursiveAlias { body } => TypeUnit::RecursiveAlias {
+                body: body
+                    .decrement_recursive_index(greater_than_or_equal_to + 1),
+            },
         }
     }
 }
@@ -401,9 +359,7 @@ impl<'a> TypeUnit<'a> {
 impl<'a> Type<'a> {
     pub fn is_singleton(&self) -> bool {
         match self.matchable_ref() {
-            Normal { args, .. } => {
-                args.iter().all(|c| c.is_singleton())
-            }
+            Normal { args, .. } => args.iter().all(|c| c.is_singleton()),
             Fn(a, b) => a.is_singleton() && b.is_singleton(),
             _ => false,
         }
@@ -461,11 +417,7 @@ impl<'a> Type<'a> {
                                 // vec![t]
                             })
                             .multi_cartesian_product()
-                            .map(|args| TypeUnit::Normal {
-                                name,
-                                args,
-                                id,
-                            })
+                            .map(|args| TypeUnit::Normal { name, args, id })
                             .collect()
                     }
                 }
@@ -495,9 +447,7 @@ impl<'a> Type<'a> {
         greater_than_or_equal_to: usize,
     ) -> Self {
         self.into_iter()
-            .map(|t| {
-                t.increment_recursive_index(greater_than_or_equal_to)
-            })
+            .map(|t| t.increment_recursive_index(greater_than_or_equal_to))
             .collect()
     }
 
@@ -506,9 +456,7 @@ impl<'a> Type<'a> {
         greater_than_or_equal_to: usize,
     ) -> Self {
         self.into_iter()
-            .map(|t| {
-                t.decrement_recursive_index(greater_than_or_equal_to)
-            })
+            .map(|t| t.decrement_recursive_index(greater_than_or_equal_to))
             .collect()
     }
 }
@@ -566,12 +514,9 @@ impl<'a> IncompleteType<'a> {
         let mut variable_map = Vec::new();
         for a in anos {
             let new_variable = TypeVariable::new();
-            self = self.replace_num(
-                a,
-                &TypeUnit::Variable(new_variable).into(),
-            );
-            variable_map
-                .push((a, TypeUnit::Variable(new_variable).into()));
+            self =
+                self.replace_num(a, &TypeUnit::Variable(new_variable).into());
+            variable_map.push((a, TypeUnit::Variable(new_variable).into()));
         }
         (self, variable_map)
     }
@@ -581,11 +526,7 @@ impl<'a, T> IncompleteType<'a, T>
 where
     T: TypeConstructor<'a>,
 {
-    pub fn replace_num(
-        self,
-        from: TypeVariable,
-        to: &Type<'a>,
-    ) -> Self {
+    pub fn replace_num(self, from: TypeVariable, to: &Type<'a>) -> Self {
         self.map_type(|t| t.replace_num(from, to))
     }
 
@@ -623,11 +564,10 @@ where
                 .map(|(a, b)| (f(a), f(b)))
                 .collect(),
             pattern_restrictions,
-            already_considered_relations:
-                already_considered_relations
-                    .into_iter()
-                    .map(|(a, b)| (f(a), f(b)))
-                    .collect(),
+            already_considered_relations: already_considered_relations
+                .into_iter()
+                .map(|(a, b)| (f(a), f(b)))
+                .collect(),
         }
     }
 
