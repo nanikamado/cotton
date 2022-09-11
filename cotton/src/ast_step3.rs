@@ -6,6 +6,7 @@ pub use self::type_check::{
     VariableRequirement,
 };
 use crate::ast_step2::ident_id::IdentId;
+use crate::ast_step2::types::TypeUnit;
 use crate::ast_step2::PatternUnit;
 use crate::ast_step2::{
     self,
@@ -192,7 +193,33 @@ fn expr<'a>(
         subtype_relations,
         map,
     );
-    (e, t)
+    (e, lift_recursive_alias(t))
+}
+
+/// Change `Cons[List[a], a] | Nil` to `List[a]`
+fn lift_recursive_alias<'a, T>(t: T) -> T
+where
+    T: TypeConstructor<'a>,
+{
+    if let Some(body) = t.find_recursive_alias() {
+        let r = &TypeUnit::RecursiveAlias { body: body.clone() };
+        let v = TypeVariable::new();
+        let t = t.replace_type(r, &TypeUnit::Variable(v));
+        let body = body.replace_num(
+            TypeVariable::RecursiveIndex(0),
+            &TypeUnit::Variable(v).into(),
+        );
+        let (t, updated) = t
+            .replace_type_union_with_update_flag(&body, &TypeUnit::Variable(v));
+        let t = t.replace_num(v, &r.clone().into());
+        if updated {
+            lift_recursive_alias(t)
+        } else {
+            t
+        }
+    } else {
+        t
+    }
 }
 
 fn fn_arm<'a>(
