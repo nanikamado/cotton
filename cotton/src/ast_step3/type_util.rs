@@ -3,7 +3,9 @@ use crate::{
     ast_step1,
     ast_step2::{
         type_to_type,
-        types::{Type, TypeMatchableRef, TypeUnit, TypeVariable},
+        types::{
+            unwrap_or_clone, Type, TypeMatchableRef, TypeUnit, TypeVariable,
+        },
         IncompleteType, TypeConstructor,
     },
     ast_step3::type_check::simplify_subtype_rel,
@@ -402,7 +404,7 @@ impl<'a> Type<'a> {
 
     pub fn disjunctive(self) -> Self {
         self.into_iter()
-            .flat_map(|tu| match tu {
+            .flat_map(|tu| match unwrap_or_clone(tu) {
                 TypeUnit::Normal { name, args, id } => {
                     if args.is_empty() {
                         vec![TypeUnit::Normal { name, args, id }]
@@ -427,8 +429,10 @@ impl<'a> Type<'a> {
     }
 
     pub fn conjunctive(self) -> Self {
-        let mut ts: Vec<_> =
-            self.into_iter().map(TypeUnit::conjunctive).collect();
+        let mut ts: Vec<_> = self
+            .into_iter()
+            .map(|t| unwrap_or_clone(t).conjunctive())
+            .collect();
         let mut new_ts = Vec::new();
         'pop_loop: while let Some(last_t) = ts.pop() {
             for t in ts.iter_mut() {
@@ -447,7 +451,10 @@ impl<'a> Type<'a> {
         greater_than_or_equal_to: usize,
     ) -> Self {
         self.into_iter()
-            .map(|t| t.increment_recursive_index(greater_than_or_equal_to))
+            .map(|t| {
+                unwrap_or_clone(t)
+                    .increment_recursive_index(greater_than_or_equal_to)
+            })
             .collect()
     }
 
@@ -456,7 +463,10 @@ impl<'a> Type<'a> {
         greater_than_or_equal_to: usize,
     ) -> Self {
         self.into_iter()
-            .map(|t| t.decrement_recursive_index(greater_than_or_equal_to))
+            .map(|t| {
+                unwrap_or_clone(t)
+                    .decrement_recursive_index(greater_than_or_equal_to)
+            })
             .collect()
     }
 }

@@ -51,77 +51,49 @@ impl IntrinsicVariable {
         }
     }
 
-    pub fn to_type(self) -> &'static Type<'static> {
-        &INTRINSIC_VARIABLES_TYPES[&self]
+    pub fn to_type(self) -> Type<'static> {
+        match self {
+            IntrinsicVariable::Minus => Type::from_str("I64")
+                .arrow(Type::from_str("I64").arrow(Type::from_str("I64"))),
+            IntrinsicVariable::Plus => Type::from_str("I64")
+                .arrow(Type::from_str("I64").arrow(Type::from_str("I64"))),
+            IntrinsicVariable::Percent => Type::from_str("I64")
+                .arrow(Type::from_str("I64").arrow(Type::from_str("I64"))),
+            IntrinsicVariable::Multi => Type::from_str("I64")
+                .arrow(Type::from_str("I64").arrow(Type::from_str("I64"))),
+            IntrinsicVariable::Lt => {
+                Type::from_str("I64").arrow(Type::from_str("I64").arrow(
+                    Type::from_str("True").union(Type::from_str("False")),
+                ))
+            }
+            IntrinsicVariable::Neq => {
+                Type::from_str("I64").arrow(Type::from_str("I64").arrow(
+                    Type::from_str("True").union(Type::from_str("False")),
+                ))
+            }
+            IntrinsicVariable::Eq => {
+                Type::from_str("I64").arrow(Type::from_str("I64").arrow(
+                    Type::from_str("True").union(Type::from_str("False")),
+                ))
+            }
+            IntrinsicVariable::Println => {
+                Type::from_str("String").arrow(Type::from_str("()"))
+            }
+            IntrinsicVariable::Print => {
+                Type::from_str("String").arrow(Type::from_str("()"))
+            }
+            IntrinsicVariable::I64ToString => {
+                Type::from_str("I64").arrow(Type::from_str("String"))
+            }
+            IntrinsicVariable::True => Type::from_str("True"),
+            IntrinsicVariable::False => Type::from_str("False"),
+            IntrinsicVariable::Unit => Type::from_str("()"),
+            IntrinsicVariable::Append => Type::from_str("String").arrow(
+                Type::from_str("String").arrow(Type::from_str("String")),
+            ),
+        }
     }
 }
-
-pub static INTRINSIC_VARIABLES_TYPES: Lazy<FxHashMap<IntrinsicVariable, Type>> =
-    Lazy::new(|| {
-        vec![
-            (
-                IntrinsicVariable::Minus,
-                Type::from_str("I64")
-                    .arrow(Type::from_str("I64").arrow(Type::from_str("I64"))),
-            ),
-            (
-                IntrinsicVariable::Plus,
-                Type::from_str("I64")
-                    .arrow(Type::from_str("I64").arrow(Type::from_str("I64"))),
-            ),
-            (
-                IntrinsicVariable::Percent,
-                Type::from_str("I64")
-                    .arrow(Type::from_str("I64").arrow(Type::from_str("I64"))),
-            ),
-            (
-                IntrinsicVariable::Multi,
-                Type::from_str("I64")
-                    .arrow(Type::from_str("I64").arrow(Type::from_str("I64"))),
-            ),
-            (
-                IntrinsicVariable::Lt,
-                Type::from_str("I64").arrow(Type::from_str("I64").arrow(
-                    Type::from_str("True").union(Type::from_str("False")),
-                )),
-            ),
-            (
-                IntrinsicVariable::Neq,
-                Type::from_str("I64").arrow(Type::from_str("I64").arrow(
-                    Type::from_str("True").union(Type::from_str("False")),
-                )),
-            ),
-            (
-                IntrinsicVariable::Eq,
-                Type::from_str("I64").arrow(Type::from_str("I64").arrow(
-                    Type::from_str("True").union(Type::from_str("False")),
-                )),
-            ),
-            (
-                IntrinsicVariable::Println,
-                Type::from_str("String").arrow(Type::from_str("()")),
-            ),
-            (
-                IntrinsicVariable::Print,
-                Type::from_str("String").arrow(Type::from_str("()")),
-            ),
-            (
-                IntrinsicVariable::I64ToString,
-                Type::from_str("I64").arrow(Type::from_str("String")),
-            ),
-            (IntrinsicVariable::True, Type::from_str("True")),
-            (IntrinsicVariable::False, Type::from_str("False")),
-            (IntrinsicVariable::Unit, Type::from_str("()")),
-            (
-                IntrinsicVariable::Append,
-                Type::from_str("String").arrow(
-                    Type::from_str("String").arrow(Type::from_str("String")),
-                ),
-            ),
-        ]
-        .into_iter()
-        .collect()
-    });
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IntrinsicType {

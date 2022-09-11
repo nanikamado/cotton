@@ -6,7 +6,8 @@ use crate::ast_step2::TypeId;
 use crate::ast_step3::TypeVariableMap;
 use fxhash::FxHashSet;
 use itertools::Itertools;
-use std::{collections::BTreeSet, fmt::Display};
+use std::fmt::Display;
+use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeMatchable<'a> {
@@ -32,7 +33,7 @@ pub enum TypeMatchableRef<'a, 'b> {
         id: TypeId,
     },
     Fn(&'b Type<'a>, &'b Type<'a>),
-    Union(&'b BTreeSet<TypeUnit<'a>>),
+    Union(&'b Type<'a>),
     Variable(TypeVariable),
     Empty,
     RecursiveAlias {
@@ -157,14 +158,16 @@ mod type_unit {
 }
 
 mod type_type {
+    use crate::ast_step2::types::unwrap_or_clone;
+
     use super::{TypeMatchable, TypeMatchableRef, TypeUnit};
-    use std::{collections::BTreeSet, iter::FromIterator};
+    use std::{collections::BTreeSet, iter::FromIterator, rc::Rc};
 
     #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-    pub struct Type<'a>(BTreeSet<TypeUnit<'a>>);
+    pub struct Type<'a>(BTreeSet<Rc<TypeUnit<'a>>>);
 
     impl<'a> IntoIterator for Type<'a> {
-        type Item = TypeUnit<'a>;
+        type Item = Rc<TypeUnit<'a>>;
 
         type IntoIter = std::collections::btree_set::IntoIter<Self::Item>;
 
@@ -176,7 +179,7 @@ mod type_type {
     impl<'a> Type<'a> {
         pub fn iter<'b>(
             &'b self,
-        ) -> std::collections::btree_set::Iter<'b, TypeUnit<'a>> {
+        ) -> std::collections::btree_set::Iter<'b, Rc<TypeUnit<'a>>> {
             self.0.iter()
         }
 
@@ -202,16 +205,18 @@ mod type_type {
             use TypeMatchable::*;
             match self.0.len() {
                 0 => Empty,
-                1 => match self.0.into_iter().next().unwrap() {
-                    TypeUnit::Normal { name, args, id } => {
-                        Normal { name, args, id }
+                1 => {
+                    match unwrap_or_clone(self.0.into_iter().next().unwrap()) {
+                        TypeUnit::Normal { name, args, id } => {
+                            Normal { name, args, id }
+                        }
+                        TypeUnit::Fn(arg, ret) => Fn(arg, ret),
+                        TypeUnit::Variable(i) => Variable(i),
+                        TypeUnit::RecursiveAlias { body } => {
+                            RecursiveAlias { body }
+                        }
                     }
-                    TypeUnit::Fn(arg, ret) => Fn(arg, ret),
-                    TypeUnit::Variable(i) => Variable(i),
-                    TypeUnit::RecursiveAlias { body } => {
-                        RecursiveAlias { body }
-                    }
-                },
+                }
                 _ => TypeMatchable::Union(self),
             }
         }
@@ -220,7 +225,7 @@ mod type_type {
             use TypeMatchableRef::*;
             match self.0.len() {
                 0 => Empty,
-                1 => match self.0.iter().next().unwrap() {
+                1 => match &**self.0.iter().next().unwrap() {
                     TypeUnit::Normal { name, args, id } => Normal {
                         name,
                         args,
@@ -232,7 +237,7 @@ mod type_type {
                         RecursiveAlias { body }
                     }
                 },
-                _ => Union(&self.0),
+                _ => Union(self),
             }
         }
 
@@ -243,12 +248,26 @@ mod type_type {
 
     impl<'a> FromIterator<TypeUnit<'a>> for Type<'a> {
         fn from_iter<T: IntoIterator<Item = TypeUnit<'a>>>(iter: T) -> Self {
+            Type(iter.into_iter().map(Rc::new).collect())
+        }
+    }
+
+    impl<'a> FromIterator<Rc<TypeUnit<'a>>> for Type<'a> {
+        fn from_iter<T: IntoIterator<Item = Rc<TypeUnit<'a>>>>(
+            iter: T,
+        ) -> Self {
             Type(iter.into_iter().collect())
         }
     }
 
     impl<'a> From<TypeUnit<'a>> for Type<'a> {
         fn from(t: TypeUnit<'a>) -> Self {
+            Type(std::iter::once(Rc::new(t)).collect())
+        }
+    }
+
+    impl<'a> From<Rc<TypeUnit<'a>>> for Type<'a> {
+        fn from(t: Rc<TypeUnit<'a>>) -> Self {
             Type(std::iter::once(t).collect())
         }
     }
@@ -402,7 +421,8 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
         let t = self
             .into_iter()
             .flat_map(|t| {
-                let (t2, u) = t.replace_num_with_update_flag(from, to);
+                let (t2, u) =
+                    unwrap_or_clone(t).replace_num_with_update_flag(from, to);
                 updated |= u;
                 t2.into_iter()
             })
@@ -464,11 +484,13 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
     }
 
     fn find_recursive_alias(&self) -> Option<Type<'a>> {
-        self.iter().find_map(TypeUnit::find_recursive_alias)
+        self.iter().find_map(|t| t.find_recursive_alias())
     }
 
     fn replace_type(self, from: &TypeUnit<'a>, to: &TypeUnit<'a>) -> Self {
-        self.into_iter().map(|t| t.replace_type(from, to)).collect()
+        self.into_iter()
+            .map(|t| unwrap_or_clone(t).replace_type(from, to))
+            .collect()
     }
 
     fn replace_type_union(self, from: &Type, to: &TypeUnit<'a>) -> Self {
@@ -476,7 +498,7 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
             to.clone().into()
         } else {
             self.into_iter()
-                .map(|t| t.replace_type_union(from, to))
+                .map(|t| unwrap_or_clone(t).replace_type_union(from, to))
                 .collect()
         }
     }
@@ -493,8 +515,8 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
             (
                 self.into_iter()
                     .map(|t| {
-                        let (t, u) =
-                            t.replace_type_union_with_update_flag(from, to);
+                        let (t, u) = unwrap_or_clone(t)
+                            .replace_type_union_with_update_flag(from, to);
                         updated |= u;
                         t
                     })
@@ -569,6 +591,10 @@ impl<'a> TypeUnit<'a> {
     }
 }
 
+pub fn unwrap_or_clone<T: Clone>(this: Rc<T>) -> T {
+    Rc::try_unwrap(this).unwrap_or_else(|rc| (*rc).clone())
+}
+
 impl Display for Type<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use TypeMatchableRef::*;
@@ -597,7 +623,7 @@ impl Display for Type<'_> {
                 "{{{}}}",
                 a.iter()
                     .map(|t| {
-                        if let TypeUnit::Fn(_, _) = t {
+                        if let TypeUnit::Fn(_, _) = **t {
                             format!("({})", t)
                         } else {
                             format!("{}", t)

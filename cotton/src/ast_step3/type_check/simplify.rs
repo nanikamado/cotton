@@ -1,7 +1,10 @@
 use crate::ast_step2::{
     self,
     decl_id::DeclId,
-    types::{Type, TypeMatchable, TypeMatchableRef, TypeUnit, TypeVariable},
+    types::{
+        unwrap_or_clone, Type, TypeMatchable, TypeMatchableRef, TypeUnit,
+        TypeVariable,
+    },
     IncompleteType, PatternForRestriction, PatternRestrictions,
     PatternUnitForRestriction, SubtypeRelations, TypeConstructor,
 };
@@ -40,7 +43,7 @@ impl<'a> TypeVariableMap<'a> {
     pub fn normalize_type(&mut self, t: Type<'a>) -> Type<'a> {
         let tus: Vec<_> = t
             .into_iter()
-            .flat_map(|tu| match tu {
+            .flat_map(|tu| match unwrap_or_clone(tu) {
                 TypeUnit::Fn(arg, rtn) => TypeUnit::Fn(
                     self.normalize_type(arg),
                     self.normalize_type(rtn),
@@ -498,7 +501,7 @@ fn _simplify_type<'a, T: TypeConstructor<'a>>(
                 sup.clone()
                     .into_iter()
                     .filter(|s| {
-                        if let TypeUnit::Variable(s) = s {
+                        if let TypeUnit::Variable(s) = &**s {
                             if let Some(s) =
                                 t.subtype_relations.possible_weakest(
                                     map,
@@ -838,7 +841,7 @@ pub fn simplify_subtype_rel<'a>(
                     .clone()
                     .into_iter()
                     .filter(|tu| {
-                        (if let TypeUnit::Normal { id: id2, .. } = tu {
+                        (if let TypeUnit::Normal { id: id2, .. } = &**tu {
                             id == *id2
                         } else {
                             true
@@ -1372,7 +1375,7 @@ fn destruct_type_by_pattern<'a>(
             matched: m,
             bind_matched: bm,
             kind,
-        } = destruct_type_unit_by_pattern(tu, pattern);
+        } = destruct_type_unit_by_pattern(unwrap_or_clone(tu), pattern);
         match kind {
             DestructResultKind::NotSure => {
                 matched = matched.union(m.unwrap());
@@ -1789,7 +1792,8 @@ mod tests {
             .unwrap()
             .constructor
             .clone();
-        if let TypeUnit::Normal { name, id, .. } = t1.iter().next().unwrap() {
+        if let TypeUnit::Normal { name, id, .. } = &**t1.iter().next().unwrap()
+        {
             let p = PatternUnitForRestriction::Constructor {
                 id: *id,
                 name,

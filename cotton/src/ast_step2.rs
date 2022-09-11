@@ -2,7 +2,7 @@ pub mod decl_id;
 pub mod ident_id;
 pub mod types;
 
-use self::types::TypeVariable;
+use self::types::{unwrap_or_clone, TypeVariable};
 use self::{
     decl_id::DeclId,
     ident_id::IdentId,
@@ -716,7 +716,9 @@ impl<'a> TypeAliasMap<'a> {
 }
 
 fn decrement_index_outside(t: Type) -> Type {
-    t.into_iter().map(decrement_index_outside_unit).collect()
+    t.into_iter()
+        .map(|t| decrement_index_outside_unit(unwrap_or_clone(t)))
+        .collect()
 }
 
 fn decrement_index_outside_unit(t: TypeUnit) -> TypeUnit {
