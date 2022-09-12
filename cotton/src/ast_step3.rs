@@ -201,7 +201,7 @@ fn lift_recursive_alias<'a, T>(t: T) -> T
 where
     T: TypeConstructor<'a>,
 {
-    if let Some(body) = t.find_recursive_alias() {
+    if let Some(body) = t.find_recursive_alias().cloned() {
         let r = &TypeUnit::RecursiveAlias { body: body.clone() };
         let v = TypeVariable::new();
         let t = t.replace_type(r, &TypeUnit::Variable(v));

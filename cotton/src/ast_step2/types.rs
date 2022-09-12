@@ -342,7 +342,7 @@ impl<'a> TypeConstructor<'a> for SingleTypeConstructor<'a> {
         }
     }
 
-    fn find_recursive_alias(&self) -> Option<Type<'a>> {
+    fn find_recursive_alias(&self) -> Option<&Type<'a>> {
         self.type_.find_recursive_alias()
     }
 
@@ -483,7 +483,7 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
         }
     }
 
-    fn find_recursive_alias(&self) -> Option<Type<'a>> {
+    fn find_recursive_alias(&self) -> Option<&Type<'a>> {
         self.iter().find_map(|t| t.find_recursive_alias())
     }
 
@@ -561,7 +561,7 @@ pub trait TypeConstructor<'a>:
     ) -> (Self, bool);
     fn covariant_type_variables(&self) -> Vec<TypeVariable>;
     fn contravariant_type_variables(&self) -> Vec<TypeVariable>;
-    fn find_recursive_alias(&self) -> Option<Type<'a>>;
+    fn find_recursive_alias(&self) -> Option<&Type<'a>>;
     fn replace_type(self, from: &TypeUnit<'a>, to: &TypeUnit<'a>) -> Self;
     fn replace_type_union(self, from: &Type, to: &TypeUnit<'a>) -> Self;
     fn replace_type_union_with_update_flag(
@@ -577,7 +577,7 @@ pub trait TypeConstructor<'a>:
 }
 
 impl<'a> TypeUnit<'a> {
-    fn find_recursive_alias(&self) -> Option<Type<'a>> {
+    fn find_recursive_alias(&self) -> Option<&Type<'a>> {
         match self {
             TypeUnit::Normal { args, .. } => {
                 args.iter().find_map(Type::find_recursive_alias)
@@ -586,7 +586,7 @@ impl<'a> TypeUnit<'a> {
                 [a, r].iter().find_map(|a| a.find_recursive_alias())
             }
             TypeUnit::Variable(_) => None,
-            TypeUnit::RecursiveAlias { body } => Some(body.clone()),
+            TypeUnit::RecursiveAlias { body } => Some(body),
         }
     }
 }
