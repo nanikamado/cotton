@@ -339,14 +339,9 @@ impl Display for SccTypeConstructor<'_> {
 
 impl<'a> Type<'a> {
     fn argument_tuple_from_arguments(ts: Vec<Self>) -> Self {
-        let mut new_ts = Type::from_str("()");
+        let mut new_ts = Type::label_from_str("()");
         for t in ts.into_iter().rev() {
-            new_ts = TypeUnit::Normal {
-                name: "AT",
-                args: vec![t, new_ts],
-                id: TypeId::Intrinsic(IntrinsicType::ArgumentTuple),
-            }
-            .into();
+            new_ts = TypeUnit::Tuple(t, new_ts).into();
         }
         new_ts
     }
@@ -354,15 +349,10 @@ impl<'a> Type<'a> {
     fn arguments_from_argument_tuple(self) -> Vec<Self> {
         use TypeMatchable::*;
         match self.matchable() {
-            Normal { args, id, .. }
-                if id == TypeId::Intrinsic(IntrinsicType::ArgumentTuple) =>
-            {
-                let mut args = args.into_iter();
-                std::iter::once(args.next().unwrap())
-                    .chain(args.next().unwrap().arguments_from_argument_tuple())
-                    .collect()
-            }
-            Normal { id, .. }
+            Tuple(a1, a2) => std::iter::once(a1)
+                .chain(a2.arguments_from_argument_tuple())
+                .collect(),
+            Const { id, .. }
                 if id == TypeId::Intrinsic(IntrinsicType::Unit) =>
             {
                 Vec::new()
@@ -375,38 +365,27 @@ impl<'a> Type<'a> {
 }
 
 impl<'a> PatternUnitForRestriction<'a> {
-    fn argument_tuple_from_arguments(pss: Vec<Vec<Self>>) -> Vec<Self> {
-        let mut new_pattern = Vec::new();
-        for ps in pss {
-            let mut new_p = PatternUnitForRestriction::Constructor {
-                id: TypeId::Intrinsic(IntrinsicType::Unit),
-                name: "()",
-                args: Vec::new(),
-            };
-            for p in ps.iter().rev() {
-                new_p = PatternUnitForRestriction::Constructor {
-                    id: TypeId::Intrinsic(IntrinsicType::ArgumentTuple),
-                    name: "AT",
-                    args: vec![p.clone(), new_p],
-                };
-            }
-            new_pattern.push(new_p);
+    fn argument_tuple_from_arguments(ps: Vec<Self>) -> Self {
+        let mut new_p = PatternUnitForRestriction::Const {
+            id: TypeId::Intrinsic(IntrinsicType::Unit),
+            name: "()",
+        };
+        for p in ps.iter().rev() {
+            new_p = PatternUnitForRestriction::Tuple(
+                p.clone().into(),
+                new_p.into(),
+            );
         }
-        new_pattern
+        new_p
     }
 
     fn arguments_from_argument_tuple(self) -> Vec<Self> {
         use PatternUnitForRestriction::*;
         match self {
-            Constructor { args, id, .. }
-                if id == TypeId::Intrinsic(IntrinsicType::ArgumentTuple) =>
-            {
-                let mut args = args.into_iter();
-                std::iter::once(args.next().unwrap())
-                    .chain(args.next().unwrap().arguments_from_argument_tuple())
-                    .collect()
-            }
-            Constructor { id, .. }
+            Tuple(a1, a2) => std::iter::once(*a1)
+                .chain(a2.arguments_from_argument_tuple())
+                .collect(),
+            Const { id, .. }
                 if id == TypeId::Intrinsic(IntrinsicType::Unit) =>
             {
                 Vec::new()
@@ -418,19 +397,10 @@ impl<'a> PatternUnitForRestriction<'a> {
     fn arguments_from_argument_tuple_ref(&self) -> Vec<&Self> {
         use PatternUnitForRestriction::*;
         match self {
-            Constructor { args, id, .. }
-                if *id == TypeId::Intrinsic(IntrinsicType::ArgumentTuple) =>
-            {
-                let mut args = args.iter();
-                std::iter::once(args.next().unwrap())
-                    .chain(
-                        args.next()
-                            .unwrap()
-                            .arguments_from_argument_tuple_ref(),
-                    )
-                    .collect()
-            }
-            Constructor { id, .. }
+            Tuple(a1, a2) => std::iter::once(&**a1)
+                .chain(a2.arguments_from_argument_tuple_ref())
+                .collect(),
+            Const { id, .. }
                 if *id == TypeId::Intrinsic(IntrinsicType::Unit) =>
             {
                 Vec::new()
@@ -453,17 +423,19 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
     }
 
     fn replace_num(self, from: TypeVariable, to: &Type<'a>) -> Self {
-        self.replace_num_with_update_flag(from, to).0
+        self.replace_num_with_update_flag(from, to, 0).0
     }
 
     fn replace_num_with_update_flag(
         self,
         from: TypeVariable,
         to: &Type<'a>,
+        recursive_alias_depth: usize,
     ) -> (Self, bool) {
         let mut updated = false;
         let t = self.map_type(|t| {
-            let (t, u) = t.replace_num_with_update_flag(from, to);
+            let (t, u) =
+                t.replace_num_with_update_flag(from, to, recursive_alias_depth);
             updated = u;
             t
         });
@@ -512,10 +484,15 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
         self,
         from: &Type,
         to: &TypeUnit<'a>,
+        recursive_alias_depth: usize,
     ) -> (Self, bool) {
         let mut updated = false;
         let t = self.map_type(|t| {
-            let (t, u) = t.replace_type_union_with_update_flag(from, to);
+            let (t, u) = t.replace_type_union_with_update_flag(
+                from,
+                to,
+                recursive_alias_depth,
+            );
             updated = u;
             t
         });
@@ -1003,11 +980,14 @@ fn constructor_type(d: DataDecl) -> TypeUnit {
         .iter()
         .map(|t| TypeUnit::Variable(*t).into())
         .collect();
-    let mut t = TypeUnit::Normal {
-        name: d.name,
-        args: fields.clone(),
-        id: TypeId::DeclId(d.decl_id),
-    };
+    let mut t = TypeUnit::Tuple(
+        TypeUnit::Const {
+            name: d.name,
+            id: TypeId::DeclId(d.decl_id),
+        }
+        .into(),
+        Type::argument_tuple_from_arguments(fields.clone()),
+    );
     for field in fields.into_iter().rev() {
         t = TypeUnit::Fn(field, t.into())
     }
@@ -1068,11 +1048,13 @@ fn min_type_incomplite<'a>(
                     .chain(std::iter::once(rtn_type)),
             );
             let mut pattern_restrictions = pattern_restrictions.concat();
+            let restrictions = restrictions
+                .into_iter()
+                .map(PatternUnitForRestriction::argument_tuple_from_arguments)
+                .collect();
             pattern_restrictions.push((
                 Type::argument_tuple_from_arguments(arg_types),
-                PatternUnitForRestriction::argument_tuple_from_arguments(
-                    restrictions,
-                ),
+                restrictions,
             ));
             map.insert(subtype_relations, *type_variable, constructor.clone());
             (
@@ -1314,19 +1296,28 @@ fn pattern_unit_to_type<'a>(
                 Vec<_>,
             ) = args.iter().map(pattern_to_type).multiunzip();
             (
-                TypeUnit::Normal {
-                    name: id.name(),
-                    args: types,
-                    id: (*id).into(),
-                }
+                TypeUnit::Tuple(
+                    TypeUnit::Const {
+                        name: id.name(),
+                        id: (*id).into(),
+                    }
+                    .into(),
+                    Type::argument_tuple_from_arguments(types),
+                )
                 .into(),
                 // TypeUnit::new_variable().into(),
                 bindings.into_iter().flatten().collect(),
-                PatternUnitForRestriction::Constructor {
-                    id: (*id).into(),
-                    name: id.name(),
-                    args: pattern_restrictions,
-                },
+                PatternUnitForRestriction::Tuple(
+                    PatternUnitForRestriction::Const {
+                        name: id.name(),
+                        id: (*id).into(),
+                    }
+                    .into(),
+                    PatternUnitForRestriction::argument_tuple_from_arguments(
+                        pattern_restrictions,
+                    )
+                    .into(),
+                ),
             )
         }
         Binder(name, decl_id, t) => (

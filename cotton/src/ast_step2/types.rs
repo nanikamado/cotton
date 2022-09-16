@@ -2,8 +2,11 @@ pub use self::type_type::Type;
 pub use self::type_unit::TypeUnit;
 pub use self::type_unit::TypeVariable;
 use super::IncompleteType;
+use super::SubtypeRelations;
 use crate::ast_step2::TypeId;
+use crate::ast_step3::simplify_subtype_rel;
 use crate::ast_step3::TypeVariableMap;
+use crate::intrinsics::IntrinsicType;
 use fxhash::FxHashSet;
 use itertools::Itertools;
 use std::fmt::Display;
@@ -11,34 +14,24 @@ use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeMatchable<'a> {
-    Normal {
-        name: &'a str,
-        args: Vec<Type<'a>>,
-        id: TypeId,
-    },
     Fn(Type<'a>, Type<'a>),
     Union(Type<'a>),
     Variable(TypeVariable),
     Empty,
-    RecursiveAlias {
-        body: Type<'a>,
-    },
+    RecursiveAlias { body: Type<'a> },
+    Const { name: &'a str, id: TypeId },
+    Tuple(Type<'a>, Type<'a>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeMatchableRef<'a, 'b> {
-    Normal {
-        name: &'a str,
-        args: &'b Vec<Type<'a>>,
-        id: TypeId,
-    },
     Fn(&'b Type<'a>, &'b Type<'a>),
     Union(&'b Type<'a>),
     Variable(TypeVariable),
     Empty,
-    RecursiveAlias {
-        body: &'b Type<'a>,
-    },
+    RecursiveAlias { body: &'b Type<'a> },
+    Const { name: &'a str, id: TypeId },
+    Tuple(&'b Type<'a>, &'b Type<'a>),
 }
 
 mod type_unit {
@@ -55,18 +48,13 @@ mod type_unit {
         RecursiveIndex(usize),
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub enum TypeUnit<'a> {
-        Normal {
-            name: &'a str,
-            args: Vec<Type<'a>>,
-            id: TypeId,
-        },
         Fn(Type<'a>, Type<'a>),
         Variable(TypeVariable),
-        RecursiveAlias {
-            body: Type<'a>,
-        },
+        RecursiveAlias { body: Type<'a> },
+        Const { name: &'a str, id: TypeId },
+        Tuple(Type<'a>, Type<'a>),
     }
 
     impl Default for TypeVariable {
@@ -88,11 +76,15 @@ mod type_unit {
             Self::RecursiveIndex(0)
         }
 
-        pub fn increment_recursive_index(self) -> Self {
+        pub fn increment_recursive_index(self, n: i32) -> Self {
             match self {
                 TypeVariable::Normal(n) => TypeVariable::Normal(n),
-                TypeVariable::RecursiveIndex(n) => {
-                    TypeVariable::RecursiveIndex(n + 1)
+                TypeVariable::RecursiveIndex(m) => {
+                    if n >= 0 {
+                        TypeVariable::RecursiveIndex(m + n as usize)
+                    } else {
+                        TypeVariable::RecursiveIndex(m - (-n) as usize)
+                    }
                 }
             }
         }
@@ -100,12 +92,17 @@ mod type_unit {
         pub fn increment_recursive_index_with_bound(
             self,
             greater_than_or_equal_to: usize,
+            n: i32,
         ) -> Self {
             match self {
-                TypeVariable::RecursiveIndex(n)
-                    if n >= greater_than_or_equal_to =>
+                TypeVariable::RecursiveIndex(m)
+                    if m >= greater_than_or_equal_to =>
                 {
-                    TypeVariable::RecursiveIndex(n + 1)
+                    if n >= 0 {
+                        TypeVariable::RecursiveIndex(m + n as usize)
+                    } else {
+                        TypeVariable::RecursiveIndex(m - (-n) as usize)
+                    }
                 }
                 n => n,
             }
@@ -158,18 +155,24 @@ mod type_unit {
 }
 
 mod type_type {
-    use crate::ast_step2::types::unwrap_or_clone;
-
     use super::{TypeMatchable, TypeMatchableRef, TypeUnit};
-    use std::{collections::BTreeSet, iter::FromIterator, rc::Rc};
+    use crate::{
+        ast_step2::{types::unwrap_or_clone, SubtypeRelations},
+        ast_step3::simplify_subtype_rel,
+    };
+    use std::{
+        collections::{self, BTreeSet},
+        iter,
+        rc::Rc,
+    };
 
-    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+    #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
     pub struct Type<'a>(BTreeSet<Rc<TypeUnit<'a>>>);
 
     impl<'a> IntoIterator for Type<'a> {
         type Item = Rc<TypeUnit<'a>>;
 
-        type IntoIter = std::collections::btree_set::IntoIter<Self::Item>;
+        type IntoIter = collections::btree_set::IntoIter<Self::Item>;
 
         fn into_iter(self) -> Self::IntoIter {
             self.0.into_iter()
@@ -179,44 +182,31 @@ mod type_type {
     impl<'a> Type<'a> {
         pub fn iter<'b>(
             &'b self,
-        ) -> std::collections::btree_set::Iter<'b, Rc<TypeUnit<'a>>> {
+        ) -> collections::btree_set::Iter<'b, Rc<TypeUnit<'a>>> {
             self.0.iter()
         }
-
-        pub fn contains(&self, value: &Type) -> bool {
-            self.0.is_superset(&value.0)
-        }
-
-        pub fn contains_unit(&self, value: &TypeUnit) -> bool {
-            self.0.contains(value)
-        }
-
-        // pub fn merge(self, other: Self) -> Self {
-        //     let mut u = self.0;
-        //     u.extend(other.0);
-        //     Type(u)
-        // }
 
         pub fn len(&self) -> usize {
             self.0.len()
         }
 
-        pub fn matchable(self) -> TypeMatchable<'a> {
+        pub fn is_empty(&self) -> bool {
+            self.0.is_empty()
+        }
+
+        pub fn matchable(mut self) -> TypeMatchable<'a> {
             use TypeMatchable::*;
             match self.0.len() {
                 0 => Empty,
-                1 => {
-                    match unwrap_or_clone(self.0.into_iter().next().unwrap()) {
-                        TypeUnit::Normal { name, args, id } => {
-                            Normal { name, args, id }
-                        }
-                        TypeUnit::Fn(arg, ret) => Fn(arg, ret),
-                        TypeUnit::Variable(i) => Variable(i),
-                        TypeUnit::RecursiveAlias { body } => {
-                            RecursiveAlias { body }
-                        }
+                1 => match unwrap_or_clone(self.0.pop_first().unwrap()) {
+                    TypeUnit::Fn(arg, ret) => Fn(arg, ret),
+                    TypeUnit::Variable(i) => Variable(i),
+                    TypeUnit::RecursiveAlias { body } => {
+                        RecursiveAlias { body }
                     }
-                }
+                    TypeUnit::Const { name, id } => Const { name, id },
+                    TypeUnit::Tuple(a, b) => Tuple(a, b),
+                },
                 _ => TypeMatchable::Union(self),
             }
         }
@@ -225,60 +215,292 @@ mod type_type {
             use TypeMatchableRef::*;
             match self.0.len() {
                 0 => Empty,
-                1 => match &**self.0.iter().next().unwrap() {
-                    TypeUnit::Normal { name, args, id } => Normal {
-                        name,
-                        args,
-                        id: *id,
-                    },
+                1 => match &**self.0.first().unwrap() {
                     TypeUnit::Fn(arg, ret) => Fn(arg, ret),
                     TypeUnit::Variable(i) => Variable(*i),
                     TypeUnit::RecursiveAlias { body } => {
                         RecursiveAlias { body }
                     }
+                    TypeUnit::Const { name, id } => Const { name, id: *id },
+                    TypeUnit::Tuple(a, b) => Tuple(a, b),
                 },
                 _ => Union(self),
             }
         }
 
-        pub fn union_in_place(&mut self, mut other: Self) {
-            self.0.append(&mut other.0);
+        pub fn union_in_place(&mut self, other: Self) {
+            for t in other {
+                self.insert(t);
+            }
         }
-    }
 
-    impl<'a> FromIterator<TypeUnit<'a>> for Type<'a> {
-        fn from_iter<T: IntoIterator<Item = TypeUnit<'a>>>(iter: T) -> Self {
-            Type(iter.into_iter().map(Rc::new).collect())
+        pub fn insert_with_already_considered_relations(
+            &mut self,
+            other: Rc<TypeUnit<'a>>,
+            already_considered_relations: Option<SubtypeRelations<'a>>,
+        ) {
+            if other.contains_empty_in_covariant_candidate() {
+                return;
+            }
+            if let Some(u) = self.0.pop_first() {
+                let (u, t1, t2) = unwrap_or_clone(u).merge_union_with(
+                    unwrap_or_clone(other),
+                    already_considered_relations,
+                );
+                if let Some(t2) = t2 {
+                    self.insert(Rc::new(t2));
+                }
+                match u {
+                    Some(TypeUnit::Tuple(u_head, u_tail)) => {
+                        let mut m = Vec::with_capacity(self.0.len());
+                        let mut merged = false;
+                        while let Some(t) = self.0.pop_first() {
+                            match unwrap_or_clone(t) {
+                                TypeUnit::Tuple(t_head, t_tail)
+                                    if u_tail == t_tail =>
+                                {
+                                    self.0.insert(Rc::new(TypeUnit::Tuple(
+                                        u_head.clone().union(t_head),
+                                        t_tail,
+                                    )));
+                                    merged = true;
+                                    break;
+                                }
+                                t => {
+                                    m.push(t);
+                                }
+                            }
+                        }
+                        self.0.extend(m.into_iter().map(Rc::new));
+                        if !merged {
+                            self.0.insert(Rc::new(TypeUnit::Tuple(
+                                u_head, u_tail,
+                            )));
+                        }
+                    }
+                    Some(u) => {
+                        self.0.insert(Rc::new(u));
+                    }
+                    _ => (),
+                }
+                if let Some(t1) = t1 {
+                    self.0.insert(Rc::new(t1));
+                }
+            } else {
+                self.0.insert(other);
+            }
         }
-    }
 
-    impl<'a> FromIterator<Rc<TypeUnit<'a>>> for Type<'a> {
-        fn from_iter<T: IntoIterator<Item = Rc<TypeUnit<'a>>>>(
-            iter: T,
+        pub fn insert(&mut self, other: Rc<TypeUnit<'a>>) {
+            self.insert_with_already_considered_relations(
+                other,
+                Some(Default::default()),
+            )
+        }
+
+        pub fn increment_recursive_index(
+            self,
+            greater_than_or_equal_to: usize,
+            n: i32,
         ) -> Self {
-            Type(iter.into_iter().collect())
+            Type(
+                self.0
+                    .into_iter()
+                    .map(|t| {
+                        Rc::new(unwrap_or_clone(t).increment_recursive_index(
+                            greater_than_or_equal_to,
+                            n,
+                        ))
+                    })
+                    .collect(),
+            )
         }
     }
 
     impl<'a> From<TypeUnit<'a>> for Type<'a> {
         fn from(t: TypeUnit<'a>) -> Self {
-            Type(std::iter::once(Rc::new(t)).collect())
+            Type(iter::once(Rc::new(t)).collect())
         }
     }
 
     impl<'a> From<Rc<TypeUnit<'a>>> for Type<'a> {
         fn from(t: Rc<TypeUnit<'a>>) -> Self {
-            Type(std::iter::once(t).collect())
+            Type(iter::once(t).collect())
         }
+    }
+
+    impl<'a> TypeUnit<'a> {
+        pub fn merge_union_with(
+            self,
+            other: Self,
+            mut already_considered_relations: Option<SubtypeRelations<'a>>,
+        ) -> (Option<Self>, Option<Self>, Option<Self>) {
+            use TypeUnit::*;
+            match (self, other) {
+                (Tuple(a1, a2), Tuple(b1, b2)) => {
+                    let (da, i, db) = a1.intersection_and_difference(b1);
+                    (
+                        if da.is_empty() {
+                            None
+                        } else {
+                            Some(Tuple(da, a2.clone()))
+                        },
+                        if i.is_empty() {
+                            None
+                        } else {
+                            Some(Tuple(i, a2.union(b2.clone())))
+                        },
+                        if db.is_empty() {
+                            None
+                        } else {
+                            Some(Tuple(db, b2))
+                        },
+                    )
+                }
+                (
+                    a @ (Variable(_) | Const { .. }),
+                    b @ (Variable(_) | Const { .. }),
+                ) => {
+                    if a == b {
+                        (None, Some(a), None)
+                    } else {
+                        (Some(a), None, Some(b))
+                    }
+                }
+                (Fn(a1, a2), Fn(b1, b2)) => {
+                    if a1 == b1 {
+                        (None, Some(Fn(a1, a2.union(b2))), None)
+                    } else {
+                        (Some(Fn(a1, a2)), None, Some(Fn(b1, b2)))
+                    }
+                }
+                (a @ RecursiveAlias { .. }, b) => {
+                    let r = simplify_subtype_rel(
+                        b.clone().into(),
+                        a.clone().into(),
+                        already_considered_relations.as_mut(),
+                    );
+                    if r.map(|r| r.is_empty()).unwrap_or(false) {
+                        (None, Some(a), None)
+                    } else {
+                        (Some(a), None, Some(b))
+                    }
+                }
+                (a, b @ RecursiveAlias { .. }) => {
+                    let r = simplify_subtype_rel(
+                        a.clone().into(),
+                        b.clone().into(),
+                        already_considered_relations.as_mut(),
+                    );
+                    if r.map(|r| r.is_empty()).unwrap_or(false) {
+                        (None, Some(b), None)
+                    } else {
+                        (Some(a), None, Some(b))
+                    }
+                }
+                (
+                    a @ Fn(_, _),
+                    b @ (Variable(_) | Const { .. } | Tuple(_, _)),
+                )
+                | (
+                    a @ Tuple(_, _),
+                    b @ (Variable(_) | Const { .. } | Fn(_, _)),
+                )
+                | (
+                    a @ (Variable(_) | Const { .. }),
+                    b @ (Fn(_, _) | Tuple(_, _)),
+                ) => (Some(a), None, Some(b)),
+            }
+        }
+
+        pub fn contains_empty_in_covariant_candidate(&self) -> bool {
+            match self {
+                TypeUnit::Fn(_, a) => a.is_empty(),
+                TypeUnit::Tuple(a, b) => a.is_empty() || b.is_empty(),
+                TypeUnit::RecursiveAlias { body } => body.is_empty(),
+                TypeUnit::Const { .. } | TypeUnit::Variable(_) => false,
+            }
+        }
+
+        fn increment_recursive_index(
+            self,
+            greater_than_or_equal_to: usize,
+            n: i32,
+        ) -> Self {
+            match self {
+                TypeUnit::Fn(a, b) => TypeUnit::Fn(
+                    a.increment_recursive_index(greater_than_or_equal_to, n),
+                    b.increment_recursive_index(greater_than_or_equal_to, n),
+                ),
+                TypeUnit::Variable(v) => {
+                    TypeUnit::Variable(v.increment_recursive_index_with_bound(
+                        greater_than_or_equal_to,
+                        n,
+                    ))
+                }
+                TypeUnit::RecursiveAlias { body } => TypeUnit::RecursiveAlias {
+                    body: body.increment_recursive_index(
+                        greater_than_or_equal_to + 1,
+                        n,
+                    ),
+                },
+                TypeUnit::Const { name, id } => TypeUnit::Const { name, id },
+                TypeUnit::Tuple(a, b) => TypeUnit::Tuple(
+                    a.increment_recursive_index(greater_than_or_equal_to, n),
+                    b.increment_recursive_index(greater_than_or_equal_to, n),
+                ),
+            }
+        }
+    }
+}
+
+impl<'a> Type<'a> {
+    #[allow(clippy::wrong_self_convention)]
+    pub fn is_subtype_of(self, other: Self) -> bool {
+        let r = simplify_subtype_rel(self, other, None);
+        r.map(|v| v.is_empty()).unwrap_or(false)
+    }
+
+    #[allow(clippy::wrong_self_convention)]
+    pub fn is_subtype_of_with_rels(
+        self,
+        other: Self,
+        already_considered_relations: Option<&mut SubtypeRelations<'a>>,
+    ) -> bool {
+        let r = simplify_subtype_rel(self, other, already_considered_relations);
+        r.map(|v| v.is_empty()).unwrap_or(false)
+    }
+}
+
+impl<'a> FromIterator<TypeUnit<'a>> for Type<'a> {
+    fn from_iter<T: IntoIterator<Item = TypeUnit<'a>>>(iter: T) -> Self {
+        let mut t = Type::default();
+        for u in iter.into_iter() {
+            t.insert_with_already_considered_relations(
+                Rc::new(u),
+                Some(Default::default()),
+            );
+        }
+        t
+    }
+}
+
+impl<'a> FromIterator<Rc<TypeUnit<'a>>> for Type<'a> {
+    fn from_iter<T: IntoIterator<Item = Rc<TypeUnit<'a>>>>(iter: T) -> Self {
+        let mut t = Type::default();
+        for u in iter.into_iter() {
+            t.insert_with_already_considered_relations(
+                u,
+                Some(Default::default()),
+            );
+        }
+        t
     }
 }
 
 impl<'a> From<TypeMatchable<'a>> for Type<'a> {
     fn from(m: TypeMatchable<'a>) -> Self {
         match m {
-            TypeMatchable::Normal { name, args, id } => {
-                TypeUnit::Normal { name, args, id }.into()
-            }
             TypeMatchable::Fn(a, b) => TypeUnit::Fn(a, b).into(),
             TypeMatchable::Union(u) => u,
             TypeMatchable::Variable(i) => TypeUnit::Variable(i).into(),
@@ -286,6 +508,10 @@ impl<'a> From<TypeMatchable<'a>> for Type<'a> {
             TypeMatchable::RecursiveAlias { body } => {
                 TypeUnit::RecursiveAlias { body }.into()
             }
+            TypeMatchable::Const { name, id } => {
+                TypeUnit::Const { name, id }.into()
+            }
+            TypeMatchable::Tuple(a, b) => TypeUnit::Tuple(a, b).into(),
         }
     }
 }
@@ -318,10 +544,14 @@ impl<'a> TypeConstructor<'a> for SingleTypeConstructor<'a> {
         mut self,
         from: TypeVariable,
         to: &Type<'a>,
+        recursive_alias_depth: usize,
     ) -> (Self, bool) {
         let updated;
-        (self.type_, updated) =
-            self.type_.replace_num_with_update_flag(from, to);
+        (self.type_, updated) = self.type_.replace_num_with_update_flag(
+            from,
+            to,
+            recursive_alias_depth,
+        );
         (self, updated)
     }
 
@@ -360,10 +590,14 @@ impl<'a> TypeConstructor<'a> for SingleTypeConstructor<'a> {
         mut self,
         from: &Type,
         to: &TypeUnit<'a>,
+        recursive_alias_depth: usize,
     ) -> (Self, bool) {
         let updated;
-        (self.type_, updated) =
-            self.type_.replace_type_union_with_update_flag(from, to);
+        (self.type_, updated) = self.type_.replace_type_union_with_update_flag(
+            from,
+            to,
+            recursive_alias_depth,
+        );
         (self, updated)
     }
 
@@ -409,24 +643,28 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
     }
 
     fn replace_num(self, from: TypeVariable, to: &Self) -> Self {
-        self.replace_num_with_update_flag(from, to).0
+        self.replace_num_with_update_flag(from, to, 0).0
     }
 
     fn replace_num_with_update_flag(
         self,
         from: TypeVariable,
         to: &Self,
+        recursive_alias_depth: usize,
     ) -> (Self, bool) {
         let mut updated = false;
-        let t = self
-            .into_iter()
-            .flat_map(|t| {
-                let (t2, u) =
-                    unwrap_or_clone(t).replace_num_with_update_flag(from, to);
-                updated |= u;
-                t2.into_iter()
-            })
-            .collect();
+        let mut t = Type::default();
+        for u in self {
+            let (u, up_) = unwrap_or_clone(u).replace_num_with_update_flag(
+                from,
+                to,
+                recursive_alias_depth,
+            );
+            updated |= up_;
+            for u in u {
+                t.insert_with_already_considered_relations(u, None);
+            }
+        }
         (t, updated)
     }
 
@@ -436,10 +674,6 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
                 r.covariant_type_variables(),
                 a.contravariant_type_variables(),
             ),
-            TypeMatchableRef::Normal { args, .. } => args
-                .iter()
-                .flat_map(TypeConstructor::covariant_type_variables)
-                .collect(),
             TypeMatchableRef::Union(cs) => cs
                 .iter()
                 .map(|c| Type::from(c.clone()).covariant_type_variables())
@@ -454,6 +688,11 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
                 vs.remove(&TypeVariable::RecursiveIndex(0));
                 vs.into_iter().collect()
             }
+            TypeMatchableRef::Const { .. } => Vec::new(),
+            TypeMatchableRef::Tuple(a, b) => marge_vec(
+                a.covariant_type_variables(),
+                b.covariant_type_variables(),
+            ),
         }
     }
 
@@ -463,10 +702,6 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
                 a.covariant_type_variables(),
                 r.contravariant_type_variables(),
             ),
-            TypeMatchableRef::Normal { args, .. } => args
-                .iter()
-                .map(TypeConstructor::contravariant_type_variables)
-                .concat(),
             TypeMatchableRef::Union(cs) => cs
                 .iter()
                 .map(|c| Type::from(c.clone()).contravariant_type_variables())
@@ -480,6 +715,11 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
                 vs.remove(&TypeVariable::RecursiveIndex(0));
                 vs.into_iter().collect()
             }
+            TypeMatchableRef::Const { .. } => Vec::new(),
+            TypeMatchableRef::Tuple(a, b) => marge_vec(
+                a.contravariant_type_variables(),
+                b.contravariant_type_variables(),
+            ),
         }
     }
 
@@ -507,6 +747,7 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
         self,
         from: &Type,
         to: &TypeUnit<'a>,
+        recursive_alias_depth: usize,
     ) -> (Self, bool) {
         if self == *from {
             (to.clone().into(), true)
@@ -516,7 +757,11 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
                 self.into_iter()
                     .map(|t| {
                         let (t, u) = unwrap_or_clone(t)
-                            .replace_type_union_with_update_flag(from, to);
+                            .replace_type_union_with_update_flag(
+                                from,
+                                to,
+                                recursive_alias_depth,
+                            );
                         updated |= u;
                         t
                     })
@@ -542,7 +787,7 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
     }
 }
 
-fn marge_vec<T>(mut a: Vec<T>, mut b: Vec<T>) -> Vec<T> {
+pub fn marge_vec<T>(mut a: Vec<T>, mut b: Vec<T>) -> Vec<T> {
     a.append(&mut b);
     a
 }
@@ -558,6 +803,7 @@ pub trait TypeConstructor<'a>:
         self,
         from: TypeVariable,
         to: &Type<'a>,
+        recursive_alias_depth: usize,
     ) -> (Self, bool);
     fn covariant_type_variables(&self) -> Vec<TypeVariable>;
     fn contravariant_type_variables(&self) -> Vec<TypeVariable>;
@@ -568,6 +814,7 @@ pub trait TypeConstructor<'a>:
         self,
         from: &Type,
         to: &TypeUnit<'a>,
+        recursive_alias_depth: usize,
     ) -> (Self, bool);
     fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(self, f: F) -> Self;
     fn normalize_contravariant_candidates_from_annotation(
@@ -579,14 +826,15 @@ pub trait TypeConstructor<'a>:
 impl<'a> TypeUnit<'a> {
     fn find_recursive_alias(&self) -> Option<&Type<'a>> {
         match self {
-            TypeUnit::Normal { args, .. } => {
-                args.iter().find_map(Type::find_recursive_alias)
-            }
             TypeUnit::Fn(a, r) => {
                 [a, r].iter().find_map(|a| a.find_recursive_alias())
             }
             TypeUnit::Variable(_) => None,
             TypeUnit::RecursiveAlias { body } => Some(body),
+            TypeUnit::Const { .. } => None,
+            TypeUnit::Tuple(a, b) => {
+                [a, b].iter().find_map(|a| a.find_recursive_alias())
+            }
         }
     }
 }
@@ -599,18 +847,6 @@ impl Display for Type<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use TypeMatchableRef::*;
         match self.matchable_ref() {
-            Normal { name, args, .. } => {
-                if args.is_empty() {
-                    write!(f, "{}", name)
-                } else {
-                    write!(
-                        f,
-                        "{}({})",
-                        name,
-                        args.iter().map(|c| format!("{}", c)).join(", ")
-                    )
-                }
-            }
             Fn(arg, rtn) => {
                 if let Fn(_, _) = arg.matchable_ref() {
                     write!(f, "({}) -> {}", arg, rtn)
@@ -636,6 +872,64 @@ impl Display for Type<'_> {
             RecursiveAlias { body } => {
                 write!(f, "rec[{}]", *body)
             }
+            Const { name, .. } => write!(f, ":{}", name),
+            Tuple(a, b) => fmt_tuple(a, b, f),
+        }
+    }
+}
+
+impl std::fmt::Debug for Type<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use TypeMatchableRef::*;
+        match self.matchable_ref() {
+            Fn(arg, rtn) => {
+                if let Fn(_, _) = arg.matchable_ref() {
+                    write!(f, "({:?}) -> {:?}", arg, rtn)
+                } else {
+                    write!(f, "{:?} -> {:?}", arg, rtn)
+                }
+            }
+            Union(a) => write!(
+                f,
+                "{{{}}}",
+                a.iter()
+                    .map(|t| {
+                        if let TypeUnit::Fn(_, _) = **t {
+                            format!("({:?})", t)
+                        } else {
+                            format!("{:?}", t)
+                        }
+                    })
+                    .join(" | ")
+            ),
+            Variable(n) => write!(f, "{}", n),
+            Empty => write!(f, "∅"),
+            RecursiveAlias { body } => {
+                write!(f, "rec[{:?}]", *body)
+            }
+            Const { name, .. } => write!(f, ":{}", name),
+            Tuple(a, b) => write!(f, "({a:?}, {b:?})"),
+        }
+    }
+}
+
+impl std::fmt::Debug for TypeUnit<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use TypeUnit::*;
+        match self {
+            Fn(arg, rtn) => {
+                if let TypeMatchableRef::Fn(_, _) = arg.matchable_ref() {
+                    write!(f, "({:?}) -> {:?}", arg, rtn)
+                } else {
+                    write!(f, "{:?} -> {:?}", arg, rtn)
+                }
+            }
+            Variable(n) => write!(f, "{}", n),
+            RecursiveAlias { body } => {
+                write!(f, "rec[{:?}]", *body)
+            }
+            Const { name, .. } => write!(f, ":{name}"),
+            Tuple(a, b) => write!(f, "({a:?}, {b:?})"),
         }
     }
 }
@@ -644,18 +938,6 @@ impl Display for TypeUnit<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use TypeUnit::*;
         match self {
-            Normal { name, args, .. } => {
-                if args.is_empty() {
-                    write!(f, "{}", name)
-                } else {
-                    write!(
-                        f,
-                        "{}({})",
-                        name,
-                        args.iter().map(|c| format!("{}", c)).join(", ")
-                    )
-                }
-            }
             Fn(arg, rtn) => {
                 if let TypeMatchableRef::Fn(_, _) = arg.matchable_ref() {
                     write!(f, "({}) -> {}", arg, rtn)
@@ -667,7 +949,55 @@ impl Display for TypeUnit<'_> {
             RecursiveAlias { body } => {
                 write!(f, "rec[{}]", *body)
             }
+            Const { name, .. } => write!(f, ":{name}"),
+            Tuple(a, b) => fmt_tuple(a, b, f),
         }
+    }
+}
+
+fn fmt_tuple(
+    a: &Type<'_>,
+    b: &Type<'_>,
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    if let TypeMatchableRef::Const { name, .. } = a.matchable_ref() {
+        match b.matchable_ref() {
+            TypeMatchableRef::Const { id, .. }
+                if id == TypeId::Intrinsic(IntrinsicType::Unit) =>
+            {
+                write!(f, "{}", name)
+            }
+            TypeMatchableRef::Tuple(h, t) => {
+                write!(f, "{}[{}", name, h)?;
+                fmt_tuple_tail(t, f)
+            }
+            TypeMatchableRef::Union(u) => {
+                write!(f, "{}[{}]", name, u)
+            }
+            _ => panic!(),
+        }
+    } else {
+        write!(f, "[{a}")?;
+        fmt_tuple_tail(b, f)
+    }
+}
+
+fn fmt_tuple_tail(
+    tuple: &Type<'_>,
+    f: &mut std::fmt::Formatter<'_>,
+) -> std::fmt::Result {
+    use TypeMatchableRef::*;
+    match tuple.matchable_ref() {
+        Union(u) => write!(f, "] <> {{{}}}", u.iter().format(" | ")),
+        Empty => write!(f, "] <> ∅"),
+        Tuple(a, b) => {
+            write!(f, ", {}", a)?;
+            fmt_tuple_tail(b, f)
+        }
+        Const { id, .. } if id == TypeId::Intrinsic(IntrinsicType::Unit) => {
+            write!(f, "]")
+        }
+        _ => panic!(),
     }
 }
 

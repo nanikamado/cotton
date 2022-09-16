@@ -2,8 +2,8 @@ mod type_check;
 pub mod type_util;
 
 pub use self::type_check::{
-    type_check, ResolvedIdents, TypeVariableMap, VariableId,
-    VariableRequirement,
+    simplify_subtype_rel, type_check, ResolvedIdents, TypeVariableMap,
+    VariableId, VariableRequirement,
 };
 use crate::ast_step2::ident_id::IdentId;
 use crate::ast_step2::types::TypeUnit;
@@ -209,8 +209,11 @@ where
             TypeVariable::RecursiveIndex(0),
             &TypeUnit::Variable(v).into(),
         );
-        let (t, updated) = t
-            .replace_type_union_with_update_flag(&body, &TypeUnit::Variable(v));
+        let (t, updated) = t.replace_type_union_with_update_flag(
+            &body,
+            &TypeUnit::Variable(v),
+            0,
+        );
         let t = t.replace_num(v, &r.clone().into());
         if updated {
             lift_recursive_alias(t)
