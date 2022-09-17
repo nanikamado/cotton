@@ -87,7 +87,7 @@ pub fn type_check<'a>(
     let mut map = TypeVariableMap::default();
     for d in &ast.variable_decl {
         let (mut t, resolved, mut ident_type) =
-            min_type_incomplite(&d.value, &mut subtype_relations, &mut map);
+            min_type_incomplete(&d.value, &mut subtype_relations, &mut map);
         resolved_idents.extend(resolved);
         ident_type_map.append(&mut ident_type);
         let type_annotation: Option<ast_step2::IncompleteType> =
@@ -994,7 +994,7 @@ fn constructor_type(d: DataDecl) -> TypeUnit {
     t
 }
 
-fn min_type_incomplite<'a>(
+fn min_type_incomplete<'a>(
     (expr, type_variable): &ExprWithType<'a>,
     subtype_relations: &mut SubtypeRelations<'a>,
     map: &mut TypeVariableMap<'a>,
@@ -1103,9 +1103,9 @@ fn min_type_incomplite<'a>(
         }
         Expr::Call(f, a) => {
             let (f_t, resolved1, ident_type_map1) =
-                min_type_incomplite(f, subtype_relations, map);
+                min_type_incomplete(f, subtype_relations, map);
             let (a_t, resolved2, ident_type_map2) =
-                min_type_incomplite(a, subtype_relations, map);
+                min_type_incomplete(a, subtype_relations, map);
             let b: types::Type = TypeUnit::Variable(*type_variable).into();
             let c: types::Type = TypeUnit::new_variable().into();
             // c -> b
@@ -1158,7 +1158,7 @@ fn min_type_incomplite<'a>(
                 .iter()
                 .map(|e| {
                     let (t, resolved, mut ident_type) =
-                        min_type_incomplite(e, &mut subtype_relations, map);
+                        min_type_incomplete(e, &mut subtype_relations, map);
                     variable_requirements
                         .append(&mut t.variable_requirements.clone());
                     subtype_relations.extend(t.subtype_relations.clone());
@@ -1226,7 +1226,7 @@ fn arm_min_type<'a>(
     PatternRestrictions<'a>,
 ) {
     let (body_type, mut resolved_idents, ident_type_map) =
-        min_type_incomplite(&arm.expr, subtype_relations, map);
+        min_type_incomplete(&arm.expr, subtype_relations, map);
     let (mut ts, bindings, patterns): (Vec<_>, Vec<_>, Vec<_>) =
         arm.pattern.iter().map(pattern_to_type).multiunzip();
     ts.push(body_type.constructor);

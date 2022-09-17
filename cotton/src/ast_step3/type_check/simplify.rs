@@ -2,7 +2,7 @@ use crate::ast_step2::{
     self,
     decl_id::DeclId,
     types::{
-        marge_vec, unwrap_or_clone, Type, TypeMatchable, TypeMatchableRef,
+        merge_vec, unwrap_or_clone, Type, TypeMatchable, TypeMatchableRef,
         TypeUnit, TypeVariable,
     },
     IncompleteType, PatternForRestriction, PatternRestrictions,
@@ -779,7 +779,7 @@ pub fn simplify_subtype_rel<'a>(
                 a.push((sub, sup));
                 a
             })?;
-            Ok(marge_vec(a, r))
+            Ok(merge_vec(a, r))
         }
         (Tuple(a1, b1), Tuple(a2, b2)) => {
             let mut r = simplify_subtype_rel(
@@ -1548,7 +1548,7 @@ fn destruct_type_unit_by_pattern<'a>(
                             )
                             .into(),
                         ),
-                        bind_matched: Some(marge_vec(
+                        bind_matched: Some(merge_vec(
                             r1.bind_matched.unwrap(),
                             r2.bind_matched.unwrap(),
                         )),

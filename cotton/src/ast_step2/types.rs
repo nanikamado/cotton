@@ -670,7 +670,7 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
 
     fn covariant_type_variables(&self) -> Vec<TypeVariable> {
         match self.matchable_ref() {
-            TypeMatchableRef::Fn(a, r) => marge_vec(
+            TypeMatchableRef::Fn(a, r) => merge_vec(
                 r.covariant_type_variables(),
                 a.contravariant_type_variables(),
             ),
@@ -689,7 +689,7 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
                 vs.into_iter().collect()
             }
             TypeMatchableRef::Const { .. } => Vec::new(),
-            TypeMatchableRef::Tuple(a, b) => marge_vec(
+            TypeMatchableRef::Tuple(a, b) => merge_vec(
                 a.covariant_type_variables(),
                 b.covariant_type_variables(),
             ),
@@ -698,7 +698,7 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
 
     fn contravariant_type_variables(&self) -> Vec<TypeVariable> {
         match self.matchable_ref() {
-            TypeMatchableRef::Fn(a, r) => marge_vec(
+            TypeMatchableRef::Fn(a, r) => merge_vec(
                 a.covariant_type_variables(),
                 r.contravariant_type_variables(),
             ),
@@ -716,7 +716,7 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
                 vs.into_iter().collect()
             }
             TypeMatchableRef::Const { .. } => Vec::new(),
-            TypeMatchableRef::Tuple(a, b) => marge_vec(
+            TypeMatchableRef::Tuple(a, b) => merge_vec(
                 a.contravariant_type_variables(),
                 b.contravariant_type_variables(),
             ),
@@ -787,7 +787,7 @@ impl<'a> TypeConstructor<'a> for Type<'a> {
     }
 }
 
-pub fn marge_vec<T>(mut a: Vec<T>, mut b: Vec<T>) -> Vec<T> {
+pub fn merge_vec<T>(mut a: Vec<T>, mut b: Vec<T>) -> Vec<T> {
     a.append(&mut b);
     a
 }
