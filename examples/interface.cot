@@ -1,0 +1,25 @@
+(.) = | a, f => f(a)
+
+infixl 10 .
+
+data Hoge
+
+greet : Hoge -> String =
+    | _ => "Hogeeeeee"
+
+data Fuga
+
+greet : Fuga -> String =
+    | _ => "Fugaaaaaa"
+
+interface Greet where
+    greet : Self -> String
+
+greet_twice : A -> String forall { A : Greet } =
+    | a => do 
+        a.greet <> a.greet
+
+main : () -> () =
+    | () => do
+        Hoge.greet_twice.println
+        Fuga.greet_twice.println

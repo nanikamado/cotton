@@ -56,8 +56,7 @@ impl std::fmt::Debug for VariableId {
     }
 }
 
-pub type ResolvedIdents<'a> =
-    FxHashMap<IdentId, (VariableId, Vec<(TypeVariable, Type<'a>)>)>;
+pub type ResolvedIdents<'a> = FxHashMap<IdentId, ResolvedIdent<'a>>;
 
 pub fn type_check<'a>(
     ast: &Ast<'a>,
@@ -75,6 +74,8 @@ pub fn type_check<'a>(
             resolved_idents: Default::default(),
             decl_id: VariableId::Intrinsic(v),
             name: v.to_str(),
+            variables_required_by_interface_restrictions:
+                Default::default(),
         });
     }
     for d in &ast.data_decl {
@@ -85,6 +86,8 @@ pub fn type_check<'a>(
             resolved_idents: Default::default(),
             decl_id: VariableId::Decl(d.decl_id),
             name: d.name,
+            variables_required_by_interface_restrictions:
+                Default::default(),
         });
     }
     let mut resolved_idents = Vec::new();
@@ -114,6 +117,41 @@ pub fn type_check<'a>(
             } else {
                 None
             };
+        let vs: FxHashMap<_, _> = d
+            .implicit_parameters
+            .iter()
+            .map(|(s, t, decl_id)| (*s, (t, decl_id)))
+            .collect();
+        let mut suptype_rel = Vec::new();
+        t.variable_requirements = t
+            .variable_requirements
+            .into_iter()
+            .filter_map(|mut req| {
+                if let Some((t, decl_id)) = vs.get(req.name) {
+                    suptype_rel.push((
+                        (*t).clone(),
+                        req.required_type.clone(),
+                    ));
+                    resolved_idents.push((
+                        req.ident,
+                        ResolvedIdent {
+                            variable_id: VariableId::Decl(**decl_id),
+                            type_args: Default::default(),
+                            implicit_args: Default::default(),
+                        },
+                    ));
+                    None
+                } else {
+                    req.local_env.extend(vs.iter().map(
+                        |(name, (t, decl_id))| {
+                            (*name, **decl_id, (**t).clone())
+                        },
+                    ));
+                    Some(req)
+                }
+            })
+            .collect();
+        t.subtype_relations.extend(suptype_rel);
         let incomplete = simplify::simplify_type(
             &mut map,
             IncompleteType {
@@ -141,6 +179,9 @@ pub fn type_check<'a>(
             resolved_idents: Default::default(),
             decl_id: VariableId::Decl(d.decl_id),
             name: d.name,
+            variables_required_by_interface_restrictions: d
+                .implicit_parameters
+                .clone(),
         });
     }
     for top in &toplevels {
@@ -156,7 +197,7 @@ pub fn type_check<'a>(
     let (mut resolved_names, types, rel) =
         resolve_names(toplevels, &mut map);
     subtype_relations = subtype_relations.merge(rel);
-    for (ident_id, variable_id, _) in
+    for (ident_id, ResolvedIdent { variable_id, .. }) in
         resolved_names.iter().sorted_unstable()
     {
         log::debug!("{ident_id} => {variable_id:?}");
@@ -164,18 +205,38 @@ pub fn type_check<'a>(
     resolved_idents.append(&mut resolved_names);
     let resolved_idents = resolved_idents
         .into_iter()
-        .map(|(ident_id, variable_id, type_args)| {
-            (
+        .map(
+            |(
                 ident_id,
-                (
+                ResolvedIdent {
                     variable_id,
-                    type_args
-                        .into_iter()
-                        .map(|(v, t)| (v, map.find(t)))
-                        .collect(),
-                ),
-            )
-        })
+                    type_args,
+                    implicit_args,
+                },
+            )| {
+                (
+                    ident_id,
+                    ResolvedIdent {
+                        variable_id,
+                        type_args: type_args
+                            .into_iter()
+                            .map(|(v, t)| (v, map.normalize_type(t)))
+                            .collect(),
+                        implicit_args: implicit_args
+                            .into_iter()
+                            .map(|(decl_id, name, t, r)| {
+                                (
+                                    decl_id,
+                                    name,
+                                    map.normalize_type(t),
+                                    r,
+                                )
+                            })
+                            .collect(),
+                    },
+                )
+            },
+        )
         .collect();
     log::debug!("ok");
     (
@@ -186,8 +247,15 @@ pub fn type_check<'a>(
     )
 }
 
-pub type Resolved =
-    Vec<(IdentId, VariableId, Vec<(TypeVariable, TypeVariable)>)>;
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
+pub struct ResolvedIdent<'a> {
+    pub variable_id: VariableId,
+    pub type_args: Vec<(TypeVariable, Type<'a>)>,
+    pub implicit_args:
+        Vec<(DeclId, &'a str, Type<'a>, ResolvedIdent<'a>)>,
+}
+
+pub type Resolved<'a> = Vec<(IdentId, ResolvedIdent<'a>)>;
 
 #[derive(Debug, Clone)]
 struct Toplevel<'a> {
@@ -196,6 +264,8 @@ struct Toplevel<'a> {
     resolved_idents: FxHashMap<IdentId, VariableId>,
     decl_id: VariableId,
     name: &'a str,
+    variables_required_by_interface_restrictions:
+        Vec<(&'a str, Type<'a>, DeclId)>,
 }
 
 type TypesOfDeclsVec<'a> =
@@ -204,7 +274,7 @@ type TypesOfDeclsVec<'a> =
 fn resolve_names<'a>(
     toplevels: Vec<Toplevel<'a>>,
     map: &mut TypeVariableMap<'a>,
-) -> (Resolved, TypesOfDeclsVec<'a>, SubtypeRelations<'a>) {
+) -> (Resolved<'a>, TypesOfDeclsVec<'a>, SubtypeRelations<'a>) {
     let mut toplevel_graph = Graph::<Toplevel, ()>::new();
     for t in toplevels {
         toplevel_graph.add_node(t);
@@ -221,7 +291,7 @@ fn resolve_names<'a>(
                 .incomplete
                 .variable_requirements
                 .iter()
-                .flat_map(|(to_name, _, _, _)| &toplevle_map[to_name])
+                .flat_map(|req| &toplevle_map[req.name])
                 .map(move |to| (*to, from))
         })
         .collect_vec();
@@ -532,15 +602,15 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
     fn normalize_contravariant_candidates_from_annotation(
         self,
         map: &mut TypeVariableMap<'a>,
-    ) -> Self {
-        Self(self.0
-            .into_iter()
-            .map(|s| {
-                s.normalize_contravariant_candidates_from_annotation(
-                    map,
-                )
-            })
-            .collect())
+    ) -> Option<Self> {
+        Some(Self(
+            self.0
+                .into_iter()
+                .map(|s| {
+                    s.normalize_contravariant_candidates_from_annotation(map)
+                })
+                .collect::<Option<_>>()?,
+        ))
     }
 
     fn contains_variable(&self, v: TypeVariable) -> bool {
@@ -555,7 +625,7 @@ fn resolve_scc<'a>(
     resolved_variable_map: &FxHashMap<&str, Vec<Toplevel<'a>>>,
     map: &mut TypeVariableMap<'a>,
 ) -> (
-    Resolved,
+    Resolved<'a>,
     Vec<ast_step2::IncompleteType<'a, Type<'a>>>,
     SubtypeRelations<'a>,
 ) {
@@ -589,16 +659,21 @@ fn resolve_scc<'a>(
     log::debug!("name of unresolved: {:?}", names_in_scc);
     // The order of resolving is important.
     // Requirements that are easier to solve should be solved earlier.
-    variable_requirements.sort_unstable_by_key(
-        |(req_name, _, _, _)| {
-            (
-                !names_in_scc.contains(req_name),
-                resolved_variable_map
-                    .get(req_name)
-                    .map(|v| Reverse(v.len())),
-            )
-        },
-    );
+    variable_requirements.sort_unstable_by_key(|req| {
+        (
+            !names_in_scc.contains(req.name),
+            resolved_variable_map.get(req.name).map(|v| {
+                Reverse(
+                    v.iter()
+                        .map(|d| {
+                            d.variables_required_by_interface_restrictions.len()
+                                + 1
+                        })
+                        .sum::<usize>(),
+                )
+            }),
+        )
+    });
     let mut unresolved_type = IncompleteType {
         constructor: SccTypeConstructor(types),
         variable_requirements,
@@ -607,45 +682,34 @@ fn resolve_scc<'a>(
         already_considered_relations: Default::default(),
     };
     // Recursions are not resolved in this loop.
-    while let Some((
-        req_name,
-        req_type,
-        ident_id,
-        ident_type_variable,
-    )) = unresolved_type.variable_requirements.pop()
+    while let Some(req) = unresolved_type.variable_requirements.pop()
     {
-        if names_in_scc.contains(req_name) {
-            unresolved_type.variable_requirements.push((
-                req_name,
-                req_type,
-                ident_id,
-                ident_type_variable,
-            ));
+        if names_in_scc.contains(req.name) {
+            unresolved_type.variable_requirements.push(req);
             // Skipping the resolveing of recursion.
             break;
         }
         let satisfied = find_satisfied_types(
+            &req,
             &unresolved_type,
-            &req_type,
-            resolved_variable_map
-                .get(req_name)
-                .unwrap_or_else(|| panic!("req_name: {}", req_name))
-                .clone()
-                .into_iter(),
-            true,
+            resolved_variable_map,
             map,
+            &names_in_scc,
         );
         let satisfied = get_one_satisfied(satisfied);
         resolved_idents.push((
-            ident_id,
-            satisfied.id_of_satisfied_variable,
-            satisfied.type_args.clone(),
+            req.ident,
+            ResolvedIdent {
+                variable_id: satisfied.id_of_satisfied_variable,
+                type_args: satisfied.type_args.clone(),
+                implicit_args: satisfied.implicit_args,
+            },
         ));
         *map = satisfied.map;
         unresolved_type = satisfied.type_of_improved_decl;
-        map.insert(
+        map.insert_type(
             &mut unresolved_type.subtype_relations,
-            ident_type_variable,
+            req.required_type,
             satisfied.type_of_satisfied_variable,
         );
     }
@@ -655,6 +719,7 @@ fn resolve_scc<'a>(
         &scc,
         resolved_variable_map,
         map,
+        &names_in_scc,
     );
     resolved_idents.append(&mut resolved);
     let variable_requirements = improved_types.variable_requirements;
@@ -692,56 +757,270 @@ struct SatisfiedType<'a, T> {
     type_of_satisfied_variable: Type<'a>,
     id_of_satisfied_variable: VariableId,
     type_of_improved_decl: T,
-    type_args: Vec<(TypeVariable, TypeVariable)>,
+    type_args: Vec<(TypeVariable, Type<'a>)>,
+    implicit_args:
+        Vec<(DeclId, &'a str, Type<'a>, ResolvedIdent<'a>)>,
     map: TypeVariableMap<'a>,
 }
 
-fn find_satisfied_types<'a, T: TypeConstructor<'a>>(
-    type_of_unresolved_decl: &IncompleteType<'a, T>,
-    required_type: &Type<'a>,
-    candidates: impl Iterator<Item = Toplevel<'a>>,
+trait CandidatesProvider<'a>: Copy {
+    type T: Iterator<Item = Candidate<'a>>;
+    fn get_candidates(self, req_name: &str) -> Self::T;
+}
+
+impl<'a> CandidatesProvider<'a>
+    for &FxHashMap<&str, Vec<Toplevel<'a>>>
+{
+    type T = std::vec::IntoIter<Candidate<'a>>;
+
+    fn get_candidates(self, req_name: &str) -> Self::T {
+        self.get(req_name)
+            .into_iter()
+            .flatten()
+            .cloned()
+            .map(|t| Candidate {
+                candidate: t,
+                replace_variables: true,
+            })
+            .collect_vec()
+            .into_iter()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CandidatesProviderWithFn<
+    'a,
+    'b,
+    F: FnMut(usize) -> Candidate<'a>,
+> {
+    scc_map: &'b FxHashMap<&'b str, Vec<usize>>,
+    f: F,
+}
+
+impl<'a, 'b, F: FnMut(usize) -> Candidate<'a> + Copy>
+    CandidatesProvider<'a> for CandidatesProviderWithFn<'a, 'b, F>
+{
+    type T = std::iter::Map<std::vec::IntoIter<usize>, F>;
+
+    fn get_candidates(self, req_name: &str) -> Self::T {
+        self.scc_map
+            .get(req_name)
+            .iter()
+            .copied()
+            .flatten()
+            .copied()
+            .collect_vec()
+            .into_iter()
+            .map(self.f)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct Candidate<'a> {
+    candidate: Toplevel<'a>,
     replace_variables: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CandidatesProviderForScc<
+    'a,
+    'b,
+    F: FnMut(usize) -> Candidate<'a>,
+> {
+    candidates_provider_with_fn: CandidatesProviderWithFn<'a, 'b, F>,
+    normal_map: &'b FxHashMap<&'b str, Vec<Toplevel<'a>>>,
+}
+
+impl<'a, 'b, F: FnMut(usize) -> Candidate<'a> + Copy>
+    CandidatesProvider<'a> for CandidatesProviderForScc<'a, 'b, F>
+{
+    type T = std::iter::Chain<
+        std::vec::IntoIter<Candidate<'a>>,
+        std::iter::Map<std::vec::IntoIter<usize>, F>,
+    >;
+
+    fn get_candidates(self, req_name: &str) -> Self::T {
+        self.normal_map.get_candidates(req_name).chain(
+            self.candidates_provider_with_fn.get_candidates(req_name),
+        )
+    }
+}
+
+fn find_satisfied_types<
+    'a,
+    T: TypeConstructor<'a>,
+    C: CandidatesProvider<'a>,
+>(
+    req: &VariableRequirement<'a>,
+    type_of_unresolved_decl: &IncompleteType<'a, T>,
+    resolved_variable_map: C,
     map: &TypeVariableMap<'a>,
+    names_in_scc: &FxHashSet<&str>,
 ) -> Vec<SatisfiedType<'a, IncompleteType<'a, T>>> {
     log::trace!("type_of_unresolved_decl:");
     log::trace!("{}", type_of_unresolved_decl);
-    log::trace!("required_type : {required_type}");
-    candidates
-        .filter_map(|candidate| {
-            let mut t = type_of_unresolved_decl.clone();
-            let mut cand_t =
-                if let Some(face) = candidate.type_annotation {
-                    face
-                } else {
-                    candidate.incomplete
-                };
-            let mut type_args = Vec::new();
-            log::debug!("~~ {} : {}", candidate.name, cand_t);
-            if replace_variables {
-                (cand_t, type_args) = cand_t.change_variable_num();
-            }
-            let mut map = map.clone();
-            t.subtype_relations.add_subtype_rel(
-                cand_t.constructor.clone(),
-                required_type.clone(),
-            );
-            t.subtype_relations.add_subtype_rel(
-                required_type.clone(),
-                cand_t.constructor.clone(),
-            );
-            t.subtype_relations
-                .add_subtype_rels(cand_t.subtype_relations);
-            let decl_id = candidate.decl_id;
-            simplify::simplify_type(&mut map, t).map(
-                |type_of_improved_decl| SatisfiedType {
-                    id_of_satisfied_variable: decl_id,
-                    type_of_improved_decl,
-                    type_args,
-                    type_of_satisfied_variable: cand_t.constructor,
-                    map,
-                },
-            )
-        })
+    log::trace!("required_type : {}", req.required_type);
+    resolved_variable_map
+        .get_candidates(req.name)
+        .filter_map(
+            |Candidate {
+                 candidate,
+                 replace_variables,
+             }| {
+                let mut t = type_of_unresolved_decl.clone();
+                let mut cand_t =
+                    if let Some(face) = candidate.type_annotation {
+                        face
+                    } else {
+                        candidate.incomplete
+                    };
+                let mut type_args = Vec::new();
+                let mut map = map.clone();
+                log::debug!("~~ {} : {}", candidate.name, cand_t);
+                for (req_name, req_t, decl_id) in &candidate
+                    .variables_required_by_interface_restrictions
+                {
+                    log::debug!(
+                        "   {} : {} ({})",
+                        req_name,
+                        req_t,
+                        decl_id
+                    );
+                }
+                let mut implicit_args = Vec::new();
+                let mut resolved_implicit_args = FxHashMap::default();
+                for (
+                    interface_v_name,
+                    interface_v_t,
+                    interface_v_decl_id,
+                ) in candidate
+                    .variables_required_by_interface_restrictions
+                {
+                    let arg = IdentId::new();
+                    implicit_args.push((
+                        interface_v_decl_id,
+                        interface_v_name,
+                        interface_v_t.clone(),
+                        arg,
+                    ));
+                    if let Some((_, decl_id, found_t)) =
+                        req.local_env.iter().find(|(name, _, _)| {
+                            interface_v_name == *name
+                        })
+                    {
+                        resolved_implicit_args.insert(
+                            arg,
+                            ResolvedIdent {
+                                variable_id: VariableId::Decl(
+                                    *decl_id,
+                                ),
+                                type_args: Default::default(),
+                                implicit_args: Default::default(),
+                            },
+                        );
+                        map.insert_type(
+                            &mut t.subtype_relations,
+                            interface_v_t,
+                            found_t.clone(),
+                        );
+                    } else {
+                        cand_t.variable_requirements.push(
+                            VariableRequirement {
+                                name: interface_v_name,
+                                required_type: interface_v_t,
+                                ident: arg,
+                                local_env: req.local_env.clone(),
+                            },
+                        );
+                    }
+                }
+                if replace_variables {
+                    cand_t = cand_t.normalize(&mut map).unwrap();
+                    (cand_t, type_args) =
+                        cand_t.change_variable_num();
+                }
+                t.subtype_relations.add_subtype_rel(
+                    cand_t.constructor.clone(),
+                    req.required_type.clone(),
+                );
+                t.subtype_relations.add_subtype_rel(
+                    req.required_type.clone(),
+                    cand_t.constructor.clone(),
+                );
+                t.subtype_relations
+                    .add_subtype_rels(cand_t.subtype_relations);
+                t.variable_requirements
+                    .extend(cand_t.variable_requirements.clone());
+                let decl_id = candidate.decl_id;
+                simplify::simplify_type(&mut map, t).map(
+                    |mut type_of_improved_decl| {
+                        while let Some(req) =
+                            cand_t.variable_requirements.pop()
+                        {
+                            if names_in_scc.contains(req.name) {
+                                type_of_improved_decl
+                                    .variable_requirements
+                                    .push(req);
+                                // Skipping the resolveing of recursion.
+                                panic!();
+                                // break;
+                            }
+                            let satisfied = find_satisfied_types(
+                                &req,
+                                &type_of_improved_decl,
+                                resolved_variable_map,
+                                &map,
+                                names_in_scc,
+                            );
+                            let satisfied =
+                                get_one_satisfied(satisfied);
+                            resolved_implicit_args.insert(
+                                req.ident,
+                                ResolvedIdent {
+                                    variable_id: satisfied
+                                        .id_of_satisfied_variable,
+                                    type_args: satisfied.type_args,
+                                    implicit_args: satisfied
+                                        .implicit_args,
+                                },
+                            );
+                            map = satisfied.map;
+                            type_of_improved_decl =
+                                satisfied.type_of_improved_decl;
+                            map.insert_type(
+                                &mut type_of_improved_decl
+                                    .subtype_relations,
+                                req.required_type,
+                                satisfied.type_of_satisfied_variable,
+                            );
+                        }
+                        SatisfiedType {
+                            id_of_satisfied_variable: decl_id,
+                            type_of_improved_decl,
+                            type_args,
+                            implicit_args: implicit_args
+                                .into_iter()
+                                .map(
+                                    |(decl_id, name, t, ident_id)| {
+                                        (
+                                            decl_id,
+                                            name,
+                                            t,
+                                            resolved_implicit_args
+                                                [&ident_id]
+                                                .clone(),
+                                        )
+                                    },
+                                )
+                                .collect(),
+                            type_of_satisfied_variable: cand_t
+                                .constructor,
+                            map,
+                        }
+                    },
+                )
+            },
+        )
         .collect_vec()
 }
 
@@ -773,55 +1052,52 @@ fn resolve_recursion_in_scc<'a>(
     toplevels: &[Toplevel<'a>],
     resolved_variable_map: &FxHashMap<&str, Vec<Toplevel<'a>>>,
     map: &mut TypeVariableMap<'a>,
-) -> (Resolved, IncompleteType<'a, SccTypeConstructor<'a>>) {
+    names_in_scc: &FxHashSet<&str>,
+) -> (Resolved<'a>, IncompleteType<'a, SccTypeConstructor<'a>>) {
     let mut scc_map: FxHashMap<&str, Vec<usize>> =
         FxHashMap::default();
     for (i, t) in toplevels.iter().enumerate() {
         scc_map.entry(t.name).or_default().push(i);
     }
     let mut resolved_idents = Vec::new();
-    while let Some((
-        req_name,
-        req_type,
-        ident_id,
-        ident_type_variable,
-    )) = scc.variable_requirements.pop()
-    {
-        let mut satisfied = find_satisfied_types(
+    while let Some(req) = scc.variable_requirements.pop() {
+        let satisfied = find_satisfied_types(
+            &req,
             &scc,
-            &req_type,
-            resolved_variable_map
-                .get(req_name)
-                .into_iter()
-                .flatten()
-                .cloned(),
-            true,
+            CandidatesProviderForScc {
+                candidates_provider_with_fn:
+                    CandidatesProviderWithFn {
+                        scc_map: &scc_map,
+                        f: |j| Candidate {
+                            candidate: Toplevel {
+                                incomplete: scc.constructor.0[j]
+                                    .type_
+                                    .clone()
+                                    .into(),
+                                ..toplevels[j].clone()
+                            },
+                            replace_variables: false,
+                        },
+                    },
+                normal_map: resolved_variable_map,
+            },
             map,
+            names_in_scc,
         );
-        satisfied.append(&mut find_satisfied_types(
-            &scc,
-            &req_type,
-            scc_map.get(req_name).unwrap().iter().map(|j| Toplevel {
-                incomplete: scc.constructor.0[*j]
-                    .type_
-                    .clone()
-                    .into(),
-                ..toplevels[*j].clone()
-            }),
-            false,
-            map,
-        ));
         let satisfied = get_one_satisfied(satisfied);
         *map = satisfied.map;
-        map.insert(
+        map.insert_type(
             &mut scc.subtype_relations,
-            ident_type_variable,
+            req.required_type,
             satisfied.type_of_satisfied_variable,
         );
         resolved_idents.push((
-            ident_id,
-            satisfied.id_of_satisfied_variable,
-            satisfied.type_args,
+            req.ident,
+            ResolvedIdent {
+                variable_id: satisfied.id_of_satisfied_variable,
+                type_args: satisfied.type_args,
+                implicit_args: satisfied.implicit_args,
+            },
         ));
         scc = satisfied.type_of_improved_decl;
     }
@@ -851,7 +1127,7 @@ fn min_type_incomplite<'a>(
     map: &mut TypeVariableMap<'a>,
 ) -> (
     ast_step2::IncompleteType<'a>,
-    Resolved,
+    Resolved<'a>,
     Vec<(IdentId, TypeVariable)>,
 ) {
     match expr {
@@ -906,7 +1182,9 @@ fn min_type_incomplite<'a>(
                 pattern_restrictions.concat();
             pattern_restrictions.push((
                 Type::argument_tuple_from_arguments(arg_types),
-                PatternUnitForRestriction::argument_tuple_from_arguments(restrictions),
+                PatternUnitForRestriction::argument_tuple_from_arguments(
+                    restrictions,
+                ),
             ));
             map.insert(
                 subtype_relations,
@@ -939,21 +1217,19 @@ fn min_type_incomplite<'a>(
             map.insert(subtype_relations, *type_variable, t.clone());
             (t.into(), Default::default(), Default::default())
         }
-        Expr::Ident {
-            name: info,
-            ident_id,
-            ..
-        } => {
+        Expr::Ident { name, ident_id, .. } => {
             let t: Type = TypeUnit::Variable(*type_variable).into();
             (
                 ast_step2::IncompleteType {
                     constructor: t.clone(),
-                    variable_requirements: vec![(
-                        info,
-                        t,
-                        *ident_id,
-                        *type_variable,
-                    )],
+                    variable_requirements: vec![
+                        VariableRequirement {
+                            name,
+                            required_type: t,
+                            ident: *ident_id,
+                            local_env: Default::default(),
+                        },
+                    ],
                     subtype_relations: SubtypeRelations::default(),
                     pattern_restrictions:
                         PatternRestrictions::default(),
@@ -1073,8 +1349,16 @@ fn types_to_fn_type<'a>(
     r
 }
 
-type VariableRequirement<'a> =
-    (&'a str, types::Type<'a>, IdentId, TypeVariable);
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
+)]
+pub struct VariableRequirement<'a> {
+    pub name: &'a str,
+    pub required_type: Type<'a>,
+    pub ident: IdentId,
+    pub local_env: Vec<(&'a str, DeclId, Type<'a>)>,
+}
+
 type IdentTypeMap = Vec<(IdentId, TypeVariable)>;
 
 /// Returns `vec![argument type, argument type, ..., return type]`,
@@ -1088,7 +1372,7 @@ fn arm_min_type<'a>(
     Vec<PatternUnitForRestriction<'a>>,
     Vec<VariableRequirement<'a>>,
     SubtypeRelations<'a>,
-    Resolved,
+    Resolved<'a>,
     IdentTypeMap,
     PatternRestrictions<'a>,
 ) {
@@ -1101,16 +1385,23 @@ fn arm_min_type<'a>(
         bindings.into_iter().flatten().collect();
     let mut variable_requirements = Vec::new();
     let mut subtype_requirement = Vec::new();
-    for p in body_type.variable_requirements.into_iter() {
-        if let Some(a) = bindings.get(&p.0) {
-            subtype_requirement.push((a.1.clone(), p.1.clone()));
-            subtype_requirement.push((p.1, a.1.clone()));
+    for mut p in body_type.variable_requirements.into_iter() {
+        if let Some(a) = bindings.get(&p.name) {
+            subtype_requirement
+                .push((a.1.clone(), p.required_type.clone()));
+            subtype_requirement.push((p.required_type, a.1.clone()));
             resolved_idents.push((
-                p.2,
-                VariableId::Decl(a.0),
-                Vec::new(),
+                p.ident,
+                ResolvedIdent {
+                    variable_id: VariableId::Decl(a.0),
+                    type_args: Vec::new(),
+                    implicit_args: Vec::new(),
+                },
             ));
         } else {
+            p.local_env.extend(bindings.iter().map(
+                |(name, (decl_id, t))| (*name, *decl_id, t.clone()),
+            ));
             variable_requirements.push(p);
         }
     }

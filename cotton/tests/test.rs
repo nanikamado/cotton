@@ -159,3 +159,18 @@ fn red_black_tree_strongly_typed_fail1() {
 fn red_black_tree_strongly_typed_fail2() {
     test_test("red_black_tree_strongly_typed_fail2.cot").failure();
 }
+
+#[test]
+fn interface() {
+    test_examples(
+        "interface.cot",
+        "HogeeeeeeHogeeeeee\nFugaaaaaaFugaaaaaa\n",
+    );
+}
+
+#[test]
+fn rfold_with_empty() {
+    test_test("rfold_with_empty.cot")
+        .stdout("abc\n6\n")
+        .success();
+}

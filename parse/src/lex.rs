@@ -28,6 +28,8 @@ pub enum Token {
     BArrow,
     Colon,
     Type,
+    Interface,
+    Where,
 }
 
 trait RequiresIndet {
@@ -37,7 +39,7 @@ trait RequiresIndet {
 impl RequiresIndet for (Token, Span) {
     fn requires_indent(&self) -> bool {
         use Token::*;
-        matches!(self, (Do | Forall, _))
+        matches!(self, (Do | Forall | Where, _))
     }
 }
 
@@ -161,6 +163,8 @@ fn lexer(
         "infixr" => Token::Infixr,
         "data" => Token::Data,
         "type" => Token::Type,
+        "interface" => Token::Interface,
+        "where" => Token::Where,
         _ if i.chars().next().unwrap().is_uppercase() => {
             Token::CapitalHeadIdent(i)
         }

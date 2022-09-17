@@ -1,0 +1,54 @@
+(.) = | a, f => f(a)
+
+infixl 10 .
+
+data Nil
+data A /\ B forall { A, B }
+
+infixr 3 /\
+
+type List = Nil | (A /\ List) forall { A }
+
+data E
+data T(A, B, C) forall { A, B, C }
+
+type Tree = E | T[A, Tree[A], Tree[A]] forall { A }
+
+type Bool = True | False
+
+empty : Bool = False
+empty : Tree[A] forall { A } = E
+empty : List[A] forall { A } = Nil
+empty : String = ""
+empty : I64 = 0
+
+interface Empty where
+    empty : Self
+
+rfold_with_empty : List[A] -> (B -> A -> B) -> B forall { A, B : Empty } =
+    | Nil, _ => empty
+    | h /\ t, f => t.rfold_with_empty(f).f(h)
+
+append : List[A] -> List[A] -> List[A] forall { A } =
+    | h /\ t, l => h /\ t.append(l)
+    | Nil, l => l
+
+append : I64 -> I64 -> I64 = (+)
+
+append : String -> String -> String = (<>)
+
+interface Append where
+    append : Self -> Self -> Self
+
+concat : List[A] -> A forall { A : Empty & Append } =
+    | l => l.rfold_with_empty(| a, b => b.append(a))
+
+main : () -> () =
+    | () => do
+        ("a" /\ "b" /\ "c" /\ Nil)
+            .concat
+            .println
+        (1 /\ 2 /\ 3 /\ Nil)
+            .concat
+            .i64_to_string
+            .println

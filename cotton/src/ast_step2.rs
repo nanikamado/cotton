@@ -8,6 +8,7 @@ use self::{
     ident_id::IdentId,
     types::{Type, TypeUnit},
 };
+use crate::ast_step3::VariableRequirement;
 use crate::{
     ast_step1,
     intrinsics::{
@@ -84,8 +85,7 @@ where
     T: TypeConstructor<'a>,
 {
     pub constructor: T,
-    pub variable_requirements:
-        Vec<(&'a str, Type<'a>, IdentId, TypeVariable)>,
+    pub variable_requirements: Vec<VariableRequirement<'a>>,
     pub subtype_relations: SubtypeRelations<'a>,
     pub already_considered_relations: SubtypeRelations<'a>,
     pub pattern_restrictions: PatternRestrictions<'a>,
@@ -95,6 +95,7 @@ where
 pub struct VariableDecl<'a> {
     pub name: &'a str,
     pub type_annotation: Option<IncompleteType<'a>>,
+    pub implicit_parameters: Vec<(&'a str, Type<'a>, DeclId)>,
     pub value: ExprWithType<'a>,
     pub decl_id: DeclId,
 }
@@ -134,6 +135,12 @@ pub enum PatternUnit<'a> {
     TypeRestriction(Pattern<'a>, Type<'a>),
 }
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct InterfaceDecl<'a> {
+    name: &'a str,
+    variables: Vec<(&'a str, Type<'a>, TypeVariable)>,
+}
+
 impl<'a> From<ast_step1::Ast<'a>> for Ast<'a> {
     fn from(ast: ast_step1::Ast<'a>) -> Self {
         let data_decl: Vec<_> = ast
@@ -157,6 +164,41 @@ impl<'a> From<ast_step1::Ast<'a>> for Ast<'a> {
                 })
                 .collect(),
         );
+        let interface_decl: FxHashMap<&str, Vec<_>> = ast
+            .interface_decl
+            .into_iter()
+            .map(|i| {
+                (
+                    i.name,
+                    i.variables
+                        .into_iter()
+                        .map(|(name, t, forall)| {
+                            let self_ = TypeVariable::new();
+                            (
+                                name,
+                                type_to_type(
+                                    t,
+                                    &data_decl_map,
+                                    &forall
+                                        .type_variables
+                                        .into_iter()
+                                        .map(|(s, _)| {
+                                            (s, TypeVariable::new())
+                                        })
+                                        .chain(std::iter::once((
+                                            "Self", self_,
+                                        )))
+                                        .collect(),
+                                    &mut type_alias_map,
+                                    SearchMode::Normal,
+                                ),
+                                self_,
+                            )
+                        })
+                        .collect(),
+                )
+            })
+            .collect();
         let variable_decl: Vec<_> = ast
             .variable_decl
             .into_iter()
@@ -166,6 +208,7 @@ impl<'a> From<ast_step1::Ast<'a>> for Ast<'a> {
                     &data_decl_map,
                     &Default::default(),
                     &mut type_alias_map,
+                    &interface_decl,
                 )
             })
             .collect();
@@ -220,16 +263,36 @@ fn variable_decl<'a>(
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
+    interfaces: &FxHashMap<
+        &'a str,
+        Vec<(&'a str, Type<'a>, TypeVariable)>,
+    >,
 ) -> VariableDecl<'a> {
     let mut type_variable_names = type_variable_names.clone();
+    let mut implicit_parameters = Vec::new();
     VariableDecl {
         name: v.name,
         type_annotation: v.type_annotation.map(|(t, forall)| {
             type_variable_names.extend(
-                forall
-                    .type_variables
-                    .into_iter()
-                    .map(|s| (s, TypeVariable::new())),
+                forall.type_variables.into_iter().map(
+                    |(s, interface_names)| {
+                        let v = TypeVariable::new();
+                        for name in interface_names {
+                            for (name, t, self_) in &interfaces[&name]
+                            {
+                                implicit_parameters.push((
+                                    *name,
+                                    t.clone().replace_num(
+                                        *self_,
+                                        &TypeUnit::Variable(v).into(),
+                                    ),
+                                    DeclId::new(),
+                                ))
+                            }
+                        }
+                        (s, v)
+                    },
+                ),
             );
             type_to_type(
                 t,
@@ -245,8 +308,10 @@ fn variable_decl<'a>(
             data_decl_map,
             &type_variable_names,
             type_alias_map,
+            interfaces,
         ),
         decl_id: DeclId::new(),
+        implicit_parameters,
     }
 }
 
@@ -255,6 +320,10 @@ fn expr<'a>(
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
+    interfaces: &FxHashMap<
+        &'a str,
+        Vec<(&'a str, Type<'a>, TypeVariable)>,
+    >,
 ) -> ExprWithType<'a> {
     use Expr::*;
     let e = match e {
@@ -266,6 +335,7 @@ fn expr<'a>(
                         data_decl_map,
                         type_variable_names,
                         type_alias_map,
+                        interfaces,
                     )
                 })
                 .collect(),
@@ -282,6 +352,7 @@ fn expr<'a>(
                 data_decl_map,
                 type_variable_names,
                 type_alias_map,
+                interfaces,
             );
             d.value.0
         }
@@ -291,12 +362,14 @@ fn expr<'a>(
                 data_decl_map,
                 type_variable_names,
                 type_alias_map,
+                interfaces,
             )),
             Box::new(expr(
                 *a,
                 data_decl_map,
                 type_variable_names,
                 type_alias_map,
+                interfaces,
             )),
         ),
         ast_step1::Expr::Do(es) => {
@@ -308,6 +381,7 @@ fn expr<'a>(
                     data_decl_map,
                     type_variable_names,
                     type_alias_map,
+                    interfaces,
                 );
             }
             new_es.reverse();
@@ -323,6 +397,10 @@ fn add_expr_in_do<'a>(
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
+    interfaces: &FxHashMap<
+        &'a str,
+        Vec<(&'a str, Type<'a>, TypeVariable)>,
+    >,
 ) -> Vec<ExprWithType<'a>> {
     match e {
         ast_step1::Expr::Decl(d) => {
@@ -331,6 +409,7 @@ fn add_expr_in_do<'a>(
                 data_decl_map,
                 type_variable_names,
                 type_alias_map,
+                interfaces,
             );
             if es.is_empty() {
                 vec![
@@ -369,6 +448,7 @@ fn add_expr_in_do<'a>(
                 data_decl_map,
                 type_variable_names,
                 type_alias_map,
+                interfaces,
             ));
             es
         }
@@ -380,6 +460,10 @@ fn fn_arm<'a>(
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
+    interfaces: &FxHashMap<
+        &'a str,
+        Vec<(&'a str, Type<'a>, TypeVariable)>,
+    >,
 ) -> FnArm<'a> {
     FnArm {
         pattern: arm
@@ -392,6 +476,7 @@ fn fn_arm<'a>(
             data_decl_map,
             type_variable_names,
             type_alias_map,
+            interfaces,
         ),
     }
 }
@@ -643,7 +728,7 @@ impl<'a> TypeAliasMap<'a> {
                     t.1.clone()
                         .type_variables
                         .into_iter()
-                        .map(|s| {
+                        .map(|(s, _)| {
                             let v = TypeVariable::new();
                             type_variable_names.insert(s, v);
                             v

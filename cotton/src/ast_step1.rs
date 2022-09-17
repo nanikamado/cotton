@@ -12,11 +12,12 @@ pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl<'a>>,
     pub type_alias_decl: Vec<TypeAliasDecl<'a>>,
+    pub interface_decl: Vec<InterfaceDecl<'a>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Forall<'a> {
-    pub type_variables: Vec<&'a str>,
+    pub type_variables: Vec<(&'a str, Vec<&'a str>)>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -42,6 +43,12 @@ pub struct DataDecl<'a> {
 pub struct TypeAliasDecl<'a> {
     pub name: &'a str,
     pub body: (Type<'a>, Forall<'a>),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct InterfaceDecl<'a> {
+    pub name: &'a str,
+    pub variables: Vec<(&'a str, Type<'a>, Forall<'a>)>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -173,6 +180,7 @@ impl<'a> From<&'a parse::Ast> for Ast<'a> {
         let mut ds = Vec::new();
         let mut aliases = Vec::new();
         let mut precedence_map = OP_PRECEDENCE.clone();
+        let mut interfaces = Vec::new();
         for d in &ast.decls {
             match d {
                 parse::Decl::Variable(a) => vs.push(a),
@@ -189,6 +197,7 @@ impl<'a> From<&'a parse::Ast> for Ast<'a> {
                         .insert(name, (*associativity, *precedence));
                 }
                 parse::Decl::TypeAlias(a) => aliases.push(a),
+                parse::Decl::Interface(a) => interfaces.push(a),
             }
         }
         let op_precedence_map = OpPrecedenceMap::new(precedence_map);
@@ -207,16 +216,46 @@ impl<'a> From<&'a parse::Ast> for Ast<'a> {
                             &a.body.0,
                             &op_precedence_map,
                         )),
-                        Forall {
-                            type_variables: a
-                                .body
-                                .1
-                                .type_variables
-                                .iter()
-                                .map(|s| s.as_str())
-                                .collect(),
-                        },
+                        (&a.body.1).into(),
                     ),
+                })
+                .collect(),
+            interface_decl: interfaces
+                .into_iter()
+                .map(|a| InterfaceDecl {
+                    name: &a.name,
+                    variables: a
+                        .variables
+                        .iter()
+                        .map(|(name, t, forall)| {
+                            (
+                                name.as_str(),
+                                infix_op_sequence(op_sequence(
+                                    t,
+                                    &op_precedence_map,
+                                )),
+                                forall.into(),
+                            )
+                        })
+                        .collect(),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl<'a> From<&'a parse::Forall> for Forall<'a> {
+    fn from(
+        parse::Forall { type_variables }: &'a parse::Forall,
+    ) -> Self {
+        Forall {
+            type_variables: type_variables
+                .iter()
+                .map(|(name, ts)| {
+                    (
+                        name.as_str(),
+                        ts.iter().map(String::as_str).collect(),
+                    )
                 })
                 .collect(),
         }
@@ -230,18 +269,13 @@ fn variable_decl<'a>(
     VariableDecl {
         name: &v.name,
         type_annotation: v.type_annotation.as_ref().map(
-            |(s, parse::Forall { type_variables })| {
+            |(s, forall)| {
                 (
                     infix_op_sequence(op_sequence(
                         s,
                         op_precedence_map,
                     )),
-                    Forall {
-                        type_variables: type_variables
-                            .iter()
-                            .map(|s| s.as_str())
-                            .collect(),
-                    },
+                    forall.into(),
                 )
             },
         ),

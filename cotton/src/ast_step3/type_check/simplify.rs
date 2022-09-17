@@ -129,27 +129,12 @@ impl<'a> TypeVariableMap<'a> {
         }
     }
 
-    pub fn insert(
+    fn _insert_type(
         &mut self,
         subtype: &mut SubtypeRelations<'a>,
-        k: TypeVariable,
-        v: Type<'a>,
+        key: Type<'a>,
+        value: Type<'a>,
     ) {
-        let key = self.find(k);
-        let value = self.normalize_type(v.clone());
-        log::debug!(
-            "{k} {} ----> {v} {}",
-            match key.matchable_ref() {
-                TypeMatchableRef::Variable(key) if k == key =>
-                    "".to_string(),
-                _ => format!("({})", key),
-            },
-            if v == value {
-                "".to_string()
-            } else {
-                format!("({})", value)
-            }
-        );
         if key == value {
             return;
         }
@@ -190,6 +175,54 @@ impl<'a> TypeVariableMap<'a> {
         } else {
             self.0.insert(key, value);
         }
+    }
+
+    pub fn insert_type(
+        &mut self,
+        subtype: &mut SubtypeRelations<'a>,
+        k: Type<'a>,
+        v: Type<'a>,
+    ) {
+        let key = self.normalize_type(k.clone());
+        let value = self.normalize_type(v.clone());
+        log::debug!(
+            "{k} {} ----> {v} {}",
+            if k == key {
+                "".to_string()
+            } else {
+                format!("({})", key)
+            },
+            if v == value {
+                "".to_string()
+            } else {
+                format!("({})", value)
+            }
+        );
+        self._insert_type(subtype, key, value)
+    }
+
+    pub fn insert(
+        &mut self,
+        subtype: &mut SubtypeRelations<'a>,
+        k: TypeVariable,
+        v: Type<'a>,
+    ) {
+        let key = self.find(k);
+        let value = self.normalize_type(v.clone());
+        log::debug!(
+            "{k} {} ----> {v} {}",
+            match key.matchable_ref() {
+                TypeMatchableRef::Variable(key) if k == key =>
+                    "".to_string(),
+                _ => format!("({})", key),
+            },
+            if v == value {
+                "".to_string()
+            } else {
+                format!("({})", value)
+            }
+        );
+        self._insert_type(subtype, key, value)
     }
 }
 
@@ -973,7 +1006,7 @@ fn possible_weakest<'a>(
 ) -> Option<Type<'a>> {
     if variable_requirements
         .iter()
-        .any(|(_, req_t, _, _)| req_t.contains_variable(t))
+        .any(|req| req.required_type.contains_variable(t))
     {
         return None;
     }
@@ -1158,7 +1191,7 @@ fn possible_strongest<'a>(
     let mut down = Vec::new();
     if variable_requirements
         .iter()
-        .any(|(_, req_t, _, _)| req_t.contains_variable(t))
+        .any(|req| req.required_type.contains_variable(t))
     {
         return None;
     }
@@ -1235,8 +1268,8 @@ fn mk_contravariant_candidates<'a, T: TypeConstructor<'a>>(
 ) -> FxHashSet<TypeVariable> {
     let mut rst: Vec<TypeVariable> =
         t.constructor.contravariant_type_variables();
-    for (_, v, _, _) in &t.variable_requirements {
-        rst.append(&mut v.covariant_type_variables());
+    for req in &t.variable_requirements {
+        rst.append(&mut req.required_type.covariant_type_variables());
     }
     rst.into_iter().collect()
 }
@@ -1246,8 +1279,10 @@ fn mk_covariant_candidates<'a, T: TypeConstructor<'a>>(
 ) -> FxHashSet<TypeVariable> {
     let mut rst: Vec<TypeVariable> =
         t.constructor.covariant_type_variables();
-    for (_, v, _, _) in &t.variable_requirements {
-        rst.append(&mut v.contravariant_type_variables());
+    for req in &t.variable_requirements {
+        rst.append(
+            &mut req.required_type.contravariant_type_variables(),
+        );
     }
     rst.into_iter().collect()
 }
@@ -1256,7 +1291,7 @@ impl<'a, T> IncompleteType<'a, T>
 where
     T: TypeConstructor<'a>,
 {
-    fn normalize(
+    pub fn normalize(
         mut self,
         map: &mut TypeVariableMap<'a>,
     ) -> Option<Self> {
@@ -1269,12 +1304,14 @@ where
                 .map_type(|t| map.normalize_type(t))
                 .normalize_contravariant_candidates_from_annotation(
                     map,
-                ),
+                )?,
             variable_requirements: self
                 .variable_requirements
                 .into_iter()
-                .map(|(name, t, id, type_variable)| {
-                    (name, map.normalize_type(t), id, type_variable)
+                .map(|mut req| {
+                    req.required_type =
+                        map.normalize_type(req.required_type);
+                    req
                 })
                 .collect(),
             subtype_relations: self
@@ -1303,18 +1340,18 @@ where
 }
 
 fn apply_type_to_pattern<'a>(
-    mut ts: Type<'a>,
+    t: Type<'a>,
     pattern: &Vec<PatternUnitForRestriction<'a>>,
 ) -> Option<SubtypeRelations<'a>> {
     log::trace!(
         "ts = ({})",
-        ts.iter().map(|t| format!("{t}")).join(", ")
+        t.iter().map(|t| format!("{t}")).join(", ")
     );
     log::trace!(
         "pattern = {}",
         pattern.iter().map(|p| format!("{}", p)).join(" | ")
     );
-    ts = ts.disjunctive();
+    let mut ts = t.clone().disjunctive();
     let decl_type_map_in_pattern: FxHashMap<DeclId, Type> = pattern
         .iter()
         .flat_map(|p| p.decl_type_map())
@@ -1379,8 +1416,49 @@ fn apply_type_to_pattern<'a>(
         log::debug!("missing type = {ts}");
         None
     } else {
+        if not_sure {
+            if let Some(pattern_t) = pattern_to_type(pattern) {
+                subtype_rels.add_subtype_rels(simplify_subtype_rel(
+                    t,
+                    pattern_t.conjunctive(),
+                    &mut Default::default(),
+                )?);
+            }
+        }
         Some(subtype_rels)
     }
+}
+
+fn pattern_unit_to_type<'a>(
+    p: &PatternUnitForRestriction<'a>,
+) -> Option<Type<'a>> {
+    use PatternUnitForRestriction::*;
+    match p {
+        I64 => Some(Type::from_str("I64")),
+        Str => Some(Type::from_str("String")),
+        Constructor { id, args, name } => Some(
+            TypeUnit::Normal {
+                name,
+                args: args
+                    .iter()
+                    .map(|t| pattern_to_type(&[t.clone()]))
+                    .collect::<Option<_>>()?,
+                id: *id,
+            }
+            .into(),
+        ),
+        Binder(_, _) => None,
+    }
+}
+
+fn pattern_to_type<'a>(
+    p: &[PatternUnitForRestriction<'a>],
+) -> Option<Type<'a>> {
+    let mut t = Type::default();
+    for p in p {
+        t = t.union(pattern_unit_to_type(p)?);
+    }
+    Some(t)
 }
 
 #[derive(Debug)]
@@ -1642,10 +1720,27 @@ impl<'a, T: TypeConstructor<'a>> IncompleteType<'a, T> {
         &self,
     ) -> FxHashSet<TypeVariable> {
         let mut s = self.constructor.all_type_variables();
-        for (_, t, _, _) in &self.variable_requirements {
-            s.extend(t.all_type_variables())
+        for req in &self.variable_requirements {
+            s.extend(req.required_type.all_type_variables())
         }
         s
+    }
+}
+
+impl Display for VariableRequirement<'_> {
+    fn fmt(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        write!(
+            f,
+            "  {:<3}  ?{} : {} , env = ",
+            self.ident, self.name, self.required_type
+        )?;
+        for (name, _, _) in &self.local_env {
+            write!(f, "{}, ", name)?;
+        }
+        Ok(())
     }
 }
 
@@ -1660,12 +1755,8 @@ impl<'a, T: TypeConstructor<'a>> Display
         for (a, b) in &self.subtype_relations {
             writeln!(f, "    {} < {},", a, b)?;
         }
-        for (a, b, id, type_variable) in &self.variable_requirements {
-            writeln!(
-                f,
-                "  {:<3}  ?{} : {} (type_variable = {}),",
-                id, a, b, type_variable
-            )?;
+        for req in &self.variable_requirements {
+            writeln!(f, "{},", req)?;
         }
         for (a, b) in &self.pattern_restrictions {
             writeln!(
