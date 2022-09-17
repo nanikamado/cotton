@@ -50,10 +50,7 @@ fn helloworld() {
 
 #[test]
 fn list() {
-    test_examples(
-        "list.cot",
-        &(0..100).map(|i| format!("{}\n", i)).join(""),
-    );
+    test_examples("list.cot", &(0..100).map(|i| format!("{}\n", i)).join(""));
 }
 
 #[test]
@@ -162,10 +159,7 @@ fn red_black_tree_strongly_typed_fail2() {
 
 #[test]
 fn interface() {
-    test_examples(
-        "interface.cot",
-        "HogeeeeeeHogeeeeee\nFugaaaaaaFugaaaaaa\n",
-    );
+    test_examples("interface.cot", "HogeeeeeeHogeeeeee\nFugaaaaaaFugaaaaaa\n");
 }
 
 #[test]
@@ -173,4 +167,14 @@ fn rfold_with_empty() {
     test_test("rfold_with_empty.cot")
         .stdout("abc\n6\n")
         .success();
+}
+
+#[test]
+fn tuple_infer() {
+    test_test("tuple_infer.cot").stdout("b\n").success();
+}
+
+#[test]
+fn tuple_infer_fail() {
+    test_test("tuple_infer_fail.cot").failure();
 }

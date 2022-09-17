@@ -2,7 +2,7 @@ pub mod decl_id;
 pub mod ident_id;
 pub mod types;
 
-use self::types::TypeVariable;
+use self::types::{unwrap_or_clone, TypeVariable};
 use self::{
     decl_id::DeclId,
     ident_id::IdentId,
@@ -22,17 +22,13 @@ use std::collections::BTreeSet;
 use std::fmt::Display;
 pub use types::TypeConstructor;
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ConstructorId<'a> {
     DeclId(DeclId, &'a str),
     Intrinsic(IntrinsicConstructor),
 }
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeId {
     DeclId(DeclId),
     Intrinsic(IntrinsicType),
@@ -55,31 +51,34 @@ pub struct DataDecl<'a> {
     pub decl_id: DeclId,
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct SubtypeRelations<'a>(pub BTreeSet<(Type<'a>, Type<'a>)>);
 
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
 pub enum PatternUnitForRestriction<'a> {
     I64,
     Str,
-    Constructor {
-        id: TypeId,
+    Const {
         name: &'a str,
-        args: Vec<PatternUnitForRestriction<'a>>,
+        id: TypeId,
     },
+    Tuple(
+        Box<PatternUnitForRestriction<'a>>,
+        Box<PatternUnitForRestriction<'a>>,
+    ),
+    // Constructor {
+    //     id: TypeId,
+    //     name: &'a str,
+    //     args: Vec<PatternUnitForRestriction<'a>>,
+    // },
     Binder(Type<'a>, DeclId),
 }
 
-pub type PatternForRestriction<'a> =
-    Vec<PatternUnitForRestriction<'a>>;
+pub type PatternForRestriction<'a> = Vec<PatternUnitForRestriction<'a>>;
 pub type PatternRestrictions<'a> =
     Vec<(Type<'a>, Vec<PatternUnitForRestriction<'a>>)>;
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct IncompleteType<'a, T = Type<'a>>
 where
     T: TypeConstructor<'a>,
@@ -148,9 +147,7 @@ impl<'a> From<ast_step1::Ast<'a>> for Ast<'a> {
             .into_iter()
             .map(|d| DataDecl {
                 name: d.name,
-                fields: (0..d.field_len)
-                    .map(|_| TypeVariable::new())
-                    .collect(),
+                fields: (0..d.field_len).map(|_| TypeVariable::new()).collect(),
                 decl_id: DeclId::new(),
             })
             .collect();
@@ -159,9 +156,7 @@ impl<'a> From<ast_step1::Ast<'a>> for Ast<'a> {
         let mut type_alias_map = TypeAliasMap(
             ast.type_alias_decl
                 .into_iter()
-                .map(|a| {
-                    (a.name, (a.body, AliasComputation::NotUnaliased))
-                })
+                .map(|a| (a.name, (a.body, AliasComputation::NotUnaliased)))
                 .collect(),
         );
         let interface_decl: FxHashMap<&str, Vec<_>> = ast
@@ -182,12 +177,8 @@ impl<'a> From<ast_step1::Ast<'a>> for Ast<'a> {
                                     &forall
                                         .type_variables
                                         .into_iter()
-                                        .map(|(s, _)| {
-                                            (s, TypeVariable::new())
-                                        })
-                                        .chain(std::iter::once((
-                                            "Self", self_,
-                                        )))
+                                        .map(|(s, _)| (s, TypeVariable::new()))
+                                        .chain(std::iter::once(("Self", self_)))
                                         .collect(),
                                     &mut type_alias_map,
                                     SearchMode::Normal,
@@ -263,37 +254,31 @@ fn variable_decl<'a>(
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
-    interfaces: &FxHashMap<
-        &'a str,
-        Vec<(&'a str, Type<'a>, TypeVariable)>,
-    >,
+    interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type<'a>, TypeVariable)>>,
 ) -> VariableDecl<'a> {
     let mut type_variable_names = type_variable_names.clone();
     let mut implicit_parameters = Vec::new();
     VariableDecl {
         name: v.name,
         type_annotation: v.type_annotation.map(|(t, forall)| {
-            type_variable_names.extend(
-                forall.type_variables.into_iter().map(
-                    |(s, interface_names)| {
-                        let v = TypeVariable::new();
-                        for name in interface_names {
-                            for (name, t, self_) in &interfaces[&name]
-                            {
-                                implicit_parameters.push((
-                                    *name,
-                                    t.clone().replace_num(
-                                        *self_,
-                                        &TypeUnit::Variable(v).into(),
-                                    ),
-                                    DeclId::new(),
-                                ))
-                            }
+            type_variable_names.extend(forall.type_variables.into_iter().map(
+                |(s, interface_names)| {
+                    let v = TypeVariable::new();
+                    for name in interface_names {
+                        for (name, t, self_) in &interfaces[&name] {
+                            implicit_parameters.push((
+                                *name,
+                                t.clone().replace_num(
+                                    *self_,
+                                    &TypeUnit::Variable(v).into(),
+                                ),
+                                DeclId::new(),
+                            ))
                         }
-                        (s, v)
-                    },
-                ),
-            );
+                    }
+                    (s, v)
+                },
+            ));
             type_to_type(
                 t,
                 data_decl_map,
@@ -320,10 +305,7 @@ fn expr<'a>(
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
-    interfaces: &FxHashMap<
-        &'a str,
-        Vec<(&'a str, Type<'a>, TypeVariable)>,
-    >,
+    interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type<'a>, TypeVariable)>>,
 ) -> ExprWithType<'a> {
     use Expr::*;
     let e = match e {
@@ -397,10 +379,7 @@ fn add_expr_in_do<'a>(
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
-    interfaces: &FxHashMap<
-        &'a str,
-        Vec<(&'a str, Type<'a>, TypeVariable)>,
-    >,
+    interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type<'a>, TypeVariable)>>,
 ) -> Vec<ExprWithType<'a>> {
     match e {
         ast_step1::Expr::Decl(d) => {
@@ -460,10 +439,7 @@ fn fn_arm<'a>(
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
-    interfaces: &FxHashMap<
-        &'a str,
-        Vec<(&'a str, Type<'a>, TypeVariable)>,
-    >,
+    interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type<'a>, TypeVariable)>>,
 ) -> FnArm<'a> {
     FnArm {
         pattern: arm
@@ -519,20 +495,16 @@ fn pattern<'a>(
     match p {
         ast_step1::Pattern::Number(n) => I64(n),
         ast_step1::Pattern::StrLiteral(s) => Str(s),
-        ast_step1::Pattern::Constructor { name, args } => {
-            Constructor {
-                id: ConstructorId::get(name, data_decl_map),
-                args: args
-                    .into_iter()
-                    .map(|arg| pattern(arg, data_decl_map))
-                    .collect(),
-            }
+        ast_step1::Pattern::Constructor { name, args } => Constructor {
+            id: ConstructorId::get(name, data_decl_map),
+            args: args
+                .into_iter()
+                .map(|arg| pattern(arg, data_decl_map))
+                .collect(),
+        },
+        ast_step1::Pattern::Binder(name) => {
+            Binder(name, DeclId::new(), TypeUnit::new_variable().into())
         }
-        ast_step1::Pattern::Binder(name) => Binder(
-            name,
-            DeclId::new(),
-            TypeUnit::new_variable().into(),
-        ),
         ast_step1::Pattern::Underscore => Underscore,
     }
     .into()
@@ -587,36 +559,42 @@ pub fn type_to_type<'a>(
             if let Some(n) = type_variable_names.get(t.name) {
                 TypeUnit::Variable(*n).into()
             } else if let Some(i) = INTRINSIC_TYPES.get(&t.name) {
-                TypeUnit::Normal {
-                    name: t.name,
-                    args: t
-                        .args
-                        .into_iter()
-                        .map(|a| {
-                            type_to_type(
-                                a,
-                                data_decl_map,
-                                type_variable_names,
-                                type_alias_map,
-                                search_type,
-                            )
-                        })
-                        .collect(),
-                    id: TypeId::Intrinsic(*i),
+                let mut tuple = Type::label_from_str("()");
+                for a in t
+                    .args
+                    .into_iter()
+                    .map(|a| {
+                        type_to_type(
+                            a,
+                            data_decl_map,
+                            type_variable_names,
+                            type_alias_map,
+                            search_type,
+                        )
+                    })
+                    .rev()
+                {
+                    tuple = TypeUnit::Tuple(a, tuple).into();
                 }
-                .into()
-            } else if let Some((mut unaliased, forall)) =
-                type_alias_map.get(
-                    t.name,
-                    data_decl_map,
-                    type_variable_names,
-                    if search_type == SearchMode::Normal {
-                        SearchMode::Alias
-                    } else {
-                        SearchMode::AliasSub
-                    },
+                TypeUnit::Tuple(
+                    TypeUnit::Const {
+                        name: t.name,
+                        id: TypeId::Intrinsic(*i),
+                    }
+                    .into(),
+                    tuple,
                 )
-            {
+                .into()
+            } else if let Some((mut unaliased, forall)) = type_alias_map.get(
+                t.name,
+                data_decl_map,
+                type_variable_names,
+                if search_type == SearchMode::Normal {
+                    SearchMode::Alias
+                } else {
+                    SearchMode::AliasSub
+                },
+            ) {
                 for (from, to) in forall.0.into_iter().zip(t.args) {
                     unaliased = unaliased.replace_num(
                         from,
@@ -631,23 +609,31 @@ pub fn type_to_type<'a>(
                 }
                 unaliased
             } else {
-                TypeUnit::Normal {
-                    name: t.name,
-                    args: t
-                        .args
-                        .into_iter()
-                        .map(|a| {
-                            type_to_type(
-                                a,
-                                data_decl_map,
-                                type_variable_names,
-                                type_alias_map,
-                                search_type,
-                            )
-                        })
-                        .collect(),
-                    id: TypeId::get(t.name, data_decl_map),
+                let mut tuple = Type::label_from_str("()");
+                for a in t
+                    .args
+                    .into_iter()
+                    .map(|a| {
+                        type_to_type(
+                            a,
+                            data_decl_map,
+                            type_variable_names,
+                            type_alias_map,
+                            search_type,
+                        )
+                    })
+                    .rev()
+                {
+                    tuple = TypeUnit::Tuple(a, tuple).into();
                 }
+                TypeUnit::Tuple(
+                    TypeUnit::Const {
+                        name: t.name,
+                        id: TypeId::get(t.name, data_decl_map),
+                    }
+                    .into(),
+                    tuple,
+                )
                 .into()
             }
         }
@@ -655,10 +641,7 @@ pub fn type_to_type<'a>(
 }
 
 impl std::fmt::Display for ConstructorId<'_> {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ConstructorId::Intrinsic(a) => std::fmt::Debug::fmt(a, f),
             ConstructorId::DeclId(a, _) => a.fmt(f),
@@ -705,23 +688,18 @@ impl<'a> TypeAliasMap<'a> {
                 let mut new_forall = Vec::new();
                 for v in &forall.0 {
                     let new_v = TypeVariable::new();
-                    t = t.replace_num(
-                        *v,
-                        &TypeUnit::Variable(new_v).into(),
-                    );
+                    t = t.replace_num(*v, &TypeUnit::Variable(new_v).into());
                     new_forall.push(new_v);
                 }
                 (t, Forall(new_forall))
             }
             ((t, _), _) => {
-                let mut type_variable_names: FxHashMap<
-                    &'a str,
-                    TypeVariable,
-                > = type_variable_names
-                    .clone()
-                    .into_iter()
-                    .map(|(s, v)| (s, v.increment_recursive_index()))
-                    .collect();
+                let mut type_variable_names: FxHashMap<&'a str, TypeVariable> =
+                    type_variable_names
+                        .clone()
+                        .into_iter()
+                        .map(|(s, v)| (s, v.increment_recursive_index(1)))
+                        .collect();
                 type_variable_names
                     .insert(name, TypeVariable::RecursiveIndex(0));
                 let forall =
@@ -741,9 +719,9 @@ impl<'a> TypeAliasMap<'a> {
                     self,
                     search_type,
                 );
-                let new_t = if new_t.contains_variable(
-                    TypeVariable::RecursiveIndex(0),
-                ) {
+                let new_t = if new_t
+                    .contains_variable(TypeVariable::RecursiveIndex(0))
+                {
                     TypeUnit::RecursiveAlias { body: new_t }.into()
                 } else {
                     new_t
@@ -762,36 +740,31 @@ impl<'a> TypeAliasMap<'a> {
 }
 
 fn decrement_index_outside(t: Type) -> Type {
-    t.into_iter().map(decrement_index_outside_unit).collect()
+    t.into_iter()
+        .map(|t| decrement_index_outside_unit(unwrap_or_clone(t)))
+        .collect()
 }
 
 fn decrement_index_outside_unit(t: TypeUnit) -> TypeUnit {
     match t {
-        TypeUnit::Normal { name, args, id } => TypeUnit::Normal {
-            name,
-            args: args
-                .into_iter()
-                .map(decrement_index_outside)
-                .collect(),
-            id,
-        },
-        TypeUnit::Fn(a, b) => TypeUnit::Fn(
+        TypeUnit::Fn(a, b) => {
+            TypeUnit::Fn(decrement_index_outside(a), decrement_index_outside(b))
+        }
+        TypeUnit::Variable(v) => {
+            TypeUnit::Variable(v.decrement_recursive_index_with_bound(1))
+        }
+        TypeUnit::RecursiveAlias { body } => TypeUnit::RecursiveAlias { body },
+        TypeUnit::Const { name, id } => TypeUnit::Const { name, id },
+        TypeUnit::Tuple(a, b) => TypeUnit::Tuple(
             decrement_index_outside(a),
             decrement_index_outside(b),
         ),
-        TypeUnit::Variable(v) => TypeUnit::Variable(
-            v.decrement_recursive_index_with_bound(1),
-        ),
-        TypeUnit::RecursiveAlias { body } => {
-            TypeUnit::RecursiveAlias { body }
-        }
     }
 }
 
 impl<'a> IntoIterator for SubtypeRelations<'a> {
     type Item = (Type<'a>, Type<'a>);
-    type IntoIter =
-        std::collections::btree_set::IntoIter<(Type<'a>, Type<'a>)>;
+    type IntoIter = std::collections::btree_set::IntoIter<(Type<'a>, Type<'a>)>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
@@ -800,8 +773,7 @@ impl<'a> IntoIterator for SubtypeRelations<'a> {
 
 impl<'a, 'b> IntoIterator for &'b SubtypeRelations<'a> {
     type Item = &'b (Type<'a>, Type<'a>);
-    type IntoIter =
-        std::collections::btree_set::Iter<'b, (Type<'a>, Type<'a>)>;
+    type IntoIter = std::collections::btree_set::Iter<'b, (Type<'a>, Type<'a>)>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
@@ -850,27 +822,17 @@ impl<'a> Extend<(Type<'a>, Type<'a>)> for SubtypeRelations<'a> {
 }
 
 impl<'a> Display for PatternUnitForRestriction<'a> {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PatternUnitForRestriction::I64 => write!(f, "I64Lit"),
             PatternUnitForRestriction::Str => write!(f, "StrLit"),
-            PatternUnitForRestriction::Constructor {
-                id: _,
-                name,
-                args,
-            } => {
-                write!(
-                    f,
-                    "{name}({})",
-                    args.iter().map(|p| format!("{p}")).join(", ")
-                )
-            }
             PatternUnitForRestriction::Binder(b, decl_id) => {
                 write!(f, "Bind({b}, id = {decl_id})")
             }
+            PatternUnitForRestriction::Const { name, .. } => {
+                write!(f, ":{name}")
+            }
+            PatternUnitForRestriction::Tuple(a, b) => write!(f, "({a}, {b})"),
         }
     }
 }
@@ -879,52 +841,48 @@ impl<'a> PatternUnitForRestriction<'a> {
     pub fn covariant_type_variables(&self) -> Vec<TypeVariable> {
         match self {
             PatternUnitForRestriction::I64
-            | PatternUnitForRestriction::Str => Default::default(),
-            PatternUnitForRestriction::Constructor {
-                args,
-                ..
-            } => args
-                .iter()
-                .flat_map(PatternUnitForRestriction::covariant_type_variables)
-                .collect(),
+            | PatternUnitForRestriction::Str
+            | PatternUnitForRestriction::Const { .. } => Default::default(),
             PatternUnitForRestriction::Binder(t, _) => {
                 t.covariant_type_variables()
             }
+            PatternUnitForRestriction::Tuple(a, b) => a
+                .covariant_type_variables()
+                .into_iter()
+                .chain(b.covariant_type_variables())
+                .collect(),
         }
     }
 
     pub fn contravariant_type_variables(&self) -> Vec<TypeVariable> {
         match self {
             PatternUnitForRestriction::I64
-            | PatternUnitForRestriction::Str => Default::default(),
-            PatternUnitForRestriction::Constructor {
-                args,
-                ..
-            } => args
-                .iter()
-                .flat_map(PatternUnitForRestriction::contravariant_type_variables)
-                .collect(),
+            | PatternUnitForRestriction::Str
+            | PatternUnitForRestriction::Const { .. } => Default::default(),
             PatternUnitForRestriction::Binder(t, _) => {
                 t.contravariant_type_variables()
             }
+            PatternUnitForRestriction::Tuple(a, b) => a
+                .contravariant_type_variables()
+                .into_iter()
+                .chain(b.contravariant_type_variables())
+                .collect(),
         }
     }
 
     pub fn all_type_variables_vec(&self) -> Vec<TypeVariable> {
         match self {
             PatternUnitForRestriction::I64
-            | PatternUnitForRestriction::Str => Default::default(),
-            PatternUnitForRestriction::Constructor {
-                args, ..
-            } => args
-                .iter()
-                .flat_map(
-                    PatternUnitForRestriction::all_type_variables_vec,
-                )
-                .collect(),
+            | PatternUnitForRestriction::Str
+            | PatternUnitForRestriction::Const { .. } => Default::default(),
             PatternUnitForRestriction::Binder(t, _) => {
                 t.all_type_variables_vec()
             }
+            PatternUnitForRestriction::Tuple(a, b) => a
+                .all_type_variables_vec()
+                .into_iter()
+                .chain(b.all_type_variables_vec())
+                .collect(),
         }
     }
 
@@ -935,15 +893,16 @@ impl<'a> PatternUnitForRestriction<'a> {
     pub fn decl_type_map(&self) -> Vec<(DeclId, &Type<'a>)> {
         match self {
             PatternUnitForRestriction::I64
-            | PatternUnitForRestriction::Str => Default::default(),
-            PatternUnitForRestriction::Constructor {
-                args, ..
-            } => {
-                args.iter().flat_map(|p| p.decl_type_map()).collect()
-            }
+            | PatternUnitForRestriction::Str
+            | PatternUnitForRestriction::Const { .. } => Default::default(),
             PatternUnitForRestriction::Binder(t, decl_id) => {
                 vec![(*decl_id, t)]
             }
+            PatternUnitForRestriction::Tuple(a, b) => a
+                .decl_type_map()
+                .into_iter()
+                .chain(b.decl_type_map())
+                .collect(),
         }
     }
 
@@ -960,24 +919,12 @@ impl<'a> PatternUnitForRestriction<'a> {
     {
         use PatternUnitForRestriction::*;
         match self {
-            a @ (I64 | Str) => (a, f),
-            Constructor { id, name, args } => (
-                Constructor {
-                    id,
-                    name,
-                    args: {
-                        let mut new_args =
-                            Vec::with_capacity(args.len());
-                        for p in args {
-                            let new_p: PatternUnitForRestriction;
-                            (new_p, f) = p.map_type_rec(f);
-                            new_args.push(new_p);
-                        }
-                        new_args
-                    },
-                },
-                f,
-            ),
+            a @ (I64 | Str | Const { .. }) => (a, f),
+            Tuple(a, b) => {
+                let (a, f) = a.map_type_rec(f);
+                let (b, f) = b.map_type_rec(f);
+                (Tuple(a.into(), b.into()), f)
+            }
             Binder(t, decl_id) => (Binder(f(t), decl_id), f),
         }
     }

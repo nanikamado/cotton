@@ -1,0 +1,6 @@
+f =
+    | True, True => ()
+    | _, False => ()
+
+main = | () => do
+    f(False, True)

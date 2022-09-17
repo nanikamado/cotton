@@ -8,17 +8,16 @@ use crate::{
         ident_id::IdentId,
         types::{self, SingleTypeConstructor, TypeMatchable},
         types::{Type, TypeUnit, TypeVariable},
-        Ast, DataDecl, Expr, ExprWithType, FnArm, IncompleteType,
-        Pattern, PatternRestrictions, PatternUnit,
-        PatternUnitForRestriction, SubtypeRelations, TypeId,
+        Ast, DataDecl, Expr, ExprWithType, FnArm, IncompleteType, Pattern,
+        PatternRestrictions, PatternUnit, PatternUnitForRestriction,
+        SubtypeRelations, TypeId,
     },
     intrinsics::{IntrinsicType, IntrinsicVariable},
 };
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::{multiunzip, Itertools};
 use petgraph::{
-    algo::kosaraju_scc, graph::NodeIndex, visit::IntoNodeReferences,
-    Graph,
+    algo::kosaraju_scc, graph::NodeIndex, visit::IntoNodeReferences, Graph,
 };
 use std::{cmp::Reverse, fmt::Display};
 use strum::IntoEnumIterator;
@@ -31,10 +30,7 @@ pub enum VariableId {
 }
 
 impl Display for VariableId {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             VariableId::Decl(a) => a.fmt(f),
             VariableId::Intrinsic(a) => a.fmt(f),
@@ -43,10 +39,7 @@ impl Display for VariableId {
 }
 
 impl std::fmt::Debug for VariableId {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             VariableId::Decl(a) => write!(f, "VariableId({})", a),
             VariableId::Intrinsic(a) => {
@@ -74,8 +67,7 @@ pub fn type_check<'a>(
             resolved_idents: Default::default(),
             decl_id: VariableId::Intrinsic(v),
             name: v.to_str(),
-            variables_required_by_interface_restrictions:
-                Default::default(),
+            variables_required_by_interface_restrictions: Default::default(),
         });
     }
     for d in &ast.data_decl {
@@ -86,8 +78,7 @@ pub fn type_check<'a>(
             resolved_idents: Default::default(),
             decl_id: VariableId::Decl(d.decl_id),
             name: d.name,
-            variables_required_by_interface_restrictions:
-                Default::default(),
+            variables_required_by_interface_restrictions: Default::default(),
         });
     }
     let mut resolved_idents = Vec::new();
@@ -95,11 +86,8 @@ pub fn type_check<'a>(
     let mut subtype_relations = SubtypeRelations::default();
     let mut map = TypeVariableMap::default();
     for d in &ast.variable_decl {
-        let (mut t, resolved, mut ident_type) = min_type_incomplite(
-            &d.value,
-            &mut subtype_relations,
-            &mut map,
-        );
+        let (mut t, resolved, mut ident_type) =
+            min_type_incomplete(&d.value, &mut subtype_relations, &mut map);
         resolved_idents.extend(resolved);
         ident_type_map.append(&mut ident_type);
         let type_annotation: Option<ast_step2::IncompleteType> =
@@ -110,9 +98,8 @@ pub fn type_check<'a>(
                 ));
                 t.subtype_relations
                     .extend(annotation.subtype_relations.clone());
-                t.variable_requirements.append(
-                    &mut annotation.variable_requirements.clone(),
-                );
+                t.variable_requirements
+                    .append(&mut annotation.variable_requirements.clone());
                 Some(annotation.clone())
             } else {
                 None
@@ -128,10 +115,7 @@ pub fn type_check<'a>(
             .into_iter()
             .filter_map(|mut req| {
                 if let Some((t, decl_id)) = vs.get(req.name) {
-                    suptype_rel.push((
-                        (*t).clone(),
-                        req.required_type.clone(),
-                    ));
+                    suptype_rel.push(((*t).clone(), req.required_type.clone()));
                     resolved_idents.push((
                         req.ident,
                         ResolvedIdent {
@@ -157,22 +141,19 @@ pub fn type_check<'a>(
             IncompleteType {
                 constructor: SingleTypeConstructor {
                     type_: t.constructor,
-                    contravariant_candidates_from_annotation:
-                        type_annotation.as_ref().map(|t| {
-                            t.constructor
-                                .contravariant_type_variables()
-                        }),
+                    contravariant_candidates_from_annotation: type_annotation
+                        .as_ref()
+                        .map(|t| t.constructor.contravariant_type_variables()),
                 },
                 variable_requirements: t.variable_requirements,
                 subtype_relations: t.subtype_relations,
                 pattern_restrictions: t.pattern_restrictions,
-                already_considered_relations: t
-                    .already_considered_relations,
+                already_considered_relations: t.already_considered_relations,
             },
         )
         .unwrap();
-        subtype_relations = subtype_relations
-            .merge(incomplete.subtype_relations.clone());
+        subtype_relations =
+            subtype_relations.merge(incomplete.subtype_relations.clone());
         toplevels.push(Toplevel {
             incomplete: incomplete.into(),
             type_annotation,
@@ -194,8 +175,7 @@ pub fn type_check<'a>(
             log::debug!("not face: {}", top.incomplete);
         }
     }
-    let (mut resolved_names, types, rel) =
-        resolve_names(toplevels, &mut map);
+    let (mut resolved_names, types, rel) = resolve_names(toplevels, &mut map);
     subtype_relations = subtype_relations.merge(rel);
     for (ident_id, ResolvedIdent { variable_id, .. }) in
         resolved_names.iter().sorted_unstable()
@@ -225,12 +205,7 @@ pub fn type_check<'a>(
                         implicit_args: implicit_args
                             .into_iter()
                             .map(|(decl_id, name, t, r)| {
-                                (
-                                    decl_id,
-                                    name,
-                                    map.normalize_type(t),
-                                    r,
-                                )
+                                (decl_id, name, map.normalize_type(t), r)
                             })
                             .collect(),
                     },
@@ -251,8 +226,7 @@ pub fn type_check<'a>(
 pub struct ResolvedIdent<'a> {
     pub variable_id: VariableId,
     pub type_args: Vec<(TypeVariable, Type<'a>)>,
-    pub implicit_args:
-        Vec<(DeclId, &'a str, Type<'a>, ResolvedIdent<'a>)>,
+    pub implicit_args: Vec<(DeclId, &'a str, Type<'a>, ResolvedIdent<'a>)>,
 }
 
 pub type Resolved<'a> = Vec<(IdentId, ResolvedIdent<'a>)>;
@@ -268,8 +242,7 @@ struct Toplevel<'a> {
         Vec<(&'a str, Type<'a>, DeclId)>,
 }
 
-type TypesOfDeclsVec<'a> =
-    Vec<(DeclId, ast_step2::IncompleteType<'a>)>;
+type TypesOfDeclsVec<'a> = Vec<(DeclId, ast_step2::IncompleteType<'a>)>;
 
 fn resolve_names<'a>(
     toplevels: Vec<Toplevel<'a>>,
@@ -319,8 +292,7 @@ fn resolve_names<'a>(
         {
             debug_assert_eq!(
                 improved_type,
-                simplify::simplify_type(map, improved_type.clone())
-                    .unwrap()
+                simplify::simplify_type(map, improved_type.clone()).unwrap()
             );
             log::debug!(
                 "improved type of {}:\n{}",
@@ -337,11 +309,13 @@ fn resolve_names<'a>(
         }
     }
     let mut types = Vec::new();
-    for (i, t) in resolved_variable_map.into_iter().flat_map(
-        |(_, toplevels)| {
-            toplevels.into_iter().map(|t| (t.decl_id, t.incomplete))
-        },
-    ) {
+    for (i, t) in
+        resolved_variable_map
+            .into_iter()
+            .flat_map(|(_, toplevels)| {
+                toplevels.into_iter().map(|t| (t.decl_id, t.incomplete))
+            })
+    {
         match i {
             VariableId::Decl(i) => {
                 types.push((i, t));
@@ -356,10 +330,7 @@ fn resolve_names<'a>(
 struct SccTypeConstructor<'a>(Vec<SingleTypeConstructor<'a>>);
 
 impl Display for SccTypeConstructor<'_> {
-    fn fmt(
-        &self,
-        f: &mut std::fmt::Formatter<'_>,
-    ) -> std::fmt::Result {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[")?;
         write!(f, "{}", self.0.iter().join(", "))?;
         write!(f, "]")
@@ -368,14 +339,9 @@ impl Display for SccTypeConstructor<'_> {
 
 impl<'a> Type<'a> {
     fn argument_tuple_from_arguments(ts: Vec<Self>) -> Self {
-        let mut new_ts = Type::from_str("()");
+        let mut new_ts = Type::label_from_str("()");
         for t in ts.into_iter().rev() {
-            new_ts = TypeUnit::Normal {
-                name: "AT",
-                args: vec![t, new_ts],
-                id: TypeId::Intrinsic(IntrinsicType::ArgumentTuple),
-            }
-            .into();
+            new_ts = TypeUnit::Tuple(t, new_ts).into();
         }
         new_ts
     }
@@ -383,80 +349,43 @@ impl<'a> Type<'a> {
     fn arguments_from_argument_tuple(self) -> Vec<Self> {
         use TypeMatchable::*;
         match self.matchable() {
-            Normal { args, id, .. }
-                if id
-                    == TypeId::Intrinsic(
-                        IntrinsicType::ArgumentTuple,
-                    ) =>
-            {
-                let mut args = args.into_iter();
-                std::iter::once(args.next().unwrap())
-                    .chain(
-                        args.next()
-                            .unwrap()
-                            .arguments_from_argument_tuple(),
-                    )
-                    .collect()
-            }
-            Normal { id, .. }
+            Tuple(a1, a2) => std::iter::once(a1)
+                .chain(a2.arguments_from_argument_tuple())
+                .collect(),
+            Const { id, .. }
                 if id == TypeId::Intrinsic(IntrinsicType::Unit) =>
             {
                 Vec::new()
             }
             t => {
-                panic!(
-                    "expected AT or Unit but got {}",
-                    Type::from(t)
-                )
+                panic!("expected AT or Unit but got {}", Type::from(t))
             }
         }
     }
 }
 
 impl<'a> PatternUnitForRestriction<'a> {
-    fn argument_tuple_from_arguments(
-        pss: Vec<Vec<Self>>,
-    ) -> Vec<Self> {
-        let mut new_pattern = Vec::new();
-        for ps in pss {
-            let mut new_p = PatternUnitForRestriction::Constructor {
-                id: TypeId::Intrinsic(IntrinsicType::Unit),
-                name: "()",
-                args: Vec::new(),
-            };
-            for p in ps.iter().rev() {
-                new_p = PatternUnitForRestriction::Constructor {
-                    id: TypeId::Intrinsic(
-                        IntrinsicType::ArgumentTuple,
-                    ),
-                    name: "AT",
-                    args: vec![p.clone(), new_p],
-                };
-            }
-            new_pattern.push(new_p);
+    fn argument_tuple_from_arguments(ps: Vec<Self>) -> Self {
+        let mut new_p = PatternUnitForRestriction::Const {
+            id: TypeId::Intrinsic(IntrinsicType::Unit),
+            name: "()",
+        };
+        for p in ps.iter().rev() {
+            new_p = PatternUnitForRestriction::Tuple(
+                p.clone().into(),
+                new_p.into(),
+            );
         }
-        new_pattern
+        new_p
     }
 
     fn arguments_from_argument_tuple(self) -> Vec<Self> {
         use PatternUnitForRestriction::*;
         match self {
-            Constructor { args, id, .. }
-                if id
-                    == TypeId::Intrinsic(
-                        IntrinsicType::ArgumentTuple,
-                    ) =>
-            {
-                let mut args = args.into_iter();
-                std::iter::once(args.next().unwrap())
-                    .chain(
-                        args.next()
-                            .unwrap()
-                            .arguments_from_argument_tuple(),
-                    )
-                    .collect()
-            }
-            Constructor { id, .. }
+            Tuple(a1, a2) => std::iter::once(*a1)
+                .chain(a2.arguments_from_argument_tuple())
+                .collect(),
+            Const { id, .. }
                 if id == TypeId::Intrinsic(IntrinsicType::Unit) =>
             {
                 Vec::new()
@@ -468,22 +397,10 @@ impl<'a> PatternUnitForRestriction<'a> {
     fn arguments_from_argument_tuple_ref(&self) -> Vec<&Self> {
         use PatternUnitForRestriction::*;
         match self {
-            Constructor { args, id, .. }
-                if *id
-                    == TypeId::Intrinsic(
-                        IntrinsicType::ArgumentTuple,
-                    ) =>
-            {
-                let mut args = args.iter();
-                std::iter::once(args.next().unwrap())
-                    .chain(
-                        args.next()
-                            .unwrap()
-                            .arguments_from_argument_tuple_ref(),
-                    )
-                    .collect()
-            }
-            Constructor { id, .. }
+            Tuple(a1, a2) => std::iter::once(&**a1)
+                .chain(a2.arguments_from_argument_tuple_ref())
+                .collect(),
+            Const { id, .. }
                 if *id == TypeId::Intrinsic(IntrinsicType::Unit) =>
             {
                 Vec::new()
@@ -506,17 +423,19 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
     }
 
     fn replace_num(self, from: TypeVariable, to: &Type<'a>) -> Self {
-        self.replace_num_with_update_flag(from, to).0
+        self.replace_num_with_update_flag(from, to, 0).0
     }
 
     fn replace_num_with_update_flag(
         self,
         from: TypeVariable,
         to: &Type<'a>,
+        recursive_alias_depth: usize,
     ) -> (Self, bool) {
         let mut updated = false;
         let t = self.map_type(|t| {
-            let (t, u) = t.replace_num_with_update_flag(from, to);
+            let (t, u) =
+                t.replace_num_with_update_flag(from, to, recursive_alias_depth);
             updated = u;
             t
         });
@@ -537,17 +456,13 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
             .collect()
     }
 
-    fn find_recursive_alias(&self) -> Option<Type<'a>> {
+    fn find_recursive_alias(&self) -> Option<&Type<'a>> {
         self.0
             .iter()
             .find_map(TypeConstructor::find_recursive_alias)
     }
 
-    fn replace_type(
-        self,
-        from: &TypeUnit<'a>,
-        to: &TypeUnit<'a>,
-    ) -> Self {
+    fn replace_type(self, from: &TypeUnit<'a>, to: &TypeUnit<'a>) -> Self {
         SccTypeConstructor(
             self.0
                 .into_iter()
@@ -556,11 +471,7 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
         )
     }
 
-    fn replace_type_union(
-        self,
-        from: &Type,
-        to: &TypeUnit<'a>,
-    ) -> Self {
+    fn replace_type_union(self, from: &Type, to: &TypeUnit<'a>) -> Self {
         SccTypeConstructor(
             self.0
                 .into_iter()
@@ -573,21 +484,22 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
         self,
         from: &Type,
         to: &TypeUnit<'a>,
+        recursive_alias_depth: usize,
     ) -> (Self, bool) {
         let mut updated = false;
         let t = self.map_type(|t| {
-            let (t, u) =
-                t.replace_type_union_with_update_flag(from, to);
+            let (t, u) = t.replace_type_union_with_update_flag(
+                from,
+                to,
+                recursive_alias_depth,
+            );
             updated = u;
             t
         });
         (t, updated)
     }
 
-    fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(
-        self,
-        mut f: F,
-    ) -> Self {
+    fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(self, mut f: F) -> Self {
         Self(
             self.0
                 .into_iter()
@@ -640,22 +552,17 @@ fn resolve_scc<'a>(
         name_vec.push(t.name);
         variable_requirements
             .append(&mut t.incomplete.variable_requirements.clone());
-        subtype_relations
-            .extend(t.incomplete.subtype_relations.clone());
+        subtype_relations.extend(t.incomplete.subtype_relations.clone());
         types.push(SingleTypeConstructor {
             type_: t.incomplete.constructor.clone(),
             contravariant_candidates_from_annotation: t
                 .type_annotation
                 .as_ref()
-                .map(|t| {
-                    t.constructor.contravariant_type_variables()
-                }),
+                .map(|t| t.constructor.contravariant_type_variables()),
         });
-        pattern_restrictions
-            .extend(t.incomplete.pattern_restrictions.clone())
+        pattern_restrictions.extend(t.incomplete.pattern_restrictions.clone())
     }
-    let names_in_scc: FxHashSet<_> =
-        name_vec.iter().copied().collect();
+    let names_in_scc: FxHashSet<_> = name_vec.iter().copied().collect();
     log::debug!("name of unresolved: {:?}", names_in_scc);
     // The order of resolving is important.
     // Requirements that are easier to solve should be solved earlier.
@@ -682,8 +589,7 @@ fn resolve_scc<'a>(
         already_considered_relations: Default::default(),
     };
     // Recursions are not resolved in this loop.
-    while let Some(req) = unresolved_type.variable_requirements.pop()
-    {
+    while let Some(req) = unresolved_type.variable_requirements.pop() {
         if names_in_scc.contains(req.name) {
             unresolved_type.variable_requirements.push(req);
             // Skipping the resolveing of recursion.
@@ -735,8 +641,7 @@ fn resolve_scc<'a>(
                     map,
                     ast_step2::IncompleteType {
                         constructor: t.type_,
-                        variable_requirements: variable_requirements
-                            .clone(),
+                        variable_requirements: variable_requirements.clone(),
                         subtype_relations: subtype_relation.clone(),
                         pattern_restrictions: improved_types
                             .pattern_restrictions
@@ -758,8 +663,7 @@ struct SatisfiedType<'a, T> {
     id_of_satisfied_variable: VariableId,
     type_of_improved_decl: T,
     type_args: Vec<(TypeVariable, Type<'a>)>,
-    implicit_args:
-        Vec<(DeclId, &'a str, Type<'a>, ResolvedIdent<'a>)>,
+    implicit_args: Vec<(DeclId, &'a str, Type<'a>, ResolvedIdent<'a>)>,
     map: TypeVariableMap<'a>,
 }
 
@@ -768,9 +672,7 @@ trait CandidatesProvider<'a>: Copy {
     fn get_candidates(self, req_name: &str) -> Self::T;
 }
 
-impl<'a> CandidatesProvider<'a>
-    for &FxHashMap<&str, Vec<Toplevel<'a>>>
-{
+impl<'a> CandidatesProvider<'a> for &FxHashMap<&str, Vec<Toplevel<'a>>> {
     type T = std::vec::IntoIter<Candidate<'a>>;
 
     fn get_candidates(self, req_name: &str) -> Self::T {
@@ -788,17 +690,13 @@ impl<'a> CandidatesProvider<'a>
 }
 
 #[derive(Debug, Clone, Copy)]
-struct CandidatesProviderWithFn<
-    'a,
-    'b,
-    F: FnMut(usize) -> Candidate<'a>,
-> {
+struct CandidatesProviderWithFn<'a, 'b, F: FnMut(usize) -> Candidate<'a>> {
     scc_map: &'b FxHashMap<&'b str, Vec<usize>>,
     f: F,
 }
 
-impl<'a, 'b, F: FnMut(usize) -> Candidate<'a> + Copy>
-    CandidatesProvider<'a> for CandidatesProviderWithFn<'a, 'b, F>
+impl<'a, 'b, F: FnMut(usize) -> Candidate<'a> + Copy> CandidatesProvider<'a>
+    for CandidatesProviderWithFn<'a, 'b, F>
 {
     type T = std::iter::Map<std::vec::IntoIter<usize>, F>;
 
@@ -822,17 +720,13 @@ struct Candidate<'a> {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct CandidatesProviderForScc<
-    'a,
-    'b,
-    F: FnMut(usize) -> Candidate<'a>,
-> {
+struct CandidatesProviderForScc<'a, 'b, F: FnMut(usize) -> Candidate<'a>> {
     candidates_provider_with_fn: CandidatesProviderWithFn<'a, 'b, F>,
     normal_map: &'b FxHashMap<&'b str, Vec<Toplevel<'a>>>,
 }
 
-impl<'a, 'b, F: FnMut(usize) -> Candidate<'a> + Copy>
-    CandidatesProvider<'a> for CandidatesProviderForScc<'a, 'b, F>
+impl<'a, 'b, F: FnMut(usize) -> Candidate<'a> + Copy> CandidatesProvider<'a>
+    for CandidatesProviderForScc<'a, 'b, F>
 {
     type T = std::iter::Chain<
         std::vec::IntoIter<Candidate<'a>>,
@@ -840,9 +734,9 @@ impl<'a, 'b, F: FnMut(usize) -> Candidate<'a> + Copy>
     >;
 
     fn get_candidates(self, req_name: &str) -> Self::T {
-        self.normal_map.get_candidates(req_name).chain(
-            self.candidates_provider_with_fn.get_candidates(req_name),
-        )
+        self.normal_map
+            .get_candidates(req_name)
+            .chain(self.candidates_provider_with_fn.get_candidates(req_name))
     }
 }
 
@@ -868,33 +762,23 @@ fn find_satisfied_types<
                  replace_variables,
              }| {
                 let mut t = type_of_unresolved_decl.clone();
-                let mut cand_t =
-                    if let Some(face) = candidate.type_annotation {
-                        face
-                    } else {
-                        candidate.incomplete
-                    };
+                let mut cand_t = if let Some(face) = candidate.type_annotation {
+                    face
+                } else {
+                    candidate.incomplete
+                };
                 let mut type_args = Vec::new();
                 let mut map = map.clone();
                 log::debug!("~~ {} : {}", candidate.name, cand_t);
-                for (req_name, req_t, decl_id) in &candidate
-                    .variables_required_by_interface_restrictions
+                for (req_name, req_t, decl_id) in
+                    &candidate.variables_required_by_interface_restrictions
                 {
-                    log::debug!(
-                        "   {} : {} ({})",
-                        req_name,
-                        req_t,
-                        decl_id
-                    );
+                    log::debug!("   {} : {} ({})", req_name, req_t, decl_id);
                 }
                 let mut implicit_args = Vec::new();
                 let mut resolved_implicit_args = FxHashMap::default();
-                for (
-                    interface_v_name,
-                    interface_v_t,
-                    interface_v_decl_id,
-                ) in candidate
-                    .variables_required_by_interface_restrictions
+                for (interface_v_name, interface_v_t, interface_v_decl_id) in
+                    candidate.variables_required_by_interface_restrictions
                 {
                     let arg = IdentId::new();
                     implicit_args.push((
@@ -903,17 +787,15 @@ fn find_satisfied_types<
                         interface_v_t.clone(),
                         arg,
                     ));
-                    if let Some((_, decl_id, found_t)) =
-                        req.local_env.iter().find(|(name, _, _)| {
-                            interface_v_name == *name
-                        })
+                    if let Some((_, decl_id, found_t)) = req
+                        .local_env
+                        .iter()
+                        .find(|(name, _, _)| interface_v_name == *name)
                     {
                         resolved_implicit_args.insert(
                             arg,
                             ResolvedIdent {
-                                variable_id: VariableId::Decl(
-                                    *decl_id,
-                                ),
+                                variable_id: VariableId::Decl(*decl_id),
                                 type_args: Default::default(),
                                 implicit_args: Default::default(),
                             },
@@ -936,8 +818,7 @@ fn find_satisfied_types<
                 }
                 if replace_variables {
                     cand_t = cand_t.normalize(&mut map).unwrap();
-                    (cand_t, type_args) =
-                        cand_t.change_variable_num();
+                    (cand_t, type_args) = cand_t.change_variable_num();
                 }
                 t.subtype_relations.add_subtype_rel(
                     cand_t.constructor.clone(),
@@ -954,8 +835,7 @@ fn find_satisfied_types<
                 let decl_id = candidate.decl_id;
                 simplify::simplify_type(&mut map, t).map(
                     |mut type_of_improved_decl| {
-                        while let Some(req) =
-                            cand_t.variable_requirements.pop()
+                        while let Some(req) = cand_t.variable_requirements.pop()
                         {
                             if names_in_scc.contains(req.name) {
                                 type_of_improved_decl
@@ -972,24 +852,21 @@ fn find_satisfied_types<
                                 &map,
                                 names_in_scc,
                             );
-                            let satisfied =
-                                get_one_satisfied(satisfied);
+                            let satisfied = get_one_satisfied(satisfied);
                             resolved_implicit_args.insert(
                                 req.ident,
                                 ResolvedIdent {
                                     variable_id: satisfied
                                         .id_of_satisfied_variable,
                                     type_args: satisfied.type_args,
-                                    implicit_args: satisfied
-                                        .implicit_args,
+                                    implicit_args: satisfied.implicit_args,
                                 },
                             );
                             map = satisfied.map;
                             type_of_improved_decl =
                                 satisfied.type_of_improved_decl;
                             map.insert_type(
-                                &mut type_of_improved_decl
-                                    .subtype_relations,
+                                &mut type_of_improved_decl.subtype_relations,
                                 req.required_type,
                                 satisfied.type_of_satisfied_variable,
                             );
@@ -1000,21 +877,17 @@ fn find_satisfied_types<
                             type_args,
                             implicit_args: implicit_args
                                 .into_iter()
-                                .map(
-                                    |(decl_id, name, t, ident_id)| {
-                                        (
-                                            decl_id,
-                                            name,
-                                            t,
-                                            resolved_implicit_args
-                                                [&ident_id]
-                                                .clone(),
-                                        )
-                                    },
-                                )
+                                .map(|(decl_id, name, t, ident_id)| {
+                                    (
+                                        decl_id,
+                                        name,
+                                        t,
+                                        resolved_implicit_args[&ident_id]
+                                            .clone(),
+                                    )
+                                })
                                 .collect(),
-                            type_of_satisfied_variable: cand_t
-                                .constructor,
+                            type_of_satisfied_variable: cand_t.constructor,
                             map,
                         }
                     },
@@ -1037,8 +910,7 @@ fn get_one_satisfied<T: Display>(
                     .iter()
                     .map(|s| format!(
                         "{} : {}",
-                        s.id_of_satisfied_variable,
-                        s.type_of_improved_decl
+                        s.id_of_satisfied_variable, s.type_of_improved_decl
                     ))
                     .join("\n")
             )
@@ -1054,8 +926,7 @@ fn resolve_recursion_in_scc<'a>(
     map: &mut TypeVariableMap<'a>,
     names_in_scc: &FxHashSet<&str>,
 ) -> (Resolved<'a>, IncompleteType<'a, SccTypeConstructor<'a>>) {
-    let mut scc_map: FxHashMap<&str, Vec<usize>> =
-        FxHashMap::default();
+    let mut scc_map: FxHashMap<&str, Vec<usize>> = FxHashMap::default();
     for (i, t) in toplevels.iter().enumerate() {
         scc_map.entry(t.name).or_default().push(i);
     }
@@ -1065,20 +936,19 @@ fn resolve_recursion_in_scc<'a>(
             &req,
             &scc,
             CandidatesProviderForScc {
-                candidates_provider_with_fn:
-                    CandidatesProviderWithFn {
-                        scc_map: &scc_map,
-                        f: |j| Candidate {
-                            candidate: Toplevel {
-                                incomplete: scc.constructor.0[j]
-                                    .type_
-                                    .clone()
-                                    .into(),
-                                ..toplevels[j].clone()
-                            },
-                            replace_variables: false,
+                candidates_provider_with_fn: CandidatesProviderWithFn {
+                    scc_map: &scc_map,
+                    f: |j| Candidate {
+                        candidate: Toplevel {
+                            incomplete: scc.constructor.0[j]
+                                .type_
+                                .clone()
+                                .into(),
+                            ..toplevels[j].clone()
                         },
+                        replace_variables: false,
                     },
+                },
                 normal_map: resolved_variable_map,
             },
             map,
@@ -1110,18 +980,21 @@ fn constructor_type(d: DataDecl) -> TypeUnit {
         .iter()
         .map(|t| TypeUnit::Variable(*t).into())
         .collect();
-    let mut t = TypeUnit::Normal {
-        name: d.name,
-        args: fields.clone(),
-        id: TypeId::DeclId(d.decl_id),
-    };
+    let mut t = TypeUnit::Tuple(
+        TypeUnit::Const {
+            name: d.name,
+            id: TypeId::DeclId(d.decl_id),
+        }
+        .into(),
+        Type::argument_tuple_from_arguments(fields.clone()),
+    );
     for field in fields.into_iter().rev() {
         t = TypeUnit::Fn(field, t.into())
     }
     t
 }
 
-fn min_type_incomplite<'a>(
+fn min_type_incomplete<'a>(
     (expr, type_variable): &ExprWithType<'a>,
     subtype_relations: &mut SubtypeRelations<'a>,
     map: &mut TypeVariableMap<'a>,
@@ -1148,16 +1021,14 @@ fn min_type_incomplite<'a>(
                 Vec<_>,
                 Vec<_>,
                 Vec<_>,
-            ) = multiunzip(arms.iter().map(|arm| {
-                arm_min_type(arm, subtype_relations, map)
-            }));
+            ) = multiunzip(
+                arms.iter()
+                    .map(|arm| arm_min_type(arm, subtype_relations, map)),
+            );
             let resolved_idents = resolved_idents.concat();
-            let arg_len =
-                arm_types.iter().map(Vec::len).min().unwrap() - 1;
-            let mut arm_types = arm_types
-                .into_iter()
-                .map(Vec::into_iter)
-                .collect_vec();
+            let arg_len = arm_types.iter().map(Vec::len).min().unwrap() - 1;
+            let mut arm_types =
+                arm_types.into_iter().map(Vec::into_iter).collect_vec();
             #[allow(clippy::needless_collect)]
             let arg_types: Vec<Type> = (0..arg_len)
                 .map(|_| {
@@ -1168,34 +1039,28 @@ fn min_type_incomplite<'a>(
                     TypeUnit::new_variable().into()
                 })
                 .collect();
-            let rtn_type: Type = arm_types
-                .into_iter()
-                .flat_map(types_to_fn_type)
-                .collect();
+            let rtn_type: Type =
+                arm_types.into_iter().flat_map(types_to_fn_type).collect();
             let constructor: Type = types_to_fn_type(
                 arg_types
                     .clone()
                     .into_iter()
                     .chain(std::iter::once(rtn_type)),
             );
-            let mut pattern_restrictions =
-                pattern_restrictions.concat();
+            let mut pattern_restrictions = pattern_restrictions.concat();
+            let restrictions = restrictions
+                .into_iter()
+                .map(PatternUnitForRestriction::argument_tuple_from_arguments)
+                .collect();
             pattern_restrictions.push((
                 Type::argument_tuple_from_arguments(arg_types),
-                PatternUnitForRestriction::argument_tuple_from_arguments(
-                    restrictions,
-                ),
+                restrictions,
             ));
-            map.insert(
-                subtype_relations,
-                *type_variable,
-                constructor.clone(),
-            );
+            map.insert(subtype_relations, *type_variable, constructor.clone());
             (
                 ast_step2::IncompleteType {
                     constructor,
-                    variable_requirements: variable_requirements
-                        .concat(),
+                    variable_requirements: variable_requirements.concat(),
                     subtype_relations: subtype_relation
                         .into_iter()
                         .flatten()
@@ -1222,17 +1087,14 @@ fn min_type_incomplite<'a>(
             (
                 ast_step2::IncompleteType {
                     constructor: t.clone(),
-                    variable_requirements: vec![
-                        VariableRequirement {
-                            name,
-                            required_type: t,
-                            ident: *ident_id,
-                            local_env: Default::default(),
-                        },
-                    ],
+                    variable_requirements: vec![VariableRequirement {
+                        name,
+                        required_type: t,
+                        ident: *ident_id,
+                        local_env: Default::default(),
+                    }],
                     subtype_relations: SubtypeRelations::default(),
-                    pattern_restrictions:
-                        PatternRestrictions::default(),
+                    pattern_restrictions: PatternRestrictions::default(),
                     already_considered_relations: Default::default(),
                 },
                 Default::default(),
@@ -1241,26 +1103,22 @@ fn min_type_incomplite<'a>(
         }
         Expr::Call(f, a) => {
             let (f_t, resolved1, ident_type_map1) =
-                min_type_incomplite(f, subtype_relations, map);
+                min_type_incomplete(f, subtype_relations, map);
             let (a_t, resolved2, ident_type_map2) =
-                min_type_incomplite(a, subtype_relations, map);
-            let b: types::Type =
-                TypeUnit::Variable(*type_variable).into();
+                min_type_incomplete(a, subtype_relations, map);
+            let b: types::Type = TypeUnit::Variable(*type_variable).into();
             let c: types::Type = TypeUnit::new_variable().into();
             // c -> b
-            let cb_fn: Type =
-                TypeUnit::Fn(c.clone(), b.clone()).into();
+            let cb_fn: Type = TypeUnit::Fn(c.clone(), b.clone()).into();
             // f < c -> b
             let f_sub_cb = [(f_t.constructor.clone(), cb_fn.clone())]
                 .iter()
                 .cloned()
                 .collect();
             // c -> b < f
-            let cb_sub_f =
-                [(cb_fn, f_t.constructor)].iter().cloned().collect();
+            let cb_sub_f = [(cb_fn, f_t.constructor)].iter().cloned().collect();
             // a < c
-            let a_sub_c =
-                [(a_t.constructor, c)].iter().cloned().collect();
+            let a_sub_c = [(a_t.constructor, c)].iter().cloned().collect();
             (
                 ast_step2::IncompleteType {
                     constructor: b,
@@ -1295,23 +1153,16 @@ fn min_type_incomplite<'a>(
             let mut subtype_relations = SubtypeRelations::default();
             let mut resolved_idents = Vec::default();
             let mut ident_type_map = Vec::new();
-            let mut pattern_restrictions =
-                PatternRestrictions::default();
+            let mut pattern_restrictions = PatternRestrictions::default();
             let t = es
                 .iter()
                 .map(|e| {
                     let (t, resolved, mut ident_type) =
-                        min_type_incomplite(
-                            e,
-                            &mut subtype_relations,
-                            map,
-                        );
+                        min_type_incomplete(e, &mut subtype_relations, map);
                     variable_requirements
                         .append(&mut t.variable_requirements.clone());
-                    subtype_relations
-                        .extend(t.subtype_relations.clone());
-                    pattern_restrictions
-                        .extend(t.pattern_restrictions.clone());
+                    subtype_relations.extend(t.subtype_relations.clone());
+                    pattern_restrictions.extend(t.pattern_restrictions.clone());
                     resolved_idents.extend(resolved);
                     ident_type_map.append(&mut ident_type);
                     t
@@ -1349,9 +1200,7 @@ fn types_to_fn_type<'a>(
     r
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct VariableRequirement<'a> {
     pub name: &'a str,
     pub required_type: Type<'a>,
@@ -1377,7 +1226,7 @@ fn arm_min_type<'a>(
     PatternRestrictions<'a>,
 ) {
     let (body_type, mut resolved_idents, ident_type_map) =
-        min_type_incomplite(&arm.expr, subtype_relations, map);
+        min_type_incomplete(&arm.expr, subtype_relations, map);
     let (mut ts, bindings, patterns): (Vec<_>, Vec<_>, Vec<_>) =
         arm.pattern.iter().map(pattern_to_type).multiunzip();
     ts.push(body_type.constructor);
@@ -1387,8 +1236,7 @@ fn arm_min_type<'a>(
     let mut subtype_requirement = Vec::new();
     for mut p in body_type.variable_requirements.into_iter() {
         if let Some(a) = bindings.get(&p.name) {
-            subtype_requirement
-                .push((a.1.clone(), p.required_type.clone()));
+            subtype_requirement.push((a.1.clone(), p.required_type.clone()));
             subtype_requirement.push((p.required_type, a.1.clone()));
             resolved_idents.push((
                 p.ident,
@@ -1399,9 +1247,11 @@ fn arm_min_type<'a>(
                 },
             ));
         } else {
-            p.local_env.extend(bindings.iter().map(
-                |(name, (decl_id, t))| (*name, *decl_id, t.clone()),
-            ));
+            p.local_env.extend(
+                bindings
+                    .iter()
+                    .map(|(name, (decl_id, t))| (*name, *decl_id, t.clone())),
+            );
             variable_requirements.push(p);
         }
     }
@@ -1446,26 +1296,33 @@ fn pattern_unit_to_type<'a>(
                 Vec<_>,
             ) = args.iter().map(pattern_to_type).multiunzip();
             (
-                TypeUnit::Normal {
-                    name: id.name(),
-                    args: types,
-                    id: (*id).into(),
-                }
+                TypeUnit::Tuple(
+                    TypeUnit::Const {
+                        name: id.name(),
+                        id: (*id).into(),
+                    }
+                    .into(),
+                    Type::argument_tuple_from_arguments(types),
+                )
                 .into(),
                 // TypeUnit::new_variable().into(),
                 bindings.into_iter().flatten().collect(),
-                PatternUnitForRestriction::Constructor {
-                    id: (*id).into(),
-                    name: id.name(),
-                    args: pattern_restrictions,
-                },
+                PatternUnitForRestriction::Tuple(
+                    PatternUnitForRestriction::Const {
+                        name: id.name(),
+                        id: (*id).into(),
+                    }
+                    .into(),
+                    PatternUnitForRestriction::argument_tuple_from_arguments(
+                        pattern_restrictions,
+                    )
+                    .into(),
+                ),
             )
         }
         Binder(name, decl_id, t) => (
             t.clone(),
-            vec![(*name, (*decl_id, t.clone()))]
-                .into_iter()
-                .collect(),
+            vec![(*name, (*decl_id, t.clone()))].into_iter().collect(),
             PatternUnitForRestriction::Binder(t.clone(), *decl_id),
         ),
         Underscore => {

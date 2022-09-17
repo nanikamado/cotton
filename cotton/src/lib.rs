@@ -8,8 +8,7 @@ mod rust_backend;
 
 use codegen::codegen;
 use simplelog::{
-    self, ColorChoice, ConfigBuilder, LevelFilter, TermLogger,
-    TerminalMode,
+    self, ColorChoice, ConfigBuilder, LevelFilter, TermLogger, TerminalMode,
 };
 use std::{
     io::{ErrorKind, Write},
@@ -65,10 +64,8 @@ pub fn run(
         if output_js {
             println!("{}", js);
         } else {
-            let mut child = Command::new("node")
-                .stdin(Stdio::piped())
-                .spawn()
-                .unwrap();
+            let mut child =
+                Command::new("node").stdin(Stdio::piped()).spawn().unwrap();
             child
                 .stdin
                 .as_mut()
