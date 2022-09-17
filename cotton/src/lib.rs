@@ -1,5 +1,3 @@
-#![feature(map_first_last)]
-
 mod ast_step1;
 mod ast_step2;
 mod ast_step3;

@@ -160,19 +160,15 @@ mod type_type {
         ast_step2::{types::unwrap_or_clone, SubtypeRelations},
         ast_step3::simplify_subtype_rel,
     };
-    use std::{
-        collections::{self, BTreeSet},
-        iter,
-        rc::Rc,
-    };
+    use std::{iter, rc::Rc, vec};
 
     #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-    pub struct Type<'a>(BTreeSet<Rc<TypeUnit<'a>>>);
+    pub struct Type<'a>(Vec<Rc<TypeUnit<'a>>>);
 
     impl<'a> IntoIterator for Type<'a> {
         type Item = Rc<TypeUnit<'a>>;
 
-        type IntoIter = collections::btree_set::IntoIter<Self::Item>;
+        type IntoIter = vec::IntoIter<Self::Item>;
 
         fn into_iter(self) -> Self::IntoIter {
             self.0.into_iter()
@@ -180,9 +176,7 @@ mod type_type {
     }
 
     impl<'a> Type<'a> {
-        pub fn iter<'b>(
-            &'b self,
-        ) -> collections::btree_set::Iter<'b, Rc<TypeUnit<'a>>> {
+        pub fn iter<'b>(&'b self) -> std::slice::Iter<'b, Rc<TypeUnit<'a>>> {
             self.0.iter()
         }
 
@@ -198,7 +192,7 @@ mod type_type {
             use TypeMatchable::*;
             match self.0.len() {
                 0 => Empty,
-                1 => match unwrap_or_clone(self.0.pop_first().unwrap()) {
+                1 => match unwrap_or_clone(self.0.pop().unwrap()) {
                     TypeUnit::Fn(arg, ret) => Fn(arg, ret),
                     TypeUnit::Variable(i) => Variable(i),
                     TypeUnit::RecursiveAlias { body } => {
@@ -234,6 +228,45 @@ mod type_type {
             }
         }
 
+        fn insert_to_vec(&mut self, other: Rc<TypeUnit<'a>>) {
+            let i = self.0.partition_point(|x| *x < other);
+            self.0.insert(i, other);
+        }
+
+        fn push_tuple(&mut self, t: TypeUnit<'a>) {
+            match t {
+                TypeUnit::Tuple(t_head, t_tail) => {
+                    let mut m = Vec::with_capacity(self.0.len());
+                    let mut merged = false;
+                    while let Some(u) = self.0.pop() {
+                        match unwrap_or_clone(u) {
+                            TypeUnit::Tuple(u_head, u_tail)
+                                if t_tail == u_tail =>
+                            {
+                                self.0.push(Rc::new(TypeUnit::Tuple(
+                                    t_head.clone().union(u_head),
+                                    u_tail,
+                                )));
+                                merged = true;
+                                break;
+                            }
+                            t => {
+                                m.push(Rc::new(t));
+                            }
+                        }
+                    }
+                    self.0.append(&mut m);
+                    if !merged {
+                        self.0.push(Rc::new(TypeUnit::Tuple(t_head, t_tail)));
+                    }
+                    self.0.sort_unstable();
+                }
+                t => {
+                    self.insert_to_vec(Rc::new(t));
+                }
+            }
+        }
+
         pub fn insert_with_already_considered_relations(
             &mut self,
             other: Rc<TypeUnit<'a>>,
@@ -242,60 +275,27 @@ mod type_type {
             if other.contains_empty_in_covariant_candidate() {
                 return;
             }
-            if let Some(u) = self.0.pop_first() {
+            if let Some(u) = self.0.pop() {
                 let (u, t1, t2) = unwrap_or_clone(u).merge_union_with(
                     unwrap_or_clone(other),
                     already_considered_relations,
                 );
                 if let Some(t2) = t2 {
-                    self.insert(Rc::new(t2));
+                    self.insert(Rc::new(t2)); //
                 }
-                match u {
-                    Some(TypeUnit::Tuple(u_head, u_tail)) => {
-                        let mut m = Vec::with_capacity(self.0.len());
-                        let mut merged = false;
-                        while let Some(t) = self.0.pop_first() {
-                            match unwrap_or_clone(t) {
-                                TypeUnit::Tuple(t_head, t_tail)
-                                    if u_tail == t_tail =>
-                                {
-                                    self.0.insert(Rc::new(TypeUnit::Tuple(
-                                        u_head.clone().union(t_head),
-                                        t_tail,
-                                    )));
-                                    merged = true;
-                                    break;
-                                }
-                                t => {
-                                    m.push(t);
-                                }
-                            }
-                        }
-                        self.0.extend(m.into_iter().map(Rc::new));
-                        if !merged {
-                            self.0.insert(Rc::new(TypeUnit::Tuple(
-                                u_head, u_tail,
-                            )));
-                        }
-                    }
-                    Some(u) => {
-                        self.0.insert(Rc::new(u));
-                    }
-                    _ => (),
+                if let Some(u) = u {
+                    self.push_tuple(u);
                 }
                 if let Some(t1) = t1 {
-                    self.0.insert(Rc::new(t1));
+                    self.push_tuple(t1);
                 }
             } else {
-                self.0.insert(other);
+                self.insert_to_vec(other);
             }
         }
 
         pub fn insert(&mut self, other: Rc<TypeUnit<'a>>) {
-            self.insert_with_already_considered_relations(
-                other,
-                Some(Default::default()),
-            )
+            self.insert_with_already_considered_relations(other, None);
         }
 
         pub fn increment_recursive_index(
@@ -974,7 +974,7 @@ fn fmt_tuple(
             TypeMatchableRef::Union(u) => {
                 write!(f, "{}[{}]", name, u)
             }
-            _ => panic!(),
+            _ => panic!("expected tuple but found {}", b),
         }
     } else {
         write!(f, "[{a}")?;
@@ -997,7 +997,7 @@ fn fmt_tuple_tail(
         Const { id, .. } if id == TypeId::Intrinsic(IntrinsicType::Unit) => {
             write!(f, "]")
         }
-        _ => panic!(),
+        _ => panic!("expected tuple but found {}", tuple),
     }
 }
 
