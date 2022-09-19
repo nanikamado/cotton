@@ -1,6 +1,10 @@
 use crate::{
-    ast_step2::{decl_id::DeclId, types::Type, Pattern, PatternUnit},
-    ast_step4::{Ast, DataDecl, Expr, ExprWithType, FnArm, VariableDecl},
+    ast_step2::decl_id::DeclId,
+    ast_step4::DataDecl,
+    ast_step5::{
+        Ast, Expr, ExprWithType, FnArm, Pattern, PatternUnit, Type,
+        VariableDecl,
+    },
     intrinsics::IntrinsicVariable,
 };
 use fxhash::FxHashMap;
@@ -161,7 +165,7 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
     pattern
         .iter()
         .zip(names)
-        .flat_map(|(p, n)| {
+        .flat_map(|((p, _), n)| {
             if p.len() == 1 {
                 use PatternUnit::*;
                 match &p[0] {
@@ -211,10 +215,10 @@ fn _bindings<'a>(
     pattern
         .iter()
         .zip(names)
-        .flat_map(|(p, n)| {
+        .flat_map(|((p, t), n)| {
             if p.len() == 1 {
                 match &p[0] {
-                    PatternUnit::Binder(a, id, t) => {
+                    PatternUnit::Binder(a, id) => {
                         vec![(&a[..], n, *id, t)]
                     }
                     PatternUnit::Constructor { args, .. } => _bindings(
