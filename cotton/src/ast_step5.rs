@@ -68,10 +68,10 @@ pub struct FnArm<'a, T = Type<'a>> {
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Clone)]
-struct Type0<'a>(BTreeSet<TypeUnit0<'a>>);
+struct LinkedType<'a>(BTreeSet<LinkedTypeUnit<'a>>);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
-enum TypeUnit0<'a, T = Type0<'a>> {
+enum LinkedTypeUnit<'a, T = LinkedType<'a>> {
     Normal {
         name: &'a str,
         id: TypeId,
@@ -79,7 +79,7 @@ enum TypeUnit0<'a, T = Type0<'a>> {
     },
     Fn(T, T),
     RecursionPoint,
-    RecursiveAlias(Type0<'a>),
+    RecursiveAlias(LinkedType<'a>),
     Pointer(TypePointer),
 }
 
@@ -98,29 +98,31 @@ pub enum TypeUnit<'a> {
     RecursionPoint,
 }
 
-impl<'a> TryFrom<Type0<'a>> for Type<'a> {
+impl<'a> TryFrom<LinkedType<'a>> for Type<'a> {
     type Error = ();
 
-    fn try_from(value: Type0<'a>) -> Result<Self, Self::Error> {
+    fn try_from(value: LinkedType<'a>) -> Result<Self, Self::Error> {
         use TypeUnit::*;
         Ok(Type(
             value
                 .0
                 .into_iter()
                 .map(|t| match t {
-                    TypeUnit0::Normal { name, id, args } => {
+                    LinkedTypeUnit::Normal { name, id, args } => {
                         let args = args
                             .into_iter()
                             .map(Type::try_from)
                             .collect::<Result<_, _>>()?;
                         Ok(Normal { name, id, args })
                     }
-                    TypeUnit0::Fn(a, b) => Ok(Fn(a.try_into()?, b.try_into()?)),
-                    TypeUnit0::RecursionPoint => Ok(RecursionPoint),
-                    TypeUnit0::RecursiveAlias(a) => {
+                    LinkedTypeUnit::Fn(a, b) => {
+                        Ok(Fn(a.try_into()?, b.try_into()?))
+                    }
+                    LinkedTypeUnit::RecursionPoint => Ok(RecursionPoint),
+                    LinkedTypeUnit::RecursiveAlias(a) => {
                         Ok(RecursiveAlias(a.try_into()?))
                     }
-                    TypeUnit0::Pointer(_) => Err(()),
+                    LinkedTypeUnit::Pointer(_) => Err(()),
                 })
                 .collect::<Result<_, _>>()?,
         ))
@@ -137,7 +139,7 @@ impl<'a> From<ast_step4::Ast<'a>> for Ast<'a> {
         let mut map = PaddedTypeMap::new(&global_variables);
         for d in IntrinsicVariable::iter() {
             let p = map.new_pointer();
-            type_to_type(&d.to_type(), p, &mut map);
+            unify_type_with_type(&d.to_type(), p, &mut map);
             map.global_variables.insert(VariableId::Intrinsic(d), p);
         }
         let variable_decl = ast
@@ -156,7 +158,7 @@ impl<'a> From<ast_step4::Ast<'a>> for Ast<'a> {
             .collect_vec()
             .into_iter()
             .map(|d| VariableDecl {
-                value: normalize_types(d.value, &mut map),
+                value: dereference_types(d.value, &mut map),
                 name: d.name,
                 decl_id: d.decl_id,
             })
@@ -169,24 +171,24 @@ impl<'a> From<ast_step4::Ast<'a>> for Ast<'a> {
     }
 }
 
-impl<'a> Type0<'a> {
+impl<'a> LinkedType<'a> {
     fn replace_pointer(self, from: TypePointer, to: &Self) -> (Self, bool) {
         let mut t = BTreeSet::default();
         let mut replaced = false;
         for u in self.0 {
             match u {
-                TypeUnit0::Pointer(p) if p == from => {
+                LinkedTypeUnit::Pointer(p) if p == from => {
                     t.extend(to.0.iter().cloned());
                     replaced = true;
                 }
-                TypeUnit0::Fn(a, b) => {
+                LinkedTypeUnit::Fn(a, b) => {
                     let (a, r) = a.replace_pointer(from, to);
                     replaced |= r;
                     let (b, r) = b.replace_pointer(from, to);
                     replaced |= r;
-                    t.insert(TypeUnit0::Fn(a, b));
+                    t.insert(LinkedTypeUnit::Fn(a, b));
                 }
-                TypeUnit0::Normal { name, id, args } => {
+                LinkedTypeUnit::Normal { name, id, args } => {
                     let args = args
                         .into_iter()
                         .map(|arg| {
@@ -195,11 +197,11 @@ impl<'a> Type0<'a> {
                             arg
                         })
                         .collect();
-                    t.insert(TypeUnit0::Normal { name, id, args });
+                    t.insert(LinkedTypeUnit::Normal { name, id, args });
                 }
-                TypeUnit0::RecursiveAlias(u) => {
+                LinkedTypeUnit::RecursiveAlias(u) => {
                     let (u, r) = u.replace_pointer(from, to);
-                    t.insert(TypeUnit0::RecursiveAlias(u));
+                    t.insert(LinkedTypeUnit::RecursiveAlias(u));
                     replaced = r;
                 }
                 u => {
@@ -207,18 +209,18 @@ impl<'a> Type0<'a> {
                 }
             }
         }
-        (Type0(t), replaced)
+        (LinkedType(t), replaced)
     }
 }
 
-impl<'a> From<TypeUnit0<'a>> for Type0<'a> {
-    fn from(t: TypeUnit0<'a>) -> Self {
-        Type0(iter::once(t).collect())
+impl<'a> From<LinkedTypeUnit<'a>> for LinkedType<'a> {
+    fn from(t: LinkedTypeUnit<'a>) -> Self {
+        LinkedType(iter::once(t).collect())
     }
 }
 
 mod padded_type_map {
-    use super::{Type, Type0, TypeUnit0};
+    use super::{LinkedType, LinkedTypeUnit, Type};
     use crate::{ast_step2::TypeId, ast_step3::VariableId};
     use fxhash::{FxHashMap, FxHashSet};
     use itertools::Itertools;
@@ -392,34 +394,36 @@ mod padded_type_map {
             &mut self,
             p: TypePointer,
             mut parents: FxHashSet<TypePointer>,
-        ) -> Type0<'a> {
+        ) -> LinkedType<'a> {
             let p = self.find(p);
             if parents.contains(&p) {
-                return Type0(iter::once(TypeUnit0::Pointer(p)).collect());
+                return LinkedType(
+                    iter::once(LinkedTypeUnit::Pointer(p)).collect(),
+                );
             }
             parents.insert(p);
             let t = if let Node::Terminal(type_map) = &self.map[p.0] {
                 let mut t = Vec::default();
                 if let Some((a, b)) = type_map.function {
-                    t.push(TypeUnit0::Fn(a, b));
+                    t.push(LinkedTypeUnit::Fn(a, b));
                 }
                 for (type_id, normal_type) in &type_map.normals {
-                    let n = TypeUnit0::Normal {
+                    let n = LinkedTypeUnit::Normal {
                         name: normal_type.name,
                         id: *type_id,
                         args: normal_type.args.clone(),
                     };
                     t.push(n);
                 }
-                Type0(
+                LinkedType(
                     t.into_iter()
                         .map(|t| match t {
-                            TypeUnit0::Fn(a, b) => TypeUnit0::Fn(
+                            LinkedTypeUnit::Fn(a, b) => LinkedTypeUnit::Fn(
                                 self.get_type_rec(a, parents.clone()),
                                 self.get_type_rec(b, parents.clone()),
                             ),
-                            TypeUnit0::Normal { name, id, args } => {
-                                TypeUnit0::Normal {
+                            LinkedTypeUnit::Normal { name, id, args } => {
+                                LinkedTypeUnit::Normal {
                                     name,
                                     id,
                                     args: args
@@ -433,9 +437,9 @@ mod padded_type_map {
                                         .collect(),
                                 }
                             }
-                            TypeUnit0::RecursiveAlias(_)
-                            | TypeUnit0::RecursionPoint
-                            | TypeUnit0::Pointer(_) => panic!(),
+                            LinkedTypeUnit::RecursiveAlias(_)
+                            | LinkedTypeUnit::RecursionPoint
+                            | LinkedTypeUnit::Pointer(_) => panic!(),
                         })
                         .collect(),
                 )
@@ -443,9 +447,9 @@ mod padded_type_map {
                 panic!()
             };
             let (t, replaced) =
-                t.replace_pointer(p, &TypeUnit0::RecursionPoint.into());
+                t.replace_pointer(p, &LinkedTypeUnit::RecursionPoint.into());
             if replaced {
-                TypeUnit0::RecursiveAlias(t).into()
+                LinkedTypeUnit::RecursiveAlias(t).into()
             } else {
                 t
             }
@@ -553,22 +557,22 @@ fn expr<'a>(
     }
 }
 
-fn normalize_types<'a>(
+fn dereference_types<'a>(
     (e, t): (Expr<'a, TypePointer>, TypePointer),
     map: &mut PaddedTypeMap<'a>,
 ) -> (Expr<'a, Type<'a>>, Type<'a>) {
     let e = match e {
         Expr::Lambda(arms) => Expr::Lambda(
             arms.into_iter()
-                .map(|arm| normalize_types_in_fn_arm(arm, map))
+                .map(|arm| dereference_types_in_fn_arm(arm, map))
                 .collect(),
         ),
         Expr::Call(a, b) => Expr::Call(
-            normalize_types(*a, map).into(),
-            normalize_types(*b, map).into(),
+            dereference_types(*a, map).into(),
+            dereference_types(*b, map).into(),
         ),
         Expr::DoBlock(es) => Expr::DoBlock(
-            es.into_iter().map(|e| normalize_types(e, map)).collect(),
+            es.into_iter().map(|e| dereference_types(e, map)).collect(),
         ),
         Expr::Number(a) => Expr::Number(a),
         Expr::StrLiteral(a) => Expr::StrLiteral(a),
@@ -587,7 +591,7 @@ fn normalize_types<'a>(
     (e, map.get_type(t))
 }
 
-fn normalize_types_in_fn_arm<'a>(
+fn dereference_types_in_fn_arm<'a>(
     arm: FnArm<'a, TypePointer>,
     map: &mut PaddedTypeMap<'a>,
 ) -> FnArm<'a, Type<'a>> {
@@ -595,13 +599,13 @@ fn normalize_types_in_fn_arm<'a>(
         pattern: arm
             .pattern
             .into_iter()
-            .map(|p| normalize_types_in_pattern(p, map))
+            .map(|p| dereference_types_in_pattern(p, map))
             .collect(),
-        expr: normalize_types(arm.expr, map),
+        expr: dereference_types(arm.expr, map),
     }
 }
 
-fn normalize_types_in_pattern<'a>(
+fn dereference_types_in_pattern<'a>(
     (pattern, t): Pattern<'a, TypePointer>,
     map: &mut PaddedTypeMap<'a>,
 ) -> Pattern<'a, Type<'a>> {
@@ -615,7 +619,7 @@ fn normalize_types_in_pattern<'a>(
                 id,
                 args: args
                     .into_iter()
-                    .map(|p| normalize_types_in_pattern(p, map))
+                    .map(|p| dereference_types_in_pattern(p, map))
                     .collect(),
             },
             Binder(a, b) => Binder(a, b),
@@ -657,7 +661,12 @@ fn fn_arm<'a>(
     for p in arm.pattern {
         let arg;
         (arg, type_pointer) = map.get_fn(type_pointer);
-        pattern.push(pattern_to_type(arg, &p, &mut local_variables, map));
+        pattern.push(unify_type_with_pattern(
+            arg,
+            &p,
+            &mut local_variables,
+            map,
+        ));
     }
     let expr = expr(arm.expr, type_pointer, &local_variables, map);
     FnArm {
@@ -666,7 +675,7 @@ fn fn_arm<'a>(
     }
 }
 
-fn pattern_to_type<'a>(
+fn unify_type_with_pattern<'a>(
     type_pointer: TypePointer,
     pattern: &ast_step2::Pattern<'a>,
     local_variables: &mut FxHashMap<VariableId, TypePointer>,
@@ -700,7 +709,12 @@ fn pattern_to_type<'a>(
                     .iter()
                     .map(|pattern| {
                         let p = map.new_pointer();
-                        pattern_to_type(p, pattern, local_variables, map)
+                        unify_type_with_pattern(
+                            p,
+                            pattern,
+                            local_variables,
+                            map,
+                        )
                     })
                     .collect_vec();
                 map.insert_normal(
@@ -757,7 +771,7 @@ impl Display for TypeUnit<'_> {
     }
 }
 
-fn type_to_type<'a>(
+fn unify_type_with_type<'a>(
     t: &ast_step2::types::Type<'a>,
     p: TypePointer,
     map: &mut PaddedTypeMap<'a>,
@@ -767,15 +781,15 @@ fn type_to_type<'a>(
         match &**t {
             Fn(a, b) => {
                 let (p_a, p_b) = map.get_fn(p);
-                type_to_type(a, p_a, map);
-                type_to_type(b, p_b, map);
+                unify_type_with_type(a, p_a, map);
+                unify_type_with_type(b, p_b, map);
             }
             Tuple(a, b) => {
                 let len = tuple_len(b);
                 let args = (0..len).map(|_| map.new_pointer()).collect_vec();
                 for a in a.iter() {
                     if let Const { name, id } = &**a {
-                        tuple_to_tuple(b, &args, map);
+                        unify_type_with_tuple(b, &args, map);
                         map.insert_normal(p, *id, name, args.clone());
                     } else {
                         panic!()
@@ -789,7 +803,7 @@ fn type_to_type<'a>(
     }
 }
 
-fn tuple_to_tuple<'a>(
+fn unify_type_with_tuple<'a>(
     t: &ast_step2::types::Type<'a>,
     ps: &[TypePointer],
     map: &mut PaddedTypeMap<'a>,
@@ -802,8 +816,8 @@ fn tuple_to_tuple<'a>(
                 debug_assert!(ps.is_empty());
             }
             ast_step2::types::TypeUnit::Tuple(h, t) => {
-                type_to_type(h, ps[0], map);
-                tuple_to_tuple(t, &ps[1..], map);
+                unify_type_with_type(h, ps[0], map);
+                unify_type_with_tuple(t, &ps[1..], map);
             }
             _ => panic!(),
         }
