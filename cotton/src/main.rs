@@ -1,32 +1,39 @@
-use clap::{
-    crate_authors, crate_description, crate_name, crate_version, App, Arg,
-};
+use clap::{command, Arg, ArgAction, ArgGroup};
 use cotton::{run, Command};
 use log::LevelFilter;
 use std::{fs, process, str::FromStr};
 
 fn main() {
-    let matches = App::new(crate_name!())
-        .version(crate_version!())
-        .author(crate_authors!())
-        .about(crate_description!())
+    let matches = command!()
         .arg(Arg::new("filename").required(true))
         .arg(
             Arg::new("js")
                 .short('j')
                 .long("js")
-                .takes_value(false)
                 .help(
                     "Output the generated JavaScript code \
                     instead of executing it",
-                ),
+                )
+                .action(ArgAction::SetTrue),
         )
         .arg(
             Arg::new("rust")
                 .short('r')
                 .long("rust-backend")
-                .takes_value(false)
-                .help("Compile to Rust code."),
+                .help("Compile to Rust code")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("types")
+                .short('t')
+                .long("types")
+                .help("Output the type of each toplevel declaration")
+                .action(ArgAction::SetTrue),
+        )
+        .group(
+            ArgGroup::new("action")
+                .required(false)
+                .args(&["js", "rust", "types"]),
         )
         .arg(
             Arg::new("loglevel")
@@ -40,19 +47,21 @@ fn main() {
         )
         .get_matches();
     let file_name = matches.value_of("filename").unwrap();
-    let output_js = matches.is_present("js");
-    let use_rust_backend = matches.is_present("rust");
-    let commnad = if output_js {
-        Command::PrintJs
-    } else if use_rust_backend {
-        Command::RunRust
-    } else {
-        Command::RunJs
+    let command = match (
+        matches.get_flag("js"),
+        matches.get_flag("rust"),
+        matches.get_flag("types"),
+    ) {
+        (true, false, false) => Command::PrintJs,
+        (false, true, false) => Command::RunRust,
+        (false, false, true) => Command::PrintTypes,
+        (false, false, false) => Command::RunJs,
+        _ => unreachable!(),
     };
     let loglevel =
         LevelFilter::from_str(matches.value_of("loglevel").unwrap()).unwrap();
     match fs::read_to_string(file_name) {
-        Ok(source) => run(&source, commnad, loglevel),
+        Ok(source) => run(&source, command, loglevel),
         Err(e) => {
             eprintln!("{}", e);
             process::exit(1)

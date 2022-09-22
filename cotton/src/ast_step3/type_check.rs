@@ -216,10 +216,42 @@ pub fn type_check<'a>(
     log::debug!("ok");
     (
         resolved_idents,
-        types.into_iter().collect(),
+        types
+            .into_iter()
+            .map(|(d, t)| (d, t.map_type(lift_recursive_alias)))
+            .collect(),
         subtype_relations,
         map,
     )
+}
+
+/// Change `Cons[List[a], a] | Nil` to `List[a]`
+fn lift_recursive_alias<'a, T>(t: T) -> T
+where
+    T: TypeConstructor<'a>,
+{
+    if let Some(body) = t.find_recursive_alias().cloned() {
+        let r = &TypeUnit::RecursiveAlias { body: body.clone() };
+        let v = TypeVariable::new();
+        let t = t.replace_type(r, &TypeUnit::Variable(v));
+        let body = body.replace_num(
+            TypeVariable::RecursiveIndex(0),
+            &TypeUnit::Variable(v).into(),
+        );
+        let (t, updated) = t.replace_type_union_with_update_flag(
+            &body,
+            &TypeUnit::Variable(v),
+            0,
+        );
+        let t = t.replace_num(v, &r.clone().into());
+        if updated {
+            lift_recursive_alias(t)
+        } else {
+            t
+        }
+    } else {
+        t
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]

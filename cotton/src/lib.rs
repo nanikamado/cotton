@@ -6,6 +6,8 @@ mod ast_step5;
 mod ast_step6;
 mod codegen;
 mod intrinsics;
+mod print_types;
+mod run_js;
 mod rust_backend;
 
 use ast_step3::type_check;
@@ -14,7 +16,7 @@ use simplelog::{
     self, ColorChoice, ConfigBuilder, LevelFilter, TermLogger, TerminalMode,
 };
 use std::{
-    io::{ErrorKind, Write},
+    io::ErrorKind,
     process::{self, exit, Stdio},
 };
 
@@ -61,30 +63,26 @@ pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
     let ast = parse::parse(source);
     let ast = ast_step1::Ast::from(&ast);
     let ast = ast_step2::Ast::from(ast);
-    let (resolved_idents, _types_of_decls, _subtype_relations, _map) =
+    let (resolved_idents, types_of_decls, _subtype_relations, _map) =
         type_check(&ast);
-    let ast = ast_step3::Ast::from(ast, &resolved_idents);
-    let ast = ast_step4::Ast::from(ast, &resolved_idents);
-    let ast = ast_step5::Ast::from(ast);
-    let ast = ast_step6::Ast::from(ast);
-    if command == Command::RunRust {
-        rust_backend::run(ast);
+    if command == Command::PrintTypes {
+        print_types::print(&types_of_decls, ast);
     } else {
-        let js = codegen(ast);
-        if command == Command::PrintJs {
-            println!("{}", js);
+        let ast = ast_step3::Ast::from(ast, &resolved_idents);
+        let ast = ast_step4::Ast::from(ast, &resolved_idents);
+        let ast = ast_step5::Ast::from(ast);
+        let ast = ast_step6::Ast::from(ast);
+        if command == Command::RunRust {
+            rust_backend::run(ast);
         } else {
-            let mut child = process::Command::new("node")
-                .stdin(Stdio::piped())
-                .spawn()
-                .unwrap();
-            child
-                .stdin
-                .as_mut()
-                .unwrap()
-                .write_all(js.as_bytes())
-                .unwrap();
-            child.wait().unwrap();
+            let js = codegen(ast);
+            if command == Command::PrintJs {
+                println!("{}", js);
+            } else if command == Command::RunJs {
+                run_js::run(&js);
+            } else {
+                unreachable!()
+            }
         }
     }
 }
