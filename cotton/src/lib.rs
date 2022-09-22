@@ -3,6 +3,7 @@ mod ast_step2;
 mod ast_step3;
 mod ast_step4;
 mod ast_step5;
+mod ast_step6;
 mod codegen;
 mod intrinsics;
 mod rust_backend;
@@ -59,6 +60,7 @@ pub fn run(
     let ast: ast_step3::Ast = ast.into();
     let ast: ast_step4::Ast = ast.into();
     let ast: ast_step5::Ast = ast.into();
+    let ast: ast_step6::Ast = ast.into();
     if use_rust_backend {
         rust_backend::run(ast);
     } else {

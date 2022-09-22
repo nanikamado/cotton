@@ -1,10 +1,8 @@
 use crate::{
     ast_step2::decl_id::DeclId,
     ast_step4::DataDecl,
-    ast_step5::{
-        Ast, Expr, ExprWithType, FnArm, Pattern, PatternUnit, Type,
-        VariableDecl,
-    },
+    ast_step5::{Pattern, PatternUnit, Type},
+    ast_step6::{Ast, Expr, ExprWithType, FnArm, VariableDecl},
     intrinsics::IntrinsicVariable,
 };
 use fxhash::FxHashMap;
@@ -100,18 +98,9 @@ fn expr((e, t): &ExprWithType, name_count: u32) -> String {
         Expr::Ident {
             name: info,
             variable_id,
-            type_args,
+            variable_kind: _,
         } => {
-            format!(
-                "${}${} /* ({}) [{}] */",
-                variable_id,
-                convert_name(info),
-                info,
-                type_args.iter().format_with("", |args, f| f(&format!(
-                    "[args: ({})]",
-                    args.iter().format(", ")
-                )))
-            )
+            format!("${}${} /* ({}) */", variable_id, convert_name(info), info,)
         }
         Expr::Call(f, a) => {
             format!("{}({})", expr(f, name_count), expr(a, name_count))
