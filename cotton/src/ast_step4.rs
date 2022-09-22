@@ -54,13 +54,16 @@ pub struct DataDecl<'a> {
     pub decl_id: DeclId,
 }
 
-impl<'a> From<ast_step3::Ast<'a>> for Ast<'a> {
-    fn from(ast: ast_step3::Ast<'a>) -> Self {
+impl<'a> Ast<'a> {
+    pub fn from(
+        ast: ast_step3::Ast<'a>,
+        resolved_idents: &ResolvedIdents<'a>,
+    ) -> Self {
         let (variable_decl, entry_point) = variable_decl(
             ast.variable_decl,
             &ast.data_decl,
             ast.entry_point,
-            &ast.resolved_idents,
+            resolved_idents,
         );
         let data_decl = ast
             .data_decl

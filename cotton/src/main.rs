@@ -1,7 +1,7 @@
 use clap::{
     crate_authors, crate_description, crate_name, crate_version, App, Arg,
 };
-use cotton::run;
+use cotton::{run, Command};
 use log::LevelFilter;
 use std::{fs, process, str::FromStr};
 
@@ -42,10 +42,17 @@ fn main() {
     let file_name = matches.value_of("filename").unwrap();
     let output_js = matches.is_present("js");
     let use_rust_backend = matches.is_present("rust");
+    let commnad = if output_js {
+        Command::PrintJs
+    } else if use_rust_backend {
+        Command::RunRust
+    } else {
+        Command::RunJs
+    };
     let loglevel =
         LevelFilter::from_str(matches.value_of("loglevel").unwrap()).unwrap();
     match fs::read_to_string(file_name) {
-        Ok(source) => run(&source, output_js, use_rust_backend, loglevel),
+        Ok(source) => run(&source, commnad, loglevel),
         Err(e) => {
             eprintln!("{}", e);
             process::exit(1)

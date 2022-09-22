@@ -16,7 +16,6 @@ pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl<'a>>,
     pub entry_point: DeclId,
-    pub resolved_idents: ResolvedIdents<'a>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -42,21 +41,21 @@ pub struct FnArm<'a> {
     pub expr: Expr<'a>,
 }
 
-impl<'a> From<ast_step2::Ast<'a>> for Ast<'a> {
-    fn from(ast: ast_step2::Ast<'a>) -> Self {
-        let (resolved_idents, _types_of_decls, _subtype_relations, _map) =
-            type_check(&ast);
+impl<'a> Ast<'a> {
+    pub fn from(
+        ast: ast_step2::Ast<'a>,
+        resolved_idents: &ResolvedIdents<'a>,
+    ) -> Self {
         log::trace!("{:?}", resolved_idents);
         let variable_decl: Vec<_> = ast
             .variable_decl
             .into_iter()
-            .map(|d| variable_decl(d, &resolved_idents))
+            .map(|d| variable_decl(d, resolved_idents))
             .collect();
         Self {
             variable_decl,
             data_decl: ast.data_decl,
             entry_point: ast.entry_point,
-            resolved_idents,
         }
     }
 }
