@@ -95,43 +95,43 @@ pub struct VariableDecl<'a> {
     pub name: &'a str,
     pub type_annotation: Option<IncompleteType<'a>>,
     pub implicit_parameters: Vec<(&'a str, Type<'a>, DeclId)>,
-    pub value: ExprWithType<'a>,
+    pub value: ExprWithType<'a, TypeVariable>,
     pub decl_id: DeclId,
 }
 
-pub type ExprWithType<'a> = (Expr<'a>, TypeVariable);
+pub type ExprWithType<'a, T> = (Expr<'a, T>, T);
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Expr<'a> {
-    Lambda(Vec<FnArm<'a>>),
+pub enum Expr<'a, T> {
+    Lambda(Vec<FnArm<'a, T>>),
     Number(&'a str),
     StrLiteral(&'a str),
     Ident { name: &'a str, ident_id: IdentId },
-    Call(Box<ExprWithType<'a>>, Box<ExprWithType<'a>>),
-    Do(Vec<ExprWithType<'a>>),
+    Call(Box<ExprWithType<'a, T>>, Box<ExprWithType<'a, T>>),
+    Do(Vec<ExprWithType<'a, T>>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct FnArm<'a> {
-    pub pattern: Vec<Pattern<'a>>,
-    pub expr: ExprWithType<'a>,
+pub struct FnArm<'a, T> {
+    pub pattern: Vec<Pattern<'a, T>>,
+    pub expr: ExprWithType<'a, T>,
 }
 
 /// Represents a multi-case pattern which matches if any of the `PatternUnit` in it matches.
 /// It should have at least one `PatternUnit`.
-pub type Pattern<'a> = Vec<PatternUnit<'a>>;
+pub type Pattern<'a, T> = Vec<PatternUnit<'a, T>>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum PatternUnit<'a> {
+pub enum PatternUnit<'a, T> {
     I64(&'a str),
     Str(&'a str),
     Constructor {
         id: ConstructorId<'a>,
-        args: Vec<Pattern<'a>>,
+        args: Vec<Pattern<'a, T>>,
     },
-    Binder(&'a str, DeclId, Type<'a>),
+    Binder(&'a str, DeclId, T),
     Underscore,
-    TypeRestriction(Pattern<'a>, Type<'a>),
+    TypeRestriction(Pattern<'a, T>, Type<'a>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -243,8 +243,8 @@ impl<'a> From<Type<'a>> for IncompleteType<'a> {
     }
 }
 
-impl<'a> From<PatternUnit<'a>> for Pattern<'a> {
-    fn from(p: PatternUnit<'a>) -> Self {
+impl<'a, T> From<PatternUnit<'a, T>> for Pattern<'a, T> {
+    fn from(p: PatternUnit<'a, T>) -> Self {
         vec![p]
     }
 }
@@ -306,7 +306,7 @@ fn expr<'a>(
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
     interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type<'a>, TypeVariable)>>,
-) -> ExprWithType<'a> {
+) -> ExprWithType<'a, TypeVariable> {
     use Expr::*;
     let e = match e {
         ast_step1::Expr::Lambda(arms) => Lambda(
@@ -375,12 +375,12 @@ fn expr<'a>(
 
 fn add_expr_in_do<'a>(
     e: ast_step1::Expr<'a>,
-    mut es: Vec<ExprWithType<'a>>,
+    mut es: Vec<ExprWithType<'a, TypeVariable>>,
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
     interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type<'a>, TypeVariable)>>,
-) -> Vec<ExprWithType<'a>> {
+) -> Vec<ExprWithType<'a, TypeVariable>> {
     match e {
         ast_step1::Expr::Decl(d) => {
             let d = variable_decl(
@@ -407,7 +407,7 @@ fn add_expr_in_do<'a>(
                     pattern: vec![PatternUnit::Binder(
                         d.name,
                         d.decl_id,
-                        TypeUnit::new_variable().into(),
+                        TypeVariable::new(),
                     )
                     .into()],
                     expr: (Expr::Do(es), TypeVariable::new()),
@@ -440,7 +440,7 @@ fn fn_arm<'a>(
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
     interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type<'a>, TypeVariable)>>,
-) -> FnArm<'a> {
+) -> FnArm<'a, TypeVariable> {
     FnArm {
         pattern: arm
             .pattern
@@ -490,7 +490,7 @@ impl ConstructorId<'_> {
 fn pattern<'a>(
     p: ast_step1::Pattern<'a>,
     data_decl_map: &FxHashMap<&str, DeclId>,
-) -> Pattern<'a> {
+) -> Pattern<'a, TypeVariable> {
     use PatternUnit::*;
     match p {
         ast_step1::Pattern::Number(n) => I64(n),
@@ -503,7 +503,7 @@ fn pattern<'a>(
                 .collect(),
         },
         ast_step1::Pattern::Binder(name) => {
-            Binder(name, DeclId::new(), TypeUnit::new_variable().into())
+            Binder(name, DeclId::new(), TypeVariable::new())
         }
         ast_step1::Pattern::Underscore => Underscore,
     }

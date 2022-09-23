@@ -1,7 +1,7 @@
 use crate::{
     ast_step2::decl_id::DeclId,
+    ast_step3::DataDecl,
     ast_step3::VariableId,
-    ast_step4::DataDecl,
     ast_step5::{
         self, PaddedTypeMap, Pattern, PatternUnit, Type, TypePointer,
         VariableKind,
@@ -136,7 +136,6 @@ impl<'a> VariableMemo<'a> {
             Expr::Ident {
                 name,
                 variable_id: VariableId::Decl(decl_id),
-                type_args: None,
                 variable_kind: VariableKind::Global,
             } => Ident {
                 name,
@@ -173,16 +172,6 @@ impl<'a> VariableMemo<'a> {
                 ),
                 variable_kind: VariableKind::Global,
             },
-            Expr::Ident {
-                name,
-                variable_id,
-                type_args: Some(_),
-                variable_kind,
-            } => Ident {
-                name,
-                variable_id,
-                variable_kind,
-            },
             Expr::Call(a, b) => Call(
                 Box::new(self.monomorphize_expr(*a, replace_map, trace)),
                 Box::new(self.monomorphize_expr(*b, replace_map, trace)),
@@ -197,7 +186,6 @@ impl<'a> VariableMemo<'a> {
             Expr::Ident {
                 name,
                 variable_id,
-                type_args: None,
                 variable_kind,
             } => Ident {
                 name,

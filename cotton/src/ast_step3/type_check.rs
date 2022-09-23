@@ -12,6 +12,7 @@ use crate::{
         PatternRestrictions, PatternUnit, PatternUnitForRestriction,
         SubtypeRelations, TypeId,
     },
+    ast_step5::VariableKind,
     intrinsics::{IntrinsicType, IntrinsicVariable},
 };
 use fxhash::{FxHashMap, FxHashSet};
@@ -68,6 +69,7 @@ pub fn type_check<'a>(
             decl_id: VariableId::Intrinsic(v),
             name: v.to_str(),
             variables_required_by_interface_restrictions: Default::default(),
+            variable_kind: VariableKind::Intrinsic,
         });
     }
     for d in &ast.data_decl {
@@ -79,6 +81,7 @@ pub fn type_check<'a>(
             decl_id: VariableId::Decl(d.decl_id),
             name: d.name,
             variables_required_by_interface_restrictions: Default::default(),
+            variable_kind: VariableKind::Constructor,
         });
     }
     let mut resolved_idents = Vec::new();
@@ -122,6 +125,7 @@ pub fn type_check<'a>(
                             variable_id: VariableId::Decl(**decl_id),
                             type_args: Default::default(),
                             implicit_args: Default::default(),
+                            variable_kind: VariableKind::Local,
                         },
                     ));
                     None
@@ -163,6 +167,7 @@ pub fn type_check<'a>(
             variables_required_by_interface_restrictions: d
                 .implicit_parameters
                 .clone(),
+            variable_kind: VariableKind::Global,
         });
     }
     for top in &toplevels {
@@ -192,6 +197,7 @@ pub fn type_check<'a>(
                     variable_id,
                     type_args,
                     implicit_args,
+                    variable_kind,
                 },
             )| {
                 (
@@ -208,6 +214,7 @@ pub fn type_check<'a>(
                                 (decl_id, name, map.normalize_type(t), r)
                             })
                             .collect(),
+                        variable_kind,
                     },
                 )
             },
@@ -258,6 +265,7 @@ where
 pub struct ResolvedIdent<'a> {
     pub variable_id: VariableId,
     pub type_args: Vec<(TypeVariable, Type<'a>)>,
+    pub variable_kind: VariableKind,
     pub implicit_args: Vec<(DeclId, &'a str, Type<'a>, ResolvedIdent<'a>)>,
 }
 
@@ -272,6 +280,7 @@ struct Toplevel<'a> {
     name: &'a str,
     variables_required_by_interface_restrictions:
         Vec<(&'a str, Type<'a>, DeclId)>,
+    variable_kind: VariableKind,
 }
 
 type TypesOfDeclsVec<'a> = Vec<(DeclId, ast_step2::IncompleteType<'a>)>;
@@ -641,6 +650,7 @@ fn resolve_scc<'a>(
                 variable_id: satisfied.id_of_satisfied_variable,
                 type_args: satisfied.type_args.clone(),
                 implicit_args: satisfied.implicit_args,
+                variable_kind: satisfied.variable_kind,
             },
         ));
         *map = satisfied.map;
@@ -693,6 +703,7 @@ fn resolve_scc<'a>(
 struct SatisfiedType<'a, T> {
     type_of_satisfied_variable: Type<'a>,
     id_of_satisfied_variable: VariableId,
+    variable_kind: VariableKind,
     type_of_improved_decl: T,
     type_args: Vec<(TypeVariable, Type<'a>)>,
     implicit_args: Vec<(DeclId, &'a str, Type<'a>, ResolvedIdent<'a>)>,
@@ -830,6 +841,7 @@ fn find_satisfied_types<
                                 variable_id: VariableId::Decl(*decl_id),
                                 type_args: Default::default(),
                                 implicit_args: Default::default(),
+                                variable_kind: VariableKind::Local,
                             },
                         );
                         map.insert_type(
@@ -892,6 +904,7 @@ fn find_satisfied_types<
                                         .id_of_satisfied_variable,
                                     type_args: satisfied.type_args,
                                     implicit_args: satisfied.implicit_args,
+                                    variable_kind: satisfied.variable_kind,
                                 },
                             );
                             map = satisfied.map;
@@ -921,6 +934,7 @@ fn find_satisfied_types<
                                 .collect(),
                             type_of_satisfied_variable: cand_t.constructor,
                             map,
+                            variable_kind: candidate.variable_kind,
                         }
                     },
                 )
@@ -999,6 +1013,7 @@ fn resolve_recursion_in_scc<'a>(
                 variable_id: satisfied.id_of_satisfied_variable,
                 type_args: satisfied.type_args,
                 implicit_args: satisfied.implicit_args,
+                variable_kind: satisfied.variable_kind,
             },
         ));
         scc = satisfied.type_of_improved_decl;
@@ -1027,7 +1042,7 @@ fn constructor_type(d: DataDecl) -> TypeUnit {
 }
 
 fn min_type_incomplete<'a>(
-    (expr, type_variable): &ExprWithType<'a>,
+    (expr, type_variable): &ExprWithType<'a, TypeVariable>,
     subtype_relations: &mut SubtypeRelations<'a>,
     map: &mut TypeVariableMap<'a>,
 ) -> (
@@ -1245,7 +1260,7 @@ type IdentTypeMap = Vec<(IdentId, TypeVariable)>;
 /// Returns `vec![argument type, argument type, ..., return type]`,
 /// variable requirements, subtype relation, resolved idents.
 fn arm_min_type<'a>(
-    arm: &FnArm<'a>,
+    arm: &FnArm<'a, TypeVariable>,
     subtype_relations: &mut SubtypeRelations<'a>,
     map: &mut TypeVariableMap<'a>,
 ) -> (
@@ -1276,6 +1291,7 @@ fn arm_min_type<'a>(
                     variable_id: VariableId::Decl(a.0),
                     type_args: Vec::new(),
                     implicit_args: Vec::new(),
+                    variable_kind: VariableKind::Local,
                 },
             ));
         } else {
@@ -1303,7 +1319,7 @@ fn arm_min_type<'a>(
 }
 
 fn pattern_unit_to_type<'a>(
-    p: &PatternUnit<'a>,
+    p: &PatternUnit<'a, TypeVariable>,
 ) -> (
     types::Type<'a>,
     FxHashMap<&'a str, (DeclId, types::Type<'a>)>,
@@ -1353,9 +1369,14 @@ fn pattern_unit_to_type<'a>(
             )
         }
         Binder(name, decl_id, t) => (
-            t.clone(),
-            vec![(*name, (*decl_id, t.clone()))].into_iter().collect(),
-            PatternUnitForRestriction::Binder(t.clone(), *decl_id),
+            TypeUnit::Variable(*t).into(),
+            vec![(*name, (*decl_id, TypeUnit::Variable(*t).into()))]
+                .into_iter()
+                .collect(),
+            PatternUnitForRestriction::Binder(
+                TypeUnit::Variable(*t).into(),
+                *decl_id,
+            ),
         ),
         Underscore => {
             let v = TypeVariable::new();
@@ -1377,7 +1398,7 @@ fn pattern_unit_to_type<'a>(
 }
 
 fn pattern_to_type<'a>(
-    p: &Pattern<'a>,
+    p: &Pattern<'a, TypeVariable>,
 ) -> (
     types::Type<'a>,
     FxHashMap<&'a str, (DeclId, types::Type<'a>)>,
