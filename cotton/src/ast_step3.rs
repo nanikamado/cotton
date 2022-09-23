@@ -12,7 +12,7 @@ use crate::{
         types::{Type, TypeUnit, TypeVariable},
         Pattern, PatternUnit, TypeConstructor,
     },
-    ast_step5::VariableKind,
+    ast_step4::VariableKind,
 };
 use fxhash::FxHashMap;
 

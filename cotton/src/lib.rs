@@ -1,8 +1,8 @@
 mod ast_step1;
 mod ast_step2;
 mod ast_step3;
+mod ast_step4;
 mod ast_step5;
-mod ast_step6;
 mod codegen;
 mod intrinsics;
 mod print_types;
@@ -66,8 +66,8 @@ pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
     if command == Command::PrintTypes {
         // print_types::print(&types_of_decls, ast);
     } else {
+        let ast = ast_step4::Ast::from(ast);
         let ast = ast_step5::Ast::from(ast);
-        let ast = ast_step6::Ast::from(ast);
         if command == Command::RunRust {
             rust_backend::run(ast);
         } else {

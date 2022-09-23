@@ -12,7 +12,7 @@ use crate::{
         PatternRestrictions, PatternUnit, PatternUnitForRestriction,
         SubtypeRelations, TypeId,
     },
-    ast_step5::VariableKind,
+    ast_step4::VariableKind,
     intrinsics::{IntrinsicType, IntrinsicVariable},
 };
 use fxhash::{FxHashMap, FxHashSet};
