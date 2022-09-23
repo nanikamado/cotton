@@ -10,7 +10,7 @@ use crate::{
         self,
         decl_id::DeclId,
         types::{Type, TypeUnit, TypeVariable},
-        Pattern, PatternUnit, TypeConstructor,
+        IncompleteType, Pattern, PatternUnit, TypeConstructor,
     },
     ast_step4::VariableKind,
 };
@@ -24,6 +24,7 @@ pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl<'a>>,
     pub entry_point: DeclId,
+    pub types_of_decls: FxHashMap<DeclId, IncompleteType<'a>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -89,6 +90,7 @@ impl<'a> Ast<'a> {
             variable_decl,
             data_decl,
             entry_point,
+            types_of_decls,
         }
     }
 }

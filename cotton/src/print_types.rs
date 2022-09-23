@@ -1,19 +1,13 @@
+use crate::{ast_step2::IncompleteType, ast_step3::Ast};
+use itertools::Itertools;
 use std::fmt::Display;
 
-use crate::ast_step2::{decl_id::DeclId, types::Type, Ast, IncompleteType};
-use fxhash::FxHashMap;
-use itertools::Itertools;
-
-#[allow(unused)]
-pub fn print<'a>(
-    types_of_decls: &FxHashMap<DeclId, IncompleteType<'a, Type<'a>>>,
-    ast: Ast<'a>,
-) {
-    for d in ast.variable_decl {
+pub fn print(ast: &Ast<'_>) {
+    for d in &ast.variable_decl {
         println!(
             "{} : {}",
             d.name,
-            FormatForTest(&types_of_decls[&d.decl_id])
+            FormatForTest(&ast.types_of_decls[&d.decl_id])
         );
     }
 }
