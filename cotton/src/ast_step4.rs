@@ -2,8 +2,8 @@ use crate::{
     ast_step2::{
         self,
         decl_id::DeclId,
-        types::{Type, TypeVariable},
-        Pattern, PatternUnit,
+        types::{Type, TypeUnit, TypeVariable},
+        Pattern, PatternUnit, TypeConstructor,
     },
     ast_step3::{self, ResolvedIdent, ResolvedIdents, VariableId},
 };
@@ -22,9 +22,11 @@ pub struct Ast<'a> {
 #[derive(Debug, PartialEq, Clone)]
 pub struct VariableDecl<'a> {
     pub name: &'a str,
-    pub value: Expr<'a>,
+    pub value: ExprWithType<'a>,
     pub decl_id: DeclId,
 }
+
+pub type ExprWithType<'a> = (Expr<'a>, Type<'a>);
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr<'a> {
@@ -37,14 +39,14 @@ pub enum Expr<'a> {
         /// `Some()` if and only if the ident is a constructor.
         type_args: Option<Vec<Type<'a>>>,
     },
-    Call(Box<Expr<'a>>, Box<Expr<'a>>),
-    DoBlock(Vec<Expr<'a>>),
+    Call(Box<ExprWithType<'a>>, Box<ExprWithType<'a>>),
+    DoBlock(Vec<ExprWithType<'a>>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FnArm<'a> {
     pub pattern: Vec<Pattern<'a>>,
-    pub expr: Expr<'a>,
+    pub expr: ExprWithType<'a>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -55,15 +57,12 @@ pub struct DataDecl<'a> {
 }
 
 impl<'a> Ast<'a> {
-    pub fn from(
-        ast: ast_step3::Ast<'a>,
-        resolved_idents: &ResolvedIdents<'a>,
-    ) -> Self {
+    pub fn from(ast: ast_step3::Ast<'a>) -> Self {
         let (variable_decl, entry_point) = variable_decl(
             ast.variable_decl,
             &ast.data_decl,
             ast.entry_point,
-            resolved_idents,
+            &ast.resolved_idents,
         );
         let data_decl = ast
             .data_decl
@@ -146,7 +145,8 @@ impl<'a> Monomorphics<'a, '_> {
             let d = (*d).clone();
             let new_decl_id = DeclId::new();
             trace.insert(old_decl_id, new_decl_id);
-            let mut value = self.monomorphy_expr(d.value, trace);
+            let (mut value, mut value_t) =
+                self.monomorphy_expr(d.value, &type_args, trace);
             for (decl_id, name, t) in implicit_args.into_iter().rev() {
                 value = Expr::Lambda(vec![FnArm {
                     pattern: vec![vec![PatternUnit::Binder(
@@ -154,10 +154,19 @@ impl<'a> Monomorphics<'a, '_> {
                         decl_id,
                         t.clone(),
                     )]],
-                    expr: value,
+                    expr: (value, value_t.clone()),
                 }]);
+                value_t = TypeUnit::Fn(t, value_t).into();
             }
-            let value = value;
+            let value = (value, value_t);
+            verify_types_do_not_have_free_variables(&value).unwrap_or_else(
+                |t| {
+                    panic!(
+                        "could not identify type variable in {}, {}",
+                        t.1, d.name
+                    )
+                },
+            );
             self.map.insert(
                 (old_decl_id, type_args),
                 VariableDecl {
@@ -212,14 +221,19 @@ impl<'a> Monomorphics<'a, '_> {
 
     fn monomorphy_expr(
         &mut self,
-        e: ast_step3::Expr<'a>,
+        (e, mut t): ast_step3::ExprWithType<'a>,
+        t_args: &BTreeMap<TypeVariable, Type<'a>>,
         trace: FxHashMap<DeclId, DeclId>,
-    ) -> Expr<'a> {
+    ) -> ExprWithType<'a> {
+        for (v, to) in t_args {
+            t = t.replace_num(*v, to);
+        }
         let e = match e {
             ast_step3::Expr::Lambda(arms) => Expr::Lambda(
                 arms.into_iter()
                     .map(|a| {
-                        let expr = self.monomorphy_expr(a.expr, trace.clone());
+                        let expr =
+                            self.monomorphy_expr(a.expr, t_args, trace.clone());
                         FnArm {
                             pattern: a.pattern,
                             expr,
@@ -230,8 +244,12 @@ impl<'a> Monomorphics<'a, '_> {
             ast_step3::Expr::Number(a) => Expr::Number(a),
             ast_step3::Expr::StrLiteral(a) => Expr::StrLiteral(a),
             ast_step3::Expr::Ident { name, ident_id } => {
-                let resolved_item =
-                    self.resolved_idents.get(&ident_id).unwrap().clone();
+                let resolved_item = self
+                    .resolved_idents
+                    .get(&ident_id)
+                    .unwrap()
+                    .clone()
+                    .replace_variables(t_args);
                 let (variable_id, new_type_args) = self
                     .get_variable_id_from_resolved_item(
                         &resolved_item,
@@ -242,36 +260,103 @@ impl<'a> Monomorphics<'a, '_> {
                     variable_id,
                     type_args: new_type_args,
                 };
-                for (_, name, _implicit_arg_t, resolved_item) in
-                    resolved_item.implicit_args.iter()
+                let mut ts = Vec::new();
+                let mut fn_t = t.clone();
+                for (_, _, implicit_arg_t, _) in
+                    resolved_item.implicit_args.iter().rev()
+                {
+                    fn_t = TypeUnit::Fn(implicit_arg_t.clone(), fn_t).into();
+                    ts.push(fn_t.clone());
+                }
+                for ((_, name, implicit_arg_t, resolved_item), fn_t) in
+                    resolved_item.implicit_args.iter().zip(ts.into_iter().rev())
                 {
                     let (variable_id, type_args) = self
                         .get_variable_id_from_resolved_item(
-                            resolved_item,
+                            &resolved_item.clone().replace_variables(t_args),
                             trace.clone(),
                         );
                     value = Expr::Call(
-                        Box::new(value),
-                        Box::new(Expr::Ident {
-                            name,
-                            variable_id,
-                            type_args,
-                        }),
+                        Box::new((value, fn_t)),
+                        Box::new((
+                            Expr::Ident {
+                                name,
+                                variable_id,
+                                type_args,
+                            },
+                            implicit_arg_t.clone(),
+                        )),
                     );
                 }
                 value
             }
             ast_step3::Expr::Call(f, a) => Expr::Call(
-                self.monomorphy_expr(*f, trace.clone()).into(),
-                self.monomorphy_expr(*a, trace).into(),
+                self.monomorphy_expr(*f, t_args, trace.clone()).into(),
+                self.monomorphy_expr(*a, t_args, trace).into(),
             ),
             ast_step3::Expr::Do(exprs) => Expr::DoBlock(
                 exprs
                     .into_iter()
-                    .map(|expr| self.monomorphy_expr(expr, trace.clone()))
+                    .map(|expr| {
+                        self.monomorphy_expr(expr, t_args, trace.clone())
+                    })
                     .collect(),
             ),
         };
-        e
+        (e, t)
+    }
+}
+
+fn verify_types_do_not_have_free_variables<'a, 'b>(
+    et: &'b ExprWithType<'a>,
+) -> Result<(), &'b ExprWithType<'a>> {
+    if et.1.all_type_variables().is_empty() {
+        match &et.0 {
+            Expr::Lambda(arms) => arms.iter().try_for_each(|arm| {
+                verify_types_do_not_have_free_variables(&arm.expr)
+            }),
+            Expr::Number(_) | Expr::StrLiteral(_) | Expr::Ident { .. } => {
+                Ok(())
+            }
+            Expr::Call(e1, e2) => [e1, e2]
+                .iter()
+                .try_for_each(|e| verify_types_do_not_have_free_variables(e)),
+            Expr::DoBlock(es) => es
+                .iter()
+                .try_for_each(verify_types_do_not_have_free_variables),
+        }
+    } else {
+        Err(et)
+    }
+}
+
+impl<'a> ResolvedIdent<'a> {
+    fn replace_variables(
+        mut self,
+        type_args: &BTreeMap<TypeVariable, Type<'a>>,
+    ) -> Self {
+        self.type_args = type_args
+            .iter()
+            .map(|(v, t)| (*v, t.clone()))
+            .chain(self.type_args.clone().into_iter())
+            .map(|(v, mut t)| {
+                for (from, to) in type_args {
+                    t = t.replace_num(*from, to);
+                }
+                (v, t)
+            })
+            .collect();
+        self.implicit_args = self
+            .implicit_args
+            .clone()
+            .into_iter()
+            .map(|(decl_id, name, mut t, v)| {
+                for (from, to) in &self.type_args {
+                    t = t.replace_num(*from, to);
+                }
+                (decl_id, name, t, v)
+            })
+            .collect();
+        self
     }
 }

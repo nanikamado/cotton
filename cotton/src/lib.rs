@@ -10,7 +10,6 @@ mod print_types;
 mod run_js;
 mod rust_backend;
 
-use ast_step3::type_check;
 use codegen::codegen;
 use simplelog::{
     self, ColorChoice, ConfigBuilder, LevelFilter, TermLogger, TerminalMode,
@@ -63,13 +62,11 @@ pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
     let ast = parse::parse(source);
     let ast = ast_step1::Ast::from(&ast);
     let ast = ast_step2::Ast::from(ast);
-    let (resolved_idents, types_of_decls, _subtype_relations, _map) =
-        type_check(&ast);
+    let ast = ast_step3::Ast::from(ast);
     if command == Command::PrintTypes {
-        print_types::print(&types_of_decls, ast);
+        // print_types::print(&types_of_decls, ast);
     } else {
-        let ast = ast_step3::Ast::from(ast, &resolved_idents);
-        let ast = ast_step4::Ast::from(ast, &resolved_idents);
+        let ast = ast_step4::Ast::from(ast);
         let ast = ast_step5::Ast::from(ast);
         let ast = ast_step6::Ast::from(ast);
         if command == Command::RunRust {

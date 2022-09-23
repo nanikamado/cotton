@@ -592,7 +592,7 @@ impl<'a> VariableMemo<'a> {
 
     fn expr(
         &mut self,
-        e: ast_step4::Expr<'a>,
+        (e, _): ast_step4::ExprWithType<'a>,
         type_pointer: TypePointer,
         local_variables: &FxHashMap<VariableId, TypePointer>,
         trace: &FxHashMap<VariableId, TypePointer>,

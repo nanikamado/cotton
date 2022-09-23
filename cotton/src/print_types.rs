@@ -4,6 +4,7 @@ use crate::ast_step2::{decl_id::DeclId, types::Type, Ast, IncompleteType};
 use fxhash::FxHashMap;
 use itertools::Itertools;
 
+#[allow(unused)]
 pub fn print<'a>(
     types_of_decls: &FxHashMap<DeclId, IncompleteType<'a, Type<'a>>>,
     ast: Ast<'a>,
