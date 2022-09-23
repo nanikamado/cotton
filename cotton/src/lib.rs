@@ -3,9 +3,10 @@ mod ast_step2;
 mod ast_step3;
 mod ast_step4;
 mod ast_step5;
-mod ast_step6;
 mod codegen;
 mod intrinsics;
+mod print_types;
+mod run_js;
 mod rust_backend;
 
 use codegen::codegen;
@@ -13,16 +14,19 @@ use simplelog::{
     self, ColorChoice, ConfigBuilder, LevelFilter, TermLogger, TerminalMode,
 };
 use std::{
-    io::{ErrorKind, Write},
-    process::{exit, Command, Stdio},
+    io::ErrorKind,
+    process::{self, exit, Stdio},
 };
 
-pub fn run(
-    source: &str,
-    output_js: bool,
-    use_rust_backend: bool,
-    loglevel: LevelFilter,
-) {
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Command {
+    RunJs,
+    RunRust,
+    PrintJs,
+    PrintTypes,
+}
+
+pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
     TermLogger::init(
         loglevel,
         ConfigBuilder::new()
@@ -35,8 +39,8 @@ pub fn run(
         ColorChoice::Auto,
     )
     .unwrap();
-    if !output_js {
-        match Command::new("node")
+    if command == Command::RunJs {
+        match process::Command::new("node")
             .arg("--version")
             .stdout(Stdio::null())
             .spawn()
@@ -55,28 +59,25 @@ pub fn run(
         }
     }
     let ast = parse::parse(source);
-    let ast: ast_step1::Ast = (&ast).into();
-    let ast: ast_step2::Ast = ast.into();
-    let ast: ast_step3::Ast = ast.into();
-    let ast: ast_step4::Ast = ast.into();
-    let ast: ast_step5::Ast = ast.into();
-    let ast: ast_step6::Ast = ast.into();
-    if use_rust_backend {
-        rust_backend::run(ast);
+    let ast = ast_step1::Ast::from(&ast);
+    let ast = ast_step2::Ast::from(ast);
+    let ast = ast_step3::Ast::from(ast);
+    if command == Command::PrintTypes {
+        print_types::print(&ast);
     } else {
-        let js = codegen(ast);
-        if output_js {
-            println!("{}", js);
+        let ast = ast_step4::Ast::from(ast);
+        let ast = ast_step5::Ast::from(ast);
+        if command == Command::RunRust {
+            rust_backend::run(ast);
         } else {
-            let mut child =
-                Command::new("node").stdin(Stdio::piped()).spawn().unwrap();
-            child
-                .stdin
-                .as_mut()
-                .unwrap()
-                .write_all(js.as_bytes())
-                .unwrap();
-            child.wait().unwrap();
+            let js = codegen(ast);
+            if command == Command::PrintJs {
+                println!("{}", js);
+            } else if command == Command::RunJs {
+                run_js::run(&js);
+            } else {
+                unreachable!()
+            }
         }
     }
 }
