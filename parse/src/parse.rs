@@ -46,7 +46,7 @@ pub type Type = Vec<OpSequenceUnit<TypeUnit>>;
 pub enum PatternUnit {
     Int(String),
     Str(String),
-    Constructor(String, Vec<Pattern>),
+    Ident(String, Vec<Pattern>),
     Underscore,
 }
 
@@ -140,7 +140,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                     .or_not(),
             )
             .map(|(name, args)| {
-                PatternUnit::Constructor(name, args.unwrap_or_default())
+                PatternUnit::Ident(name, args.unwrap_or_default())
             });
         let pattern_unit = constructor_pattern
             .or(just(Token::Ident("_".to_string()))

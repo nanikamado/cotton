@@ -565,7 +565,7 @@ impl<'a> ConvertWithOpPrecedenceMap for &'a parse::PatternUnit {
         match self {
             parse::PatternUnit::Int(a) => Pattern::Number(a),
             parse::PatternUnit::Str(a) => Pattern::StrLiteral(a),
-            parse::PatternUnit::Constructor(name, ps) => {
+            parse::PatternUnit::Ident(name, ps) => {
                 if constructors.contains(name.as_str()) {
                     Pattern::Constructor {
                         name,
