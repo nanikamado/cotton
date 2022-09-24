@@ -134,12 +134,6 @@ pub enum PatternUnit<'a, T> {
     TypeRestriction(Pattern<'a, T>, Type<'a>),
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct InterfaceDecl<'a> {
-    name: &'a str,
-    variables: Vec<(&'a str, Type<'a>, TypeVariable)>,
-}
-
 impl<'a> From<ast_step1::Ast<'a>> for Ast<'a> {
     fn from(ast: ast_step1::Ast<'a>) -> Self {
         let data_decl: Vec<_> = ast
