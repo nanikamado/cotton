@@ -48,7 +48,6 @@ pub enum PatternUnit {
     Str(String),
     Constructor(String, Vec<Pattern>),
     Underscore,
-    Bind(String),
 }
 
 pub type Pattern = Vec<OpSequenceUnit<PatternUnit>>;
@@ -124,15 +123,15 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
     let str = select! { Token::Str(s) => s };
     let op = select! { Token::Op(s) => s };
     let ident = select! { Token::Ident(ident) => ident };
-    let capital_head_ident =
-        select! { Token::CapitalHeadIdent(ident) => ident };
-    let ident = ident.or(capital_head_ident);
+    // let capital_head_ident =
+    //     select! { Token::CapitalHeadIdent(ident) => ident };
+    // let ident = ident.or(capital_head_ident);
     let open_paren =
         just(Token::Paren('(')).or(just(Token::OpenParenWithoutPad));
     let ident_or_op =
         ident.or(op.delimited_by(open_paren.clone(), just(Token::Paren(')'))));
     let pattern = recursive(|pattern| {
-        let constructor_pattern = capital_head_ident
+        let constructor_pattern = ident
             .then(
                 pattern
                     .separated_by(just(Token::Comma))
@@ -146,7 +145,6 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         let pattern_unit = constructor_pattern
             .or(just(Token::Ident("_".to_string()))
                 .map(|_| PatternUnit::Underscore))
-            .or(ident.map(PatternUnit::Bind))
             .or(int.map(PatternUnit::Int))
             .or(str.map(PatternUnit::Str));
         pattern_unit
@@ -298,7 +296,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
             associativity,
             precedence: i.parse().unwrap(),
         });
-    let data_decl_normal = capital_head_ident
+    let data_decl_normal = ident
         .then(
             ident_or_op
                 .clone()

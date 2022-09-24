@@ -10,7 +10,6 @@ pub enum Token {
     Int(String),
     Str(String),
     Ident(String),
-    CapitalHeadIdent(String),
     Op(String),
     Comma,
     Assign,
@@ -145,9 +144,6 @@ fn lexer(
         "type" => Token::Type,
         "interface" => Token::Interface,
         "where" => Token::Where,
-        _ if i.chars().next().unwrap().is_uppercase() => {
-            Token::CapitalHeadIdent(i)
-        }
         _ => Token::Ident(i),
     });
 
@@ -159,7 +155,7 @@ fn lexer(
 
     let unit = just('(')
         .then(just(')'))
-        .map(|_| Token::CapitalHeadIdent("()".to_string()));
+        .map(|_| Token::Ident("()".to_string()));
 
     let paren = just('(')
         .or(just(')'))

@@ -1,5 +1,5 @@
-use crate::intrinsics::OP_PRECEDENCE;
-use fxhash::FxHashMap;
+use crate::intrinsics::{INTRINSIC_CONSTRUCTORS, OP_PRECEDENCE};
+use fxhash::{FxHashMap, FxHashSet};
 use index_list::{Index, IndexList};
 use parse::{self, Associativity, OpPrecedenceDecl};
 use std::{collections::BTreeMap, fmt, fmt::Debug};
@@ -179,13 +179,18 @@ impl<'a> From<&'a parse::Ast> for Ast<'a> {
         let mut aliases = Vec::new();
         let mut precedence_map = OP_PRECEDENCE.clone();
         let mut interfaces = Vec::new();
+        let mut constructors: FxHashSet<&str> =
+            INTRINSIC_CONSTRUCTORS.keys().map(|s| s.as_str()).collect();
         for d in &ast.decls {
             match d {
                 parse::Decl::Variable(a) => vs.push(a),
-                parse::Decl::Data(a) => ds.push(DataDecl {
-                    name: &a.name,
-                    field_len: a.field_len,
-                }),
+                parse::Decl::Data(a) => {
+                    ds.push(DataDecl {
+                        name: &a.name,
+                        field_len: a.field_len,
+                    });
+                    constructors.insert(&a.name);
+                }
                 parse::Decl::OpPrecedence(OpPrecedenceDecl {
                     name,
                     associativity,
@@ -201,7 +206,7 @@ impl<'a> From<&'a parse::Ast> for Ast<'a> {
         Ast {
             variable_decl: vs
                 .into_iter()
-                .map(|v| variable_decl(v, &op_precedence_map))
+                .map(|v| variable_decl(v, &op_precedence_map, &constructors))
                 .collect(),
             data_decl: ds,
             type_alias_decl: aliases
@@ -212,6 +217,7 @@ impl<'a> From<&'a parse::Ast> for Ast<'a> {
                         infix_op_sequence(op_sequence(
                             &a.body.0,
                             &op_precedence_map,
+                            &constructors,
                         )),
                         (&a.body.1).into(),
                     ),
@@ -230,6 +236,7 @@ impl<'a> From<&'a parse::Ast> for Ast<'a> {
                                 infix_op_sequence(op_sequence(
                                     t,
                                     &op_precedence_map,
+                                    &constructors,
                                 )),
                                 forall.into(),
                             )
@@ -257,16 +264,25 @@ impl<'a> From<&'a parse::Forall> for Forall<'a> {
 fn variable_decl<'a>(
     v: &'a parse::VariableDecl,
     op_precedence_map: &OpPrecedenceMap,
+    constructors: &FxHashSet<&str>,
 ) -> VariableDecl<'a> {
     VariableDecl {
         name: &v.name,
         type_annotation: v.type_annotation.as_ref().map(|(s, forall)| {
             (
-                infix_op_sequence(op_sequence(s, op_precedence_map)),
+                infix_op_sequence(op_sequence(
+                    s,
+                    op_precedence_map,
+                    constructors,
+                )),
                 forall.into(),
             )
         }),
-        value: infix_op_sequence(op_sequence(&v.expr, op_precedence_map)),
+        value: infix_op_sequence(op_sequence(
+            &v.expr,
+            op_precedence_map,
+            constructors,
+        )),
     }
 }
 
@@ -418,15 +434,21 @@ pub fn infix_op_sequence<
 impl<'a> ConvertWithOpPrecedenceMap for &'a parse::TypeUnit {
     type T = Type<'a>;
 
-    fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T {
+    fn convert(
+        self,
+        op_precedence_map: &OpPrecedenceMap,
+        constructors: &FxHashSet<&str>,
+    ) -> Self::T {
         match self {
             parse::TypeUnit::Ident(name) => Type {
                 name,
                 args: Vec::new(),
             },
-            parse::TypeUnit::Paren(s) => {
-                infix_op_sequence(op_sequence(s, op_precedence_map))
-            }
+            parse::TypeUnit::Paren(s) => infix_op_sequence(op_sequence(
+                s,
+                op_precedence_map,
+                constructors,
+            )),
         }
     }
 }
@@ -434,6 +456,7 @@ impl<'a> ConvertWithOpPrecedenceMap for &'a parse::TypeUnit {
 pub fn op_sequence<'a, U>(
     s: &'a [parse::OpSequenceUnit<U>],
     op_precedence_map: &OpPrecedenceMap,
+    constructors: &FxHashSet<&str>,
 ) -> Vec<OpSequenceUnit<'a, <&'a U as ConvertWithOpPrecedenceMap>::T>>
 where
     &'a U: ConvertWithOpPrecedenceMap,
@@ -442,14 +465,14 @@ where
     s.iter()
         .map(|u| match u {
             parse::OpSequenceUnit::Operand(e) => {
-                Operand(e.convert(op_precedence_map))
+                Operand(e.convert(op_precedence_map, constructors))
             }
             parse::OpSequenceUnit::Op(a) => {
                 let (ass, p) = op_precedence_map.get(a);
                 Operator(a, ass, p)
             }
             parse::OpSequenceUnit::Apply(a) => {
-                Apply(op_sequence(a, op_precedence_map))
+                Apply(op_sequence(a, op_precedence_map, constructors))
             }
         })
         .collect()
@@ -457,30 +480,50 @@ where
 
 pub trait ConvertWithOpPrecedenceMap {
     type T;
-    fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T;
+    fn convert(
+        self,
+        op_precedence_map: &OpPrecedenceMap,
+        constructors: &FxHashSet<&str>,
+    ) -> Self::T;
 }
 
 impl<'a> ConvertWithOpPrecedenceMap for &'a parse::ExprUnit {
     type T = Expr<'a>;
 
-    fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T {
+    fn convert(
+        self,
+        op_precedence_map: &OpPrecedenceMap,
+        constructors: &FxHashSet<&str>,
+    ) -> Self::T {
         use Expr::*;
         match self {
             parse::ExprUnit::Case(arms) => Lambda(
-                arms.iter().map(|a| fn_arm(a, op_precedence_map)).collect(),
+                arms.iter()
+                    .map(|a| fn_arm(a, op_precedence_map, constructors))
+                    .collect(),
             ),
             parse::ExprUnit::Int(a) => Number(a),
             parse::ExprUnit::Str(a) => StrLiteral(a),
             parse::ExprUnit::Ident(a) => Ident(a),
-            parse::ExprUnit::VariableDecl(a) => {
-                Decl(Box::new(variable_decl(a, op_precedence_map)))
-            }
-            parse::ExprUnit::Paren(a) => {
-                infix_op_sequence(op_sequence(a, op_precedence_map))
-            }
+            parse::ExprUnit::VariableDecl(a) => Decl(Box::new(variable_decl(
+                a,
+                op_precedence_map,
+                constructors,
+            ))),
+            parse::ExprUnit::Paren(a) => infix_op_sequence(op_sequence(
+                a,
+                op_precedence_map,
+                constructors,
+            )),
             parse::ExprUnit::Do(es) => Do(es
                 .iter()
-                .map(|e| infix_op_sequence(op_sequence(e, op_precedence_map)))
+                .map(|e| {
+                    infix_op_sequence(op_sequence(
+                        e,
+                        op_precedence_map,
+                        constructors,
+                    ))
+                })
                 .collect()),
         }
     }
@@ -489,34 +532,59 @@ impl<'a> ConvertWithOpPrecedenceMap for &'a parse::ExprUnit {
 fn fn_arm<'a>(
     a: &'a parse::FnArm,
     op_precedence_map: &OpPrecedenceMap,
+    constructors: &FxHashSet<&str>,
 ) -> FnArm<'a> {
     FnArm {
         pattern: a
             .pattern
             .iter()
-            .map(|s| infix_op_sequence(op_sequence(s, op_precedence_map)))
+            .map(|s| {
+                infix_op_sequence(op_sequence(
+                    s,
+                    op_precedence_map,
+                    constructors,
+                ))
+            })
             .collect(),
-        expr: infix_op_sequence(op_sequence(&a.expr, op_precedence_map)),
+        expr: infix_op_sequence(op_sequence(
+            &a.expr,
+            op_precedence_map,
+            constructors,
+        )),
     }
 }
 
 impl<'a> ConvertWithOpPrecedenceMap for &'a parse::PatternUnit {
     type T = Pattern<'a>;
 
-    fn convert(self, op_precedence_map: &OpPrecedenceMap) -> Self::T {
+    fn convert(
+        self,
+        op_precedence_map: &OpPrecedenceMap,
+        constructors: &FxHashSet<&str>,
+    ) -> Self::T {
         match self {
             parse::PatternUnit::Int(a) => Pattern::Number(a),
             parse::PatternUnit::Str(a) => Pattern::StrLiteral(a),
-            parse::PatternUnit::Constructor(name, ps) => Pattern::Constructor {
-                name,
-                args: ps
-                    .iter()
-                    .map(|p| {
-                        infix_op_sequence(op_sequence(p, op_precedence_map))
-                    })
-                    .collect(),
-            },
-            parse::PatternUnit::Bind(a) => Pattern::Binder(a),
+            parse::PatternUnit::Constructor(name, ps) => {
+                if constructors.contains(name.as_str()) {
+                    Pattern::Constructor {
+                        name,
+                        args: ps
+                            .iter()
+                            .map(|p| {
+                                infix_op_sequence(op_sequence(
+                                    p,
+                                    op_precedence_map,
+                                    constructors,
+                                ))
+                            })
+                            .collect(),
+                    }
+                } else {
+                    assert!(ps.is_empty());
+                    Pattern::Binder(name)
+                }
+            }
             parse::PatternUnit::Underscore => Pattern::Underscore,
         }
     }
