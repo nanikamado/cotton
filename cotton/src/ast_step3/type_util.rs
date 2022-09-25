@@ -372,7 +372,7 @@ impl<'a> Type<'a> {
 
     pub fn from_str(t: &'static str) -> Self {
         let t = ast_step1::Type {
-            name: t,
+            name: (t, None),
             args: Default::default(),
         };
         type_to_type(
@@ -381,6 +381,7 @@ impl<'a> Type<'a> {
             &Default::default(),
             &mut Default::default(),
             crate::ast_step2::SearchMode::Normal,
+            &mut Default::default(),
         )
     }
 

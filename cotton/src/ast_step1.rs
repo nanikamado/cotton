@@ -1,7 +1,7 @@
 use crate::intrinsics::{INTRINSIC_CONSTRUCTORS, OP_PRECEDENCE};
 use fxhash::{FxHashMap, FxHashSet};
 use index_list::{Index, IndexList};
-use parse::{self, Associativity, OpPrecedenceDecl};
+use parse::{self, token_id::TokenId, Associativity, OpPrecedenceDecl};
 use std::{collections::BTreeMap, fmt, fmt::Debug};
 
 /// # Difference between `parse::Ast` and `ast_step1::Ast`
@@ -15,6 +15,8 @@ pub struct Ast<'a> {
     pub interface_decl: Vec<InterfaceDecl<'a>>,
 }
 
+type StrWithId<'a> = (&'a str, Option<TokenId>);
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Forall<'a> {
     pub type_variables: Vec<(&'a str, Vec<&'a str>)>,
@@ -22,32 +24,32 @@ pub struct Forall<'a> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VariableDecl<'a> {
-    pub name: &'a str,
+    pub name: StrWithId<'a>,
     pub type_annotation: Option<(Type<'a>, Forall<'a>)>,
     pub value: Expr<'a>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Type<'a> {
-    pub name: &'a str,
+    pub name: StrWithId<'a>,
     pub args: Vec<Type<'a>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DataDecl<'a> {
-    pub name: &'a str,
+    pub name: StrWithId<'a>,
     pub field_len: usize,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct TypeAliasDecl<'a> {
-    pub name: &'a str,
+    pub name: StrWithId<'a>,
     pub body: (Type<'a>, Forall<'a>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct InterfaceDecl<'a> {
-    pub name: &'a str,
+    pub name: StrWithId<'a>,
     pub variables: Vec<(&'a str, Type<'a>, Forall<'a>)>,
 }
 
@@ -56,7 +58,7 @@ pub enum Expr<'a> {
     Lambda(Vec<FnArm<'a>>),
     Number(&'a str),
     StrLiteral(&'a str),
-    Ident(&'a str),
+    Ident(StrWithId<'a>),
     Decl(Box<VariableDecl<'a>>),
     Call(Box<Expr<'a>>, Box<Expr<'a>>),
     Do(Vec<Expr<'a>>),
@@ -73,17 +75,17 @@ pub enum Pattern<'a> {
     Number(&'a str),
     StrLiteral(&'a str),
     Constructor {
-        name: &'a str,
+        name: StrWithId<'a>,
         args: Vec<Pattern<'a>>,
     },
-    Binder(&'a str),
+    Binder(StrWithId<'a>),
     Underscore,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum OpSequenceUnit<'a, T> {
     Operand(T),
-    Operator(&'a str, Associativity, i32),
+    Operator(StrWithId<'a>, Associativity, i32),
     Apply(Vec<OpSequenceUnit<'a, T>>),
 }
 
@@ -107,7 +109,7 @@ pub trait InfixOpCall {
 }
 
 pub trait IdentFromStr<'a> {
-    fn ident_from_str(s: &'a str) -> Self;
+    fn ident_from_str(s: StrWithId<'a>) -> Self;
 }
 
 pub trait AddArgument {
@@ -115,7 +117,7 @@ pub trait AddArgument {
 }
 
 impl<'a> IdentFromStr<'a> for Type<'a> {
-    fn ident_from_str(s: &'a str) -> Self {
+    fn ident_from_str(s: StrWithId<'a>) -> Self {
         Self {
             name: s,
             args: Vec::new(),
@@ -131,7 +133,7 @@ impl<'a> AddArgument for Type<'a> {
 }
 
 impl<'a> IdentFromStr<'a> for Expr<'a> {
-    fn ident_from_str(s: &'a str) -> Self {
+    fn ident_from_str(s: StrWithId<'a>) -> Self {
         Self::Ident(s)
     }
 }
@@ -143,7 +145,7 @@ impl<'a> AddArgument for Expr<'a> {
 }
 
 impl<'a> IdentFromStr<'a> for Pattern<'a> {
-    fn ident_from_str(name: &'a str) -> Self {
+    fn ident_from_str(name: StrWithId<'a>) -> Self {
         Self::Constructor {
             name,
             args: Vec::new(),
@@ -186,10 +188,10 @@ impl<'a> From<&'a parse::Ast> for Ast<'a> {
                 parse::Decl::Variable(a) => vs.push(a),
                 parse::Decl::Data(a) => {
                     ds.push(DataDecl {
-                        name: &a.name,
+                        name: (&a.name.0, a.name.1),
                         field_len: a.field_len,
                     });
-                    constructors.insert(&a.name);
+                    constructors.insert(&a.name.0);
                 }
                 parse::Decl::OpPrecedence(OpPrecedenceDecl {
                     name,
@@ -212,7 +214,7 @@ impl<'a> From<&'a parse::Ast> for Ast<'a> {
             type_alias_decl: aliases
                 .into_iter()
                 .map(|a| TypeAliasDecl {
-                    name: &a.name,
+                    name: (&a.name.0, a.name.1),
                     body: (
                         infix_op_sequence(op_sequence(
                             &a.body.0,
@@ -226,11 +228,11 @@ impl<'a> From<&'a parse::Ast> for Ast<'a> {
             interface_decl: interfaces
                 .into_iter()
                 .map(|a| InterfaceDecl {
-                    name: &a.name,
+                    name: (&a.name.0, a.name.1),
                     variables: a
                         .variables
                         .iter()
-                        .map(|(name, t, forall)| {
+                        .map(|((name, _id), t, forall)| {
                             (
                                 name.as_str(),
                                 infix_op_sequence(op_sequence(
@@ -253,8 +255,11 @@ impl<'a> From<&'a parse::Forall> for Forall<'a> {
         Forall {
             type_variables: type_variables
                 .iter()
-                .map(|(name, ts)| {
-                    (name.as_str(), ts.iter().map(String::as_str).collect())
+                .map(|((name, _), ts)| {
+                    (
+                        name.as_str(),
+                        ts.iter().map(|(n, _id)| n.as_str()).collect(),
+                    )
                 })
                 .collect(),
         }
@@ -267,7 +272,7 @@ fn variable_decl<'a>(
     constructors: &FxHashSet<&str>,
 ) -> VariableDecl<'a> {
     VariableDecl {
-        name: &v.name,
+        name: (&v.name.0, v.name.1),
         type_annotation: v.type_annotation.as_ref().map(|(s, forall)| {
             (
                 infix_op_sequence(op_sequence(
@@ -440,8 +445,8 @@ impl<'a> ConvertWithOpPrecedenceMap for &'a parse::TypeUnit {
         constructors: &FxHashSet<&str>,
     ) -> Self::T {
         match self {
-            parse::TypeUnit::Ident(name) => Type {
-                name,
+            parse::TypeUnit::Ident((name, id)) => Type {
+                name: (name, *id),
                 args: Vec::new(),
             },
             parse::TypeUnit::Paren(s) => infix_op_sequence(op_sequence(
@@ -468,8 +473,8 @@ where
                 Operand(e.convert(op_precedence_map, constructors))
             }
             parse::OpSequenceUnit::Op(a) => {
-                let (ass, p) = op_precedence_map.get(a);
-                Operator(a, ass, p)
+                let (ass, p) = op_precedence_map.get(&a.0);
+                Operator((&a.0, a.1), ass, p)
             }
             parse::OpSequenceUnit::Apply(a) => {
                 Apply(op_sequence(a, op_precedence_map, constructors))
@@ -504,7 +509,7 @@ impl<'a> ConvertWithOpPrecedenceMap for &'a parse::ExprUnit {
             ),
             parse::ExprUnit::Int(a) => Number(a),
             parse::ExprUnit::Str(a) => StrLiteral(a),
-            parse::ExprUnit::Ident(a) => Ident(a),
+            parse::ExprUnit::Ident((n, id)) => Ident((n, *id)),
             parse::ExprUnit::VariableDecl(a) => Decl(Box::new(variable_decl(
                 a,
                 op_precedence_map,
@@ -565,10 +570,10 @@ impl<'a> ConvertWithOpPrecedenceMap for &'a parse::PatternUnit {
         match self {
             parse::PatternUnit::Int(a) => Pattern::Number(a),
             parse::PatternUnit::Str(a) => Pattern::StrLiteral(a),
-            parse::PatternUnit::Ident(name, ps) => {
+            parse::PatternUnit::Ident((name, id), ps) => {
                 if constructors.contains(name.as_str()) {
                     Pattern::Constructor {
-                        name,
+                        name: (name, *id),
                         args: ps
                             .iter()
                             .map(|p| {
@@ -582,7 +587,7 @@ impl<'a> ConvertWithOpPrecedenceMap for &'a parse::PatternUnit {
                     }
                 } else {
                     assert!(ps.is_empty());
-                    Pattern::Binder(name)
+                    Pattern::Binder((name, *id))
                 }
             }
             parse::PatternUnit::Underscore => Pattern::Underscore,

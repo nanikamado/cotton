@@ -5,12 +5,14 @@ use chumsky::{
 use std::iter;
 use unic_ucd_category::GeneralCategory;
 
+use crate::token_id::TokenId;
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Token {
     Int(String),
     Str(String),
-    Ident(String),
-    Op(String),
+    Ident(String, TokenId),
+    Op(String, TokenId),
     Comma,
     Assign,
     Paren(char),
@@ -144,7 +146,7 @@ fn lexer(
         "type" => Token::Type,
         "interface" => Token::Interface,
         "where" => Token::Where,
-        _ => Token::Ident(i),
+        _ => Token::Ident(i, TokenId::new()),
     });
 
     let str = filter(|&c| c != '"')
@@ -155,7 +157,7 @@ fn lexer(
 
     let unit = just('(')
         .then(just(')'))
-        .map(|_| Token::Ident("()".to_string()));
+        .map(|_| Token::Ident("()".to_string(), TokenId::new()));
 
     let paren = just('(')
         .or(just(')'))
@@ -182,7 +184,7 @@ fn lexer(
         "|" => Token::Bar,
         "=" => Token::Assign,
         ":" => Token::Colon,
-        _ => Token::Op(op),
+        _ => Token::Op(op, TokenId::new()),
     });
 
     let line_ws = filter(|c: &char| c.is_inline_whitespace());
