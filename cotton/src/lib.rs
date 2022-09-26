@@ -118,7 +118,8 @@ pub fn get_token_map(ast: &parse::Ast) -> FxHashMap<TokenId, TokenKind> {
                     }
                 }
                 ast_step2::TokenMapEntry::TypeId(_)
-                | ast_step2::TokenMapEntry::TypeAlias => TokenKind::Type,
+                | ast_step2::TokenMapEntry::TypeAlias
+                | ast_step2::TokenMapEntry::Constructor(_) => TokenKind::Type,
             };
             (id, t)
         })

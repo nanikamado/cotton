@@ -143,6 +143,7 @@ pub enum TokenMapEntry {
     Ident(IdentId),
     TypeId(TypeId),
     TypeAlias,
+    Constructor(ConstructorId),
 }
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -553,14 +554,18 @@ fn pattern<'a>(
     match p {
         ast_step1::Pattern::Number(n) => I64(n),
         ast_step1::Pattern::StrLiteral(s) => Str(s),
-        ast_step1::Pattern::Constructor { name, args } => Constructor {
-            name: name.0,
-            id: ConstructorId::get(name.0, data_decl_map),
-            args: args
-                .into_iter()
-                .map(|arg| pattern(arg, data_decl_map, token_map))
-                .collect(),
-        },
+        ast_step1::Pattern::Constructor { name, args } => {
+            let id = ConstructorId::get(name.0, data_decl_map);
+            token_map.insert(name.1, TokenMapEntry::Constructor(id));
+            Constructor {
+                name: name.0,
+                id,
+                args: args
+                    .into_iter()
+                    .map(|arg| pattern(arg, data_decl_map, token_map))
+                    .collect(),
+            }
+        }
         ast_step1::Pattern::Binder(name) => {
             let decl_id = DeclId::new();
             token_map.insert_decl(name.1, decl_id);
