@@ -1,4 +1,7 @@
-use crate::{ast_step2::IncompleteType, ast_step3::Ast};
+use crate::{
+    ast_step2::IncompleteType,
+    ast_step3::{Ast, VariableId},
+};
 use itertools::Itertools;
 use std::fmt::Display;
 
@@ -7,7 +10,7 @@ pub fn print(ast: &Ast<'_>) {
         println!(
             "{} : {}",
             d.name,
-            FormatForTest(&ast.types_of_decls[&d.decl_id])
+            FormatForTest(&ast.types_of_decls[&VariableId::Decl(d.decl_id)])
         );
     }
 }

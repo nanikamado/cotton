@@ -1,7 +1,8 @@
 [workspace]
+default-members = ["cotton"]
 members = [
   "parse",
-  "cotton",
+  "lsp",
 ]
 
 [profile.release]

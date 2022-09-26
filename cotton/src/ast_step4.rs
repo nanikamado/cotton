@@ -3,7 +3,7 @@ use crate::{
     ast_step2::{self, decl_id::DeclId, ConstructorId, TypeId},
     ast_step3::VariableId,
     ast_step3::{self, DataDecl},
-    intrinsics::{IntrinsicType, IntrinsicVariable},
+    intrinsics::{IntrinsicConstructor, IntrinsicType, IntrinsicVariable},
 };
 use fxhash::FxHashMap;
 use itertools::Itertools;
@@ -38,6 +38,7 @@ pub enum VariableKind {
     Global,
     Constructor,
     Intrinsic,
+    IntrinsicConstructor,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -68,7 +69,8 @@ pub enum PatternUnit<'a, T> {
     I64(&'a str),
     Str(&'a str),
     Constructor {
-        id: ConstructorId<'a>,
+        name: &'a str,
+        id: ConstructorId,
         args: Vec<Pattern<'a, T>>,
     },
     Binder(&'a str, DeclId),
@@ -149,7 +151,14 @@ impl<'a> From<ast_step3::Ast<'a>> for Ast<'a> {
         for d in IntrinsicVariable::iter() {
             let p = memo.type_map.new_pointer();
             unify_type_with_ast_sep2_type(&d.to_type(), p, &mut memo.type_map);
-            memo.intrinsic_variables.insert(VariableId::Intrinsic(d), p);
+            memo.intrinsic_variables
+                .insert(VariableId::IntrinsicVariable(d), p);
+        }
+        for d in IntrinsicConstructor::iter() {
+            let p = memo.type_map.new_pointer();
+            unify_type_with_ast_sep2_type(&d.to_type(), p, &mut memo.type_map);
+            memo.intrinsic_variables
+                .insert(VariableId::IntrinsicConstructor(d), p);
         }
         memo.get_type_global(
             VariableId::Decl(ast.entry_point),
@@ -633,29 +642,29 @@ impl<'a, 'b> VariableMemo<'a, 'b> {
             ast_step3::Expr::Ident {
                 name,
                 variable_id,
-                variable_kind: VariableKind::Constructor,
+                variable_kind:
+                    variable_kind @ (VariableKind::Constructor
+                    | VariableKind::IntrinsicConstructor),
             } => {
                 let type_id = match variable_id {
                     VariableId::Decl(d) => TypeId::DeclId(d),
-                    VariableId::Intrinsic(i) => {
-                        use crate::intrinsics::IntrinsicVariable::*;
+                    VariableId::IntrinsicVariable(_) => {
+                        panic!()
+                    }
+                    VariableId::IntrinsicConstructor(i) => {
+                        use crate::intrinsics::IntrinsicConstructor::*;
                         TypeId::Intrinsic(match i {
                             True => IntrinsicType::True,
                             False => IntrinsicType::False,
                             Unit => IntrinsicType::Unit,
-                            _ => panic!(),
                         })
                     }
                 };
                 let field_len = match variable_id {
                     VariableId::Decl(d) => self.data_decls[&d].field_len,
-                    VariableId::Intrinsic(i) => {
-                        use crate::intrinsics::IntrinsicVariable::*;
-                        if let True | False | Unit = i {
-                            0
-                        } else {
-                            unreachable!()
-                        }
+                    VariableId::IntrinsicConstructor(_) => 0,
+                    VariableId::IntrinsicVariable(_) => {
+                        unreachable!()
                     }
                 };
                 let p = make_constructor_type(
@@ -668,7 +677,7 @@ impl<'a, 'b> VariableMemo<'a, 'b> {
                 Expr::Ident {
                     name,
                     variable_id,
-                    variable_kind: VariableKind::Constructor,
+                    variable_kind,
                 }
             }
             ast_step3::Expr::Ident {
@@ -807,7 +816,7 @@ impl<'a, 'b> VariableMemo<'a, 'b> {
                     );
                     PatternUnit::Str(a)
                 }
-                Constructor { id, args } => {
+                Constructor { name, id, args } => {
                     let args = args
                         .iter()
                         .map(|pattern| {
@@ -822,10 +831,14 @@ impl<'a, 'b> VariableMemo<'a, 'b> {
                     self.type_map.insert_normal(
                         type_pointer,
                         (*id).into(),
-                        id.name(),
+                        name,
                         args.iter().map(|(_, p)| *p).collect(),
                     );
-                    PatternUnit::Constructor { id: *id, args }
+                    PatternUnit::Constructor {
+                        name,
+                        id: *id,
+                        args,
+                    }
                 }
                 Binder(name, d, _) => {
                     local_variables.insert(VariableId::Decl(*d), type_pointer);

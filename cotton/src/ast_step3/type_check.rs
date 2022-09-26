@@ -13,7 +13,7 @@ use crate::{
         SubtypeRelations, TypeId,
     },
     ast_step4::VariableKind,
-    intrinsics::{IntrinsicType, IntrinsicVariable},
+    intrinsics::{IntrinsicConstructor, IntrinsicType, IntrinsicVariable},
 };
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::{multiunzip, Itertools};
@@ -27,14 +27,16 @@ use types::TypeConstructor;
 #[derive(PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
 pub enum VariableId {
     Decl(DeclId),
-    Intrinsic(IntrinsicVariable),
+    IntrinsicVariable(IntrinsicVariable),
+    IntrinsicConstructor(IntrinsicConstructor),
 }
 
 impl Display for VariableId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             VariableId::Decl(a) => a.fmt(f),
-            VariableId::Intrinsic(a) => a.fmt(f),
+            VariableId::IntrinsicVariable(a) => a.fmt(f),
+            VariableId::IntrinsicConstructor(a) => a.fmt(f),
         }
     }
 }
@@ -43,7 +45,10 @@ impl std::fmt::Debug for VariableId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             VariableId::Decl(a) => write!(f, "VariableId({})", a),
-            VariableId::Intrinsic(a) => {
+            VariableId::IntrinsicVariable(a) => {
+                write!(f, "VariableId({})", a)
+            }
+            VariableId::IntrinsicConstructor(a) => {
                 write!(f, "VariableId({})", a)
             }
         }
@@ -56,7 +61,7 @@ pub fn type_check<'a>(
     ast: &Ast<'a>,
 ) -> (
     ResolvedIdents<'a>,
-    FxHashMap<DeclId, ast_step2::IncompleteType<'a>>,
+    FxHashMap<VariableId, ast_step2::IncompleteType<'a>>,
     SubtypeRelations<'a>,
     TypeVariableMap<'a>,
 ) {
@@ -66,10 +71,21 @@ pub fn type_check<'a>(
             incomplete: v.to_type().clone().into(),
             type_annotation: None,
             resolved_idents: Default::default(),
-            decl_id: VariableId::Intrinsic(v),
+            decl_id: VariableId::IntrinsicVariable(v),
             name: v.to_str(),
             variables_required_by_interface_restrictions: Default::default(),
             variable_kind: VariableKind::Intrinsic,
+        });
+    }
+    for v in IntrinsicConstructor::iter() {
+        toplevels.push(Toplevel {
+            incomplete: v.to_type().clone().into(),
+            type_annotation: None,
+            resolved_idents: Default::default(),
+            decl_id: VariableId::IntrinsicConstructor(v),
+            name: v.to_str(),
+            variables_required_by_interface_restrictions: Default::default(),
+            variable_kind: VariableKind::IntrinsicConstructor,
         });
     }
     for d in &ast.data_decl {
@@ -85,14 +101,14 @@ pub fn type_check<'a>(
         });
     }
     let mut resolved_idents = Vec::new();
-    let mut ident_type_map = Vec::new();
     let mut subtype_relations = SubtypeRelations::default();
     let mut map = TypeVariableMap::default();
+    let mut types_of_local_decls = Vec::new();
     for d in &ast.variable_decl {
-        let (mut t, resolved, mut ident_type) =
+        let (mut t, resolved, mut tod) =
             min_type_incomplete(&d.value, &mut subtype_relations, &mut map);
         resolved_idents.extend(resolved);
-        ident_type_map.append(&mut ident_type);
+        types_of_local_decls.append(&mut tod);
         let type_annotation: Option<ast_step2::IncompleteType> =
             if let Some(annotation) = &d.type_annotation {
                 t.subtype_relations.insert((
@@ -225,7 +241,13 @@ pub fn type_check<'a>(
         resolved_idents,
         types
             .into_iter()
-            .map(|(d, t)| (d, t.map_type(lift_recursive_alias)))
+            .chain(types_of_local_decls)
+            .map(|(d, t)| {
+                (
+                    d,
+                    t.map_type(|t| lift_recursive_alias(map.normalize_type(t))),
+                )
+            })
             .collect(),
         subtype_relations,
         map,
@@ -283,7 +305,7 @@ struct Toplevel<'a> {
     variable_kind: VariableKind,
 }
 
-type TypesOfDeclsVec<'a> = Vec<(DeclId, ast_step2::IncompleteType<'a>)>;
+type TypesOfDeclsVec<'a> = Vec<(VariableId, ast_step2::IncompleteType<'a>)>;
 
 fn resolve_names<'a>(
     toplevels: Vec<Toplevel<'a>>,
@@ -349,21 +371,12 @@ fn resolve_names<'a>(
                 });
         }
     }
-    let mut types = Vec::new();
-    for (i, t) in
-        resolved_variable_map
-            .into_iter()
-            .flat_map(|(_, toplevels)| {
-                toplevels.into_iter().map(|t| (t.decl_id, t.incomplete))
-            })
-    {
-        match i {
-            VariableId::Decl(i) => {
-                types.push((i, t));
-            }
-            VariableId::Intrinsic(_) => (),
-        }
-    }
+    let types = resolved_variable_map
+        .into_iter()
+        .flat_map(|(_, toplevels)| {
+            toplevels.into_iter().map(|t| (t.decl_id, t.incomplete))
+        })
+        .collect();
     (resolved_idents, types, rel)
 }
 
@@ -1048,7 +1061,7 @@ fn min_type_incomplete<'a>(
 ) -> (
     ast_step2::IncompleteType<'a>,
     Resolved<'a>,
-    Vec<(IdentId, TypeVariable)>,
+    TypesOfDeclsVec<'a>,
 ) {
     match expr {
         Expr::Lambda(arms) => {
@@ -1058,8 +1071,8 @@ fn min_type_incomplete<'a>(
                 variable_requirements,
                 subtype_relation,
                 resolved_idents,
-                ident_type_map,
                 pattern_restrictions,
+                types_of_decls,
             ): (
                 Vec<_>,
                 Vec<_>,
@@ -1116,7 +1129,7 @@ fn min_type_incomplete<'a>(
                     already_considered_relations: Default::default(),
                 },
                 resolved_idents,
-                ident_type_map.concat(),
+                types_of_decls.concat(),
             )
         }
         Expr::Number(_) => {
@@ -1145,13 +1158,13 @@ fn min_type_incomplete<'a>(
                     already_considered_relations: Default::default(),
                 },
                 Default::default(),
-                vec![(*ident_id, *type_variable)],
+                Default::default(),
             )
         }
         Expr::Call(f, a) => {
-            let (f_t, resolved1, ident_type_map1) =
+            let (f_t, resolved1, types_of_decls_f) =
                 min_type_incomplete(f, subtype_relations, map);
-            let (a_t, resolved2, ident_type_map2) =
+            let (a_t, resolved2, types_of_decls_a) =
                 min_type_incomplete(a, subtype_relations, map);
             let b: types::Type = TypeUnit::Variable(*type_variable).into();
             let c: types::Type = TypeUnit::new_variable().into();
@@ -1192,26 +1205,26 @@ fn min_type_incomplete<'a>(
                     already_considered_relations: Default::default(),
                 },
                 [resolved1, resolved2].concat(),
-                [ident_type_map1, ident_type_map2].concat(),
+                [types_of_decls_f, types_of_decls_a].concat(),
             )
         }
         Expr::Do(es) => {
             let mut variable_requirements = Vec::new();
             let mut subtype_relations = SubtypeRelations::default();
             let mut resolved_idents = Vec::default();
-            let mut ident_type_map = Vec::new();
             let mut pattern_restrictions = PatternRestrictions::default();
+            let mut types_of_decls = Vec::new();
             let t = es
                 .iter()
                 .map(|e| {
-                    let (t, resolved, mut ident_type) =
+                    let (t, resolved, mut tod) =
                         min_type_incomplete(e, &mut subtype_relations, map);
                     variable_requirements
                         .append(&mut t.variable_requirements.clone());
                     subtype_relations.extend(t.subtype_relations.clone());
                     pattern_restrictions.extend(t.pattern_restrictions.clone());
                     resolved_idents.extend(resolved);
-                    ident_type_map.append(&mut ident_type);
+                    types_of_decls.append(&mut tod);
                     t
                 })
                 .collect::<Vec<_>>();
@@ -1230,7 +1243,7 @@ fn min_type_incomplete<'a>(
                     already_considered_relations: Default::default(),
                 },
                 resolved_idents,
-                ident_type_map,
+                types_of_decls,
             )
         }
     }
@@ -1255,8 +1268,6 @@ pub struct VariableRequirement<'a> {
     pub local_env: Vec<(&'a str, DeclId, Type<'a>)>,
 }
 
-type IdentTypeMap = Vec<(IdentId, TypeVariable)>;
-
 /// Returns `vec![argument type, argument type, ..., return type]`,
 /// variable requirements, subtype relation, resolved idents.
 fn arm_min_type<'a>(
@@ -1269,16 +1280,21 @@ fn arm_min_type<'a>(
     Vec<VariableRequirement<'a>>,
     SubtypeRelations<'a>,
     Resolved<'a>,
-    IdentTypeMap,
     PatternRestrictions<'a>,
+    TypesOfDeclsVec<'a>,
 ) {
-    let (body_type, mut resolved_idents, ident_type_map) =
+    let (body_type, mut resolved_idents, mut types_of_decls) =
         min_type_incomplete(&arm.expr, subtype_relations, map);
     let (mut ts, bindings, patterns): (Vec<_>, Vec<_>, Vec<_>) =
         arm.pattern.iter().map(pattern_to_type).multiunzip();
     ts.push(body_type.constructor);
-    let bindings: FxHashMap<&str, (DeclId, types::Type)> =
-        bindings.into_iter().flatten().collect();
+    let bindings: FxHashMap<&str, (DeclId, types::Type)> = bindings
+        .into_iter()
+        .flatten()
+        .inspect(|(_, (decl_id, t))| {
+            types_of_decls.push((VariableId::Decl(*decl_id), t.clone().into()));
+        })
+        .collect();
     let mut variable_requirements = Vec::new();
     let mut subtype_requirement = Vec::new();
     for mut p in body_type.variable_requirements.into_iter() {
@@ -1313,8 +1329,8 @@ fn arm_min_type<'a>(
             tmp
         },
         resolved_idents,
-        ident_type_map,
         body_type.pattern_restrictions,
+        types_of_decls,
     )
 }
 
@@ -1337,7 +1353,7 @@ fn pattern_unit_to_type<'a>(
             Default::default(),
             PatternUnitForRestriction::Str,
         ),
-        Constructor { id, args } => {
+        Constructor { name, id, args } => {
             let (types, bindings, pattern_restrictions): (
                 Vec<_>,
                 Vec<_>,
@@ -1346,7 +1362,7 @@ fn pattern_unit_to_type<'a>(
             (
                 TypeUnit::Tuple(
                     TypeUnit::Const {
-                        name: id.name(),
+                        name,
                         id: (*id).into(),
                     }
                     .into(),
@@ -1357,7 +1373,7 @@ fn pattern_unit_to_type<'a>(
                 bindings.into_iter().flatten().collect(),
                 PatternUnitForRestriction::Tuple(
                     PatternUnitForRestriction::Const {
-                        name: id.name(),
+                        name,
                         id: (*id).into(),
                     }
                     .into(),

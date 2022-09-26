@@ -372,7 +372,7 @@ impl<'a> Type<'a> {
 
     pub fn from_str(t: &'static str) -> Self {
         let t = ast_step1::Type {
-            name: t,
+            name: (t, None),
             args: Default::default(),
         };
         type_to_type(
@@ -381,6 +381,7 @@ impl<'a> Type<'a> {
             &Default::default(),
             &mut Default::default(),
             crate::ast_step2::SearchMode::Normal,
+            &mut Default::default(),
         )
     }
 
@@ -657,7 +658,7 @@ mod tests {
         "#;
         let ast = parse::parse(src);
         let ast: ast_step1::Ast = (&ast).into();
-        let ast: ast_step2::Ast = ast.into();
+        let (ast, _) = ast_step2::Ast::from(ast);
         let t = ast
             .variable_decl
             .iter()
@@ -685,7 +686,7 @@ mod tests {
         "#;
         let ast = parse::parse(src);
         let ast: ast_step1::Ast = (&ast).into();
-        let ast: ast_step2::Ast = ast.into();
+        let (ast, _) = ast_step2::Ast::from(ast);
         let t = ast
             .variable_decl
             .iter()

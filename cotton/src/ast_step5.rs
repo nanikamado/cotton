@@ -221,12 +221,12 @@ impl<'a> VariableMemo<'a> {
         let pattern = pattern
             .into_iter()
             .map(|p| match p {
-                PatternUnit::Constructor { id, args } => {
+                PatternUnit::Constructor { name, id, args } => {
                     let args = args
                         .into_iter()
                         .map(|p| self.monomorphize_pattern(p, replace_map))
                         .collect();
-                    PatternUnit::Constructor { id, args }
+                    PatternUnit::Constructor { name, id, args }
                 }
                 PatternUnit::I64(a) => PatternUnit::I64(a),
                 PatternUnit::Str(a) => PatternUnit::Str(a),

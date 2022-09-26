@@ -1,0 +1,13 @@
+[package]
+name = "lsp"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.60"
+tokio = { version = "1.3", features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+tower-lsp = "0.17"
+cotton = { path = "../cotton" }
+dashmap = "5.4.0"
+once_cell = "1.15.0"

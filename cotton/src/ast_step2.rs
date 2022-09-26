@@ -18,13 +18,14 @@ use crate::{
 };
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
+use parse::token_id::TokenId;
 use std::collections::BTreeSet;
 use std::fmt::Display;
 pub use types::TypeConstructor;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ConstructorId<'a> {
-    DeclId(DeclId, &'a str),
+pub enum ConstructorId {
+    DeclId(DeclId),
     Intrinsic(IntrinsicConstructor),
 }
 
@@ -37,7 +38,7 @@ pub enum TypeId {
 /// # Difference between `ast_step1::Ast` and `ast_step2::Ast`
 /// - The names of types and constructors are resolved.
 /// - Local variable declarations are converted into lambdas and function calls.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq)]
 pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl<'a>>,
@@ -126,7 +127,8 @@ pub enum PatternUnit<'a, T> {
     I64(&'a str),
     Str(&'a str),
     Constructor {
-        id: ConstructorId<'a>,
+        name: &'a str,
+        id: ConstructorId,
         args: Vec<Pattern<'a, T>>,
     },
     Binder(&'a str, DeclId, T),
@@ -134,21 +136,57 @@ pub enum PatternUnit<'a, T> {
     TypeRestriction(Pattern<'a, T>, Type<'a>),
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct InterfaceDecl<'a> {
-    name: &'a str,
-    variables: Vec<(&'a str, Type<'a>, TypeVariable)>,
+#[derive(Debug, PartialEq, Eq)]
+pub enum TokenMapEntry<'a> {
+    Decl(DeclId),
+    DataDecl(DeclId),
+    Ident(IdentId),
+    TypeId(TypeId),
+    TypeAlias,
+    Constructor(ConstructorId),
+    TypeVariable,
+    Interface,
+    VariableDeclInInterface(Type<'a>),
 }
 
-impl<'a> From<ast_step1::Ast<'a>> for Ast<'a> {
-    fn from(ast: ast_step1::Ast<'a>) -> Self {
+#[derive(Default, Debug, PartialEq, Eq)]
+pub struct TokenMap<'a>(pub FxHashMap<TokenId, TokenMapEntry<'a>>);
+
+impl<'a> TokenMap<'a> {
+    fn insert(&mut self, id: Option<TokenId>, entry: TokenMapEntry<'a>) {
+        if let Some(id) = id {
+            self.0.insert(id, entry);
+        }
+    }
+}
+
+impl<'a> Ast<'a> {
+    pub fn from(ast: ast_step1::Ast<'a>) -> (Self, TokenMap) {
+        let mut token_map = TokenMap::default();
         let data_decl: Vec<_> = ast
             .data_decl
             .into_iter()
-            .map(|d| DataDecl {
-                name: d.name,
-                fields: (0..d.field_len).map(|_| TypeVariable::new()).collect(),
-                decl_id: DeclId::new(),
+            .map(|d| {
+                let decl_id = DeclId::new();
+                token_map.insert(d.name.1, TokenMapEntry::DataDecl(decl_id));
+                for ((_, id), interfaces) in d.type_variables.type_variables {
+                    token_map.insert(id, TokenMapEntry::TypeVariable);
+                    for (_, id) in interfaces {
+                        token_map.insert(id, TokenMapEntry::Interface);
+                    }
+                }
+                DataDecl {
+                    name: d.name.0,
+                    fields: d
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            token_map.insert(f.1, TokenMapEntry::TypeVariable);
+                            TypeVariable::new()
+                        })
+                        .collect(),
+                    decl_id,
+                }
             })
             .collect();
         let data_decl_map: FxHashMap<&str, DeclId> =
@@ -156,35 +194,49 @@ impl<'a> From<ast_step1::Ast<'a>> for Ast<'a> {
         let mut type_alias_map = TypeAliasMap(
             ast.type_alias_decl
                 .into_iter()
-                .map(|a| (a.name, (a.body, AliasComputation::NotUnaliased)))
+                .map(|a| {
+                    token_map.insert(a.name.1, TokenMapEntry::TypeAlias);
+                    (a.name.0, (a.body, AliasComputation::NotUnaliased))
+                })
                 .collect(),
         );
         let interface_decl: FxHashMap<&str, Vec<_>> = ast
             .interface_decl
             .into_iter()
             .map(|i| {
+                token_map.insert(i.name.1, TokenMapEntry::Interface);
                 (
-                    i.name,
+                    i.name.0,
                     i.variables
                         .into_iter()
                         .map(|(name, t, forall)| {
                             let self_ = TypeVariable::new();
-                            (
-                                name,
-                                type_to_type(
-                                    t,
-                                    &data_decl_map,
-                                    &forall
-                                        .type_variables
-                                        .into_iter()
-                                        .map(|(s, _)| (s, TypeVariable::new()))
-                                        .chain(std::iter::once(("Self", self_)))
-                                        .collect(),
-                                    &mut type_alias_map,
-                                    SearchMode::Normal,
+                            let t = type_to_type(
+                                t,
+                                &data_decl_map,
+                                &forall
+                                    .type_variables
+                                    .into_iter()
+                                    .map(|(s, _)| {
+                                        token_map.insert(
+                                            s.1,
+                                            TokenMapEntry::TypeVariable,
+                                        );
+                                        (s.0, TypeVariable::new())
+                                    })
+                                    .chain(std::iter::once(("Self", self_)))
+                                    .collect(),
+                                &mut type_alias_map,
+                                SearchMode::Normal,
+                                &mut token_map,
+                            );
+                            token_map.insert(
+                                name.1,
+                                TokenMapEntry::VariableDeclInInterface(
+                                    t.clone(),
                                 ),
-                                self_,
-                            )
+                            );
+                            (name.0, t, self_)
                         })
                         .collect(),
                 )
@@ -200,6 +252,7 @@ impl<'a> From<ast_step1::Ast<'a>> for Ast<'a> {
                     &Default::default(),
                     &mut type_alias_map,
                     &interface_decl,
+                    &mut token_map,
                 )
             })
             .collect();
@@ -208,27 +261,21 @@ impl<'a> From<ast_step1::Ast<'a>> for Ast<'a> {
             .find(|d| d.name == "main")
             .unwrap_or_else(|| panic!("entry point not found"))
             .decl_id;
-        Self {
-            variable_decl,
-            data_decl,
-            entry_point,
-        }
+        (
+            Self {
+                variable_decl,
+                data_decl,
+                entry_point,
+            },
+            token_map,
+        )
     }
 }
 
-impl<'a> ConstructorId<'a> {
-    pub fn name(&self) -> &'a str {
-        match self {
-            ConstructorId::DeclId(_, name) => name,
-            ConstructorId::Intrinsic(c) => c.to_str(),
-        }
-    }
-}
-
-impl<'a> From<ConstructorId<'a>> for TypeId {
-    fn from(c: ConstructorId<'a>) -> Self {
+impl From<ConstructorId> for TypeId {
+    fn from(c: ConstructorId) -> Self {
         match c {
-            ConstructorId::DeclId(ident, _) => Self::DeclId(ident),
+            ConstructorId::DeclId(ident) => Self::DeclId(ident),
             ConstructorId::Intrinsic(i) => Self::Intrinsic(i.into()),
         }
     }
@@ -255,17 +302,22 @@ fn variable_decl<'a>(
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
     interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type<'a>, TypeVariable)>>,
+    token_map: &mut TokenMap,
 ) -> VariableDecl<'a> {
     let mut type_variable_names = type_variable_names.clone();
     let mut implicit_parameters = Vec::new();
+    let decl_id = DeclId::new();
+    token_map.insert(v.name.1, TokenMapEntry::Decl(decl_id));
     VariableDecl {
-        name: v.name,
+        name: v.name.0,
         type_annotation: v.type_annotation.map(|(t, forall)| {
             type_variable_names.extend(forall.type_variables.into_iter().map(
                 |(s, interface_names)| {
+                    token_map.insert(s.1, TokenMapEntry::TypeVariable);
                     let v = TypeVariable::new();
                     for name in interface_names {
-                        for (name, t, self_) in &interfaces[&name] {
+                        token_map.insert(name.1, TokenMapEntry::Interface);
+                        for (name, t, self_) in &interfaces[&name.0] {
                             implicit_parameters.push((
                                 *name,
                                 t.clone().replace_num(
@@ -276,7 +328,7 @@ fn variable_decl<'a>(
                             ))
                         }
                     }
-                    (s, v)
+                    (s.0, v)
                 },
             ));
             type_to_type(
@@ -285,6 +337,7 @@ fn variable_decl<'a>(
                 &type_variable_names,
                 type_alias_map,
                 SearchMode::Normal,
+                token_map,
             )
             .into()
         }),
@@ -294,8 +347,9 @@ fn variable_decl<'a>(
             &type_variable_names,
             type_alias_map,
             interfaces,
+            token_map,
         ),
-        decl_id: DeclId::new(),
+        decl_id,
         implicit_parameters,
     }
 }
@@ -306,6 +360,7 @@ fn expr<'a>(
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
     interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type<'a>, TypeVariable)>>,
+    token_map: &mut TokenMap,
 ) -> ExprWithType<'a, TypeVariable> {
     use Expr::*;
     let e = match e {
@@ -318,16 +373,21 @@ fn expr<'a>(
                         type_variable_names,
                         type_alias_map,
                         interfaces,
+                        token_map,
                     )
                 })
                 .collect(),
         ),
         ast_step1::Expr::Number(n) => Number(n),
         ast_step1::Expr::StrLiteral(s) => StrLiteral(s),
-        ast_step1::Expr::Ident(name) => Ident {
-            name,
-            ident_id: IdentId::new(),
-        },
+        ast_step1::Expr::Ident(name) => {
+            let ident_id = IdentId::new();
+            token_map.insert(name.1, TokenMapEntry::Ident(ident_id));
+            Ident {
+                name: name.0,
+                ident_id,
+            }
+        }
         ast_step1::Expr::Decl(d) => {
             let d = variable_decl(
                 *d,
@@ -335,6 +395,7 @@ fn expr<'a>(
                 type_variable_names,
                 type_alias_map,
                 interfaces,
+                token_map,
             );
             d.value.0
         }
@@ -345,6 +406,7 @@ fn expr<'a>(
                 type_variable_names,
                 type_alias_map,
                 interfaces,
+                token_map,
             )),
             Box::new(expr(
                 *a,
@@ -352,6 +414,7 @@ fn expr<'a>(
                 type_variable_names,
                 type_alias_map,
                 interfaces,
+                token_map,
             )),
         ),
         ast_step1::Expr::Do(es) => {
@@ -364,6 +427,7 @@ fn expr<'a>(
                     type_variable_names,
                     type_alias_map,
                     interfaces,
+                    token_map,
                 );
             }
             new_es.reverse();
@@ -380,6 +444,7 @@ fn add_expr_in_do<'a>(
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
     interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type<'a>, TypeVariable)>>,
+    token_map: &mut TokenMap,
 ) -> Vec<ExprWithType<'a, TypeVariable>> {
     match e {
         ast_step1::Expr::Decl(d) => {
@@ -389,6 +454,7 @@ fn add_expr_in_do<'a>(
                 type_variable_names,
                 type_alias_map,
                 interfaces,
+                token_map,
             );
             if es.is_empty() {
                 vec![
@@ -428,6 +494,7 @@ fn add_expr_in_do<'a>(
                 type_variable_names,
                 type_alias_map,
                 interfaces,
+                token_map,
             ));
             es
         }
@@ -440,12 +507,13 @@ fn fn_arm<'a>(
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
     interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type<'a>, TypeVariable)>>,
+    token_map: &mut TokenMap,
 ) -> FnArm<'a, TypeVariable> {
     FnArm {
         pattern: arm
             .pattern
             .into_iter()
-            .map(|p| pattern(p, data_decl_map))
+            .map(|p| pattern(p, data_decl_map, token_map))
             .collect(),
         expr: expr(
             arm.expr,
@@ -453,6 +521,7 @@ fn fn_arm<'a>(
             type_variable_names,
             type_alias_map,
             interfaces,
+            token_map,
         ),
     }
 }
@@ -472,13 +541,13 @@ impl TypeId {
     }
 }
 
-impl ConstructorId<'_> {
-    fn get<'a>(
-        name: &'a str,
+impl ConstructorId {
+    fn get(
+        name: &str,
         data_decl_map: &FxHashMap<&str, DeclId>,
-    ) -> ConstructorId<'a> {
+    ) -> ConstructorId {
         if let Some(id) = data_decl_map.get(name) {
-            ConstructorId::DeclId(*id, name)
+            ConstructorId::DeclId(*id)
         } else if let Some(i) = INTRINSIC_CONSTRUCTORS.get(name) {
             ConstructorId::Intrinsic(*i)
         } else {
@@ -490,20 +559,28 @@ impl ConstructorId<'_> {
 fn pattern<'a>(
     p: ast_step1::Pattern<'a>,
     data_decl_map: &FxHashMap<&str, DeclId>,
+    token_map: &mut TokenMap,
 ) -> Pattern<'a, TypeVariable> {
     use PatternUnit::*;
     match p {
         ast_step1::Pattern::Number(n) => I64(n),
         ast_step1::Pattern::StrLiteral(s) => Str(s),
-        ast_step1::Pattern::Constructor { name, args } => Constructor {
-            id: ConstructorId::get(name, data_decl_map),
-            args: args
-                .into_iter()
-                .map(|arg| pattern(arg, data_decl_map))
-                .collect(),
-        },
+        ast_step1::Pattern::Constructor { name, args } => {
+            let id = ConstructorId::get(name.0, data_decl_map);
+            token_map.insert(name.1, TokenMapEntry::Constructor(id));
+            Constructor {
+                name: name.0,
+                id,
+                args: args
+                    .into_iter()
+                    .map(|arg| pattern(arg, data_decl_map, token_map))
+                    .collect(),
+            }
+        }
         ast_step1::Pattern::Binder(name) => {
-            Binder(name, DeclId::new(), TypeVariable::new())
+            let decl_id = DeclId::new();
+            token_map.insert(name.1, TokenMapEntry::Decl(decl_id));
+            Binder(name.0, decl_id, TypeVariable::new())
         }
         ast_step1::Pattern::Underscore => Underscore,
     }
@@ -523,8 +600,9 @@ pub fn type_to_type<'a>(
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
     search_type: SearchMode,
+    token_map: &mut TokenMap,
 ) -> Type<'a> {
-    match t.name {
+    match t.name.0 {
         "|" => t
             .args
             .into_iter()
@@ -535,6 +613,7 @@ pub fn type_to_type<'a>(
                     type_variable_names,
                     type_alias_map,
                     search_type,
+                    token_map,
                 )
             })
             .collect(),
@@ -545,6 +624,7 @@ pub fn type_to_type<'a>(
                 type_variable_names,
                 type_alias_map,
                 search_type,
+                token_map,
             ),
             type_to_type(
                 t.args[1].clone(),
@@ -552,13 +632,15 @@ pub fn type_to_type<'a>(
                 type_variable_names,
                 type_alias_map,
                 search_type,
+                token_map,
             ),
         )
         .into(),
         _ => {
-            if let Some(n) = type_variable_names.get(t.name) {
+            if let Some(n) = type_variable_names.get(t.name.0) {
+                token_map.insert(t.name.1, TokenMapEntry::TypeVariable);
                 TypeUnit::Variable(*n).into()
-            } else if let Some(i) = INTRINSIC_TYPES.get(&t.name) {
+            } else if let Some(i) = INTRINSIC_TYPES.get(&t.name.0) {
                 let mut tuple = Type::label_from_str("()");
                 for a in t
                     .args
@@ -570,18 +652,17 @@ pub fn type_to_type<'a>(
                             type_variable_names,
                             type_alias_map,
                             search_type,
+                            token_map,
                         )
                     })
                     .rev()
                 {
                     tuple = TypeUnit::Tuple(a, tuple).into();
                 }
+                let id = TypeId::Intrinsic(*i);
+                token_map.insert(t.name.1, TokenMapEntry::TypeId(id));
                 TypeUnit::Tuple(
-                    TypeUnit::Const {
-                        name: t.name,
-                        id: TypeId::Intrinsic(*i),
-                    }
-                    .into(),
+                    TypeUnit::Const { name: t.name.0, id }.into(),
                     tuple,
                 )
                 .into()
@@ -594,6 +675,7 @@ pub fn type_to_type<'a>(
                 } else {
                     SearchMode::AliasSub
                 },
+                token_map,
             ) {
                 for (from, to) in forall.0.into_iter().zip(t.args) {
                     unaliased = unaliased.replace_num(
@@ -604,6 +686,7 @@ pub fn type_to_type<'a>(
                             type_variable_names,
                             type_alias_map,
                             search_type,
+                            token_map,
                         ),
                     );
                 }
@@ -620,18 +703,17 @@ pub fn type_to_type<'a>(
                             type_variable_names,
                             type_alias_map,
                             search_type,
+                            token_map,
                         )
                     })
                     .rev()
                 {
                     tuple = TypeUnit::Tuple(a, tuple).into();
                 }
+                let id = TypeId::get(t.name.0, data_decl_map);
+                token_map.insert(t.name.1, TokenMapEntry::TypeId(id));
                 TypeUnit::Tuple(
-                    TypeUnit::Const {
-                        name: t.name,
-                        id: TypeId::get(t.name, data_decl_map),
-                    }
-                    .into(),
+                    TypeUnit::Const { name: t.name.0, id }.into(),
                     tuple,
                 )
                 .into()
@@ -640,11 +722,11 @@ pub fn type_to_type<'a>(
     }
 }
 
-impl std::fmt::Display for ConstructorId<'_> {
+impl std::fmt::Display for ConstructorId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ConstructorId::Intrinsic(a) => std::fmt::Debug::fmt(a, f),
-            ConstructorId::DeclId(a, _) => a.fmt(f),
+            ConstructorId::DeclId(a) => a.fmt(f),
         }
     }
 }
@@ -672,13 +754,14 @@ struct Forall(Vec<TypeVariable>);
 impl<'a> TypeAliasMap<'a> {
     fn get(
         &mut self,
-        name: &'a str,
+        name: (&'a str, Option<TokenId>),
         data_decl_map: &FxHashMap<&'a str, DeclId>,
         type_variable_names: &FxHashMap<&'a str, TypeVariable>,
         search_type: SearchMode,
+        token_map: &mut TokenMap,
     ) -> Option<(Type<'a>, Forall)> {
         debug_assert_ne!(search_type, SearchMode::Normal);
-        let alias = self.0.get(name)?;
+        let alias = self.0.get(name.0)?;
         Some(match (&alias, search_type) {
             (
                 (_, AliasComputation::Unaliased(t, forall)),
@@ -691,6 +774,7 @@ impl<'a> TypeAliasMap<'a> {
                     t = t.replace_num(*v, &TypeUnit::Variable(new_v).into());
                     new_forall.push(new_v);
                 }
+                token_map.insert(name.1, TokenMapEntry::TypeAlias);
                 (t, Forall(new_forall))
             }
             ((t, _), _) => {
@@ -701,14 +785,18 @@ impl<'a> TypeAliasMap<'a> {
                         .map(|(s, v)| (s, v.increment_recursive_index(1)))
                         .collect();
                 type_variable_names
-                    .insert(name, TypeVariable::RecursiveIndex(0));
+                    .insert(name.0, TypeVariable::RecursiveIndex(0));
                 let forall =
                     t.1.clone()
                         .type_variables
                         .into_iter()
-                        .map(|(s, _)| {
+                        .map(|(s, interfaces)| {
                             let v = TypeVariable::new();
-                            type_variable_names.insert(s, v);
+                            token_map.insert(s.1, TokenMapEntry::TypeVariable);
+                            for (_, id) in interfaces {
+                                token_map.insert(id, TokenMapEntry::Interface);
+                            }
+                            type_variable_names.insert(s.0, v);
                             v
                         })
                         .collect_vec();
@@ -718,6 +806,7 @@ impl<'a> TypeAliasMap<'a> {
                     &type_variable_names,
                     self,
                     search_type,
+                    token_map,
                 );
                 let new_t = if new_t
                     .contains_variable(TypeVariable::RecursiveIndex(0))
@@ -727,12 +816,13 @@ impl<'a> TypeAliasMap<'a> {
                     new_t
                 };
                 if search_type == SearchMode::Alias {
-                    self.0.get_mut(name).unwrap().1 =
+                    self.0.get_mut(name.0).unwrap().1 =
                         AliasComputation::Unaliased(
                             new_t.clone(),
                             Forall(forall.clone()),
                         );
                 }
+                token_map.insert(name.1, TokenMapEntry::TypeAlias);
                 (decrement_index_outside(new_t), Forall(forall))
             }
         })
