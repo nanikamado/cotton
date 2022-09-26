@@ -85,14 +85,12 @@ pub fn type_check<'a>(
         });
     }
     let mut resolved_idents = Vec::new();
-    let mut ident_type_map = Vec::new();
     let mut subtype_relations = SubtypeRelations::default();
     let mut map = TypeVariableMap::default();
     for d in &ast.variable_decl {
-        let (mut t, resolved, mut ident_type) =
+        let (mut t, resolved) =
             min_type_incomplete(&d.value, &mut subtype_relations, &mut map);
         resolved_idents.extend(resolved);
-        ident_type_map.append(&mut ident_type);
         let type_annotation: Option<ast_step2::IncompleteType> =
             if let Some(annotation) = &d.type_annotation {
                 t.subtype_relations.insert((
@@ -1036,11 +1034,7 @@ fn min_type_incomplete<'a>(
     (expr, type_variable): &ExprWithType<'a, TypeVariable>,
     subtype_relations: &mut SubtypeRelations<'a>,
     map: &mut TypeVariableMap<'a>,
-) -> (
-    ast_step2::IncompleteType<'a>,
-    Resolved<'a>,
-    Vec<(IdentId, TypeVariable)>,
-) {
+) -> (ast_step2::IncompleteType<'a>, Resolved<'a>) {
     match expr {
         Expr::Lambda(arms) => {
             let (
@@ -1049,17 +1043,8 @@ fn min_type_incomplete<'a>(
                 variable_requirements,
                 subtype_relation,
                 resolved_idents,
-                ident_type_map,
                 pattern_restrictions,
-            ): (
-                Vec<_>,
-                Vec<_>,
-                Vec<_>,
-                Vec<_>,
-                Vec<_>,
-                Vec<_>,
-                Vec<_>,
-            ) = multiunzip(
+            ): (Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>) = multiunzip(
                 arms.iter()
                     .map(|arm| arm_min_type(arm, subtype_relations, map)),
             );
@@ -1107,18 +1092,17 @@ fn min_type_incomplete<'a>(
                     already_considered_relations: Default::default(),
                 },
                 resolved_idents,
-                ident_type_map.concat(),
             )
         }
         Expr::Number(_) => {
             let t = Type::from_str("I64");
             map.insert(subtype_relations, *type_variable, t.clone());
-            (t.into(), Default::default(), Default::default())
+            (t.into(), Default::default())
         }
         Expr::StrLiteral(_) => {
             let t = Type::from_str("String");
             map.insert(subtype_relations, *type_variable, t.clone());
-            (t.into(), Default::default(), Default::default())
+            (t.into(), Default::default())
         }
         Expr::Ident { name, ident_id, .. } => {
             let t: Type = TypeUnit::Variable(*type_variable).into();
@@ -1136,13 +1120,12 @@ fn min_type_incomplete<'a>(
                     already_considered_relations: Default::default(),
                 },
                 Default::default(),
-                vec![(*ident_id, *type_variable)],
             )
         }
         Expr::Call(f, a) => {
-            let (f_t, resolved1, ident_type_map1) =
+            let (f_t, resolved1) =
                 min_type_incomplete(f, subtype_relations, map);
-            let (a_t, resolved2, ident_type_map2) =
+            let (a_t, resolved2) =
                 min_type_incomplete(a, subtype_relations, map);
             let b: types::Type = TypeUnit::Variable(*type_variable).into();
             let c: types::Type = TypeUnit::new_variable().into();
@@ -1183,26 +1166,23 @@ fn min_type_incomplete<'a>(
                     already_considered_relations: Default::default(),
                 },
                 [resolved1, resolved2].concat(),
-                [ident_type_map1, ident_type_map2].concat(),
             )
         }
         Expr::Do(es) => {
             let mut variable_requirements = Vec::new();
             let mut subtype_relations = SubtypeRelations::default();
             let mut resolved_idents = Vec::default();
-            let mut ident_type_map = Vec::new();
             let mut pattern_restrictions = PatternRestrictions::default();
             let t = es
                 .iter()
                 .map(|e| {
-                    let (t, resolved, mut ident_type) =
+                    let (t, resolved) =
                         min_type_incomplete(e, &mut subtype_relations, map);
                     variable_requirements
                         .append(&mut t.variable_requirements.clone());
                     subtype_relations.extend(t.subtype_relations.clone());
                     pattern_restrictions.extend(t.pattern_restrictions.clone());
                     resolved_idents.extend(resolved);
-                    ident_type_map.append(&mut ident_type);
                     t
                 })
                 .collect::<Vec<_>>();
@@ -1221,7 +1201,6 @@ fn min_type_incomplete<'a>(
                     already_considered_relations: Default::default(),
                 },
                 resolved_idents,
-                ident_type_map,
             )
         }
     }
@@ -1246,8 +1225,6 @@ pub struct VariableRequirement<'a> {
     pub local_env: Vec<(&'a str, DeclId, Type<'a>)>,
 }
 
-type IdentTypeMap = Vec<(IdentId, TypeVariable)>;
-
 /// Returns `vec![argument type, argument type, ..., return type]`,
 /// variable requirements, subtype relation, resolved idents.
 fn arm_min_type<'a>(
@@ -1260,10 +1237,9 @@ fn arm_min_type<'a>(
     Vec<VariableRequirement<'a>>,
     SubtypeRelations<'a>,
     Resolved<'a>,
-    IdentTypeMap,
     PatternRestrictions<'a>,
 ) {
-    let (body_type, mut resolved_idents, ident_type_map) =
+    let (body_type, mut resolved_idents) =
         min_type_incomplete(&arm.expr, subtype_relations, map);
     let (mut ts, bindings, patterns): (Vec<_>, Vec<_>, Vec<_>) =
         arm.pattern.iter().map(pattern_to_type).multiunzip();
@@ -1304,7 +1280,6 @@ fn arm_min_type<'a>(
             tmp
         },
         resolved_idents,
-        ident_type_map,
         body_type.pattern_restrictions,
     )
 }
