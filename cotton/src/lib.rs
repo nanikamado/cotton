@@ -91,6 +91,7 @@ pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
 pub enum TokenKind<'a> {
     Variable(VariableId, Option<IncompleteType<'a>>),
     Type,
+    Interface,
 }
 
 pub fn get_token_map(ast: &parse::Ast) -> FxHashMap<TokenId, TokenKind> {
@@ -121,6 +122,7 @@ pub fn get_token_map(ast: &parse::Ast) -> FxHashMap<TokenId, TokenKind> {
                 | ast_step2::TokenMapEntry::TypeAlias
                 | ast_step2::TokenMapEntry::Constructor(_)
                 | ast_step2::TokenMapEntry::TypeVariable => TokenKind::Type,
+                ast_step2::TokenMapEntry::Interface => TokenKind::Interface,
             };
             (id, t)
         })

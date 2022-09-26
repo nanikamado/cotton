@@ -145,6 +145,7 @@ pub enum TokenMapEntry {
     TypeAlias,
     Constructor(ConstructorId),
     TypeVariable,
+    Interface,
 }
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -217,6 +218,7 @@ impl<'a> Ast<'a> {
             .interface_decl
             .into_iter()
             .map(|i| {
+                token_map.insert(i.name.1, TokenMapEntry::Interface);
                 (
                     i.name.0,
                     i.variables

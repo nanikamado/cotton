@@ -199,6 +199,9 @@ fn semantic_tokens_from_src(src: &str) -> SemanticTokens {
                                 SemanticTokenType::VARIABLE
                             }
                             TokenKind::Type => SemanticTokenType::TYPE,
+                            TokenKind::Interface => {
+                                SemanticTokenType::INTERFACE
+                            }
                         },
                         _ => {
                             eprintln!("id = {id} is not found in token_map.");
@@ -207,10 +210,12 @@ fn semantic_tokens_from_src(src: &str) -> SemanticTokens {
                     }
                 }
             }
-            Op(_, _) | Comma | Assign | Bar | BArrow | Colon => {
+            Op(_, _) | Assign | Bar | BArrow | Colon => {
                 SemanticTokenType::OPERATOR
             }
-            Paren(_) | OpenParenWithoutPad | Indent | Dedent => continue,
+            Paren(_) | OpenParenWithoutPad | Indent | Dedent | Comma => {
+                continue
+            }
             Case | Do | Forall | Infixl | Infixr | Data | Type | Interface
             | Where => SemanticTokenType::KEYWORD,
         };
