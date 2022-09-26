@@ -136,12 +136,22 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensParams,
     ) -> tower_lsp::jsonrpc::Result<Option<SemanticTokensResult>> {
-        let url = params.text_document.uri;
-        if let Some(r) = self.tokens.get(&url) {
+        let uri = params.text_document.uri;
+        if let Some(r) = self.tokens.get(&uri) {
             let tokens = r.value();
             Ok(Some(tokens.clone().into()))
         } else {
-            Ok(None)
+            if let Ok(src) = fs::read_to_string(uri.path()) {
+                let tokens = tokio::task::spawn_blocking(move || {
+                    semantic_tokens_from_src(&src)
+                })
+                .await
+                .unwrap();
+                self.tokens.insert(uri, tokens.clone());
+                Ok(Some(tokens.into()))
+            } else {
+                Ok(None)
+            }
         }
     }
 }
