@@ -152,24 +152,6 @@ pub enum TokenMapEntry {
 pub struct TokenMap(pub FxHashMap<TokenId, TokenMapEntry>);
 
 impl TokenMap {
-    fn insert_decl(&mut self, id: Option<TokenId>, decl_id: DeclId) {
-        if let Some(id) = id {
-            self.0.insert(id, TokenMapEntry::Decl(decl_id));
-        }
-    }
-
-    fn insert_ident(&mut self, id: Option<TokenId>, ident_id: IdentId) {
-        if let Some(id) = id {
-            self.0.insert(id, TokenMapEntry::Ident(ident_id));
-        }
-    }
-
-    fn insert_type(&mut self, id: Option<TokenId>, type_id: TypeId) {
-        if let Some(id) = id {
-            self.0.insert(id, TokenMapEntry::TypeId(type_id));
-        }
-    }
-
     fn insert(&mut self, id: Option<TokenId>, entry: TokenMapEntry) {
         if let Some(id) = id {
             self.0.insert(id, entry);
@@ -318,7 +300,7 @@ fn variable_decl<'a>(
     let mut type_variable_names = type_variable_names.clone();
     let mut implicit_parameters = Vec::new();
     let decl_id = DeclId::new();
-    token_map.insert_decl(v.name.1, decl_id);
+    token_map.insert(v.name.1, TokenMapEntry::Decl(decl_id));
     VariableDecl {
         name: v.name.0,
         type_annotation: v.type_annotation.map(|(t, forall)| {
@@ -392,7 +374,7 @@ fn expr<'a>(
         ast_step1::Expr::StrLiteral(s) => StrLiteral(s),
         ast_step1::Expr::Ident(name) => {
             let ident_id = IdentId::new();
-            token_map.insert_ident(name.1, ident_id);
+            token_map.insert(name.1, TokenMapEntry::Ident(ident_id));
             Ident {
                 name: name.0,
                 ident_id,
@@ -589,7 +571,7 @@ fn pattern<'a>(
         }
         ast_step1::Pattern::Binder(name) => {
             let decl_id = DeclId::new();
-            token_map.insert_decl(name.1, decl_id);
+            token_map.insert(name.1, TokenMapEntry::Decl(decl_id));
             Binder(name.0, decl_id, TypeVariable::new())
         }
         ast_step1::Pattern::Underscore => Underscore,
@@ -670,7 +652,7 @@ pub fn type_to_type<'a>(
                     tuple = TypeUnit::Tuple(a, tuple).into();
                 }
                 let id = TypeId::Intrinsic(*i);
-                token_map.insert_type(t.name.1, id);
+                token_map.insert(t.name.1, TokenMapEntry::TypeId(id));
                 TypeUnit::Tuple(
                     TypeUnit::Const { name: t.name.0, id }.into(),
                     tuple,
@@ -721,7 +703,7 @@ pub fn type_to_type<'a>(
                     tuple = TypeUnit::Tuple(a, tuple).into();
                 }
                 let id = TypeId::get(t.name.0, data_decl_map);
-                token_map.insert_type(t.name.1, id);
+                token_map.insert(t.name.1, TokenMapEntry::TypeId(id));
                 TypeUnit::Tuple(
                     TypeUnit::Const { name: t.name.0, id }.into(),
                     tuple,
