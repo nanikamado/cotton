@@ -51,7 +51,7 @@ pub struct TypeAliasDecl<'a> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct InterfaceDecl<'a> {
     pub name: StrWithId<'a>,
-    pub variables: Vec<(&'a str, Type<'a>, Forall<'a>)>,
+    pub variables: Vec<(StrWithId<'a>, Type<'a>, Forall<'a>)>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -238,9 +238,9 @@ impl<'a> From<&'a parse::Ast> for Ast<'a> {
                     variables: a
                         .variables
                         .iter()
-                        .map(|((name, _id), t, forall)| {
+                        .map(|((name, id), t, forall)| {
                             (
-                                name.as_str(),
+                                (name.as_str(), *id),
                                 infix_op_sequence(op_sequence(
                                     t,
                                     &op_precedence_map,

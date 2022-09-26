@@ -137,7 +137,7 @@ pub enum PatternUnit<'a, T> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum TokenMapEntry {
+pub enum TokenMapEntry<'a> {
     Decl(DeclId),
     DataDecl(DeclId),
     Ident(IdentId),
@@ -146,13 +146,14 @@ pub enum TokenMapEntry {
     Constructor(ConstructorId),
     TypeVariable,
     Interface,
+    VariableDeclInInterface(Type<'a>),
 }
 
 #[derive(Default, Debug, PartialEq, Eq)]
-pub struct TokenMap(pub FxHashMap<TokenId, TokenMapEntry>);
+pub struct TokenMap<'a>(pub FxHashMap<TokenId, TokenMapEntry<'a>>);
 
-impl TokenMap {
-    fn insert(&mut self, id: Option<TokenId>, entry: TokenMapEntry) {
+impl<'a> TokenMap<'a> {
+    fn insert(&mut self, id: Option<TokenId>, entry: TokenMapEntry<'a>) {
         if let Some(id) = id {
             self.0.insert(id, entry);
         }
@@ -210,29 +211,32 @@ impl<'a> Ast<'a> {
                         .into_iter()
                         .map(|(name, t, forall)| {
                             let self_ = TypeVariable::new();
-                            (
-                                name,
-                                type_to_type(
-                                    t,
-                                    &data_decl_map,
-                                    &forall
-                                        .type_variables
-                                        .into_iter()
-                                        .map(|(s, _)| {
-                                            token_map.insert(
-                                                s.1,
-                                                TokenMapEntry::TypeVariable,
-                                            );
-                                            (s.0, TypeVariable::new())
-                                        })
-                                        .chain(std::iter::once(("Self", self_)))
-                                        .collect(),
-                                    &mut type_alias_map,
-                                    SearchMode::Normal,
-                                    &mut token_map,
+                            let t = type_to_type(
+                                t,
+                                &data_decl_map,
+                                &forall
+                                    .type_variables
+                                    .into_iter()
+                                    .map(|(s, _)| {
+                                        token_map.insert(
+                                            s.1,
+                                            TokenMapEntry::TypeVariable,
+                                        );
+                                        (s.0, TypeVariable::new())
+                                    })
+                                    .chain(std::iter::once(("Self", self_)))
+                                    .collect(),
+                                &mut type_alias_map,
+                                SearchMode::Normal,
+                                &mut token_map,
+                            );
+                            token_map.insert(
+                                name.1,
+                                TokenMapEntry::VariableDeclInInterface(
+                                    t.clone(),
                                 ),
-                                self_,
-                            )
+                            );
+                            (name.0, t, self_)
                         })
                         .collect(),
                 )

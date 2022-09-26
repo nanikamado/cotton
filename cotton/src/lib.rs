@@ -92,6 +92,7 @@ pub enum TokenKind<'a> {
     Variable(VariableId, Option<IncompleteType<'a>>),
     Type,
     Interface,
+    VariableDeclInInterface(IncompleteType<'a>),
 }
 
 pub fn get_token_map(ast: &parse::Ast) -> FxHashMap<TokenId, TokenKind> {
@@ -116,6 +117,9 @@ pub fn get_token_map(ast: &parse::Ast) -> FxHashMap<TokenId, TokenKind> {
                             ast.types_of_decls.get(&r.variable_id).cloned(),
                         ),
                     }
+                }
+                ast_step2::TokenMapEntry::VariableDeclInInterface(t) => {
+                    TokenKind::VariableDeclInInterface(t.into())
                 }
                 ast_step2::TokenMapEntry::DataDecl(_)
                 | ast_step2::TokenMapEntry::TypeId(_)

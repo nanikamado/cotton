@@ -185,7 +185,8 @@ fn semantic_tokens_from_src(src: &str) -> SemanticTokens {
                 } else {
                     match token_map.get(&id) {
                         Some(e) => match e {
-                            TokenKind::Variable(_, Some(b)) => {
+                            TokenKind::Variable(_, Some(b))
+                            | TokenKind::VariableDeclInInterface(b) => {
                                 if let TypeMatchableRef::Fn(_, _) =
                                     b.constructor.matchable_ref()
                                 {
@@ -195,7 +196,7 @@ fn semantic_tokens_from_src(src: &str) -> SemanticTokens {
                                 }
                             }
                             TokenKind::Variable(_, _) => {
-                                eprintln!("id = {id} is variable but could not get its type.");
+                                eprintln!("id = {id} ({s}) is variable but could not get its type.");
                                 SemanticTokenType::VARIABLE
                             }
                             TokenKind::Type => SemanticTokenType::TYPE,
@@ -204,7 +205,9 @@ fn semantic_tokens_from_src(src: &str) -> SemanticTokens {
                             }
                         },
                         _ => {
-                            eprintln!("id = {id} is not found in token_map.");
+                            eprintln!(
+                                "id = {id} ({s}) is not found in token_map."
+                            );
                             SemanticTokenType::VARIABLE
                         }
                     }
