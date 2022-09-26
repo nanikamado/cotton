@@ -168,8 +168,11 @@ impl<'a> Ast<'a> {
             .map(|d| {
                 let decl_id = DeclId::new();
                 token_map.insert(d.name.1, TokenMapEntry::DataDecl(decl_id));
-                for ((_, id), _) in d.type_variables.type_variables {
+                for ((_, id), interfaces) in d.type_variables.type_variables {
                     token_map.insert(id, TokenMapEntry::TypeVariable);
+                    for (_, id) in interfaces {
+                        token_map.insert(id, TokenMapEntry::Interface);
+                    }
                 }
                 DataDecl {
                     name: d.name.0,
@@ -309,6 +312,7 @@ fn variable_decl<'a>(
                     token_map.insert(s.1, TokenMapEntry::TypeVariable);
                     let v = TypeVariable::new();
                     for name in interface_names {
+                        token_map.insert(name.1, TokenMapEntry::Interface);
                         for (name, t, self_) in &interfaces[&name.0] {
                             implicit_parameters.push((
                                 *name,
@@ -782,9 +786,12 @@ impl<'a> TypeAliasMap<'a> {
                     t.1.clone()
                         .type_variables
                         .into_iter()
-                        .map(|(s, _)| {
+                        .map(|(s, interfaces)| {
                             let v = TypeVariable::new();
                             token_map.insert(s.1, TokenMapEntry::TypeVariable);
+                            for (_, id) in interfaces {
+                                token_map.insert(id, TokenMapEntry::Interface);
+                            }
                             type_variable_names.insert(s.0, v);
                             v
                         })
