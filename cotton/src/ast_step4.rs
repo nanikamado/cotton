@@ -68,7 +68,8 @@ pub enum PatternUnit<'a, T> {
     I64(&'a str),
     Str(&'a str),
     Constructor {
-        id: ConstructorId<'a>,
+        name: &'a str,
+        id: ConstructorId,
         args: Vec<Pattern<'a, T>>,
     },
     Binder(&'a str, DeclId),
@@ -807,7 +808,7 @@ impl<'a, 'b> VariableMemo<'a, 'b> {
                     );
                     PatternUnit::Str(a)
                 }
-                Constructor { id, args } => {
+                Constructor { name, id, args } => {
                     let args = args
                         .iter()
                         .map(|pattern| {
@@ -822,10 +823,14 @@ impl<'a, 'b> VariableMemo<'a, 'b> {
                     self.type_map.insert_normal(
                         type_pointer,
                         (*id).into(),
-                        id.name(),
+                        name,
                         args.iter().map(|(_, p)| *p).collect(),
                     );
-                    PatternUnit::Constructor { id: *id, args }
+                    PatternUnit::Constructor {
+                        name,
+                        id: *id,
+                        args,
+                    }
                 }
                 Binder(name, d, _) => {
                     local_variables.insert(VariableId::Decl(*d), type_pointer);

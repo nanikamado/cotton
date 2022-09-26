@@ -24,8 +24,8 @@ use std::fmt::Display;
 pub use types::TypeConstructor;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ConstructorId<'a> {
-    DeclId(DeclId, &'a str),
+pub enum ConstructorId {
+    DeclId(DeclId),
     Intrinsic(IntrinsicConstructor),
 }
 
@@ -127,7 +127,8 @@ pub enum PatternUnit<'a, T> {
     I64(&'a str),
     Str(&'a str),
     Constructor {
-        id: ConstructorId<'a>,
+        name: &'a str,
+        id: ConstructorId,
         args: Vec<Pattern<'a, T>>,
     },
     Binder(&'a str, DeclId, T),
@@ -261,19 +262,10 @@ impl<'a> Ast<'a> {
     }
 }
 
-impl<'a> ConstructorId<'a> {
-    pub fn name(&self) -> &'a str {
-        match self {
-            ConstructorId::DeclId(_, name) => name,
-            ConstructorId::Intrinsic(c) => c.to_str(),
-        }
-    }
-}
-
-impl<'a> From<ConstructorId<'a>> for TypeId {
-    fn from(c: ConstructorId<'a>) -> Self {
+impl From<ConstructorId> for TypeId {
+    fn from(c: ConstructorId) -> Self {
         match c {
-            ConstructorId::DeclId(ident, _) => Self::DeclId(ident),
+            ConstructorId::DeclId(ident) => Self::DeclId(ident),
             ConstructorId::Intrinsic(i) => Self::Intrinsic(i.into()),
         }
     }
@@ -537,13 +529,13 @@ impl TypeId {
     }
 }
 
-impl ConstructorId<'_> {
-    fn get<'a>(
-        name: &'a str,
+impl ConstructorId {
+    fn get(
+        name: &str,
         data_decl_map: &FxHashMap<&str, DeclId>,
-    ) -> ConstructorId<'a> {
+    ) -> ConstructorId {
         if let Some(id) = data_decl_map.get(name) {
-            ConstructorId::DeclId(*id, name)
+            ConstructorId::DeclId(*id)
         } else if let Some(i) = INTRINSIC_CONSTRUCTORS.get(name) {
             ConstructorId::Intrinsic(*i)
         } else {
@@ -562,6 +554,7 @@ fn pattern<'a>(
         ast_step1::Pattern::Number(n) => I64(n),
         ast_step1::Pattern::StrLiteral(s) => Str(s),
         ast_step1::Pattern::Constructor { name, args } => Constructor {
+            name: name.0,
             id: ConstructorId::get(name.0, data_decl_map),
             args: args
                 .into_iter()
@@ -712,11 +705,11 @@ pub fn type_to_type<'a>(
     }
 }
 
-impl std::fmt::Display for ConstructorId<'_> {
+impl std::fmt::Display for ConstructorId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ConstructorId::Intrinsic(a) => std::fmt::Debug::fmt(a, f),
-            ConstructorId::DeclId(a, _) => a.fmt(f),
+            ConstructorId::DeclId(a) => a.fmt(f),
         }
     }
 }

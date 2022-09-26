@@ -262,13 +262,16 @@ fn normalize_types_in_pattern_unit<'a>(
         }
         PatternUnit::I64(a) => PatternUnit::I64(a),
         PatternUnit::Str(a) => PatternUnit::Str(a),
-        PatternUnit::Constructor { id, args } => PatternUnit::Constructor {
-            id,
-            args: args
-                .into_iter()
-                .map(|p| normalize_types_in_pattern(p, map))
-                .collect(),
-        },
+        PatternUnit::Constructor { name, id, args } => {
+            PatternUnit::Constructor {
+                name,
+                id,
+                args: args
+                    .into_iter()
+                    .map(|p| normalize_types_in_pattern(p, map))
+                    .collect(),
+            }
+        }
         PatternUnit::Underscore => PatternUnit::Underscore,
         PatternUnit::TypeRestriction(p, t) => {
             PatternUnit::TypeRestriction(normalize_types_in_pattern(p, map), t)

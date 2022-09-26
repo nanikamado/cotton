@@ -1337,7 +1337,7 @@ fn pattern_unit_to_type<'a>(
             Default::default(),
             PatternUnitForRestriction::Str,
         ),
-        Constructor { id, args } => {
+        Constructor { name, id, args } => {
             let (types, bindings, pattern_restrictions): (
                 Vec<_>,
                 Vec<_>,
@@ -1346,7 +1346,7 @@ fn pattern_unit_to_type<'a>(
             (
                 TypeUnit::Tuple(
                     TypeUnit::Const {
-                        name: id.name(),
+                        name,
                         id: (*id).into(),
                     }
                     .into(),
@@ -1357,7 +1357,7 @@ fn pattern_unit_to_type<'a>(
                 bindings.into_iter().flatten().collect(),
                 PatternUnitForRestriction::Tuple(
                     PatternUnitForRestriction::Const {
-                        name: id.name(),
+                        name,
                         id: (*id).into(),
                     }
                     .into(),

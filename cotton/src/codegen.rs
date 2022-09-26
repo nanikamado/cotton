@@ -161,11 +161,11 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
                     I64(a) | Str(a) => {
                         vec![format!("{}==={}", a, n)]
                     }
-                    Constructor { id, args } => {
+                    Constructor { id, args, name } => {
                         let mut v = vec![format!(
                             "'${}${}'==={}.name",
                             id,
-                            convert_name(id.name()),
+                            convert_name(name),
                             n
                         )];
                         v.append(&mut _condition(
