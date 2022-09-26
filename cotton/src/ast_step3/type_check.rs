@@ -87,10 +87,12 @@ pub fn type_check<'a>(
     let mut resolved_idents = Vec::new();
     let mut subtype_relations = SubtypeRelations::default();
     let mut map = TypeVariableMap::default();
+    let mut types_of_local_decls = Vec::new();
     for d in &ast.variable_decl {
-        let (mut t, resolved) =
+        let (mut t, resolved, mut tod) =
             min_type_incomplete(&d.value, &mut subtype_relations, &mut map);
         resolved_idents.extend(resolved);
+        types_of_local_decls.append(&mut tod);
         let type_annotation: Option<ast_step2::IncompleteType> =
             if let Some(annotation) = &d.type_annotation {
                 t.subtype_relations.insert((
@@ -223,7 +225,13 @@ pub fn type_check<'a>(
         resolved_idents,
         types
             .into_iter()
-            .map(|(d, t)| (d, t.map_type(lift_recursive_alias)))
+            .chain(types_of_local_decls)
+            .map(|(d, t)| {
+                (
+                    d,
+                    t.map_type(|t| lift_recursive_alias(map.normalize_type(t))),
+                )
+            })
             .collect(),
         subtype_relations,
         map,
@@ -1034,7 +1042,11 @@ fn min_type_incomplete<'a>(
     (expr, type_variable): &ExprWithType<'a, TypeVariable>,
     subtype_relations: &mut SubtypeRelations<'a>,
     map: &mut TypeVariableMap<'a>,
-) -> (ast_step2::IncompleteType<'a>, Resolved<'a>) {
+) -> (
+    ast_step2::IncompleteType<'a>,
+    Resolved<'a>,
+    TypesOfDeclsVec<'a>,
+) {
     match expr {
         Expr::Lambda(arms) => {
             let (
@@ -1044,7 +1056,16 @@ fn min_type_incomplete<'a>(
                 subtype_relation,
                 resolved_idents,
                 pattern_restrictions,
-            ): (Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>, Vec<_>) = multiunzip(
+                types_of_decls,
+            ): (
+                Vec<_>,
+                Vec<_>,
+                Vec<_>,
+                Vec<_>,
+                Vec<_>,
+                Vec<_>,
+                Vec<_>,
+            ) = multiunzip(
                 arms.iter()
                     .map(|arm| arm_min_type(arm, subtype_relations, map)),
             );
@@ -1092,17 +1113,18 @@ fn min_type_incomplete<'a>(
                     already_considered_relations: Default::default(),
                 },
                 resolved_idents,
+                types_of_decls.concat(),
             )
         }
         Expr::Number(_) => {
             let t = Type::from_str("I64");
             map.insert(subtype_relations, *type_variable, t.clone());
-            (t.into(), Default::default())
+            (t.into(), Default::default(), Default::default())
         }
         Expr::StrLiteral(_) => {
             let t = Type::from_str("String");
             map.insert(subtype_relations, *type_variable, t.clone());
-            (t.into(), Default::default())
+            (t.into(), Default::default(), Default::default())
         }
         Expr::Ident { name, ident_id, .. } => {
             let t: Type = TypeUnit::Variable(*type_variable).into();
@@ -1120,12 +1142,13 @@ fn min_type_incomplete<'a>(
                     already_considered_relations: Default::default(),
                 },
                 Default::default(),
+                Default::default(),
             )
         }
         Expr::Call(f, a) => {
-            let (f_t, resolved1) =
+            let (f_t, resolved1, types_of_decls_f) =
                 min_type_incomplete(f, subtype_relations, map);
-            let (a_t, resolved2) =
+            let (a_t, resolved2, types_of_decls_a) =
                 min_type_incomplete(a, subtype_relations, map);
             let b: types::Type = TypeUnit::Variable(*type_variable).into();
             let c: types::Type = TypeUnit::new_variable().into();
@@ -1166,6 +1189,7 @@ fn min_type_incomplete<'a>(
                     already_considered_relations: Default::default(),
                 },
                 [resolved1, resolved2].concat(),
+                [types_of_decls_f, types_of_decls_a].concat(),
             )
         }
         Expr::Do(es) => {
@@ -1173,16 +1197,18 @@ fn min_type_incomplete<'a>(
             let mut subtype_relations = SubtypeRelations::default();
             let mut resolved_idents = Vec::default();
             let mut pattern_restrictions = PatternRestrictions::default();
+            let mut types_of_decls = Vec::new();
             let t = es
                 .iter()
                 .map(|e| {
-                    let (t, resolved) =
+                    let (t, resolved, mut tod) =
                         min_type_incomplete(e, &mut subtype_relations, map);
                     variable_requirements
                         .append(&mut t.variable_requirements.clone());
                     subtype_relations.extend(t.subtype_relations.clone());
                     pattern_restrictions.extend(t.pattern_restrictions.clone());
                     resolved_idents.extend(resolved);
+                    types_of_decls.append(&mut tod);
                     t
                 })
                 .collect::<Vec<_>>();
@@ -1201,6 +1227,7 @@ fn min_type_incomplete<'a>(
                     already_considered_relations: Default::default(),
                 },
                 resolved_idents,
+                types_of_decls,
             )
         }
     }
@@ -1238,14 +1265,20 @@ fn arm_min_type<'a>(
     SubtypeRelations<'a>,
     Resolved<'a>,
     PatternRestrictions<'a>,
+    TypesOfDeclsVec<'a>,
 ) {
-    let (body_type, mut resolved_idents) =
+    let (body_type, mut resolved_idents, mut types_of_decls) =
         min_type_incomplete(&arm.expr, subtype_relations, map);
     let (mut ts, bindings, patterns): (Vec<_>, Vec<_>, Vec<_>) =
         arm.pattern.iter().map(pattern_to_type).multiunzip();
     ts.push(body_type.constructor);
-    let bindings: FxHashMap<&str, (DeclId, types::Type)> =
-        bindings.into_iter().flatten().collect();
+    let bindings: FxHashMap<&str, (DeclId, types::Type)> = bindings
+        .into_iter()
+        .flatten()
+        .inspect(|(_, (decl_id, t))| {
+            types_of_decls.push((VariableId::Decl(*decl_id), t.clone().into()));
+        })
+        .collect();
     let mut variable_requirements = Vec::new();
     let mut subtype_requirement = Vec::new();
     for mut p in body_type.variable_requirements.into_iter() {
@@ -1281,6 +1314,7 @@ fn arm_min_type<'a>(
         },
         resolved_idents,
         body_type.pattern_restrictions,
+        types_of_decls,
     )
 }
 
