@@ -19,9 +19,6 @@ pub enum IntrinsicVariable {
     Println,
     Print,
     I64ToString,
-    True,
-    False,
-    Unit,
     Append,
 }
 
@@ -44,9 +41,6 @@ impl IntrinsicVariable {
             IntrinsicVariable::Println => "println",
             IntrinsicVariable::Print => "print",
             IntrinsicVariable::I64ToString => "i64_to_string",
-            IntrinsicVariable::True => "True",
-            IntrinsicVariable::False => "False",
-            IntrinsicVariable::Unit => "()",
             IntrinsicVariable::Append => "<>",
         }
     }
@@ -85,9 +79,6 @@ impl IntrinsicVariable {
             IntrinsicVariable::I64ToString => {
                 Type::from_str("I64").arrow(Type::from_str("String"))
             }
-            IntrinsicVariable::True => Type::from_str("True"),
-            IntrinsicVariable::False => Type::from_str("False"),
-            IntrinsicVariable::Unit => Type::from_str("()"),
             IntrinsicVariable::Append => Type::from_str("String").arrow(
                 Type::from_str("String").arrow(Type::from_str("String")),
             ),
@@ -120,11 +111,19 @@ pub static INTRINSIC_TYPES: Lazy<FxHashMap<&'static str, IntrinsicType>> =
         .collect()
     });
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, EnumIter,
+)]
 pub enum IntrinsicConstructor {
     Unit,
     True,
     False,
+}
+
+impl Display for IntrinsicConstructor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self, f)
+    }
 }
 
 pub static INTRINSIC_CONSTRUCTORS: Lazy<
@@ -147,6 +146,14 @@ impl IntrinsicConstructor {
             IntrinsicConstructor::Unit => "()",
             IntrinsicConstructor::True => "True",
             IntrinsicConstructor::False => "False",
+        }
+    }
+
+    pub fn to_type(self) -> Type<'static> {
+        match self {
+            IntrinsicConstructor::True => Type::from_str("True"),
+            IntrinsicConstructor::False => Type::from_str("False"),
+            IntrinsicConstructor::Unit => Type::from_str("()"),
         }
     }
 }

@@ -13,7 +13,7 @@ use crate::{
         SubtypeRelations, TypeId,
     },
     ast_step4::VariableKind,
-    intrinsics::{IntrinsicType, IntrinsicVariable},
+    intrinsics::{IntrinsicConstructor, IntrinsicType, IntrinsicVariable},
 };
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::{multiunzip, Itertools};
@@ -27,14 +27,16 @@ use types::TypeConstructor;
 #[derive(PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
 pub enum VariableId {
     Decl(DeclId),
-    Intrinsic(IntrinsicVariable),
+    IntrinsicVariable(IntrinsicVariable),
+    IntrinsicConstructor(IntrinsicConstructor),
 }
 
 impl Display for VariableId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             VariableId::Decl(a) => a.fmt(f),
-            VariableId::Intrinsic(a) => a.fmt(f),
+            VariableId::IntrinsicVariable(a) => a.fmt(f),
+            VariableId::IntrinsicConstructor(a) => a.fmt(f),
         }
     }
 }
@@ -43,7 +45,10 @@ impl std::fmt::Debug for VariableId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             VariableId::Decl(a) => write!(f, "VariableId({})", a),
-            VariableId::Intrinsic(a) => {
+            VariableId::IntrinsicVariable(a) => {
+                write!(f, "VariableId({})", a)
+            }
+            VariableId::IntrinsicConstructor(a) => {
                 write!(f, "VariableId({})", a)
             }
         }
@@ -66,10 +71,21 @@ pub fn type_check<'a>(
             incomplete: v.to_type().clone().into(),
             type_annotation: None,
             resolved_idents: Default::default(),
-            decl_id: VariableId::Intrinsic(v),
+            decl_id: VariableId::IntrinsicVariable(v),
             name: v.to_str(),
             variables_required_by_interface_restrictions: Default::default(),
             variable_kind: VariableKind::Intrinsic,
+        });
+    }
+    for v in IntrinsicConstructor::iter() {
+        toplevels.push(Toplevel {
+            incomplete: v.to_type().clone().into(),
+            type_annotation: None,
+            resolved_idents: Default::default(),
+            decl_id: VariableId::IntrinsicConstructor(v),
+            name: v.to_str(),
+            variables_required_by_interface_restrictions: Default::default(),
+            variable_kind: VariableKind::IntrinsicConstructor,
         });
     }
     for d in &ast.data_decl {

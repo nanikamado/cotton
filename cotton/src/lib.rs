@@ -111,7 +111,10 @@ pub fn get_token_map(ast: &parse::Ast) -> FxHashMap<TokenId, TokenKind> {
                 ast_step2::TokenMapEntry::Ident(ident_id) => {
                     let r = resolved_idents.get(&ident_id).unwrap();
                     match r.variable_kind {
-                        ast_step4::VariableKind::Constructor => TokenKind::Type,
+                        ast_step4::VariableKind::Constructor
+                        | ast_step4::VariableKind::IntrinsicConstructor => {
+                            TokenKind::Type
+                        }
                         _ => TokenKind::Variable(
                             r.variable_id,
                             ast.types_of_decls.get(&r.variable_id).cloned(),

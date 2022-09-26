@@ -3,7 +3,7 @@ use crate::{
     ast_step3::DataDecl,
     ast_step4::{Pattern, PatternUnit, Type},
     ast_step5::{Ast, Expr, ExprWithType, FnArm, VariableDecl},
-    intrinsics::IntrinsicVariable,
+    intrinsics::{IntrinsicConstructor, IntrinsicVariable},
 };
 use fxhash::FxHashMap;
 use itertools::Itertools;
@@ -13,9 +13,9 @@ use unic_ucd_category::GeneralCategory;
 
 pub fn codegen(ast: Ast) -> String {
     format!(
-        "let $$bool=a=>a?{}:{};{}{}{}{}${}$main({});}}",
-        PRIMITIVES_DEF[&IntrinsicVariable::True],
-        PRIMITIVES_DEF[&IntrinsicVariable::False],
+        "let $$bool=a=>a?{}:{};{}{}{}{}{}${}$main({});}}",
+        PRIMITIVE_CONSTRUCTOR_DEF[&IntrinsicConstructor::True],
+        PRIMITIVE_CONSTRUCTOR_DEF[&IntrinsicConstructor::False],
         r#"{
         |let $$unexpected = () => {throw new Error("unexpected")};
         |"#
@@ -31,10 +31,21 @@ pub fn codegen(ast: Ast) -> String {
                 )
             })
             .join(""),
+        PRIMITIVE_CONSTRUCTOR_DEF
+            .iter()
+            .map(|(variable, def)| {
+                format!(
+                    "let ${}${}={};",
+                    variable,
+                    convert_name(variable.to_str()),
+                    def
+                )
+            })
+            .join(""),
         ast.data_decl.into_iter().map(data_decl).join(""),
         ast.variable_decl.iter().map(variable_decl).join(""),
         ast.entry_point,
-        PRIMITIVES_DEF[&IntrinsicVariable::Unit],
+        PRIMITIVE_CONSTRUCTOR_DEF[&IntrinsicConstructor::Unit],
     )
 }
 
@@ -71,12 +82,22 @@ static PRIMITIVES_DEF: Lazy<FxHashMap<IntrinsicVariable, &str>> =
             (Multi, "a => b => a * b"),
             (Print, "a => process.stdout.write(a)"),
             (Println, "a => console.log(a)"),
-            (True, "{name: '$True$True'}"),
-            (False, "{name: '$False$False'}"),
             (Percent, "a => b => a % b"),
             (Neq, "a => b => $$bool(a !== b)"),
             (Eq, "a => b => $$bool(a === b)"),
             (Append, "a => b => a + b"),
+        ]
+        .iter()
+        .copied()
+        .collect()
+    });
+
+static PRIMITIVE_CONSTRUCTOR_DEF: Lazy<FxHashMap<IntrinsicConstructor, &str>> =
+    Lazy::new(|| {
+        use IntrinsicConstructor::*;
+        [
+            (True, "{name: '$True$True'}"),
+            (False, "{name: '$False$False'}"),
             (Unit, "{name: '$Unit$unicode_28_29'}"),
         ]
         .iter()
