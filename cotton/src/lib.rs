@@ -106,7 +106,6 @@ pub fn get_token_map(ast: &parse::Ast) -> FxHashMap<TokenId, TokenKind> {
                     let t = ast.types_of_decls.get(&VariableId::Decl(decl_id));
                     TokenKind::Variable(VariableId::Decl(decl_id), t.cloned())
                 }
-                ast_step2::TokenMapEntry::DataDecl(_) => TokenKind::Type,
                 ast_step2::TokenMapEntry::Ident(ident_id) => {
                     let r = resolved_idents.get(&ident_id).unwrap();
                     match r.variable_kind {
@@ -117,9 +116,11 @@ pub fn get_token_map(ast: &parse::Ast) -> FxHashMap<TokenId, TokenKind> {
                         ),
                     }
                 }
-                ast_step2::TokenMapEntry::TypeId(_)
+                ast_step2::TokenMapEntry::DataDecl(_)
+                | ast_step2::TokenMapEntry::TypeId(_)
                 | ast_step2::TokenMapEntry::TypeAlias
-                | ast_step2::TokenMapEntry::Constructor(_) => TokenKind::Type,
+                | ast_step2::TokenMapEntry::Constructor(_)
+                | ast_step2::TokenMapEntry::TypeVariable => TokenKind::Type,
             };
             (id, t)
         })

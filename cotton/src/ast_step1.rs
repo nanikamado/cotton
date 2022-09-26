@@ -19,7 +19,7 @@ type StrWithId<'a> = (&'a str, Option<TokenId>);
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Forall<'a> {
-    pub type_variables: Vec<(&'a str, Vec<&'a str>)>,
+    pub type_variables: Vec<(StrWithId<'a>, Vec<StrWithId<'a>>)>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -38,7 +38,8 @@ pub struct Type<'a> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DataDecl<'a> {
     pub name: StrWithId<'a>,
-    pub field_len: usize,
+    pub fields: Vec<StrWithId<'a>>,
+    pub type_variables: Forall<'a>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -189,7 +190,12 @@ impl<'a> From<&'a parse::Ast> for Ast<'a> {
                 parse::Decl::Data(a) => {
                     ds.push(DataDecl {
                         name: (&a.name.0, a.name.1),
-                        field_len: a.field_len,
+                        fields: a
+                            .fields
+                            .iter()
+                            .map(|(name, id)| (name.as_str(), *id))
+                            .collect(),
+                        type_variables: (&a.type_variables).into(),
                     });
                     constructors.insert(&a.name.0);
                 }
@@ -255,10 +261,10 @@ impl<'a> From<&'a parse::Forall> for Forall<'a> {
         Forall {
             type_variables: type_variables
                 .iter()
-                .map(|((name, _), ts)| {
+                .map(|((name, id), ts)| {
                     (
-                        name.as_str(),
-                        ts.iter().map(|(n, _id)| n.as_str()).collect(),
+                        (name.as_str(), *id),
+                        ts.iter().map(|(n, id)| (n.as_str(), *id)).collect(),
                     )
                 })
                 .collect(),

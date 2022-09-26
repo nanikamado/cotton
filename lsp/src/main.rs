@@ -26,17 +26,21 @@ const SUPPORTED_TYPES: &[SemanticTokenType] = &[
     SemanticTokenType::OPERATOR,
 ];
 
-static SUPPORTED_TYPE_MAP: Lazy<HashMap<&'static SemanticTokenType, u32>> = Lazy::new(|| {
-    SUPPORTED_TYPES
-        .iter()
-        .enumerate()
-        .map(|(i, t)| (t, i as u32))
-        .collect()
-});
+static SUPPORTED_TYPE_MAP: Lazy<HashMap<&'static SemanticTokenType, u32>> =
+    Lazy::new(|| {
+        SUPPORTED_TYPES
+            .iter()
+            .enumerate()
+            .map(|(i, t)| (t, i as u32))
+            .collect()
+    });
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(
+        &self,
+        _: InitializeParams,
+    ) -> Result<InitializeResult> {
         self.client
             .log_message(MessageType::INFO, "Initializing ...")
             .await;
@@ -91,7 +95,10 @@ impl LanguageServer for Backend {
             .log_message(MessageType::INFO, "file opened!")
             .await;
         let src = params.text_document.text;
-        let tokens = semantic_tokens_from_src(&src);
+        let tokens =
+            tokio::task::spawn_blocking(move || semantic_tokens_from_src(&src))
+                .await
+                .unwrap();
         self.tokens.insert(params.text_document.uri, tokens);
     }
 
@@ -104,10 +111,17 @@ impl LanguageServer for Backend {
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         let path = params.text_document.uri.path();
         if let Ok(src) = fs::read_to_string(path) {
-            let tokens = semantic_tokens_from_src(&src);
+            let tokens = tokio::task::spawn_blocking(move || {
+                semantic_tokens_from_src(&src)
+            })
+            .await
+            .unwrap();
             self.tokens.insert(params.text_document.uri, tokens);
             self.client
-                .log_message(MessageType::INFO, format!("file saved. tokens saved."))
+                .log_message(
+                    MessageType::INFO,
+                    format!("file saved. tokens saved."),
+                )
                 .await;
         }
     }
@@ -162,7 +176,9 @@ fn semantic_tokens_from_src(src: &str) -> SemanticTokens {
                     match token_map.get(&id) {
                         Some(e) => match e {
                             TokenKind::Variable(_, Some(b)) => {
-                                if let TypeMatchableRef::Fn(_, _) = b.constructor.matchable_ref() {
+                                if let TypeMatchableRef::Fn(_, _) =
+                                    b.constructor.matchable_ref()
+                                {
                                     SemanticTokenType::FUNCTION
                                 } else {
                                     SemanticTokenType::VARIABLE
@@ -181,11 +197,12 @@ fn semantic_tokens_from_src(src: &str) -> SemanticTokens {
                     }
                 }
             }
-            Op(_, _) | Comma | Assign | Bar | BArrow | Colon => SemanticTokenType::OPERATOR,
-            Paren(_) | OpenParenWithoutPad | Indent | Dedent => continue,
-            Case | Do | Forall | Infixl | Infixr | Data | Type | Interface | Where => {
-                SemanticTokenType::KEYWORD
+            Op(_, _) | Comma | Assign | Bar | BArrow | Colon => {
+                SemanticTokenType::OPERATOR
             }
+            Paren(_) | OpenParenWithoutPad | Indent | Dedent => continue,
+            Case | Do | Forall | Infixl | Infixr | Data | Type | Interface
+            | Where => SemanticTokenType::KEYWORD,
         };
         let l = char_to_utf16_map[range.start].0;
         let s = char_to_utf16_map[range.start].1;

@@ -144,6 +144,7 @@ pub enum TokenMapEntry {
     TypeId(TypeId),
     TypeAlias,
     Constructor(ConstructorId),
+    TypeVariable,
 }
 
 #[derive(Default, Debug, PartialEq, Eq)]
@@ -184,10 +185,18 @@ impl<'a> Ast<'a> {
             .map(|d| {
                 let decl_id = DeclId::new();
                 token_map.insert(d.name.1, TokenMapEntry::DataDecl(decl_id));
+                for ((_, id), _) in d.type_variables.type_variables {
+                    token_map.insert(id, TokenMapEntry::TypeVariable);
+                }
                 DataDecl {
                     name: d.name.0,
-                    fields: (0..d.field_len)
-                        .map(|_| TypeVariable::new())
+                    fields: d
+                        .fields
+                        .iter()
+                        .map(|f| {
+                            token_map.insert(f.1, TokenMapEntry::TypeVariable);
+                            TypeVariable::new()
+                        })
                         .collect(),
                     decl_id,
                 }
@@ -198,7 +207,10 @@ impl<'a> Ast<'a> {
         let mut type_alias_map = TypeAliasMap(
             ast.type_alias_decl
                 .into_iter()
-                .map(|a| (a.name.0, (a.body, AliasComputation::NotUnaliased)))
+                .map(|a| {
+                    token_map.insert(a.name.1, TokenMapEntry::TypeAlias);
+                    (a.name.0, (a.body, AliasComputation::NotUnaliased))
+                })
                 .collect(),
         );
         let interface_decl: FxHashMap<&str, Vec<_>> = ast
@@ -219,7 +231,13 @@ impl<'a> Ast<'a> {
                                     &forall
                                         .type_variables
                                         .into_iter()
-                                        .map(|(s, _)| (s, TypeVariable::new()))
+                                        .map(|(s, _)| {
+                                            token_map.insert(
+                                                s.1,
+                                                TokenMapEntry::TypeVariable,
+                                            );
+                                            (s.0, TypeVariable::new())
+                                        })
                                         .chain(std::iter::once(("Self", self_)))
                                         .collect(),
                                     &mut type_alias_map,
@@ -304,9 +322,10 @@ fn variable_decl<'a>(
         type_annotation: v.type_annotation.map(|(t, forall)| {
             type_variable_names.extend(forall.type_variables.into_iter().map(
                 |(s, interface_names)| {
+                    token_map.insert(s.1, TokenMapEntry::TypeVariable);
                     let v = TypeVariable::new();
                     for name in interface_names {
-                        for (name, t, self_) in &interfaces[&name] {
+                        for (name, t, self_) in &interfaces[&name.0] {
                             implicit_parameters.push((
                                 *name,
                                 t.clone().replace_num(
@@ -317,7 +336,7 @@ fn variable_decl<'a>(
                             ))
                         }
                     }
-                    (s, v)
+                    (s.0, v)
                 },
             ));
             type_to_type(
@@ -627,6 +646,7 @@ pub fn type_to_type<'a>(
         .into(),
         _ => {
             if let Some(n) = type_variable_names.get(t.name.0) {
+                token_map.insert(t.name.1, TokenMapEntry::TypeVariable);
                 TypeUnit::Variable(*n).into()
             } else if let Some(i) = INTRINSIC_TYPES.get(&t.name.0) {
                 let mut tuple = Type::label_from_str("()");
@@ -780,7 +800,8 @@ impl<'a> TypeAliasMap<'a> {
                         .into_iter()
                         .map(|(s, _)| {
                             let v = TypeVariable::new();
-                            type_variable_names.insert(s, v);
+                            token_map.insert(s.1, TokenMapEntry::TypeVariable);
+                            type_variable_names.insert(s.0, v);
                             v
                         })
                         .collect_vec();

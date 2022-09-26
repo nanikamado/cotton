@@ -80,7 +80,8 @@ pub enum Associativity {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DataDecl {
     pub name: StringWithId,
-    pub field_len: usize,
+    pub fields: Vec<StringWithId>,
+    pub type_variables: Forall,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -326,21 +327,28 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 )
                 .or_not(),
         )
-        .map(|((name, id), args)| DataDecl {
+        .then(forall.clone().or_not())
+        .map(|(((name, id), args), forall)| DataDecl {
             name: (name, Some(id)),
-            field_len: args.unwrap_or_default().len(),
+            fields: args
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(name, id)| (name, Some(id)))
+                .collect(),
+            type_variables: forall.unwrap_or_default(),
         });
-    let data_decl_infix =
-        ident
-            .ignore_then(op)
-            .then_ignore(ident)
-            .map(|(name, id)| DataDecl {
-                name: (name, Some(id)),
-                field_len: 2,
-            });
-    let data_decl = just(Token::Data)
-        .ignore_then(data_decl_infix.or(data_decl_normal))
-        .then_ignore(forall.or_not());
+    let data_decl_infix = ident.then(op).then(ident).then(forall.or_not()).map(
+        |(
+            (((ident1, ident1_id), (op, op_id)), (ident2, ident2_id)),
+            forall,
+        )| DataDecl {
+            name: (op, Some(op_id)),
+            fields: vec![(ident1, Some(ident1_id)), (ident2, Some(ident2_id))],
+            type_variables: forall.unwrap_or_default(),
+        },
+    );
+    let data_decl =
+        just(Token::Data).ignore_then(data_decl_infix.or(data_decl_normal));
     let type_alias_decl = just(Token::Type)
         .ignore_then(ident)
         .then_ignore(just(Token::Assign))
