@@ -56,7 +56,7 @@ pub fn type_check<'a>(
     ast: &Ast<'a>,
 ) -> (
     ResolvedIdents<'a>,
-    FxHashMap<DeclId, ast_step2::IncompleteType<'a>>,
+    FxHashMap<VariableId, ast_step2::IncompleteType<'a>>,
     SubtypeRelations<'a>,
     TypeVariableMap<'a>,
 ) {
@@ -283,7 +283,7 @@ struct Toplevel<'a> {
     variable_kind: VariableKind,
 }
 
-type TypesOfDeclsVec<'a> = Vec<(DeclId, ast_step2::IncompleteType<'a>)>;
+type TypesOfDeclsVec<'a> = Vec<(VariableId, ast_step2::IncompleteType<'a>)>;
 
 fn resolve_names<'a>(
     toplevels: Vec<Toplevel<'a>>,
@@ -349,21 +349,12 @@ fn resolve_names<'a>(
                 });
         }
     }
-    let mut types = Vec::new();
-    for (i, t) in
-        resolved_variable_map
-            .into_iter()
-            .flat_map(|(_, toplevels)| {
-                toplevels.into_iter().map(|t| (t.decl_id, t.incomplete))
-            })
-    {
-        match i {
-            VariableId::Decl(i) => {
-                types.push((i, t));
-            }
-            VariableId::Intrinsic(_) => (),
-        }
-    }
+    let types = resolved_variable_map
+        .into_iter()
+        .flat_map(|(_, toplevels)| {
+            toplevels.into_iter().map(|t| (t.decl_id, t.incomplete))
+        })
+        .collect();
     (resolved_idents, types, rel)
 }
 

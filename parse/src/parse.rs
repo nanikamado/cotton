@@ -379,7 +379,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         .then_ignore(end())
 }
 
-pub(crate) fn parse(ts: Vec<(Token, Span)>, src: &str, src_len: usize) -> Ast {
+pub fn parse(ts: Vec<(Token, Span)>, src: &str, src_len: usize) -> Ast {
     let r =
         parser().parse(Stream::from_iter(src_len..src_len + 1, ts.into_iter()));
     match r {

@@ -38,7 +38,7 @@ pub enum TypeId {
 /// # Difference between `ast_step1::Ast` and `ast_step2::Ast`
 /// - The names of types and constructors are resolved.
 /// - Local variable declarations are converted into lambdas and function calls.
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq)]
 pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl<'a>>,
@@ -135,14 +135,17 @@ pub enum PatternUnit<'a, T> {
     TypeRestriction(Pattern<'a, T>, Type<'a>),
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum TokenMapEntry {
     Decl(DeclId),
+    DataDecl(DeclId),
     Ident(IdentId),
     TypeId(TypeId),
+    TypeAlias,
 }
 
-#[derive(Default)]
-pub struct TokenMap(FxHashMap<TokenId, TokenMapEntry>);
+#[derive(Default, Debug, PartialEq, Eq)]
+pub struct TokenMap(pub FxHashMap<TokenId, TokenMapEntry>);
 
 impl TokenMap {
     fn insert_decl(&mut self, id: Option<TokenId>, decl_id: DeclId) {
@@ -162,17 +165,23 @@ impl TokenMap {
             self.0.insert(id, TokenMapEntry::TypeId(type_id));
         }
     }
+
+    fn insert(&mut self, id: Option<TokenId>, entry: TokenMapEntry) {
+        if let Some(id) = id {
+            self.0.insert(id, entry);
+        }
+    }
 }
 
-impl<'a> From<ast_step1::Ast<'a>> for Ast<'a> {
-    fn from(ast: ast_step1::Ast<'a>) -> Self {
+impl<'a> Ast<'a> {
+    pub fn from(ast: ast_step1::Ast<'a>) -> (Self, TokenMap) {
         let mut token_map = TokenMap::default();
         let data_decl: Vec<_> = ast
             .data_decl
             .into_iter()
             .map(|d| {
                 let decl_id = DeclId::new();
-                token_map.insert_decl(d.name.1, decl_id);
+                token_map.insert(d.name.1, TokenMapEntry::DataDecl(decl_id));
                 DataDecl {
                     name: d.name.0,
                     fields: (0..d.field_len)
@@ -241,11 +250,14 @@ impl<'a> From<ast_step1::Ast<'a>> for Ast<'a> {
             .find(|d| d.name == "main")
             .unwrap_or_else(|| panic!("entry point not found"))
             .decl_id;
-        Self {
-            variable_decl,
-            data_decl,
-            entry_point,
-        }
+        (
+            Self {
+                variable_decl,
+                data_decl,
+                entry_point,
+            },
+            token_map,
+        )
     }
 }
 
@@ -293,6 +305,7 @@ fn variable_decl<'a>(
     let mut type_variable_names = type_variable_names.clone();
     let mut implicit_parameters = Vec::new();
     let decl_id = DeclId::new();
+    token_map.insert_decl(v.name.1, decl_id);
     VariableDecl {
         name: v.name.0,
         type_annotation: v.type_annotation.map(|(t, forall)| {
@@ -644,7 +657,7 @@ pub fn type_to_type<'a>(
                 )
                 .into()
             } else if let Some((mut unaliased, forall)) = type_alias_map.get(
-                t.name.0,
+                t.name,
                 data_decl_map,
                 type_variable_names,
                 if search_type == SearchMode::Normal {
@@ -731,14 +744,14 @@ struct Forall(Vec<TypeVariable>);
 impl<'a> TypeAliasMap<'a> {
     fn get(
         &mut self,
-        name: &'a str,
+        name: (&'a str, Option<TokenId>),
         data_decl_map: &FxHashMap<&'a str, DeclId>,
         type_variable_names: &FxHashMap<&'a str, TypeVariable>,
         search_type: SearchMode,
         token_map: &mut TokenMap,
     ) -> Option<(Type<'a>, Forall)> {
         debug_assert_ne!(search_type, SearchMode::Normal);
-        let alias = self.0.get(name)?;
+        let alias = self.0.get(name.0)?;
         Some(match (&alias, search_type) {
             (
                 (_, AliasComputation::Unaliased(t, forall)),
@@ -751,6 +764,7 @@ impl<'a> TypeAliasMap<'a> {
                     t = t.replace_num(*v, &TypeUnit::Variable(new_v).into());
                     new_forall.push(new_v);
                 }
+                token_map.insert(name.1, TokenMapEntry::TypeAlias);
                 (t, Forall(new_forall))
             }
             ((t, _), _) => {
@@ -761,7 +775,7 @@ impl<'a> TypeAliasMap<'a> {
                         .map(|(s, v)| (s, v.increment_recursive_index(1)))
                         .collect();
                 type_variable_names
-                    .insert(name, TypeVariable::RecursiveIndex(0));
+                    .insert(name.0, TypeVariable::RecursiveIndex(0));
                 let forall =
                     t.1.clone()
                         .type_variables
@@ -788,12 +802,13 @@ impl<'a> TypeAliasMap<'a> {
                     new_t
                 };
                 if search_type == SearchMode::Alias {
-                    self.0.get_mut(name).unwrap().1 =
+                    self.0.get_mut(name.0).unwrap().1 =
                         AliasComputation::Unaliased(
                             new_t.clone(),
                             Forall(forall.clone()),
                         );
                 }
+                token_map.insert(name.1, TokenMapEntry::TypeAlias);
                 (decrement_index_outside(new_t), Forall(forall))
             }
         })

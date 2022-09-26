@@ -658,7 +658,7 @@ mod tests {
         "#;
         let ast = parse::parse(src);
         let ast: ast_step1::Ast = (&ast).into();
-        let ast: ast_step2::Ast = ast.into();
+        let (ast, _) = ast_step2::Ast::from(ast);
         let t = ast
             .variable_decl
             .iter()
@@ -686,7 +686,7 @@ mod tests {
         "#;
         let ast = parse::parse(src);
         let ast: ast_step1::Ast = (&ast).into();
-        let ast: ast_step2::Ast = ast.into();
+        let (ast, _) = ast_step2::Ast::from(ast);
         let t = ast
             .variable_decl
             .iter()

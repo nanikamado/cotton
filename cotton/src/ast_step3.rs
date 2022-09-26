@@ -24,7 +24,7 @@ pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl<'a>>,
     pub entry_point: DeclId,
-    pub types_of_decls: FxHashMap<DeclId, IncompleteType<'a>>,
+    pub types_of_decls: FxHashMap<VariableId, IncompleteType<'a>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -64,7 +64,7 @@ pub struct DataDecl<'a> {
 }
 
 impl<'a> Ast<'a> {
-    pub fn from(ast: ast_step2::Ast<'a>) -> Self {
+    pub fn from(ast: ast_step2::Ast<'a>) -> (Self, ResolvedIdents<'a>) {
         let (resolved_idents, types_of_decls, _subtype_relations, mut map) =
             type_check(&ast);
         let (variable_decl, entry_point) = variable_decl(
@@ -75,7 +75,11 @@ impl<'a> Ast<'a> {
             &mut map,
         );
         for v in &variable_decl {
-            log::debug!("type_ {} : {}", v.name, types_of_decls[&v.decl_id]);
+            log::debug!(
+                "type_ {} : {}",
+                v.name,
+                types_of_decls[&VariableId::Decl(v.decl_id)]
+            );
         }
         let data_decl = ast
             .data_decl
@@ -86,12 +90,15 @@ impl<'a> Ast<'a> {
                 decl_id: d.decl_id,
             })
             .collect();
-        Self {
-            variable_decl,
-            data_decl,
-            entry_point,
-            types_of_decls,
-        }
+        (
+            Self {
+                variable_decl,
+                data_decl,
+                entry_point,
+                types_of_decls,
+            },
+            resolved_idents,
+        )
     }
 }
 
