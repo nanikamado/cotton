@@ -656,7 +656,7 @@ mod tests {
             | () => ()
         test1 : (False /\ False) | (False /\ True) | (True /\ False) | (True /\ True) = ()
         "#;
-        let ast = parse::parse(src);
+        let ast = parser::parse(src);
         let ast: ast_step1::Ast = (&ast).into();
         let (ast, _) = ast_step2::Ast::from(ast);
         let t = ast
@@ -684,7 +684,7 @@ mod tests {
         type List = () | A /\ List[A] forall { A }
         test1 : List[() | I64] | List[I64] = ()
         "#;
-        let ast = parse::parse(src);
+        let ast = parser::parse(src);
         let ast: ast_step1::Ast = (&ast).into();
         let (ast, _) = ast_step2::Ast::from(ast);
         let t = ast

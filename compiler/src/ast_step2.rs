@@ -18,7 +18,7 @@ use crate::{
 };
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
-use parse::token_id::TokenId;
+use parser::token_id::TokenId;
 use std::collections::BTreeSet;
 use std::fmt::Display;
 pub use types::TypeConstructor;

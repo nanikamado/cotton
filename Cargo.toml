@@ -1,8 +1,14 @@
+[package]
+name = "cotton"
+version = "0.1.0"
+edition = "2021"
+description = "A programming language."
+
 [workspace]
-default-members = ["cotton"]
+default-members = [".", "compiler"]
 members = [
-  "parse",
-  "lsp",
+  "compiler/parser",
+  "language_server",
 ]
 
 [profile.release]
@@ -10,3 +16,13 @@ debug = true
 
 [profile.test]
 opt-level = 2
+
+[dependencies]
+clap = { version = "3.2.22", features = ["cargo"] }
+compiler = { path = "compiler" }
+log = "0.4.14"
+
+[dev-dependencies]
+assert_cmd = "2.0.4"
+itertools = "0.10.3"
+stripmargin = "*"

@@ -1,4 +1,4 @@
-use cotton::{Token, TokenKind, TypeMatchableRef};
+use compiler::{Token, TokenKind, TypeMatchableRef};
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
@@ -168,9 +168,9 @@ async fn main() {
 
 fn semantic_tokens_from_src(src: &str) -> SemanticTokens {
     let char_to_utf16_map = make_map(&src);
-    let (ts, src_len) = cotton::lex(&src);
-    let ast = cotton::parse(ts.clone(), src, src_len);
-    let token_map = cotton::get_token_map(&ast);
+    let (ts, src_len) = compiler::lex(&src);
+    let ast = compiler::parse(ts.clone(), src, src_len);
+    let token_map = compiler::get_token_map(&ast);
     let mut tokens = Vec::new();
     let mut line = 0;
     let mut start = 0;

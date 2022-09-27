@@ -1,5 +1,5 @@
 use clap::{command, Arg, ArgAction, ArgGroup};
-use cotton::{run, Command};
+use compiler::{run, Command};
 use log::LevelFilter;
 use std::{fs, process, str::FromStr};
 
