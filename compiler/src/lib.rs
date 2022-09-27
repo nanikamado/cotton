@@ -9,11 +9,11 @@ mod print_types;
 mod run_js;
 mod rust_backend;
 
-pub use ast_step2::{types::TypeMatchableRef, IncompleteType};
+pub use ast_step2::{types::TypeMatchableRef, IncompleteType, PrintForUser};
 use ast_step3::VariableId;
 use codegen::codegen;
-use fxhash::FxHashMap;
-use parser::token_id::TokenId;
+pub use fxhash::FxHashMap;
+pub use parser::token_id::TokenId;
 pub use parser::{lex, parse::parse, Token};
 use simplelog::{
     self, ColorChoice, ConfigBuilder, LevelFilter, TermLogger, TerminalMode,
@@ -90,6 +90,7 @@ pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
 
 pub enum TokenKind<'a> {
     Variable(VariableId, Option<IncompleteType<'a>>),
+    Constructor(Option<IncompleteType<'a>>),
     Type,
     Interface,
     VariableDeclInInterface(IncompleteType<'a>),
@@ -111,9 +112,13 @@ pub fn get_token_map(ast: &parser::Ast) -> FxHashMap<TokenId, TokenKind> {
                 ast_step2::TokenMapEntry::Ident(ident_id) => {
                     let r = resolved_idents.get(&ident_id).unwrap();
                     match r.variable_kind {
-                        ast_step4::VariableKind::Constructor
-                        | ast_step4::VariableKind::IntrinsicConstructor => {
+                        ast_step4::VariableKind::IntrinsicConstructor => {
                             TokenKind::Type
+                        }
+                        ast_step4::VariableKind::Constructor => {
+                            TokenKind::Constructor(
+                                ast.types_of_decls.get(&r.variable_id).cloned(),
+                            )
                         }
                         _ => TokenKind::Variable(
                             r.variable_id,
@@ -127,8 +132,19 @@ pub fn get_token_map(ast: &parser::Ast) -> FxHashMap<TokenId, TokenKind> {
                 ast_step2::TokenMapEntry::DataDecl(_)
                 | ast_step2::TokenMapEntry::TypeId(_)
                 | ast_step2::TokenMapEntry::TypeAlias
-                | ast_step2::TokenMapEntry::Constructor(_)
                 | ast_step2::TokenMapEntry::TypeVariable => TokenKind::Type,
+                ast_step2::TokenMapEntry::Constructor(id) => match id {
+                    ast_step2::ConstructorId::DeclId(decl_id) => {
+                        TokenKind::Constructor(
+                            ast.types_of_decls
+                                .get(&VariableId::Decl(decl_id))
+                                .cloned(),
+                        )
+                    }
+                    ast_step2::ConstructorId::Intrinsic(id) => {
+                        TokenKind::Constructor(Some(id.to_type().into()))
+                    }
+                },
                 ast_step2::TokenMapEntry::Interface => TokenKind::Interface,
             };
             (id, t)

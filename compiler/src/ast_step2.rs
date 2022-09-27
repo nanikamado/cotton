@@ -91,6 +91,8 @@ where
     pub pattern_restrictions: PatternRestrictions<'a>,
 }
 
+pub struct PrintForUser<'a>(pub &'a IncompleteType<'a>);
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct VariableDecl<'a> {
     pub name: &'a str,
@@ -1017,5 +1019,24 @@ impl<'a> PatternUnitForRestriction<'a> {
             }
             Binder(t, decl_id) => (Binder(f(t), decl_id), f),
         }
+    }
+}
+
+impl<'a> Display for PrintForUser<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.constructor)?;
+        let vs = self.0.constructor.all_type_variables();
+        if !vs.is_empty() {
+            write!(
+                f,
+                " forall {{ {}{} }}",
+                vs.iter().format(", "),
+                &self.0.subtype_relations.iter().format_with(
+                    "",
+                    |(a, b), f| f(&format_args!(", {} <: {}", a, b))
+                )
+            )?;
+        }
+        Ok(())
     }
 }
