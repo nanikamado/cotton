@@ -235,12 +235,11 @@ fn semantic_tokens_from_src(src: &str) -> SemanticTokens {
 }
 
 fn make_map(src: &str) -> Vec<(u32, u32)> {
-    let src = src.chars();
-    let mut char_to_utf16_map = Vec::with_capacity(src.size_hint().0);
+    let mut char_to_utf16_map = Vec::with_capacity(src.len());
     char_to_utf16_map.push((0, 0));
     let mut line = 0;
     let mut col = 0;
-    for c in src {
+    for c in src.chars() {
         if c == '\n' {
             line += 1;
             col = 0;
