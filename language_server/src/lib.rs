@@ -157,7 +157,7 @@ impl LanguageServer for Backend {
 }
 
 #[tokio::main]
-async fn main() {
+pub async fn run() {
     let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
     let (service, socket) = LspService::new(|client| Backend {
         client,

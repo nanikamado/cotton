@@ -179,6 +179,7 @@ dependencies = [
  "clap",
  "compiler",
  "itertools",
+ "language_server",
  "log",
  "stripmargin",
 ]

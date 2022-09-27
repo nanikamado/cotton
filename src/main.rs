@@ -5,7 +5,16 @@ use std::{fs, process, str::FromStr};
 
 fn main() {
     let matches = command!()
-        .arg(Arg::new("filename").required(true))
+        .arg(
+            Arg::new("language-server")
+                .long("language-server")
+                .help("Run language server")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("filename")
+                .required_unless_present_any(["language-server"]),
+        )
         .arg(
             Arg::new("js")
                 .short('j')
@@ -46,18 +55,23 @@ fn main() {
                 .default_value("error"),
         )
         .get_matches();
-    let file_name = matches.value_of("filename").unwrap();
     let command = match (
         matches.get_flag("js"),
         matches.get_flag("rust"),
         matches.get_flag("types"),
+        matches.get_flag("language-server"),
     ) {
-        (true, false, false) => Command::PrintJs,
-        (false, true, false) => Command::RunRust,
-        (false, false, true) => Command::PrintTypes,
-        (false, false, false) => Command::RunJs,
+        (true, false, false, false) => Command::PrintJs,
+        (false, true, false, false) => Command::RunRust,
+        (false, false, true, false) => Command::PrintTypes,
+        (false, false, false, true) => {
+            language_server::run();
+            return;
+        }
+        (false, false, false, false) => Command::RunJs,
         _ => unreachable!(),
     };
+    let file_name = matches.value_of("filename").unwrap();
     let loglevel =
         LevelFilter::from_str(matches.value_of("loglevel").unwrap()).unwrap();
     match fs::read_to_string(file_name) {
