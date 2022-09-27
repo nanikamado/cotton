@@ -64,7 +64,6 @@ impl LanguageServer for Backend {
                 ),
                 ..ServerCapabilities::default()
             },
-            ..Default::default()
         })
     }
 
@@ -118,10 +117,7 @@ impl LanguageServer for Backend {
             .unwrap();
             self.tokens.insert(params.text_document.uri, tokens);
             self.client
-                .log_message(
-                    MessageType::INFO,
-                    format!("file saved. tokens saved."),
-                )
+                .log_message(MessageType::INFO, "file saved. tokens saved.")
                 .await;
         }
     }
@@ -140,18 +136,16 @@ impl LanguageServer for Backend {
         if let Some(r) = self.tokens.get(&uri) {
             let tokens = r.value();
             Ok(Some(tokens.clone().into()))
+        } else if let Ok(src) = fs::read_to_string(uri.path()) {
+            let tokens = tokio::task::spawn_blocking(move || {
+                semantic_tokens_from_src(&src)
+            })
+            .await
+            .unwrap();
+            self.tokens.insert(uri, tokens.clone());
+            Ok(Some(tokens.into()))
         } else {
-            if let Ok(src) = fs::read_to_string(uri.path()) {
-                let tokens = tokio::task::spawn_blocking(move || {
-                    semantic_tokens_from_src(&src)
-                })
-                .await
-                .unwrap();
-                self.tokens.insert(uri, tokens.clone());
-                Ok(Some(tokens.into()))
-            } else {
-                Ok(None)
-            }
+            Ok(None)
         }
     }
 }
@@ -167,8 +161,8 @@ pub async fn run() {
 }
 
 fn semantic_tokens_from_src(src: &str) -> SemanticTokens {
-    let char_to_utf16_map = make_map(&src);
-    let (ts, src_len) = compiler::lex(&src);
+    let char_to_utf16_map = make_map(src);
+    let (ts, src_len) = compiler::lex(src);
     let ast = compiler::parse(ts.clone(), src, src_len);
     let token_map = compiler::get_token_map(&ast);
     let mut tokens = Vec::new();
