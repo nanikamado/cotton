@@ -1725,7 +1725,7 @@ mod tests {
         = ()
         dot : a -> (a -> b) -> b forall {a, b} = ()
         "#;
-        let ast = parse::parse(src);
+        let ast = parser::parse(src);
         let ast: ast_step1::Ast = (&ast).into();
         let (ast, _) = ast_step2::Ast::from(ast);
         let req_t = ast
@@ -1770,7 +1770,7 @@ mod tests {
             (c /\ True /\ d) |
             (e /\ f /\ True) forall {a,b,c,d,e,f} = ()
         "#;
-        let ast = parse::parse(src);
+        let ast = parser::parse(src);
         let ast: ast_step1::Ast = (&ast).into();
         let (ast, _) = ast_step2::Ast::from(ast);
         let t1 = ast
@@ -1809,7 +1809,7 @@ mod tests {
             | () => ()
         test1 : ((True | False) /\ (True | False)) = ()
         "#;
-        let ast = parse::parse(src);
+        let ast = parser::parse(src);
         let ast: ast_step1::Ast = (&ast).into();
         let (ast, _) = ast_step2::Ast::from(ast);
         let t1 = ast
@@ -1871,7 +1871,7 @@ mod tests {
         type Tree = E | T[A, Tree[A], Tree[A]] forall { A }
         test1 : Tree[()] = ()
         "#;
-        let ast = parse::parse(src);
+        let ast = parser::parse(src);
         let ast: ast_step1::Ast = (&ast).into();
         let (ast, _) = ast_step2::Ast::from(ast);
         let t_id = ast
@@ -1989,7 +1989,7 @@ mod tests {
         data B
         test1 : A = A
         "#;
-        let ast = parse::parse(src);
+        let ast = parser::parse(src);
         let ast: ast_step1::Ast = (&ast).into();
         let (ast, _) = ast_step2::Ast::from(ast);
         let b_id = ast

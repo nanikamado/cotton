@@ -13,8 +13,8 @@ pub use ast_step2::{types::TypeMatchableRef, IncompleteType};
 use ast_step3::VariableId;
 use codegen::codegen;
 use fxhash::FxHashMap;
-use parse::token_id::TokenId;
-pub use parse::{lex, parse::parse, Token};
+use parser::token_id::TokenId;
+pub use parser::{lex, parse::parse, Token};
 use simplelog::{
     self, ColorChoice, ConfigBuilder, LevelFilter, TermLogger, TerminalMode,
 };
@@ -64,7 +64,7 @@ pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
         }
     }
     let (tokens, src_len) = lex(source);
-    let ast = parse::parse::parse(tokens, source, src_len);
+    let ast = parser::parse::parse(tokens, source, src_len);
     let ast = ast_step1::Ast::from(&ast);
     let (ast, _token_map) = ast_step2::Ast::from(ast);
     let (ast, _resolved_idents) = ast_step3::Ast::from(ast);
@@ -95,7 +95,7 @@ pub enum TokenKind<'a> {
     VariableDeclInInterface(IncompleteType<'a>),
 }
 
-pub fn get_token_map(ast: &parse::Ast) -> FxHashMap<TokenId, TokenKind> {
+pub fn get_token_map(ast: &parser::Ast) -> FxHashMap<TokenId, TokenKind> {
     let ast = ast_step1::Ast::from(ast);
     let (ast, token_map) = ast_step2::Ast::from(ast);
     let (ast, resolved_idents) = ast_step3::Ast::from(ast);

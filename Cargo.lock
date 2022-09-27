@@ -152,7 +152,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cotton"
+name = "compiler"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
@@ -163,12 +163,25 @@ dependencies = [
  "itertools",
  "log",
  "once_cell",
- "parse",
+ "parser",
  "petgraph",
  "simplelog",
  "stripmargin",
  "strum",
  "unic-ucd-category",
+]
+
+[[package]]
+name = "cotton"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "clap",
+ "compiler",
+ "itertools",
+ "language_server",
+ "log",
+ "stripmargin",
 ]
 
 [[package]]
@@ -398,6 +411,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112c678d4050afce233f4f2852bb2eb519230b3cf12f33585275537d7e41578d"
 
 [[package]]
+name = "language_server"
+version = "0.1.0"
+dependencies = [
+ "compiler",
+ "dashmap",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower-lsp",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -426,19 +452,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "abb12e687cfb44aa40f41fc3978ef76448f9b6038cad6aef4259d3c095a2382e"
 dependencies = [
  "cfg-if",
-]
-
-[[package]]
-name = "lsp"
-version = "0.1.0"
-dependencies = [
- "cotton",
- "dashmap",
- "once_cell",
- "serde",
- "serde_json",
- "tokio",
- "tower-lsp",
 ]
 
 [[package]]
@@ -523,7 +536,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "parse"
+name = "parser"
 version = "0.1.0"
 dependencies = [
  "ariadne",

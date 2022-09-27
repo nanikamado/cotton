@@ -1,7 +1,7 @@
 use crate::ast_step2::types::Type;
 use fxhash::FxHashMap;
 use once_cell::sync::Lazy;
-use parse::Associativity;
+use parser::Associativity;
 use std::fmt::Display;
 use strum::EnumIter;
 

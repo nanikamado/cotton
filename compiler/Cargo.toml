@@ -1,8 +1,7 @@
 [package]
-name = "cotton"
+name = "compiler"
 version = "0.1.0"
 edition = "2021"
-description = "A programming language."
 
 [dependencies]
 clap = { version = "3.2.22", features = ["cargo"] }
@@ -16,7 +15,7 @@ simplelog = "0.12.0"
 log = "0.4.14"
 strum = { version = "0.24", features = ["derive"] }
 index_list = "0.2.7"
-parse = { path = "../parse" }
+parser = { path = "parser" }
 unic-ucd-category = "0.9.0"
 
 [dev-dependencies]
