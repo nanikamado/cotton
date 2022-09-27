@@ -162,9 +162,11 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
         let url = params.text_document_position_params.text_document.uri;
         if let Some(hover_map) = self.tokens.get(&url) {
-            Ok(hover_map.value().1[position.line as usize]
-                [position.character as usize]
-                .clone())
+            Ok(hover_map
+                .value()
+                .1
+                .get(position.line as usize)
+                .and_then(|t| t.get(position.character as usize).cloned()?))
         } else {
             Ok(None)
         }
