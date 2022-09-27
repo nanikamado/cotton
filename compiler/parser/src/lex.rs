@@ -1,11 +1,10 @@
+use crate::token_id::TokenId;
 use chumsky::{
     prelude::*,
     text::{newline, Character},
 };
 use std::iter;
 use unic_ucd_category::GeneralCategory;
-
-use crate::token_id::TokenId;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Token {
