@@ -12,7 +12,7 @@ mod rust_backend;
 pub use ast_step1::OpPrecedenceMap;
 use ast_step2::types::Type;
 pub use ast_step2::{
-    types::TypeMatchableRef, IncompleteType, PrintForUser,
+    types::TypeMatchableRef, IncompleteType, PrintTypeOfGlobalVariableForUser,
     PrintTypeOfLocalVariableForUser,
 };
 use ast_step3::VariableId;

@@ -92,10 +92,10 @@ where
     pub pattern_restrictions: PatternRestrictions<'a>,
 }
 
-pub struct PrintForUser<'a>(
-    pub &'a IncompleteType<'a>,
-    pub &'a OpPrecedenceMap<'a>,
-);
+pub struct PrintTypeOfGlobalVariableForUser<'a> {
+    pub t: &'a IncompleteType<'a>,
+    pub op_precedence_map: &'a OpPrecedenceMap<'a>,
+}
 
 pub struct PrintTypeOfLocalVariableForUser<'a> {
     pub t: &'a Type<'a>,
@@ -1031,16 +1031,20 @@ impl<'a> PatternUnitForRestriction<'a> {
     }
 }
 
-impl<'a> Display for PrintForUser<'a> {
+impl<'a> Display for PrintTypeOfGlobalVariableForUser<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", fmt_type_with_env(&self.0.constructor, self.1).0)?;
-        let vs = self.0.constructor.all_type_variables();
+        write!(
+            f,
+            "{}",
+            fmt_type_with_env(&self.t.constructor, self.op_precedence_map).0
+        )?;
+        let vs = self.t.constructor.all_type_variables();
         if !vs.is_empty() {
             write!(
                 f,
                 " forall {{ {}{} }}",
                 vs.iter().format(", "),
-                &self.0.subtype_relations.iter().format_with(
+                &self.t.subtype_relations.iter().format_with(
                     "",
                     |(a, b), f| f(&format_args!(", {} <: {}", a, b))
                 )

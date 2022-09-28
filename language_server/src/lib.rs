@@ -1,6 +1,7 @@
 use compiler::{
-    FxHashMap, OpPrecedenceMap, PrintForUser, PrintTypeOfLocalVariableForUser,
-    Token, TokenId, TokenKind, TokenMapWithEnv, TypeMatchableRef,
+    FxHashMap, OpPrecedenceMap, PrintTypeOfGlobalVariableForUser,
+    PrintTypeOfLocalVariableForUser, Token, TokenId, TokenKind,
+    TokenMapWithEnv, TypeMatchableRef,
 };
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
@@ -365,9 +366,13 @@ fn print_type(
             .and_then(|token_kind| match token_kind {
                 TokenKind::GlobalVariable(_, Some(t))
                 | TokenKind::VariableDeclInInterface(t)
-                | TokenKind::Constructor(Some(t)) => {
-                    Some(PrintForUser(t, op_precedence_map).to_string())
-                }
+                | TokenKind::Constructor(Some(t)) => Some(
+                    PrintTypeOfGlobalVariableForUser {
+                        t,
+                        op_precedence_map,
+                    }
+                    .to_string(),
+                ),
                 TokenKind::LocalVariable(_, Some(t)) => Some(
                     PrintTypeOfLocalVariableForUser {
                         t,
