@@ -9,6 +9,7 @@ mod print_types;
 mod run_js;
 mod rust_backend;
 
+pub use ast_step1::OpPrecedenceMap;
 pub use ast_step2::{types::TypeMatchableRef, IncompleteType, PrintForUser};
 use ast_step3::VariableId;
 use codegen::codegen;
@@ -65,7 +66,7 @@ pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
     }
     let (tokens, src_len) = lex(source);
     let ast = parser::parse::parse(tokens, source, src_len);
-    let ast = ast_step1::Ast::from(&ast);
+    let (ast, _) = ast_step1::Ast::from(&ast);
     let (ast, _token_map) = ast_step2::Ast::from(ast);
     let (ast, _resolved_idents) = ast_step3::Ast::from(ast);
     if command == Command::PrintTypes {
@@ -96,11 +97,16 @@ pub enum TokenKind<'a> {
     VariableDeclInInterface(IncompleteType<'a>),
 }
 
-pub fn get_token_map(ast: &parser::Ast) -> FxHashMap<TokenId, TokenKind> {
-    let ast = ast_step1::Ast::from(ast);
+pub struct TokenMapWithEnv<'a> {
+    pub token_map: FxHashMap<TokenId, TokenKind<'a>>,
+    pub op_precedence_map: OpPrecedenceMap<'a>,
+}
+
+pub fn get_token_map(ast: &parser::Ast) -> TokenMapWithEnv {
+    let (ast, op_precedence_map) = ast_step1::Ast::from(ast);
     let (ast, token_map) = ast_step2::Ast::from(ast);
     let (ast, resolved_idents) = ast_step3::Ast::from(ast);
-    token_map
+    let token_map = token_map
         .0
         .into_iter()
         .map(|(id, t)| {
@@ -149,5 +155,9 @@ pub fn get_token_map(ast: &parser::Ast) -> FxHashMap<TokenId, TokenKind> {
             };
             (id, t)
         })
-        .collect()
+        .collect();
+    TokenMapWithEnv {
+        token_map,
+        op_precedence_map,
+    }
 }

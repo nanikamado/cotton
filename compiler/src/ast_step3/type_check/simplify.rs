@@ -1726,7 +1726,7 @@ mod tests {
         dot : a -> (a -> b) -> b forall {a, b} = ()
         "#;
         let ast = parser::parse(src);
-        let ast: ast_step1::Ast = (&ast).into();
+        let (ast, _) = ast_step1::Ast::from(&ast);
         let (ast, _) = ast_step2::Ast::from(ast);
         let req_t = ast
             .variable_decl
@@ -1771,7 +1771,7 @@ mod tests {
             (e /\ f /\ True) forall {a,b,c,d,e,f} = ()
         "#;
         let ast = parser::parse(src);
-        let ast: ast_step1::Ast = (&ast).into();
+        let (ast, _) = ast_step1::Ast::from(&ast);
         let (ast, _) = ast_step2::Ast::from(ast);
         let t1 = ast
             .variable_decl
@@ -1810,7 +1810,7 @@ mod tests {
         test1 : ((True | False) /\ (True | False)) = ()
         "#;
         let ast = parser::parse(src);
-        let ast: ast_step1::Ast = (&ast).into();
+        let (ast, _) = ast_step1::Ast::from(&ast);
         let (ast, _) = ast_step2::Ast::from(ast);
         let t1 = ast
             .variable_decl
@@ -1872,7 +1872,7 @@ mod tests {
         test1 : Tree[()] = ()
         "#;
         let ast = parser::parse(src);
-        let ast: ast_step1::Ast = (&ast).into();
+        let (ast, _) = ast_step1::Ast::from(&ast);
         let (ast, _) = ast_step2::Ast::from(ast);
         let t_id = ast
             .data_decl
@@ -1990,7 +1990,7 @@ mod tests {
         test1 : A = A
         "#;
         let ast = parser::parse(src);
-        let ast: ast_step1::Ast = (&ast).into();
+        let (ast, _) = ast_step1::Ast::from(&ast);
         let (ast, _) = ast_step2::Ast::from(ast);
         let b_id = ast
             .data_decl

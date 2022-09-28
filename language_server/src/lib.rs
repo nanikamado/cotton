@@ -1,5 +1,6 @@
 use compiler::{
-    FxHashMap, PrintForUser, Token, TokenId, TokenKind, TypeMatchableRef,
+    FxHashMap, OpPrecedenceMap, PrintForUser, Token, TokenId, TokenKind,
+    TokenMapWithEnv, TypeMatchableRef,
 };
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
@@ -181,7 +182,10 @@ fn semantic_tokens_from_src(src: &str) -> (SemanticTokens, HoverMap) {
     let (char_to_utf16_map, utf16_to_char_map) = make_map(src);
     let (ts, src_len) = compiler::lex(src);
     let ast = compiler::parse(ts.clone(), src, src_len);
-    let token_map = compiler::get_token_map(&ast);
+    let TokenMapWithEnv {
+        token_map,
+        op_precedence_map,
+    } = compiler::get_token_map(&ast);
     let mut tokens = Vec::new();
     let mut line = 0;
     let mut start = 0;
@@ -268,7 +272,11 @@ fn semantic_tokens_from_src(src: &str) -> (SemanticTokens, HoverMap) {
                                     MarkupContent {
                                         value: format!(
                                             "```\n{}\n```",
-                                            print_type(&ts_head.0, &token_map)?
+                                            print_type(
+                                                &ts_head.0,
+                                                &token_map,
+                                                &op_precedence_map
+                                            )?
                                         ),
                                         kind: MarkupKind::Markdown,
                                     },
@@ -337,6 +345,7 @@ fn make_map(src: &str) -> (Vec<(u32, u32)>, Utf16ToCharMap) {
 fn print_type(
     token: &Token,
     token_map: &FxHashMap<TokenId, TokenKind>,
+    op_precedence_map: &OpPrecedenceMap,
 ) -> Option<String> {
     match token {
         Token::Int(_) => Some("I64".to_string()),
@@ -347,7 +356,7 @@ fn print_type(
                 TokenKind::Variable(_, Some(t))
                 | TokenKind::VariableDeclInInterface(t)
                 | TokenKind::Constructor(Some(t)) => {
-                    Some(PrintForUser(t).to_string())
+                    Some(PrintForUser(t, op_precedence_map).to_string())
                 }
                 _ => None,
             }),

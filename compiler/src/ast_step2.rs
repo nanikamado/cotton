@@ -8,6 +8,7 @@ use self::{
     ident_id::IdentId,
     types::{Type, TypeUnit},
 };
+use crate::ast_step1::OpPrecedenceMap;
 use crate::ast_step3::VariableRequirement;
 use crate::{
     ast_step1,
@@ -91,7 +92,10 @@ where
     pub pattern_restrictions: PatternRestrictions<'a>,
 }
 
-pub struct PrintForUser<'a>(pub &'a IncompleteType<'a>);
+pub struct PrintForUser<'a>(
+    pub &'a IncompleteType<'a>,
+    pub &'a OpPrecedenceMap<'a>,
+);
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct VariableDecl<'a> {
@@ -1024,7 +1028,7 @@ impl<'a> PatternUnitForRestriction<'a> {
 
 impl<'a> Display for PrintForUser<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0.constructor)?;
+        write!(f, "{}", fmt_type_with_env(&self.0.constructor, self.1).0)?;
         let vs = self.0.constructor.all_type_variables();
         if !vs.is_empty() {
             write!(
@@ -1039,4 +1043,169 @@ impl<'a> Display for PrintForUser<'a> {
         }
         Ok(())
     }
+}
+
+enum OperatorContext {
+    Single,
+    Fn,
+    Or,
+    OtherOperator,
+}
+
+fn fmt_type_with_env(
+    t: &Type<'_>,
+    op_precedence_map: &OpPrecedenceMap,
+) -> (String, OperatorContext) {
+    if t.is_empty() {
+        ("∅".to_string(), OperatorContext::Single)
+    } else if t.len() == 1 {
+        fmt_type_unit_with_env(t.iter().next().unwrap(), op_precedence_map)
+    } else {
+        (
+            t.iter()
+                .format_with(" | ", |t, f| {
+                    let (t, t_context) =
+                        fmt_type_unit_with_env(t, op_precedence_map);
+                    let s = match t_context {
+                        OperatorContext::Single | OperatorContext::Or => t,
+                        _ => format!("({})", t),
+                    };
+                    f(&s)
+                })
+                .to_string(),
+            OperatorContext::Or,
+        )
+    }
+}
+
+fn fmt_type_unit_with_env(
+    t: &TypeUnit<'_>,
+    op_precedence_map: &OpPrecedenceMap,
+) -> (String, OperatorContext) {
+    use OperatorContext::*;
+    match t {
+        TypeUnit::Fn(a, b) => {
+            let (b, b_context) = fmt_type_with_env(b, op_precedence_map);
+            let (a, a_context) = fmt_type_with_env(a, op_precedence_map);
+            let s = match (a_context, b_context) {
+                (Single, Single | Fn) => format!("{} -> {}", a, b),
+                (Single, _) => format!("{} -> ({})", a, b),
+                (_, Single | Fn) => format!("({}) -> {}", a, b),
+                _ => format!("({}) -> ({})", a, b),
+            };
+            (s, Fn)
+        }
+        TypeUnit::Variable(v) => (format!("{}", v), Single),
+        TypeUnit::RecursiveAlias { body } => (
+            format!("rec[{}]", fmt_type_with_env(body, op_precedence_map).0),
+            Single,
+        ),
+        TypeUnit::Const { name, .. } => (format!(":{}", name), Single),
+        TypeUnit::Tuple(hs, ts) => {
+            let ts = collect_tuple_rev(ts);
+            let hts = hs
+                .iter()
+                .flat_map(|h| ts.iter().map(move |t| (h, t)))
+                .collect_vec();
+            if hts.len() == 1 {
+                let (h, tuple_rev) = hts[0];
+                if let TypeUnit::Const { name, .. } = &**h {
+                    fmt_tuple(&**name, tuple_rev, op_precedence_map)
+                } else {
+                    panic!()
+                }
+            } else {
+                let t = format!(
+                    "{}",
+                    hts.iter().format_with(" | ", |(h, t), f| {
+                        if let TypeUnit::Const { name, .. } = &***h {
+                            let (t, t_context) =
+                                fmt_tuple(name, t, op_precedence_map);
+                            match t_context {
+                                Single | Or => f(&t),
+                                _ => f(&format_args!("({})", t)),
+                            }
+                        } else {
+                            panic!()
+                        }
+                    })
+                );
+                (t, Or)
+            }
+        }
+    }
+}
+
+fn fmt_tuple(
+    head: &str,
+    tuple_rev: &[&Type],
+    op_precedence_map: &OpPrecedenceMap,
+) -> (String, OperatorContext) {
+    use OperatorContext::*;
+    if tuple_rev.is_empty() {
+        (head.to_string(), Single)
+    } else if tuple_rev.len() == 1 {
+        (
+            format!(
+                "{}[{}]",
+                head,
+                fmt_type_with_env(tuple_rev[0], op_precedence_map).0
+            ),
+            Single,
+        )
+    } else if op_precedence_map.get(head).is_some() {
+        assert_eq!(tuple_rev.len(), 2);
+        (
+            tuple_rev
+                .iter()
+                .map(|t| {
+                    let (t, t_context) =
+                        fmt_type_with_env(t, op_precedence_map);
+                    match t_context {
+                        Single => t,
+                        _ => format!("({})", t),
+                    }
+                })
+                .format(&format!(" {} ", head))
+                .to_string(),
+            OtherOperator,
+        )
+    } else {
+        (
+            format!(
+                "{}[{}]",
+                head,
+                tuple_rev.iter().rev().format_with(", ", |t, f| {
+                    let (t, t_context) =
+                        fmt_type_with_env(t, op_precedence_map);
+                    let s = match t_context {
+                        Single => t,
+                        _ => format!("({})", t),
+                    };
+                    f(&s)
+                })
+            ),
+            Single,
+        )
+    }
+}
+
+fn collect_tuple_rev<'a, 'b>(tuple: &'b Type<'a>) -> Vec<Vec<&'b Type<'a>>> {
+    tuple
+        .iter()
+        .flat_map(|tuple| match &**tuple {
+            TypeUnit::Tuple(h, t) => collect_tuple_rev(t)
+                .into_iter()
+                .map(|mut v| {
+                    v.push(h);
+                    v
+                })
+                .collect(),
+            TypeUnit::Const {
+                id: TypeId::Intrinsic(IntrinsicType::Unit),
+                ..
+            } => vec![Vec::new()],
+            _ => panic!(),
+        })
+        .collect()
 }

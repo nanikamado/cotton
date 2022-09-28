@@ -657,7 +657,7 @@ mod tests {
         test1 : (False /\ False) | (False /\ True) | (True /\ False) | (True /\ True) = ()
         "#;
         let ast = parser::parse(src);
-        let ast: ast_step1::Ast = (&ast).into();
+        let (ast, _) = ast_step1::Ast::from(&ast);
         let (ast, _) = ast_step2::Ast::from(ast);
         let t = ast
             .variable_decl
@@ -685,7 +685,7 @@ mod tests {
         test1 : List[() | I64] | List[I64] = ()
         "#;
         let ast = parser::parse(src);
-        let ast: ast_step1::Ast = (&ast).into();
+        let (ast, _) = ast_step1::Ast::from(&ast);
         let (ast, _) = ast_step2::Ast::from(ast);
         let t = ast
             .variable_decl
