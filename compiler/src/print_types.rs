@@ -10,7 +10,9 @@ pub fn print(ast: &Ast<'_>) {
         println!(
             "{} : {}",
             d.name,
-            FormatForTest(&ast.types_of_decls[&VariableId::Decl(d.decl_id)])
+            FormatForTest(
+                &ast.types_of_global_decls[&VariableId::Decl(d.decl_id)]
+            )
         );
     }
 }

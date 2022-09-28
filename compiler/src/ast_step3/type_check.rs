@@ -62,6 +62,7 @@ pub fn type_check<'a>(
 ) -> (
     ResolvedIdents<'a>,
     FxHashMap<VariableId, ast_step2::IncompleteType<'a>>,
+    FxHashMap<VariableId, Type<'a>>,
     SubtypeRelations<'a>,
     TypeVariableMap<'a>,
 ) {
@@ -241,13 +242,16 @@ pub fn type_check<'a>(
         resolved_idents,
         types
             .into_iter()
-            .chain(types_of_local_decls)
             .map(|(d, t)| {
                 (
                     d,
                     t.map_type(|t| lift_recursive_alias(map.normalize_type(t))),
                 )
             })
+            .collect(),
+        types_of_local_decls
+            .into_iter()
+            .map(|(d, t)| (d, lift_recursive_alias(map.normalize_type(t))))
             .collect(),
         subtype_relations,
         map,
@@ -305,12 +309,18 @@ struct Toplevel<'a> {
     variable_kind: VariableKind,
 }
 
-type TypesOfDeclsVec<'a> = Vec<(VariableId, ast_step2::IncompleteType<'a>)>;
+type TypesOfLocalDeclsVec<'a> = Vec<(VariableId, ast_step2::types::Type<'a>)>;
+type TypesOfGlobalDeclsVec<'a> =
+    Vec<(VariableId, ast_step2::IncompleteType<'a>)>;
 
 fn resolve_names<'a>(
     toplevels: Vec<Toplevel<'a>>,
     map: &mut TypeVariableMap<'a>,
-) -> (Resolved<'a>, TypesOfDeclsVec<'a>, SubtypeRelations<'a>) {
+) -> (
+    Resolved<'a>,
+    TypesOfGlobalDeclsVec<'a>,
+    SubtypeRelations<'a>,
+) {
     let mut toplevel_graph = Graph::<Toplevel, ()>::new();
     for t in toplevels {
         toplevel_graph.add_node(t);
@@ -1061,7 +1071,7 @@ fn min_type_incomplete<'a>(
 ) -> (
     ast_step2::IncompleteType<'a>,
     Resolved<'a>,
-    TypesOfDeclsVec<'a>,
+    TypesOfLocalDeclsVec<'a>,
 ) {
     match expr {
         Expr::Lambda(arms) => {
@@ -1281,7 +1291,7 @@ fn arm_min_type<'a>(
     SubtypeRelations<'a>,
     Resolved<'a>,
     PatternRestrictions<'a>,
-    TypesOfDeclsVec<'a>,
+    TypesOfLocalDeclsVec<'a>,
 ) {
     let (body_type, mut resolved_idents, mut types_of_decls) =
         min_type_incomplete(&arm.expr, subtype_relations, map);
@@ -1292,7 +1302,7 @@ fn arm_min_type<'a>(
         .into_iter()
         .flatten()
         .inspect(|(_, (decl_id, t))| {
-            types_of_decls.push((VariableId::Decl(*decl_id), t.clone().into()));
+            types_of_decls.push((VariableId::Decl(*decl_id), t.clone()));
         })
         .collect();
     let mut variable_requirements = Vec::new();

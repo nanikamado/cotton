@@ -10,7 +10,11 @@ mod run_js;
 mod rust_backend;
 
 pub use ast_step1::OpPrecedenceMap;
-pub use ast_step2::{types::TypeMatchableRef, IncompleteType, PrintForUser};
+use ast_step2::types::Type;
+pub use ast_step2::{
+    types::TypeMatchableRef, IncompleteType, PrintForUser,
+    PrintTypeOfLocalVariableForUser,
+};
 use ast_step3::VariableId;
 use codegen::codegen;
 pub use fxhash::FxHashMap;
@@ -90,7 +94,8 @@ pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
 }
 
 pub enum TokenKind<'a> {
-    Variable(VariableId, Option<IncompleteType<'a>>),
+    GlobalVariable(VariableId, Option<IncompleteType<'a>>),
+    LocalVariable(VariableId, Option<Type<'a>>),
     Constructor(Option<IncompleteType<'a>>),
     Type,
     Interface,
@@ -112,8 +117,23 @@ pub fn get_token_map(ast: &parser::Ast) -> TokenMapWithEnv {
         .map(|(id, t)| {
             let t = match t {
                 ast_step2::TokenMapEntry::Decl(decl_id) => {
-                    let t = ast.types_of_decls.get(&VariableId::Decl(decl_id));
-                    TokenKind::Variable(VariableId::Decl(decl_id), t.cloned())
+                    if let Some(t) = ast
+                        .types_of_global_decls
+                        .get(&VariableId::Decl(decl_id))
+                    {
+                        TokenKind::GlobalVariable(
+                            VariableId::Decl(decl_id),
+                            Some(t.clone()),
+                        )
+                    } else {
+                        let t = ast
+                            .types_of_local_decls
+                            .get(&VariableId::Decl(decl_id));
+                        TokenKind::LocalVariable(
+                            VariableId::Decl(decl_id),
+                            t.cloned(),
+                        )
+                    }
                 }
                 ast_step2::TokenMapEntry::Ident(ident_id) => {
                     let r = resolved_idents.get(&ident_id).unwrap();
@@ -123,13 +143,28 @@ pub fn get_token_map(ast: &parser::Ast) -> TokenMapWithEnv {
                         }
                         ast_step4::VariableKind::Constructor => {
                             TokenKind::Constructor(
-                                ast.types_of_decls.get(&r.variable_id).cloned(),
+                                ast.types_of_global_decls
+                                    .get(&r.variable_id)
+                                    .cloned(),
                             )
                         }
-                        _ => TokenKind::Variable(
-                            r.variable_id,
-                            ast.types_of_decls.get(&r.variable_id).cloned(),
-                        ),
+                        ast_step4::VariableKind::Global
+                        | ast_step4::VariableKind::Intrinsic => {
+                            TokenKind::GlobalVariable(
+                                r.variable_id,
+                                ast.types_of_global_decls
+                                    .get(&r.variable_id)
+                                    .cloned(),
+                            )
+                        }
+                        ast_step4::VariableKind::Local => {
+                            TokenKind::LocalVariable(
+                                r.variable_id,
+                                ast.types_of_local_decls
+                                    .get(&r.variable_id)
+                                    .cloned(),
+                            )
+                        }
                     }
                 }
                 ast_step2::TokenMapEntry::VariableDeclInInterface(t) => {
@@ -142,7 +177,7 @@ pub fn get_token_map(ast: &parser::Ast) -> TokenMapWithEnv {
                 ast_step2::TokenMapEntry::Constructor(id) => match id {
                     ast_step2::ConstructorId::DeclId(decl_id) => {
                         TokenKind::Constructor(
-                            ast.types_of_decls
+                            ast.types_of_global_decls
                                 .get(&VariableId::Decl(decl_id))
                                 .cloned(),
                         )

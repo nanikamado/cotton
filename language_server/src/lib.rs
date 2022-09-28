@@ -1,6 +1,6 @@
 use compiler::{
-    FxHashMap, OpPrecedenceMap, PrintForUser, Token, TokenId, TokenKind,
-    TokenMapWithEnv, TypeMatchableRef,
+    FxHashMap, OpPrecedenceMap, PrintForUser, PrintTypeOfLocalVariableForUser,
+    Token, TokenId, TokenKind, TokenMapWithEnv, TypeMatchableRef,
 };
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
@@ -200,7 +200,7 @@ fn semantic_tokens_from_src(src: &str) -> (SemanticTokens, HoverMap) {
                 } else {
                     match token_map.get(id) {
                         Some(e) => match e {
-                            TokenKind::Variable(_, Some(b))
+                            TokenKind::GlobalVariable(_, Some(b))
                             | TokenKind::VariableDeclInInterface(b) => {
                                 if let TypeMatchableRef::Fn(_, _) =
                                     b.constructor.matchable_ref()
@@ -210,7 +210,17 @@ fn semantic_tokens_from_src(src: &str) -> (SemanticTokens, HoverMap) {
                                     SemanticTokenType::VARIABLE
                                 }
                             }
-                            TokenKind::Variable(_, _) => {
+                            TokenKind::LocalVariable(_, Some(t)) => {
+                                if let TypeMatchableRef::Fn(_, _) =
+                                    t.matchable_ref()
+                                {
+                                    SemanticTokenType::FUNCTION
+                                } else {
+                                    SemanticTokenType::VARIABLE
+                                }
+                            }
+                            TokenKind::GlobalVariable(_, _)
+                            | TokenKind::LocalVariable(_, _) => {
                                 eprintln!("id = {id} ({s}) is variable but could not get its type.");
                                 SemanticTokenType::VARIABLE
                             }
@@ -353,11 +363,18 @@ fn print_type(
         Token::Ident(_, token_id) | Token::Op(_, token_id) => token_map
             .get(token_id)
             .and_then(|token_kind| match token_kind {
-                TokenKind::Variable(_, Some(t))
+                TokenKind::GlobalVariable(_, Some(t))
                 | TokenKind::VariableDeclInInterface(t)
                 | TokenKind::Constructor(Some(t)) => {
                     Some(PrintForUser(t, op_precedence_map).to_string())
                 }
+                TokenKind::LocalVariable(_, Some(t)) => Some(
+                    PrintTypeOfLocalVariableForUser {
+                        t,
+                        op_precedence_map,
+                    }
+                    .to_string(),
+                ),
                 _ => None,
             }),
         _ => None,

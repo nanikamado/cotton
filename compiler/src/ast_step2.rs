@@ -97,6 +97,11 @@ pub struct PrintForUser<'a>(
     pub &'a OpPrecedenceMap<'a>,
 );
 
+pub struct PrintTypeOfLocalVariableForUser<'a> {
+    pub t: &'a Type<'a>,
+    pub op_precedence_map: &'a OpPrecedenceMap<'a>,
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct VariableDecl<'a> {
     pub name: &'a str,
@@ -1041,6 +1046,13 @@ impl<'a> Display for PrintForUser<'a> {
                 )
             )?;
         }
+        Ok(())
+    }
+}
+
+impl<'a> Display for PrintTypeOfLocalVariableForUser<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", fmt_type_with_env(self.t, self.op_precedence_map).0)?;
         Ok(())
     }
 }
