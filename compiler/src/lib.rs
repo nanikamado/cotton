@@ -12,8 +12,8 @@ mod rust_backend;
 pub use ast_step1::OpPrecedenceMap;
 use ast_step2::types::Type;
 pub use ast_step2::{
-    types::TypeMatchableRef, IncompleteType, PrintTypeOfGlobalVariableForUser,
-    PrintTypeOfLocalVariableForUser,
+    types::TypeMatchableRef, PrintTypeOfGlobalVariableForUser,
+    PrintTypeOfLocalVariableForUser, TypeWithEnv,
 };
 use ast_step3::VariableId;
 use codegen::codegen;
@@ -94,12 +94,12 @@ pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
 }
 
 pub enum TokenKind<'a> {
-    GlobalVariable(VariableId, Option<IncompleteType<'a>>),
+    GlobalVariable(VariableId, Option<TypeWithEnv<'a>>),
     LocalVariable(VariableId, Option<Type<'a>>),
-    Constructor(Option<IncompleteType<'a>>),
+    Constructor(Option<TypeWithEnv<'a>>),
     Type,
     Interface,
-    VariableDeclInInterface(IncompleteType<'a>),
+    VariableDeclInInterface(TypeWithEnv<'a>),
 }
 
 pub struct TokenMapWithEnv<'a> {

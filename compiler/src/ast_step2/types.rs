@@ -1,8 +1,8 @@
 pub use self::type_type::Type;
 pub use self::type_unit::TypeUnit;
 pub use self::type_unit::TypeVariable;
-use super::IncompleteType;
 use super::SubtypeRelations;
+use super::TypeWithEnv;
 use crate::ast_step2::TypeId;
 use crate::ast_step3::simplify_subtype_rel;
 use crate::ast_step3::TypeVariableMap;
@@ -1018,11 +1018,11 @@ impl Display for SingleTypeConstructor<'_> {
     }
 }
 
-impl<'a> From<IncompleteType<'a, SingleTypeConstructor<'a>>>
-    for IncompleteType<'a, Type<'a>>
+impl<'a> From<TypeWithEnv<'a, SingleTypeConstructor<'a>>>
+    for TypeWithEnv<'a, Type<'a>>
 {
-    fn from(t: IncompleteType<'a, SingleTypeConstructor<'a>>) -> Self {
-        IncompleteType {
+    fn from(t: TypeWithEnv<'a, SingleTypeConstructor<'a>>) -> Self {
+        TypeWithEnv {
             constructor: t.constructor.type_,
             variable_requirements: t.variable_requirements,
             subtype_relations: t.subtype_relations,

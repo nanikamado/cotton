@@ -6,7 +6,7 @@ use crate::{
         types::{
             unwrap_or_clone, Type, TypeMatchableRef, TypeUnit, TypeVariable,
         },
-        IncompleteType, TypeConstructor, TypeId,
+        TypeConstructor, TypeId, TypeWithEnv,
     },
     intrinsics::INTRINSIC_TYPES,
 };
@@ -547,9 +547,9 @@ impl<'a> Type<'a> {
 //     }
 // }
 
-impl<'a> IncompleteType<'a> {
+impl<'a> TypeWithEnv<'a> {
     pub fn all_type_variables(&self) -> FxHashSet<TypeVariable> {
-        let IncompleteType {
+        let TypeWithEnv {
             constructor,
             variable_requirements,
             subtype_relations: subtype_relation,
@@ -590,7 +590,7 @@ impl<'a> IncompleteType<'a> {
     }
 }
 
-impl<'a, T> IncompleteType<'a, T>
+impl<'a, T> TypeWithEnv<'a, T>
 where
     T: TypeConstructor<'a>,
 {
@@ -602,14 +602,14 @@ where
     where
         F: FnMut(Type<'a>) -> Type<'a>,
     {
-        let IncompleteType {
+        let TypeWithEnv {
             constructor,
             variable_requirements,
             subtype_relations: subtype_relationship,
             pattern_restrictions,
             already_considered_relations,
         } = self;
-        IncompleteType {
+        TypeWithEnv {
             constructor: constructor.map_type(&mut f),
             variable_requirements: variable_requirements
                 .into_iter()

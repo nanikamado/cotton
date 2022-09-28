@@ -5,8 +5,8 @@ use crate::ast_step2::{
         merge_vec, unwrap_or_clone, Type, TypeMatchable, TypeMatchableRef,
         TypeUnit, TypeVariable,
     },
-    IncompleteType, PatternForRestriction, PatternRestrictions,
-    PatternUnitForRestriction, SubtypeRelations, TypeConstructor,
+    PatternForRestriction, PatternRestrictions, PatternUnitForRestriction,
+    SubtypeRelations, TypeConstructor, TypeWithEnv,
 };
 use fxhash::{FxHashMap, FxHashSet};
 use hashbag::HashBag;
@@ -341,8 +341,8 @@ impl<'a> SubtypeRelations<'a> {
 
 pub fn simplify_type<'a, T: TypeConstructor<'a>>(
     map: &mut TypeVariableMap<'a>,
-    mut t: IncompleteType<'a, T>,
-) -> Option<IncompleteType<'a, T>> {
+    mut t: TypeWithEnv<'a, T>,
+) -> Option<TypeWithEnv<'a, T>> {
     let mut i = 0;
     loop {
         i += 1;
@@ -379,8 +379,8 @@ pub fn simplify_type<'a, T: TypeConstructor<'a>>(
 
 fn _simplify_type<'a, T: TypeConstructor<'a>>(
     map: &mut TypeVariableMap<'a>,
-    mut t: IncompleteType<'a, T>,
-) -> Option<(IncompleteType<'a, T>, bool)> {
+    mut t: TypeWithEnv<'a, T>,
+) -> Option<(TypeWithEnv<'a, T>, bool)> {
     let t_before_simplify = t.clone();
     log::debug!("t = {}", t);
     // log::trace!("map = {}", map);
@@ -1249,7 +1249,7 @@ fn possible_strongest_t<'a>(
 }
 
 fn mk_contravariant_candidates<'a, T: TypeConstructor<'a>>(
-    t: &IncompleteType<'a, T>,
+    t: &TypeWithEnv<'a, T>,
 ) -> FxHashSet<TypeVariable> {
     let mut rst: Vec<TypeVariable> =
         t.constructor.contravariant_type_variables();
@@ -1260,7 +1260,7 @@ fn mk_contravariant_candidates<'a, T: TypeConstructor<'a>>(
 }
 
 fn mk_covariant_candidates<'a, T: TypeConstructor<'a>>(
-    t: &IncompleteType<'a, T>,
+    t: &TypeWithEnv<'a, T>,
 ) -> FxHashSet<TypeVariable> {
     let mut rst: Vec<TypeVariable> = t.constructor.covariant_type_variables();
     for req in &t.variable_requirements {
@@ -1269,7 +1269,7 @@ fn mk_covariant_candidates<'a, T: TypeConstructor<'a>>(
     rst.into_iter().collect()
 }
 
-impl<'a, T> IncompleteType<'a, T>
+impl<'a, T> TypeWithEnv<'a, T>
 where
     T: TypeConstructor<'a>,
 {
@@ -1622,7 +1622,7 @@ fn replace_type_test1() {
     );
 }
 
-impl<'a, T: TypeConstructor<'a>> IncompleteType<'a, T> {
+impl<'a, T: TypeConstructor<'a>> TypeWithEnv<'a, T> {
     fn type_variables_in_constructors_or_variable_requirements(
         &self,
     ) -> FxHashSet<TypeVariable> {
@@ -1648,7 +1648,7 @@ impl Display for VariableRequirement<'_> {
     }
 }
 
-impl<'a, T: TypeConstructor<'a>> Display for ast_step2::IncompleteType<'a, T> {
+impl<'a, T: TypeConstructor<'a>> Display for ast_step2::TypeWithEnv<'a, T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "{} forall", self.constructor)?;
         for (a, b) in &self.subtype_relations {
@@ -1703,7 +1703,7 @@ mod tests {
             types::{
                 Type, TypeMatchable, TypeMatchableRef, TypeUnit, TypeVariable,
             },
-            IncompleteType, PatternUnitForRestriction, TypeId,
+            PatternUnitForRestriction, TypeId, TypeWithEnv,
         },
         ast_step3::type_check::simplify::{
             apply_type_to_pattern, simplify_subtype_rel, simplify_type,
@@ -1748,7 +1748,7 @@ mod tests {
             .unwrap()
             .constructor
             .clone();
-        let t = IncompleteType {
+        let t = TypeWithEnv {
             constructor: Type::from_str("I64")
                 .arrow(Type::from_str("I64").union(Type::from_str("String"))),
             subtype_relations: vec![(dot, req_t)].into_iter().collect(),

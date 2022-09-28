@@ -81,7 +81,7 @@ pub type PatternRestrictions<'a> =
     Vec<(Type<'a>, Vec<PatternUnitForRestriction<'a>>)>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct IncompleteType<'a, T = Type<'a>>
+pub struct TypeWithEnv<'a, T = Type<'a>>
 where
     T: TypeConstructor<'a>,
 {
@@ -93,7 +93,7 @@ where
 }
 
 pub struct PrintTypeOfGlobalVariableForUser<'a> {
-    pub t: &'a IncompleteType<'a>,
+    pub t: &'a TypeWithEnv<'a>,
     pub op_precedence_map: &'a OpPrecedenceMap<'a>,
 }
 
@@ -105,7 +105,7 @@ pub struct PrintTypeOfLocalVariableForUser<'a> {
 #[derive(Debug, PartialEq, Clone)]
 pub struct VariableDecl<'a> {
     pub name: &'a str,
-    pub type_annotation: Option<IncompleteType<'a>>,
+    pub type_annotation: Option<TypeWithEnv<'a>>,
     pub implicit_parameters: Vec<(&'a str, Type<'a>, DeclId)>,
     pub value: ExprWithType<'a, TypeVariable>,
     pub decl_id: DeclId,
@@ -292,7 +292,7 @@ impl From<ConstructorId> for TypeId {
     }
 }
 
-impl<'a> From<Type<'a>> for IncompleteType<'a> {
+impl<'a> From<Type<'a>> for TypeWithEnv<'a> {
     fn from(t: Type<'a>) -> Self {
         Self {
             constructor: t,
