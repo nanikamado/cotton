@@ -650,7 +650,7 @@ mod tests {
 
     #[test]
     fn conjunctive_0() {
-        let src = r#"data a /\ b
+        let src = r#"data A /\ B forall { A, B }
         infixl 3 /\
         main : () -> () =
             | () => ()
@@ -667,6 +667,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
+            .type_with_env
             .constructor
             .clone();
         assert_eq!(
@@ -677,7 +678,7 @@ mod tests {
 
     #[test]
     fn conjunctive_1() {
-        let src = r#"data a /\ b
+        let src = r#"data A /\ B forall { A, B }
         infixr 3 /\
         main : () -> () =
             | () => ()
@@ -695,6 +696,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
+            .type_with_env
             .constructor
             .clone();
         assert_eq!(format!("{}", t), r#"rec[{() | /\[[{:() | :I64}], d0]}]"#);

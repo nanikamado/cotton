@@ -1715,7 +1715,7 @@ mod tests {
 
     #[test]
     fn simplify1() {
-        let src = r#"data a /\ b
+        let src = r#"data A /\ B forall { A, B }
         infixl 3 /\
         main : () -> ()
         = | () => ()
@@ -1736,6 +1736,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
+            .type_with_env
             .constructor
             .clone();
         let dot = ast
@@ -1746,6 +1747,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
+            .type_with_env
             .constructor
             .clone();
         let t = TypeWithEnv {
@@ -1761,7 +1763,7 @@ mod tests {
 
     #[test]
     fn simplify3() {
-        let src = r#"data a /\ b
+        let src = r#"data A /\ B forall { A, B }
         infixl 3 /\
         main : () -> () =
             | () => ()
@@ -1781,6 +1783,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
+            .type_with_env
             .constructor
             .clone();
         let t2 = ast
@@ -1791,6 +1794,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
+            .type_with_env
             .constructor
             .clone();
         let t = simplify_subtype_rel(
@@ -1803,7 +1807,7 @@ mod tests {
 
     #[test]
     fn destruct_type_0() {
-        let src = r#"data a /\ b
+        let src = r#"data A /\ B forall { A, B }
         infixl 3 /\
         main : () -> () =
             | () => ()
@@ -1820,6 +1824,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
+            .type_with_env
             .constructor
             .clone();
         if let TypeUnit::Tuple(h, _) = &**t1.iter().next().unwrap() {
@@ -1862,7 +1867,7 @@ mod tests {
 
     #[test]
     fn destruct_type_1() {
-        let src = r#"data a /\ b
+        let src = r#"data A /\ B forall { A, B }
         infixl 3 /\
         main : () -> () =
             | () => ()
@@ -1889,6 +1894,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
+            .type_with_env
             .constructor
             .clone();
         let p = PatternUnitForRestriction::Tuple(
@@ -1981,7 +1987,7 @@ mod tests {
 
     #[test]
     fn apply_type_to_pattern_1() {
-        let src = r#"data a /\ b
+        let src = r#"data A /\ B forall { A, B }
         infixl 3 /\
         main : () -> () =
             | () => ()
@@ -2007,6 +2013,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
+            .type_with_env
             .constructor
             .clone();
         let v2 = TypeVariable::new();

@@ -61,8 +61,8 @@ pub fn type_check<'a>(
     ast: &Ast<'a>,
 ) -> (
     ResolvedIdents<'a>,
-    FxHashMap<VariableId, ast_step2::TypeWithEnv<'a>>,
-    FxHashMap<VariableId, Type<'a>>,
+    FxHashMap<VariableId, GlobalVariableType<'a>>,
+    FxHashMap<VariableId, LocalVariableType<'a>>,
     SubtypeRelations<'a>,
     TypeVariableMap<'a>,
 ) {
@@ -106,24 +106,27 @@ pub fn type_check<'a>(
     let mut map = TypeVariableMap::default();
     let mut types_of_local_decls = Vec::new();
     for d in &ast.variable_decl {
-        let (mut t, resolved, mut tod) =
+        let (mut t, resolved, tod) =
             min_type_with_env(&d.value, &mut subtype_relations, &mut map);
         resolved_idents.extend(resolved);
-        types_of_local_decls.append(&mut tod);
-        let type_annotation: Option<ast_step2::TypeWithEnv> =
-            if let Some(annotation) = &d.type_annotation {
-                t.subtype_relations.insert((
-                    t.constructor.clone(),
-                    annotation.constructor.clone(),
-                ));
-                t.subtype_relations
-                    .extend(annotation.subtype_relations.clone());
-                t.variable_requirements
-                    .append(&mut annotation.variable_requirements.clone());
-                Some(annotation.clone())
-            } else {
-                None
-            };
+        types_of_local_decls.extend(
+            tod.into_iter()
+                .map(|(decl_id, t)| (decl_id, (t, d.decl_id))),
+        );
+        let type_annotation = if let Some(annotation) = &d.type_annotation {
+            t.subtype_relations.insert((
+                t.constructor.clone(),
+                annotation.type_with_env.constructor.clone(),
+            ));
+            t.subtype_relations
+                .extend(annotation.type_with_env.subtype_relations.clone());
+            t.variable_requirements.append(
+                &mut annotation.type_with_env.variable_requirements.clone(),
+            );
+            Some(annotation.clone())
+        } else {
+            None
+        };
         let vs: FxHashMap<_, _> = d
             .implicit_parameters
             .iter()
@@ -164,7 +167,11 @@ pub fn type_check<'a>(
                     type_: t.constructor,
                     contravariant_candidates_from_annotation: type_annotation
                         .as_ref()
-                        .map(|t| t.constructor.contravariant_type_variables()),
+                        .map(|t| {
+                            t.type_with_env
+                                .constructor
+                                .contravariant_type_variables()
+                        }),
                 },
                 variable_requirements: t.variable_requirements,
                 subtype_relations: t.subtype_relations,
@@ -191,7 +198,7 @@ pub fn type_check<'a>(
         log::debug!("{:<3} {} : ", top.decl_id, top.name);
         log::debug!("resolved: {:?}", top.resolved_idents);
         if let Some(f) = &top.type_annotation {
-            log::debug!("face: {}", f);
+            log::debug!("face: {}", f.type_with_env);
             log::debug!("type_with_env: {}", top.type_with_env);
         } else {
             log::debug!("not face: {}", top.type_with_env);
@@ -251,7 +258,15 @@ pub fn type_check<'a>(
             .collect(),
         types_of_local_decls
             .into_iter()
-            .map(|(d, t)| (d, lift_recursive_alias(map.normalize_type(t))))
+            .map(|(d, (t, toplevel))| {
+                (
+                    d,
+                    LocalVariableType {
+                        t: lift_recursive_alias(map.normalize_type(t)),
+                        toplevel,
+                    },
+                )
+            })
             .collect(),
         subtype_relations,
         map,
@@ -300,7 +315,7 @@ pub type Resolved<'a> = Vec<(IdentId, ResolvedIdent<'a>)>;
 #[derive(Debug, Clone)]
 struct Toplevel<'a> {
     type_with_env: ast_step2::TypeWithEnv<'a>,
-    type_annotation: Option<ast_step2::TypeWithEnv<'a>>,
+    type_annotation: Option<GlobalVariableType<'a>>,
     resolved_idents: FxHashMap<IdentId, VariableId>,
     decl_id: VariableId,
     name: &'a str,
@@ -310,7 +325,44 @@ struct Toplevel<'a> {
 }
 
 type TypesOfLocalDeclsVec<'a> = Vec<(VariableId, ast_step2::types::Type<'a>)>;
-type TypesOfGlobalDeclsVec<'a> = Vec<(VariableId, ast_step2::TypeWithEnv<'a>)>;
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct GlobalVariableType<'a> {
+    pub type_with_env: ast_step2::TypeWithEnv<'a>,
+    pub type_variable_decls: FxHashMap<TypeVariable, &'a str>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct LocalVariableType<'a> {
+    pub t: Type<'a>,
+    pub toplevel: DeclId,
+}
+
+impl<'a> GlobalVariableType<'a> {
+    pub fn map_type<F>(self, mut f: F) -> Self
+    where
+        F: FnMut(Type<'a>) -> Type<'a>,
+    {
+        Self {
+            type_with_env: self.type_with_env.map_type(&mut f),
+            type_variable_decls: self
+                .type_variable_decls
+                .into_iter()
+                .map(|(v, n)| {
+                    if let TypeMatchable::Variable(v) =
+                        f(TypeUnit::Variable(v).into()).matchable()
+                    {
+                        (v, n)
+                    } else {
+                        panic!()
+                    }
+                })
+                .collect(),
+        }
+    }
+}
+
+type TypesOfGlobalDeclsVec<'a> = Vec<(VariableId, GlobalVariableType<'a>)>;
 
 fn resolve_names<'a>(
     toplevels: Vec<Toplevel<'a>>,
@@ -383,7 +435,18 @@ fn resolve_names<'a>(
     let types = resolved_variable_map
         .into_iter()
         .flat_map(|(_, toplevels)| {
-            toplevels.into_iter().map(|t| (t.decl_id, t.type_with_env))
+            toplevels.into_iter().map(|t| {
+                (
+                    t.decl_id,
+                    GlobalVariableType {
+                        type_with_env: t.type_with_env,
+                        type_variable_decls: t
+                            .type_annotation
+                            .map(|t| t.type_variable_decls)
+                            .unwrap_or_default(),
+                    },
+                )
+            })
         })
         .collect();
     (resolved_idents, types, rel)
@@ -621,7 +684,9 @@ fn resolve_scc<'a>(
             contravariant_candidates_from_annotation: t
                 .type_annotation
                 .as_ref()
-                .map(|t| t.constructor.contravariant_type_variables()),
+                .map(|t| {
+                    t.type_with_env.constructor.contravariant_type_variables()
+                }),
         });
         pattern_restrictions
             .extend(t.type_with_env.pattern_restrictions.clone())
@@ -829,7 +894,7 @@ fn find_satisfied_types<
              }| {
                 let mut t = type_of_unresolved_decl.clone();
                 let mut cand_t = if let Some(face) = candidate.type_annotation {
-                    face
+                    face.type_with_env
                 } else {
                     candidate.type_with_env
                 };

@@ -12,6 +12,7 @@ pub fn print(ast: &Ast<'_>) {
             d.name,
             FormatForTest(
                 &ast.types_of_global_decls[&VariableId::Decl(d.decl_id)]
+                    .type_with_env
             )
         );
     }

@@ -204,7 +204,7 @@ fn semantic_tokens_from_src(src: &str) -> (SemanticTokens, HoverMap) {
                             TokenKind::GlobalVariable(_, Some(b))
                             | TokenKind::VariableDeclInInterface(b) => {
                                 if let TypeMatchableRef::Fn(_, _) =
-                                    b.constructor.matchable_ref()
+                                    b.type_with_env.constructor.matchable_ref()
                                 {
                                     SemanticTokenType::FUNCTION
                                 } else {
@@ -213,7 +213,7 @@ fn semantic_tokens_from_src(src: &str) -> (SemanticTokens, HoverMap) {
                             }
                             TokenKind::LocalVariable(_, Some(t)) => {
                                 if let TypeMatchableRef::Fn(_, _) =
-                                    t.matchable_ref()
+                                    t.0.matchable_ref()
                                 {
                                     SemanticTokenType::FUNCTION
                                 } else {
@@ -375,8 +375,9 @@ fn print_type(
                 ),
                 TokenKind::LocalVariable(_, Some(t)) => Some(
                     PrintTypeOfLocalVariableForUser {
-                        t,
+                        t: &t.0,
                         op_precedence_map,
+                        type_variable_decls: &t.1,
                     }
                     .to_string(),
                 ),

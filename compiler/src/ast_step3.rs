@@ -2,15 +2,15 @@ mod type_check;
 pub mod type_util;
 
 pub use self::type_check::{
-    simplify_subtype_rel, type_check, ResolvedIdents, TypeVariableMap,
-    VariableId, VariableRequirement,
+    simplify_subtype_rel, type_check, GlobalVariableType, LocalVariableType,
+    ResolvedIdents, TypeVariableMap, VariableId, VariableRequirement,
 };
 use crate::{
     ast_step2::{
         self,
         decl_id::DeclId,
         types::{Type, TypeUnit, TypeVariable},
-        Pattern, PatternUnit, TypeConstructor, TypeWithEnv,
+        Pattern, PatternUnit, TypeConstructor,
     },
     ast_step4::VariableKind,
 };
@@ -24,8 +24,8 @@ pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl<'a>>,
     pub entry_point: DeclId,
-    pub types_of_global_decls: FxHashMap<VariableId, TypeWithEnv<'a>>,
-    pub types_of_local_decls: FxHashMap<VariableId, Type<'a>>,
+    pub types_of_global_decls: FxHashMap<VariableId, GlobalVariableType<'a>>,
+    pub types_of_local_decls: FxHashMap<VariableId, LocalVariableType<'a>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -86,6 +86,7 @@ impl<'a> Ast<'a> {
                 "type_ {} : {}",
                 v.name,
                 types_of_global_decls[&VariableId::Decl(v.decl_id)]
+                    .type_with_env
             );
         }
         let data_decl = ast
@@ -116,7 +117,7 @@ fn variable_decl<'a>(
     entry_point: DeclId,
     resolved_idents: &ResolvedIdents<'a>,
     map: &mut TypeVariableMap<'a>,
-    types_of_decls: &mut FxHashMap<VariableId, Type<'a>>,
+    types_of_decls: &mut FxHashMap<VariableId, LocalVariableType<'a>>,
 ) -> (Vec<VariableDecl<'a>>, DeclId) {
     let data_decls: FxHashMap<DeclId, &ast_step2::DataDecl<'a>> = data_decls
         .iter()
@@ -131,7 +132,13 @@ fn variable_decl<'a>(
             let (mut value, mut value_t) =
                 expr(d.value, &data_decls, resolved_idents, map);
             for (name, t, decl_id) in d.implicit_parameters.into_iter().rev() {
-                types_of_decls.insert(VariableId::Decl(decl_id), t.clone());
+                types_of_decls.insert(
+                    VariableId::Decl(decl_id),
+                    LocalVariableType {
+                        t: t.clone(),
+                        toplevel: d.decl_id,
+                    },
+                );
                 value = Expr::Lambda(vec![FnArm {
                     pattern: vec![vec![PatternUnit::Binder(
                         name,
