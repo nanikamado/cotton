@@ -46,7 +46,7 @@ impl LanguageServer for Backend {
         _: InitializeParams,
     ) -> Result<InitializeResult> {
         self.client
-            .log_message(MessageType::INFO, "Initializing ...")
+            .log_message(MessageType::INFO, "initializing")
             .await;
         Ok(InitializeResult {
             server_info: None,
@@ -74,7 +74,7 @@ impl LanguageServer for Backend {
 
     async fn initialized(&self, _: InitializedParams) {
         self.client
-            .log_message(MessageType::INFO, "initialized!")
+            .log_message(MessageType::INFO, "initialized")
             .await;
     }
 
@@ -84,20 +84,17 @@ impl LanguageServer for Backend {
 
     async fn did_change_configuration(&self, _: DidChangeConfigurationParams) {
         self.client
-            .log_message(MessageType::INFO, "configuration changed!")
+            .log_message(MessageType::INFO, "configuration changed")
             .await;
     }
 
     async fn did_change_watched_files(&self, _: DidChangeWatchedFilesParams) {
         self.client
-            .log_message(MessageType::INFO, "watched files have changed!")
+            .log_message(MessageType::INFO, "watched files changed")
             .await;
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        self.client
-            .log_message(MessageType::INFO, "file opened!")
-            .await;
         let src = params.text_document.text;
         let tokens =
             tokio::task::spawn_blocking(move || semantic_tokens_from_src(&src))
@@ -108,7 +105,7 @@ impl LanguageServer for Backend {
 
     async fn did_change(&self, _params: DidChangeTextDocumentParams) {
         self.client
-            .log_message(MessageType::INFO, "file changed!")
+            .log_message(MessageType::INFO, "file changed")
             .await;
     }
 
@@ -121,15 +118,12 @@ impl LanguageServer for Backend {
             .await
             .unwrap();
             self.tokens.insert(params.text_document.uri, tokens);
-            self.client
-                .log_message(MessageType::INFO, "file saved. tokens saved.")
-                .await;
         }
     }
 
     async fn did_close(&self, _: DidCloseTextDocumentParams) {
         self.client
-            .log_message(MessageType::INFO, "file closed!")
+            .log_message(MessageType::INFO, "file closed.")
             .await;
     }
 
