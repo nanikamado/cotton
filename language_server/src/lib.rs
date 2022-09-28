@@ -1,3 +1,6 @@
+#[cfg(test)]
+mod tests;
+
 use compiler::{
     FxHashMap, OpPrecedenceMap, PrintTypeOfGlobalVariableForUser,
     PrintTypeOfLocalVariableForUser, Token, TokenId, TokenKind,
