@@ -95,10 +95,7 @@ pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
 
 pub enum TokenKind<'a> {
     GlobalVariable(VariableId, Option<GlobalVariableType<'a>>),
-    LocalVariable(
-        VariableId,
-        Option<(Type<'a>, FxHashMap<TypeVariable, &'a str>)>,
-    ),
+    LocalVariable(VariableId, Option<(Type, FxHashMap<TypeVariable, &'a str>)>),
     Constructor(Option<GlobalVariableType<'a>>),
     Type,
     Interface,

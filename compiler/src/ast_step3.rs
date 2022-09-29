@@ -25,7 +25,7 @@ pub struct Ast<'a> {
     pub data_decl: Vec<DataDecl<'a>>,
     pub entry_point: DeclId,
     pub types_of_global_decls: FxHashMap<VariableId, GlobalVariableType<'a>>,
-    pub types_of_local_decls: FxHashMap<VariableId, LocalVariableType<'a>>,
+    pub types_of_local_decls: FxHashMap<VariableId, LocalVariableType>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -35,7 +35,7 @@ pub struct VariableDecl<'a> {
     pub decl_id: DeclId,
 }
 
-pub type ExprWithType<'a> = (Expr<'a>, Type<'a>);
+pub type ExprWithType<'a> = (Expr<'a>, Type);
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr<'a> {
@@ -53,7 +53,7 @@ pub enum Expr<'a> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FnArm<'a> {
-    pub pattern: Vec<Pattern<'a, Type<'a>>>,
+    pub pattern: Vec<Pattern<'a, Type>>,
     pub expr: ExprWithType<'a>,
 }
 
@@ -116,8 +116,8 @@ fn variable_decl<'a>(
     data_decls: &[ast_step2::DataDecl<'a>],
     entry_point: DeclId,
     resolved_idents: &ResolvedIdents<'a>,
-    map: &mut TypeVariableMap<'a>,
-    types_of_decls: &mut FxHashMap<VariableId, LocalVariableType<'a>>,
+    map: &mut TypeVariableMap,
+    types_of_decls: &mut FxHashMap<VariableId, LocalVariableType>,
 ) -> (Vec<VariableDecl<'a>>, DeclId) {
     let data_decls: FxHashMap<DeclId, &ast_step2::DataDecl<'a>> = data_decls
         .iter()
@@ -164,7 +164,7 @@ fn expr<'a, 'b>(
     (e, t): ast_step2::ExprWithType<'a, TypeVariable>,
     data_decls: &FxHashMap<DeclId, &'b ast_step2::DataDecl<'a>>,
     resolved_idents: &ResolvedIdents<'a>,
-    map: &mut TypeVariableMap<'a>,
+    map: &mut TypeVariableMap,
 ) -> ExprWithType<'a> {
     let e = match e {
         ast_step2::Expr::Lambda(arms) => Expr::Lambda(
@@ -261,8 +261,8 @@ where
 
 fn normalize_types_in_pattern<'a>(
     pattern: Pattern<'a, TypeVariable>,
-    map: &mut TypeVariableMap<'a>,
-) -> Pattern<'a, Type<'a>> {
+    map: &mut TypeVariableMap,
+) -> Pattern<'a, Type> {
     pattern
         .into_iter()
         .map(|p| normalize_types_in_pattern_unit(p, map))
@@ -271,8 +271,8 @@ fn normalize_types_in_pattern<'a>(
 
 fn normalize_types_in_pattern_unit<'a>(
     pattern: PatternUnit<'a, TypeVariable>,
-    map: &mut TypeVariableMap<'a>,
-) -> PatternUnit<'a, Type<'a>> {
+    map: &mut TypeVariableMap,
+) -> PatternUnit<'a, Type> {
     match pattern {
         PatternUnit::Binder(name, ident_id, t) => {
             PatternUnit::Binder(name, ident_id, map.find(t))

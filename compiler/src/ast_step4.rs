@@ -790,7 +790,7 @@ impl<'a, 'b> VariableMemo<'a, 'b> {
     fn unify_type_with_pattern(
         &mut self,
         type_pointer: TypePointer,
-        pattern: &ast_step2::Pattern<'a, ast_step2::types::Type<'a>>,
+        pattern: &ast_step2::Pattern<'a, ast_step2::types::Type>,
         local_variables: &mut FxHashMap<VariableId, TypePointer>,
     ) -> Pattern<'a, TypePointer> {
         if pattern.len() != 1 {
@@ -909,7 +909,7 @@ impl Display for TypeUnit<'_> {
 }
 
 fn unify_type_with_ast_sep2_type<'a>(
-    t: &ast_step2::types::Type<'a>,
+    t: &ast_step2::types::Type,
     p: TypePointer,
     map: &mut PaddedTypeMap<'a>,
 ) {
@@ -925,9 +925,14 @@ fn unify_type_with_ast_sep2_type<'a>(
                 let len = tuple_len(b);
                 let args = (0..len).map(|_| map.new_pointer()).collect_vec();
                 for a in a.iter() {
-                    if let Const { name, id } = &**a {
+                    if let Const { id } = &**a {
                         unify_type_with_tuple(b, &args, map);
-                        map.insert_normal(p, *id, name, args.clone());
+                        map.insert_normal(
+                            p,
+                            *id,
+                            "TODO: name here",
+                            args.clone(),
+                        );
                     } else {
                         panic!()
                     }
@@ -941,7 +946,7 @@ fn unify_type_with_ast_sep2_type<'a>(
 }
 
 fn unify_type_with_tuple<'a>(
-    t: &ast_step2::types::Type<'a>,
+    t: &ast_step2::types::Type,
     ps: &[TypePointer],
     map: &mut PaddedTypeMap<'a>,
 ) {
@@ -961,7 +966,7 @@ fn unify_type_with_tuple<'a>(
     }
 }
 
-fn tuple_len(tuple: &ast_step2::types::Type<'_>) -> usize {
+fn tuple_len(tuple: &ast_step2::types::Type) -> usize {
     use ast_step2::types::TypeUnit::*;
     tuple
         .iter()

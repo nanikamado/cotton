@@ -55,41 +55,34 @@ pub struct DataDecl<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct SubtypeRelations<'a>(pub BTreeSet<(Type<'a>, Type<'a>)>);
+pub struct SubtypeRelations(pub BTreeSet<(Type, Type)>);
 
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
-pub enum PatternUnitForRestriction<'a> {
+pub enum PatternUnitForRestriction {
     I64,
     Str,
     Const {
-        name: &'a str,
         id: TypeId,
     },
     Tuple(
-        Box<PatternUnitForRestriction<'a>>,
-        Box<PatternUnitForRestriction<'a>>,
+        Box<PatternUnitForRestriction>,
+        Box<PatternUnitForRestriction>,
     ),
-    // Constructor {
-    //     id: TypeId,
-    //     name: &'a str,
-    //     args: Vec<PatternUnitForRestriction<'a>>,
-    // },
-    Binder(Type<'a>, DeclId),
+    Binder(Type, DeclId),
 }
 
-pub type PatternForRestriction<'a> = Vec<PatternUnitForRestriction<'a>>;
-pub type PatternRestrictions<'a> =
-    Vec<(Type<'a>, Vec<PatternUnitForRestriction<'a>>)>;
+pub type PatternForRestriction<'a> = Vec<PatternUnitForRestriction>;
+pub type PatternRestrictions<'a> = Vec<(Type, Vec<PatternUnitForRestriction>)>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct TypeWithEnv<'a, T = Type<'a>>
+pub struct TypeWithEnv<'a, T = Type>
 where
     T: TypeConstructor<'a>,
 {
     pub constructor: T,
     pub variable_requirements: Vec<VariableRequirement<'a>>,
-    pub subtype_relations: SubtypeRelations<'a>,
-    pub already_considered_relations: SubtypeRelations<'a>,
+    pub subtype_relations: SubtypeRelations,
+    pub already_considered_relations: SubtypeRelations,
     pub pattern_restrictions: PatternRestrictions<'a>,
 }
 
@@ -99,7 +92,7 @@ pub struct PrintTypeOfGlobalVariableForUser<'a> {
 }
 
 pub struct PrintTypeOfLocalVariableForUser<'a> {
-    pub t: &'a Type<'a>,
+    pub t: &'a Type,
     pub op_precedence_map: &'a OpPrecedenceMap<'a>,
     pub type_variable_decls: &'a FxHashMap<TypeVariable, &'a str>,
 }
@@ -108,7 +101,7 @@ pub struct PrintTypeOfLocalVariableForUser<'a> {
 pub struct VariableDecl<'a> {
     pub name: &'a str,
     pub type_annotation: Option<GlobalVariableType<'a>>,
-    pub implicit_parameters: Vec<(&'a str, Type<'a>, DeclId)>,
+    pub implicit_parameters: Vec<(&'a str, Type, DeclId)>,
     pub value: ExprWithType<'a, TypeVariable>,
     pub decl_id: DeclId,
 }
@@ -146,11 +139,11 @@ pub enum PatternUnit<'a, T> {
     },
     Binder(&'a str, DeclId, T),
     Underscore,
-    TypeRestriction(Pattern<'a, T>, Type<'a>),
+    TypeRestriction(Pattern<'a, T>, Type),
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum TokenMapEntry<'a> {
+pub enum TokenMapEntry {
     Decl(DeclId),
     DataDecl(DeclId),
     Ident(IdentId),
@@ -159,14 +152,14 @@ pub enum TokenMapEntry<'a> {
     Constructor(ConstructorId),
     TypeVariable,
     Interface,
-    VariableDeclInInterface(Type<'a>),
+    VariableDeclInInterface(Type),
 }
 
 #[derive(Default, Debug, PartialEq, Eq)]
-pub struct TokenMap<'a>(pub FxHashMap<TokenId, TokenMapEntry<'a>>);
+pub struct TokenMap(pub FxHashMap<TokenId, TokenMapEntry>);
 
-impl<'a> TokenMap<'a> {
-    fn insert(&mut self, id: Option<TokenId>, entry: TokenMapEntry<'a>) {
+impl TokenMap {
+    fn insert(&mut self, id: Option<TokenId>, entry: TokenMapEntry) {
         if let Some(id) = id {
             self.0.insert(id, entry);
         }
@@ -301,8 +294,17 @@ impl From<ConstructorId> for TypeId {
     }
 }
 
-impl<'a> From<Type<'a>> for TypeWithEnv<'a> {
-    fn from(t: Type<'a>) -> Self {
+impl Display for TypeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TypeId::DeclId(decl_id) => write!(f, "{}", decl_id),
+            TypeId::Intrinsic(i) => write!(f, "{:?}", i),
+        }
+    }
+}
+
+impl<'a> From<Type> for TypeWithEnv<'a> {
+    fn from(t: Type) -> Self {
         Self {
             constructor: t,
             ..Default::default()
@@ -321,7 +323,7 @@ fn variable_decl<'a>(
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
-    interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type<'a>, TypeVariable)>>,
+    interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type, TypeVariable)>>,
     token_map: &mut TokenMap,
 ) -> VariableDecl<'a> {
     let mut type_variable_names = type_variable_names.clone();
@@ -385,7 +387,7 @@ fn expr<'a>(
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
-    interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type<'a>, TypeVariable)>>,
+    interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type, TypeVariable)>>,
     token_map: &mut TokenMap,
 ) -> ExprWithType<'a, TypeVariable> {
     use Expr::*;
@@ -469,7 +471,7 @@ fn add_expr_in_do<'a>(
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
-    interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type<'a>, TypeVariable)>>,
+    interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type, TypeVariable)>>,
     token_map: &mut TokenMap,
 ) -> Vec<ExprWithType<'a, TypeVariable>> {
     match e {
@@ -532,7 +534,7 @@ fn fn_arm<'a>(
     data_decl_map: &FxHashMap<&'a str, DeclId>,
     type_variable_names: &FxHashMap<&'a str, TypeVariable>,
     type_alias_map: &mut TypeAliasMap<'a>,
-    interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type<'a>, TypeVariable)>>,
+    interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type, TypeVariable)>>,
     token_map: &mut TokenMap,
 ) -> FnArm<'a, TypeVariable> {
     FnArm {
@@ -553,10 +555,7 @@ fn fn_arm<'a>(
 }
 
 impl TypeId {
-    fn get<'a>(
-        name: &'a str,
-        data_decl_map: &FxHashMap<&str, DeclId>,
-    ) -> TypeId {
+    fn get(name: &str, data_decl_map: &FxHashMap<&str, DeclId>) -> TypeId {
         if let Some(id) = data_decl_map.get(name) {
             TypeId::DeclId(*id)
         } else if let Some(i) = INTRINSIC_TYPES.get(name) {
@@ -627,7 +626,7 @@ pub fn type_to_type<'a>(
     type_alias_map: &mut TypeAliasMap<'a>,
     search_type: SearchMode,
     token_map: &mut TokenMap,
-) -> Type<'a> {
+) -> Type {
     match t.name.0 {
         "|" => t
             .args
@@ -687,11 +686,7 @@ pub fn type_to_type<'a>(
                 }
                 let id = TypeId::Intrinsic(*i);
                 token_map.insert(t.name.1, TokenMapEntry::TypeId(id));
-                TypeUnit::Tuple(
-                    TypeUnit::Const { name: t.name.0, id }.into(),
-                    tuple,
-                )
-                .into()
+                TypeUnit::Tuple(TypeUnit::Const { id }.into(), tuple).into()
             } else if let Some((mut unaliased, forall)) = type_alias_map.get(
                 t.name,
                 data_decl_map,
@@ -738,11 +733,7 @@ pub fn type_to_type<'a>(
                 }
                 let id = TypeId::get(t.name.0, data_decl_map);
                 token_map.insert(t.name.1, TokenMapEntry::TypeId(id));
-                TypeUnit::Tuple(
-                    TypeUnit::Const { name: t.name.0, id }.into(),
-                    tuple,
-                )
-                .into()
+                TypeUnit::Tuple(TypeUnit::Const { id }.into(), tuple).into()
             }
         }
     }
@@ -758,8 +749,8 @@ impl std::fmt::Display for ConstructorId {
 }
 
 #[derive(Debug, Clone)]
-enum AliasComputation<'a> {
-    Unaliased(Type<'a>, Forall),
+enum AliasComputation {
+    Unaliased(Type, Forall),
     NotUnaliased,
 }
 
@@ -769,7 +760,7 @@ pub struct TypeAliasMap<'a>(
         &'a str,
         (
             (ast_step1::Type<'a>, ast_step1::Forall<'a>),
-            AliasComputation<'a>,
+            AliasComputation,
         ),
     >,
 );
@@ -785,7 +776,7 @@ impl<'a> TypeAliasMap<'a> {
         type_variable_names: &FxHashMap<&'a str, TypeVariable>,
         search_type: SearchMode,
         token_map: &mut TokenMap,
-    ) -> Option<(Type<'a>, Forall)> {
+    ) -> Option<(Type, Forall)> {
         debug_assert_ne!(search_type, SearchMode::Normal);
         let alias = self.0.get(name.0)?;
         Some(match (&alias, search_type) {
@@ -870,7 +861,7 @@ fn decrement_index_outside_unit(t: TypeUnit) -> TypeUnit {
             TypeUnit::Variable(v.decrement_recursive_index_with_bound(1))
         }
         TypeUnit::RecursiveAlias { body } => TypeUnit::RecursiveAlias { body },
-        TypeUnit::Const { name, id } => TypeUnit::Const { name, id },
+        TypeUnit::Const { id } => TypeUnit::Const { id },
         TypeUnit::Tuple(a, b) => TypeUnit::Tuple(
             decrement_index_outside(a),
             decrement_index_outside(b),
@@ -878,48 +869,44 @@ fn decrement_index_outside_unit(t: TypeUnit) -> TypeUnit {
     }
 }
 
-impl<'a> IntoIterator for SubtypeRelations<'a> {
-    type Item = (Type<'a>, Type<'a>);
-    type IntoIter = std::collections::btree_set::IntoIter<(Type<'a>, Type<'a>)>;
+impl IntoIterator for SubtypeRelations {
+    type Item = (Type, Type);
+    type IntoIter = std::collections::btree_set::IntoIter<(Type, Type)>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
     }
 }
 
-impl<'a, 'b> IntoIterator for &'b SubtypeRelations<'a> {
-    type Item = &'b (Type<'a>, Type<'a>);
-    type IntoIter = std::collections::btree_set::Iter<'b, (Type<'a>, Type<'a>)>;
+impl<'b> IntoIterator for &'b SubtypeRelations {
+    type Item = &'b (Type, Type);
+    type IntoIter = std::collections::btree_set::Iter<'b, (Type, Type)>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
     }
 }
 
-impl<'a> FromIterator<(Type<'a>, Type<'a>)> for SubtypeRelations<'a> {
-    fn from_iter<T: IntoIterator<Item = (Type<'a>, Type<'a>)>>(
-        iter: T,
-    ) -> Self {
+impl FromIterator<(Type, Type)> for SubtypeRelations {
+    fn from_iter<T: IntoIterator<Item = (Type, Type)>>(iter: T) -> Self {
         Self(iter.into_iter().collect())
     }
 }
 
-impl<'a> SubtypeRelations<'a> {
-    pub fn iter(
-        &self,
-    ) -> std::collections::btree_set::Iter<(Type<'a>, Type<'a>)> {
+impl SubtypeRelations {
+    pub fn iter(&self) -> std::collections::btree_set::Iter<(Type, Type)> {
         self.0.iter()
     }
 
-    pub fn insert(&mut self, value: (Type<'a>, Type<'a>)) -> bool {
+    pub fn insert(&mut self, value: (Type, Type)) -> bool {
         self.0.insert(value)
     }
 
-    pub fn remove(&mut self, value: &(Type<'a>, Type<'a>)) -> bool {
+    pub fn remove(&mut self, value: &(Type, Type)) -> bool {
         self.0.remove(value)
     }
 
-    pub fn contains(&self, value: &(Type<'a>, Type<'a>)) -> bool {
+    pub fn contains(&self, value: &(Type, Type)) -> bool {
         self.0.contains(value)
     }
 
@@ -928,16 +915,13 @@ impl<'a> SubtypeRelations<'a> {
     }
 }
 
-impl<'a> Extend<(Type<'a>, Type<'a>)> for SubtypeRelations<'a> {
-    fn extend<T: IntoIterator<Item = (Type<'a>, Type<'a>)>>(
-        &mut self,
-        iter: T,
-    ) {
+impl Extend<(Type, Type)> for SubtypeRelations {
+    fn extend<T: IntoIterator<Item = (Type, Type)>>(&mut self, iter: T) {
         self.0.extend(iter)
     }
 }
 
-impl<'a> Display for PatternUnitForRestriction<'a> {
+impl Display for PatternUnitForRestriction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PatternUnitForRestriction::I64 => write!(f, "I64Lit"),
@@ -945,15 +929,15 @@ impl<'a> Display for PatternUnitForRestriction<'a> {
             PatternUnitForRestriction::Binder(b, decl_id) => {
                 write!(f, "Bind({b}, id = {decl_id})")
             }
-            PatternUnitForRestriction::Const { name, .. } => {
-                write!(f, ":{name}")
+            PatternUnitForRestriction::Const { id } => {
+                write!(f, ":{id}")
             }
             PatternUnitForRestriction::Tuple(a, b) => write!(f, "({a}, {b})"),
         }
     }
 }
 
-impl<'a> PatternUnitForRestriction<'a> {
+impl PatternUnitForRestriction {
     pub fn covariant_type_variables(&self) -> Vec<TypeVariable> {
         match self {
             PatternUnitForRestriction::I64
@@ -1006,7 +990,7 @@ impl<'a> PatternUnitForRestriction<'a> {
         self.all_type_variables_vec().into_iter().collect()
     }
 
-    pub fn decl_type_map(&self) -> Vec<(DeclId, &Type<'a>)> {
+    pub fn decl_type_map(&self) -> Vec<(DeclId, &Type)> {
         match self {
             PatternUnitForRestriction::I64
             | PatternUnitForRestriction::Str
@@ -1024,14 +1008,14 @@ impl<'a> PatternUnitForRestriction<'a> {
 
     pub fn map_type<F>(self, f: F) -> Self
     where
-        F: FnMut(Type<'a>) -> Type<'a>,
+        F: FnMut(Type) -> Type,
     {
         self.map_type_rec(f).0
     }
 
     fn map_type_rec<F>(self, mut f: F) -> (Self, F)
     where
-        F: FnMut(Type<'a>) -> Type<'a>,
+        F: FnMut(Type) -> Type,
     {
         use PatternUnitForRestriction::*;
         match self {
@@ -1118,7 +1102,7 @@ enum OperatorContext {
 }
 
 fn fmt_type_with_env(
-    t: &Type<'_>,
+    t: &Type,
     op_precedence_map: &OpPrecedenceMap,
     type_variable_decls: &FxHashMap<TypeVariable, &str>,
 ) -> (String, OperatorContext) {
@@ -1152,7 +1136,7 @@ fn fmt_type_with_env(
 }
 
 fn fmt_type_unit_with_env(
-    t: &TypeUnit<'_>,
+    t: &TypeUnit,
     op_precedence_map: &OpPrecedenceMap,
     type_variable_decls: &FxHashMap<TypeVariable, &str>,
 ) -> (String, OperatorContext) {
@@ -1186,7 +1170,7 @@ fn fmt_type_unit_with_env(
             ),
             Single,
         ),
-        TypeUnit::Const { name, .. } => (format!(":{}", name), Single),
+        TypeUnit::Const { id } => (format!(":{}", id), Single),
         TypeUnit::Tuple(hs, ts) => {
             let ts = collect_tuple_rev(ts);
             let hts = hs
@@ -1195,9 +1179,9 @@ fn fmt_type_unit_with_env(
                 .collect_vec();
             if hts.len() == 1 {
                 let (h, tuple_rev) = hts[0];
-                if let TypeUnit::Const { name, .. } = &**h {
+                if let TypeUnit::Const { id } = &**h {
                     fmt_tuple(
-                        &**name,
+                        &id.to_string(), // TODO: name here
                         tuple_rev,
                         op_precedence_map,
                         type_variable_decls,
@@ -1209,9 +1193,9 @@ fn fmt_type_unit_with_env(
                 let t = format!(
                     "{}",
                     hts.iter().format_with(" | ", |(h, t), f| {
-                        if let TypeUnit::Const { name, .. } = &***h {
+                        if let TypeUnit::Const { id } = &***h {
                             let (t, t_context) = fmt_tuple(
-                                name,
+                                &id.to_string(), // TODO: name here
                                 t,
                                 op_precedence_map,
                                 type_variable_decls,
@@ -1297,7 +1281,7 @@ fn fmt_tuple(
     }
 }
 
-fn collect_tuple_rev<'a, 'b>(tuple: &'b Type<'a>) -> Vec<Vec<&'b Type<'a>>> {
+fn collect_tuple_rev(tuple: &Type) -> Vec<Vec<&Type>> {
     tuple
         .iter()
         .flat_map(|tuple| match &**tuple {

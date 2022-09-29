@@ -45,7 +45,7 @@ impl IntrinsicVariable {
         }
     }
 
-    pub fn to_type(self) -> Type<'static> {
+    pub fn to_type(self) -> Type {
         match self {
             IntrinsicVariable::Minus => Type::from_str("I64")
                 .arrow(Type::from_str("I64").arrow(Type::from_str("I64"))),
@@ -149,7 +149,7 @@ impl IntrinsicConstructor {
         }
     }
 
-    pub fn to_type(self) -> Type<'static> {
+    pub fn to_type(self) -> Type {
         match self {
             IntrinsicConstructor::True => Type::from_str("True"),
             IntrinsicConstructor::False => Type::from_str("False"),
