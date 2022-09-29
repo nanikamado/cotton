@@ -2,15 +2,15 @@ mod type_check;
 pub mod type_util;
 
 pub use self::type_check::{
-    simplify_subtype_rel, type_check, ResolvedIdents, TypeVariableMap,
-    VariableId, VariableRequirement,
+    simplify_subtype_rel, type_check, GlobalVariableType, LocalVariableType,
+    ResolvedIdents, TypeVariableMap, VariableId, VariableRequirement,
 };
 use crate::{
     ast_step2::{
         self,
         decl_id::DeclId,
         types::{Type, TypeUnit, TypeVariable},
-        IncompleteType, Pattern, PatternUnit, TypeConstructor,
+        Pattern, PatternUnit, TypeConstructor,
     },
     ast_step4::VariableKind,
 };
@@ -24,7 +24,8 @@ pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl<'a>>,
     pub entry_point: DeclId,
-    pub types_of_decls: FxHashMap<VariableId, IncompleteType<'a>>,
+    pub types_of_global_decls: FxHashMap<VariableId, GlobalVariableType<'a>>,
+    pub types_of_local_decls: FxHashMap<VariableId, LocalVariableType<'a>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -65,21 +66,27 @@ pub struct DataDecl<'a> {
 
 impl<'a> Ast<'a> {
     pub fn from(ast: ast_step2::Ast<'a>) -> (Self, ResolvedIdents<'a>) {
-        let (resolved_idents, mut types_of_decls, _subtype_relations, mut map) =
-            type_check(&ast);
+        let (
+            resolved_idents,
+            types_of_global_decls,
+            mut types_of_local_decls,
+            _subtype_relations,
+            mut map,
+        ) = type_check(&ast);
         let (variable_decl, entry_point) = variable_decl(
             ast.variable_decl,
             &ast.data_decl,
             ast.entry_point,
             &resolved_idents,
             &mut map,
-            &mut types_of_decls,
+            &mut types_of_local_decls,
         );
         for v in &variable_decl {
             log::debug!(
                 "type_ {} : {}",
                 v.name,
-                types_of_decls[&VariableId::Decl(v.decl_id)]
+                types_of_global_decls[&VariableId::Decl(v.decl_id)]
+                    .type_with_env
             );
         }
         let data_decl = ast
@@ -96,7 +103,8 @@ impl<'a> Ast<'a> {
                 variable_decl,
                 data_decl,
                 entry_point,
-                types_of_decls,
+                types_of_global_decls,
+                types_of_local_decls,
             },
             resolved_idents,
         )
@@ -109,7 +117,7 @@ fn variable_decl<'a>(
     entry_point: DeclId,
     resolved_idents: &ResolvedIdents<'a>,
     map: &mut TypeVariableMap<'a>,
-    types_of_decls: &mut FxHashMap<VariableId, ast_step2::IncompleteType<'a>>,
+    types_of_decls: &mut FxHashMap<VariableId, LocalVariableType<'a>>,
 ) -> (Vec<VariableDecl<'a>>, DeclId) {
     let data_decls: FxHashMap<DeclId, &ast_step2::DataDecl<'a>> = data_decls
         .iter()
@@ -124,8 +132,13 @@ fn variable_decl<'a>(
             let (mut value, mut value_t) =
                 expr(d.value, &data_decls, resolved_idents, map);
             for (name, t, decl_id) in d.implicit_parameters.into_iter().rev() {
-                types_of_decls
-                    .insert(VariableId::Decl(decl_id), t.clone().into());
+                types_of_decls.insert(
+                    VariableId::Decl(decl_id),
+                    LocalVariableType {
+                        t: t.clone(),
+                        toplevel: d.decl_id,
+                    },
+                );
                 value = Expr::Lambda(vec![FnArm {
                     pattern: vec![vec![PatternUnit::Binder(
                         name,

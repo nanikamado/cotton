@@ -44,7 +44,7 @@ each =
             a.f
             l2.each(f)
 
-data Filter(a, b)
+data Filter(A, B) forall { A, B }
 
 filter = | l, f => Filter(l, f)
 

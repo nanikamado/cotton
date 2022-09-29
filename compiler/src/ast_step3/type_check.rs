@@ -8,9 +8,9 @@ use crate::{
         ident_id::IdentId,
         types::{self, SingleTypeConstructor, TypeMatchable},
         types::{Type, TypeUnit, TypeVariable},
-        Ast, DataDecl, Expr, ExprWithType, FnArm, IncompleteType, Pattern,
-        PatternRestrictions, PatternUnit, PatternUnitForRestriction,
-        SubtypeRelations, TypeId,
+        Ast, DataDecl, Expr, ExprWithType, FnArm, Pattern, PatternRestrictions,
+        PatternUnit, PatternUnitForRestriction, SubtypeRelations, TypeId,
+        TypeWithEnv,
     },
     ast_step4::VariableKind,
     intrinsics::{IntrinsicConstructor, IntrinsicType, IntrinsicVariable},
@@ -61,14 +61,15 @@ pub fn type_check<'a>(
     ast: &Ast<'a>,
 ) -> (
     ResolvedIdents<'a>,
-    FxHashMap<VariableId, ast_step2::IncompleteType<'a>>,
+    FxHashMap<VariableId, GlobalVariableType<'a>>,
+    FxHashMap<VariableId, LocalVariableType<'a>>,
     SubtypeRelations<'a>,
     TypeVariableMap<'a>,
 ) {
     let mut toplevels: Vec<Toplevel<'a>> = Default::default();
     for v in IntrinsicVariable::iter() {
         toplevels.push(Toplevel {
-            incomplete: v.to_type().clone().into(),
+            type_with_env: v.to_type().clone().into(),
             type_annotation: None,
             resolved_idents: Default::default(),
             decl_id: VariableId::IntrinsicVariable(v),
@@ -79,7 +80,7 @@ pub fn type_check<'a>(
     }
     for v in IntrinsicConstructor::iter() {
         toplevels.push(Toplevel {
-            incomplete: v.to_type().clone().into(),
+            type_with_env: v.to_type().clone().into(),
             type_annotation: None,
             resolved_idents: Default::default(),
             decl_id: VariableId::IntrinsicConstructor(v),
@@ -91,7 +92,7 @@ pub fn type_check<'a>(
     for d in &ast.data_decl {
         let d_type: types::Type = constructor_type(d.clone()).into();
         toplevels.push(Toplevel {
-            incomplete: d_type.into(),
+            type_with_env: d_type.into(),
             type_annotation: None,
             resolved_idents: Default::default(),
             decl_id: VariableId::Decl(d.decl_id),
@@ -105,24 +106,27 @@ pub fn type_check<'a>(
     let mut map = TypeVariableMap::default();
     let mut types_of_local_decls = Vec::new();
     for d in &ast.variable_decl {
-        let (mut t, resolved, mut tod) =
-            min_type_incomplete(&d.value, &mut subtype_relations, &mut map);
+        let (mut t, resolved, tod) =
+            min_type_with_env(&d.value, &mut subtype_relations, &mut map);
         resolved_idents.extend(resolved);
-        types_of_local_decls.append(&mut tod);
-        let type_annotation: Option<ast_step2::IncompleteType> =
-            if let Some(annotation) = &d.type_annotation {
-                t.subtype_relations.insert((
-                    t.constructor.clone(),
-                    annotation.constructor.clone(),
-                ));
-                t.subtype_relations
-                    .extend(annotation.subtype_relations.clone());
-                t.variable_requirements
-                    .append(&mut annotation.variable_requirements.clone());
-                Some(annotation.clone())
-            } else {
-                None
-            };
+        types_of_local_decls.extend(
+            tod.into_iter()
+                .map(|(decl_id, t)| (decl_id, (t, d.decl_id))),
+        );
+        let type_annotation = if let Some(annotation) = &d.type_annotation {
+            t.subtype_relations.insert((
+                t.constructor.clone(),
+                annotation.type_with_env.constructor.clone(),
+            ));
+            t.subtype_relations
+                .extend(annotation.type_with_env.subtype_relations.clone());
+            t.variable_requirements.append(
+                &mut annotation.type_with_env.variable_requirements.clone(),
+            );
+            Some(annotation.clone())
+        } else {
+            None
+        };
         let vs: FxHashMap<_, _> = d
             .implicit_parameters
             .iter()
@@ -156,14 +160,18 @@ pub fn type_check<'a>(
             })
             .collect();
         t.subtype_relations.extend(suptype_rel);
-        let incomplete = simplify::simplify_type(
+        let type_with_env = simplify::simplify_type(
             &mut map,
-            IncompleteType {
+            TypeWithEnv {
                 constructor: SingleTypeConstructor {
                     type_: t.constructor,
                     contravariant_candidates_from_annotation: type_annotation
                         .as_ref()
-                        .map(|t| t.constructor.contravariant_type_variables()),
+                        .map(|t| {
+                            t.type_with_env
+                                .constructor
+                                .contravariant_type_variables()
+                        }),
                 },
                 variable_requirements: t.variable_requirements,
                 subtype_relations: t.subtype_relations,
@@ -173,9 +181,9 @@ pub fn type_check<'a>(
         )
         .unwrap();
         subtype_relations =
-            subtype_relations.merge(incomplete.subtype_relations.clone());
+            subtype_relations.merge(type_with_env.subtype_relations.clone());
         toplevels.push(Toplevel {
-            incomplete: incomplete.into(),
+            type_with_env: type_with_env.into(),
             type_annotation,
             resolved_idents: Default::default(),
             decl_id: VariableId::Decl(d.decl_id),
@@ -190,10 +198,10 @@ pub fn type_check<'a>(
         log::debug!("{:<3} {} : ", top.decl_id, top.name);
         log::debug!("resolved: {:?}", top.resolved_idents);
         if let Some(f) = &top.type_annotation {
-            log::debug!("face: {}", f);
-            log::debug!("incomplete: {}", top.incomplete);
+            log::debug!("face: {}", f.type_with_env);
+            log::debug!("type_with_env: {}", top.type_with_env);
         } else {
-            log::debug!("not face: {}", top.incomplete);
+            log::debug!("not face: {}", top.type_with_env);
         }
     }
     let (mut resolved_names, types, rel) = resolve_names(toplevels, &mut map);
@@ -241,11 +249,22 @@ pub fn type_check<'a>(
         resolved_idents,
         types
             .into_iter()
-            .chain(types_of_local_decls)
             .map(|(d, t)| {
                 (
                     d,
                     t.map_type(|t| lift_recursive_alias(map.normalize_type(t))),
+                )
+            })
+            .collect(),
+        types_of_local_decls
+            .into_iter()
+            .map(|(d, (t, toplevel))| {
+                (
+                    d,
+                    LocalVariableType {
+                        t: lift_recursive_alias(map.normalize_type(t)),
+                        toplevel,
+                    },
                 )
             })
             .collect(),
@@ -295,8 +314,8 @@ pub type Resolved<'a> = Vec<(IdentId, ResolvedIdent<'a>)>;
 
 #[derive(Debug, Clone)]
 struct Toplevel<'a> {
-    incomplete: ast_step2::IncompleteType<'a>,
-    type_annotation: Option<ast_step2::IncompleteType<'a>>,
+    type_with_env: ast_step2::TypeWithEnv<'a>,
+    type_annotation: Option<GlobalVariableType<'a>>,
     resolved_idents: FxHashMap<IdentId, VariableId>,
     decl_id: VariableId,
     name: &'a str,
@@ -305,12 +324,54 @@ struct Toplevel<'a> {
     variable_kind: VariableKind,
 }
 
-type TypesOfDeclsVec<'a> = Vec<(VariableId, ast_step2::IncompleteType<'a>)>;
+type TypesOfLocalDeclsVec<'a> = Vec<(VariableId, ast_step2::types::Type<'a>)>;
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct GlobalVariableType<'a> {
+    pub type_with_env: ast_step2::TypeWithEnv<'a>,
+    pub type_variable_decls: FxHashMap<TypeVariable, &'a str>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct LocalVariableType<'a> {
+    pub t: Type<'a>,
+    pub toplevel: DeclId,
+}
+
+impl<'a> GlobalVariableType<'a> {
+    pub fn map_type<F>(self, mut f: F) -> Self
+    where
+        F: FnMut(Type<'a>) -> Type<'a>,
+    {
+        Self {
+            type_with_env: self.type_with_env.map_type(&mut f),
+            type_variable_decls: self
+                .type_variable_decls
+                .into_iter()
+                .map(|(v, n)| {
+                    if let TypeMatchable::Variable(v) =
+                        f(TypeUnit::Variable(v).into()).matchable()
+                    {
+                        (v, n)
+                    } else {
+                        panic!()
+                    }
+                })
+                .collect(),
+        }
+    }
+}
+
+type TypesOfGlobalDeclsVec<'a> = Vec<(VariableId, GlobalVariableType<'a>)>;
 
 fn resolve_names<'a>(
     toplevels: Vec<Toplevel<'a>>,
     map: &mut TypeVariableMap<'a>,
-) -> (Resolved<'a>, TypesOfDeclsVec<'a>, SubtypeRelations<'a>) {
+) -> (
+    Resolved<'a>,
+    TypesOfGlobalDeclsVec<'a>,
+    SubtypeRelations<'a>,
+) {
     let mut toplevel_graph = Graph::<Toplevel, ()>::new();
     for t in toplevels {
         toplevel_graph.add_node(t);
@@ -324,7 +385,7 @@ fn resolve_names<'a>(
         .node_references()
         .flat_map(|(from, from_toplevle)| {
             from_toplevle
-                .incomplete
+                .type_with_env
                 .variable_requirements
                 .iter()
                 .flat_map(|req| &toplevle_map[req.name])
@@ -366,7 +427,7 @@ fn resolve_names<'a>(
                 .entry(toplevel.name)
                 .or_default()
                 .push(Toplevel {
-                    incomplete: improved_type,
+                    type_with_env: improved_type,
                     ..toplevel
                 });
         }
@@ -374,7 +435,18 @@ fn resolve_names<'a>(
     let types = resolved_variable_map
         .into_iter()
         .flat_map(|(_, toplevels)| {
-            toplevels.into_iter().map(|t| (t.decl_id, t.incomplete))
+            toplevels.into_iter().map(|t| {
+                (
+                    t.decl_id,
+                    GlobalVariableType {
+                        type_with_env: t.type_with_env,
+                        type_variable_decls: t
+                            .type_annotation
+                            .map(|t| t.type_variable_decls)
+                            .unwrap_or_default(),
+                    },
+                )
+            })
         })
         .collect();
     (resolved_idents, types, rel)
@@ -592,7 +664,7 @@ fn resolve_scc<'a>(
     map: &mut TypeVariableMap<'a>,
 ) -> (
     Resolved<'a>,
-    Vec<ast_step2::IncompleteType<'a, Type<'a>>>,
+    Vec<ast_step2::TypeWithEnv<'a, Type<'a>>>,
     SubtypeRelations<'a>,
 ) {
     // Merge the declarations in a scc to treate them as if they are one declaration,
@@ -605,16 +677,19 @@ fn resolve_scc<'a>(
     for t in &scc {
         name_vec.push(t.name);
         variable_requirements
-            .append(&mut t.incomplete.variable_requirements.clone());
-        subtype_relations.extend(t.incomplete.subtype_relations.clone());
+            .append(&mut t.type_with_env.variable_requirements.clone());
+        subtype_relations.extend(t.type_with_env.subtype_relations.clone());
         types.push(SingleTypeConstructor {
-            type_: t.incomplete.constructor.clone(),
+            type_: t.type_with_env.constructor.clone(),
             contravariant_candidates_from_annotation: t
                 .type_annotation
                 .as_ref()
-                .map(|t| t.constructor.contravariant_type_variables()),
+                .map(|t| {
+                    t.type_with_env.constructor.contravariant_type_variables()
+                }),
         });
-        pattern_restrictions.extend(t.incomplete.pattern_restrictions.clone())
+        pattern_restrictions
+            .extend(t.type_with_env.pattern_restrictions.clone())
     }
     let names_in_scc: FxHashSet<_> = name_vec.iter().copied().collect();
     log::debug!("name of unresolved: {:?}", names_in_scc);
@@ -635,7 +710,7 @@ fn resolve_scc<'a>(
             }),
         )
     });
-    let mut unresolved_type = IncompleteType {
+    let mut unresolved_type = TypeWithEnv {
         constructor: SccTypeConstructor(types),
         variable_requirements,
         subtype_relations,
@@ -694,7 +769,7 @@ fn resolve_scc<'a>(
             .map(|t| {
                 simplify::simplify_type(
                     map,
-                    ast_step2::IncompleteType {
+                    ast_step2::TypeWithEnv {
                         constructor: t.type_,
                         variable_requirements: variable_requirements.clone(),
                         subtype_relations: subtype_relation.clone(),
@@ -802,11 +877,11 @@ fn find_satisfied_types<
     C: CandidatesProvider<'a>,
 >(
     req: &VariableRequirement<'a>,
-    type_of_unresolved_decl: &IncompleteType<'a, T>,
+    type_of_unresolved_decl: &TypeWithEnv<'a, T>,
     resolved_variable_map: C,
     map: &TypeVariableMap<'a>,
     names_in_scc: &FxHashSet<&str>,
-) -> Vec<SatisfiedType<'a, IncompleteType<'a, T>>> {
+) -> Vec<SatisfiedType<'a, TypeWithEnv<'a, T>>> {
     log::trace!("type_of_unresolved_decl:");
     log::trace!("{}", type_of_unresolved_decl);
     log::trace!("required_type : {}", req.required_type);
@@ -819,9 +894,9 @@ fn find_satisfied_types<
              }| {
                 let mut t = type_of_unresolved_decl.clone();
                 let mut cand_t = if let Some(face) = candidate.type_annotation {
-                    face
+                    face.type_with_env
                 } else {
-                    candidate.incomplete
+                    candidate.type_with_env
                 };
                 let mut type_args = Vec::new();
                 let mut map = map.clone();
@@ -977,14 +1052,14 @@ fn get_one_satisfied<T: Display>(
     }
 }
 
-/// The reterned `IncompleteType` does not contain variable_requirements, but contains subtype relationship.
+/// The reterned `TypeWithEnv` does not contain variable_requirements, but contains subtype relationship.
 fn resolve_recursion_in_scc<'a>(
-    mut scc: IncompleteType<'a, SccTypeConstructor<'a>>,
+    mut scc: TypeWithEnv<'a, SccTypeConstructor<'a>>,
     toplevels: &[Toplevel<'a>],
     resolved_variable_map: &FxHashMap<&str, Vec<Toplevel<'a>>>,
     map: &mut TypeVariableMap<'a>,
     names_in_scc: &FxHashSet<&str>,
-) -> (Resolved<'a>, IncompleteType<'a, SccTypeConstructor<'a>>) {
+) -> (Resolved<'a>, TypeWithEnv<'a, SccTypeConstructor<'a>>) {
     let mut scc_map: FxHashMap<&str, Vec<usize>> = FxHashMap::default();
     for (i, t) in toplevels.iter().enumerate() {
         scc_map.entry(t.name).or_default().push(i);
@@ -999,7 +1074,7 @@ fn resolve_recursion_in_scc<'a>(
                     scc_map: &scc_map,
                     f: |j| Candidate {
                         candidate: Toplevel {
-                            incomplete: scc.constructor.0[j]
+                            type_with_env: scc.constructor.0[j]
                                 .type_
                                 .clone()
                                 .into(),
@@ -1054,14 +1129,14 @@ fn constructor_type(d: DataDecl) -> TypeUnit {
     t
 }
 
-fn min_type_incomplete<'a>(
+fn min_type_with_env<'a>(
     (expr, type_variable): &ExprWithType<'a, TypeVariable>,
     subtype_relations: &mut SubtypeRelations<'a>,
     map: &mut TypeVariableMap<'a>,
 ) -> (
-    ast_step2::IncompleteType<'a>,
+    ast_step2::TypeWithEnv<'a>,
     Resolved<'a>,
-    TypesOfDeclsVec<'a>,
+    TypesOfLocalDeclsVec<'a>,
 ) {
     match expr {
         Expr::Lambda(arms) => {
@@ -1118,7 +1193,7 @@ fn min_type_incomplete<'a>(
             ));
             map.insert(subtype_relations, *type_variable, constructor.clone());
             (
-                ast_step2::IncompleteType {
+                ast_step2::TypeWithEnv {
                     constructor,
                     variable_requirements: variable_requirements.concat(),
                     subtype_relations: subtype_relation
@@ -1145,7 +1220,7 @@ fn min_type_incomplete<'a>(
         Expr::Ident { name, ident_id, .. } => {
             let t: Type = TypeUnit::Variable(*type_variable).into();
             (
-                ast_step2::IncompleteType {
+                ast_step2::TypeWithEnv {
                     constructor: t.clone(),
                     variable_requirements: vec![VariableRequirement {
                         name,
@@ -1163,9 +1238,9 @@ fn min_type_incomplete<'a>(
         }
         Expr::Call(f, a) => {
             let (f_t, resolved1, types_of_decls_f) =
-                min_type_incomplete(f, subtype_relations, map);
+                min_type_with_env(f, subtype_relations, map);
             let (a_t, resolved2, types_of_decls_a) =
-                min_type_incomplete(a, subtype_relations, map);
+                min_type_with_env(a, subtype_relations, map);
             let b: types::Type = TypeUnit::Variable(*type_variable).into();
             let c: types::Type = TypeUnit::new_variable().into();
             // c -> b
@@ -1180,7 +1255,7 @@ fn min_type_incomplete<'a>(
             // a < c
             let a_sub_c = [(a_t.constructor, c)].iter().cloned().collect();
             (
-                ast_step2::IncompleteType {
+                ast_step2::TypeWithEnv {
                     constructor: b,
                     variable_requirements: [
                         f_t.variable_requirements,
@@ -1218,7 +1293,7 @@ fn min_type_incomplete<'a>(
                 .iter()
                 .map(|e| {
                     let (t, resolved, mut tod) =
-                        min_type_incomplete(e, &mut subtype_relations, map);
+                        min_type_with_env(e, &mut subtype_relations, map);
                     variable_requirements
                         .append(&mut t.variable_requirements.clone());
                     subtype_relations.extend(t.subtype_relations.clone());
@@ -1235,7 +1310,7 @@ fn min_type_incomplete<'a>(
                 t.constructor.clone(),
             );
             (
-                ast_step2::IncompleteType {
+                ast_step2::TypeWithEnv {
                     constructor: t.constructor,
                     variable_requirements,
                     subtype_relations,
@@ -1281,10 +1356,10 @@ fn arm_min_type<'a>(
     SubtypeRelations<'a>,
     Resolved<'a>,
     PatternRestrictions<'a>,
-    TypesOfDeclsVec<'a>,
+    TypesOfLocalDeclsVec<'a>,
 ) {
     let (body_type, mut resolved_idents, mut types_of_decls) =
-        min_type_incomplete(&arm.expr, subtype_relations, map);
+        min_type_with_env(&arm.expr, subtype_relations, map);
     let (mut ts, bindings, patterns): (Vec<_>, Vec<_>, Vec<_>) =
         arm.pattern.iter().map(pattern_to_type).multiunzip();
     ts.push(body_type.constructor);
@@ -1292,7 +1367,7 @@ fn arm_min_type<'a>(
         .into_iter()
         .flatten()
         .inspect(|(_, (decl_id, t))| {
-            types_of_decls.push((VariableId::Decl(*decl_id), t.clone().into()));
+            types_of_decls.push((VariableId::Decl(*decl_id), t.clone()));
         })
         .collect();
     let mut variable_requirements = Vec::new();

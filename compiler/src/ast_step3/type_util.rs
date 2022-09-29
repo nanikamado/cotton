@@ -6,7 +6,7 @@ use crate::{
         types::{
             unwrap_or_clone, Type, TypeMatchableRef, TypeUnit, TypeVariable,
         },
-        IncompleteType, TypeConstructor, TypeId,
+        TypeConstructor, TypeId, TypeWithEnv,
     },
     intrinsics::INTRINSIC_TYPES,
 };
@@ -547,9 +547,9 @@ impl<'a> Type<'a> {
 //     }
 // }
 
-impl<'a> IncompleteType<'a> {
+impl<'a> TypeWithEnv<'a> {
     pub fn all_type_variables(&self) -> FxHashSet<TypeVariable> {
-        let IncompleteType {
+        let TypeWithEnv {
             constructor,
             variable_requirements,
             subtype_relations: subtype_relation,
@@ -590,7 +590,7 @@ impl<'a> IncompleteType<'a> {
     }
 }
 
-impl<'a, T> IncompleteType<'a, T>
+impl<'a, T> TypeWithEnv<'a, T>
 where
     T: TypeConstructor<'a>,
 {
@@ -602,14 +602,14 @@ where
     where
         F: FnMut(Type<'a>) -> Type<'a>,
     {
-        let IncompleteType {
+        let TypeWithEnv {
             constructor,
             variable_requirements,
             subtype_relations: subtype_relationship,
             pattern_restrictions,
             already_considered_relations,
         } = self;
-        IncompleteType {
+        TypeWithEnv {
             constructor: constructor.map_type(&mut f),
             variable_requirements: variable_requirements
                 .into_iter()
@@ -650,14 +650,14 @@ mod tests {
 
     #[test]
     fn conjunctive_0() {
-        let src = r#"data a /\ b
+        let src = r#"data A /\ B forall { A, B }
         infixl 3 /\
         main : () -> () =
             | () => ()
         test1 : (False /\ False) | (False /\ True) | (True /\ False) | (True /\ True) = ()
         "#;
         let ast = parser::parse(src);
-        let ast: ast_step1::Ast = (&ast).into();
+        let (ast, _) = ast_step1::Ast::from(&ast);
         let (ast, _) = ast_step2::Ast::from(ast);
         let t = ast
             .variable_decl
@@ -667,6 +667,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
+            .type_with_env
             .constructor
             .clone();
         assert_eq!(
@@ -677,7 +678,7 @@ mod tests {
 
     #[test]
     fn conjunctive_1() {
-        let src = r#"data a /\ b
+        let src = r#"data A /\ B forall { A, B }
         infixr 3 /\
         main : () -> () =
             | () => ()
@@ -685,7 +686,7 @@ mod tests {
         test1 : List[() | I64] | List[I64] = ()
         "#;
         let ast = parser::parse(src);
-        let ast: ast_step1::Ast = (&ast).into();
+        let (ast, _) = ast_step1::Ast::from(&ast);
         let (ast, _) = ast_step2::Ast::from(ast);
         let t = ast
             .variable_decl
@@ -695,6 +696,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
+            .type_with_env
             .constructor
             .clone();
         assert_eq!(format!("{}", t), r#"rec[{() | /\[[{:() | :I64}], d0]}]"#);

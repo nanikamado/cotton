@@ -1,5 +1,5 @@
 use crate::{
-    ast_step2::IncompleteType,
+    ast_step2::TypeWithEnv,
     ast_step3::{Ast, VariableId},
 };
 use itertools::Itertools;
@@ -10,12 +10,15 @@ pub fn print(ast: &Ast<'_>) {
         println!(
             "{} : {}",
             d.name,
-            FormatForTest(&ast.types_of_decls[&VariableId::Decl(d.decl_id)])
+            FormatForTest(
+                &ast.types_of_global_decls[&VariableId::Decl(d.decl_id)]
+                    .type_with_env
+            )
         );
     }
 }
 
-struct FormatForTest<'a, 'b>(&'a IncompleteType<'b>);
+struct FormatForTest<'a, 'b>(&'a TypeWithEnv<'b>);
 
 impl Display for FormatForTest<'_, '_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

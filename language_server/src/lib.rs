@@ -1,4 +1,11 @@
-use compiler::{Token, TokenKind, TypeMatchableRef};
+#[cfg(test)]
+mod tests;
+
+use compiler::{
+    FxHashMap, OpPrecedenceMap, PrintTypeOfGlobalVariableForUser,
+    PrintTypeOfLocalVariableForUser, Token, TokenId, TokenKind,
+    TokenMapWithEnv, TypeMatchableRef,
+};
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
@@ -7,10 +14,12 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+type HoverMap = Vec<Vec<Option<Hover>>>;
+
 #[derive(Debug)]
 struct Backend {
     client: Client,
-    tokens: DashMap<Url, SemanticTokens>,
+    tokens: DashMap<Url, (SemanticTokens, HoverMap)>,
 }
 
 const SUPPORTED_TYPES: &[SemanticTokenType] = &[
@@ -42,7 +51,7 @@ impl LanguageServer for Backend {
         _: InitializeParams,
     ) -> Result<InitializeResult> {
         self.client
-            .log_message(MessageType::INFO, "Initializing ...")
+            .log_message(MessageType::INFO, "initializing")
             .await;
         Ok(InitializeResult {
             server_info: None,
@@ -62,6 +71,7 @@ impl LanguageServer for Backend {
                     }
                     .into(),
                 ),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 ..ServerCapabilities::default()
             },
         })
@@ -69,7 +79,7 @@ impl LanguageServer for Backend {
 
     async fn initialized(&self, _: InitializedParams) {
         self.client
-            .log_message(MessageType::INFO, "initialized!")
+            .log_message(MessageType::INFO, "initialized")
             .await;
     }
 
@@ -79,20 +89,17 @@ impl LanguageServer for Backend {
 
     async fn did_change_configuration(&self, _: DidChangeConfigurationParams) {
         self.client
-            .log_message(MessageType::INFO, "configuration changed!")
+            .log_message(MessageType::INFO, "configuration changed")
             .await;
     }
 
     async fn did_change_watched_files(&self, _: DidChangeWatchedFilesParams) {
         self.client
-            .log_message(MessageType::INFO, "watched files have changed!")
+            .log_message(MessageType::INFO, "watched files changed")
             .await;
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        self.client
-            .log_message(MessageType::INFO, "file opened!")
-            .await;
         let src = params.text_document.text;
         let tokens =
             tokio::task::spawn_blocking(move || semantic_tokens_from_src(&src))
@@ -103,7 +110,7 @@ impl LanguageServer for Backend {
 
     async fn did_change(&self, _params: DidChangeTextDocumentParams) {
         self.client
-            .log_message(MessageType::INFO, "file changed!")
+            .log_message(MessageType::INFO, "file changed")
             .await;
     }
 
@@ -116,15 +123,12 @@ impl LanguageServer for Backend {
             .await
             .unwrap();
             self.tokens.insert(params.text_document.uri, tokens);
-            self.client
-                .log_message(MessageType::INFO, "file saved. tokens saved.")
-                .await;
         }
     }
 
     async fn did_close(&self, _: DidCloseTextDocumentParams) {
         self.client
-            .log_message(MessageType::INFO, "file closed!")
+            .log_message(MessageType::INFO, "file closed.")
             .await;
     }
 
@@ -135,15 +139,33 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         if let Some(r) = self.tokens.get(&uri) {
             let tokens = r.value();
-            Ok(Some(tokens.clone().into()))
+            Ok(Some(tokens.0.clone().into()))
         } else if let Ok(src) = fs::read_to_string(uri.path()) {
             let tokens = tokio::task::spawn_blocking(move || {
                 semantic_tokens_from_src(&src)
             })
             .await
             .unwrap();
-            self.tokens.insert(uri, tokens.clone());
-            Ok(Some(tokens.into()))
+            let semantic_tokens = tokens.0.clone();
+            self.tokens.insert(uri, tokens);
+            Ok(Some(semantic_tokens.into()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn hover(
+        &self,
+        params: HoverParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<Hover>> {
+        let position = params.text_document_position_params.position;
+        let url = params.text_document_position_params.text_document.uri;
+        if let Some(hover_map) = self.tokens.get(&url) {
+            Ok(hover_map
+                .value()
+                .1
+                .get(position.line as usize)
+                .and_then(|t| t.get(position.character as usize).cloned()?))
         } else {
             Ok(None)
         }
@@ -160,15 +182,18 @@ pub async fn run() {
     Server::new(stdin, stdout, socket).serve(service).await;
 }
 
-fn semantic_tokens_from_src(src: &str) -> SemanticTokens {
-    let char_to_utf16_map = make_map(src);
+fn semantic_tokens_from_src(src: &str) -> (SemanticTokens, HoverMap) {
+    let (char_to_utf16_map, utf16_to_char_map) = make_map(src);
     let (ts, src_len) = compiler::lex(src);
     let ast = compiler::parse(ts.clone(), src, src_len);
-    let token_map = compiler::get_token_map(&ast);
+    let TokenMapWithEnv {
+        token_map,
+        op_precedence_map,
+    } = compiler::get_token_map(&ast);
     let mut tokens = Vec::new();
     let mut line = 0;
     let mut start = 0;
-    for (t, range) in ts {
+    for (t, range) in &ts {
         use Token::*;
         let token_type = match t {
             Int(_) => SemanticTokenType::NUMBER,
@@ -177,23 +202,36 @@ fn semantic_tokens_from_src(src: &str) -> SemanticTokens {
                 if s == "()" {
                     continue;
                 } else {
-                    match token_map.get(&id) {
+                    match token_map.get(id) {
                         Some(e) => match e {
-                            TokenKind::Variable(_, Some(b))
+                            TokenKind::GlobalVariable(_, Some(b))
                             | TokenKind::VariableDeclInInterface(b) => {
                                 if let TypeMatchableRef::Fn(_, _) =
-                                    b.constructor.matchable_ref()
+                                    b.type_with_env.constructor.matchable_ref()
                                 {
                                     SemanticTokenType::FUNCTION
                                 } else {
                                     SemanticTokenType::VARIABLE
                                 }
                             }
-                            TokenKind::Variable(_, _) => {
+                            TokenKind::LocalVariable(_, Some(t)) => {
+                                if let TypeMatchableRef::Fn(_, _) =
+                                    t.0.matchable_ref()
+                                {
+                                    SemanticTokenType::FUNCTION
+                                } else {
+                                    SemanticTokenType::VARIABLE
+                                }
+                            }
+                            TokenKind::GlobalVariable(_, _)
+                            | TokenKind::LocalVariable(_, _) => {
                                 eprintln!("id = {id} ({s}) is variable but could not get its type.");
                                 SemanticTokenType::VARIABLE
                             }
                             TokenKind::Type => SemanticTokenType::TYPE,
+                            TokenKind::Constructor(_) => {
+                                SemanticTokenType::STRUCT
+                            }
                             TokenKind::Interface => {
                                 SemanticTokenType::INTERFACE
                             }
@@ -228,26 +266,126 @@ fn semantic_tokens_from_src(src: &str) -> SemanticTokens {
         line = l;
         start = s;
     }
-    SemanticTokens {
-        result_id: None,
-        data: tokens,
-    }
+    let mut ts_tail = ts.iter();
+    let mut ts_head = ts_tail.next().unwrap();
+    let utf16_to_token_map = utf16_to_char_map
+        .into_iter()
+        .map(|utf16_to_char_line| {
+            utf16_to_char_line
+                .into_iter()
+                .map(|char| {
+                    char.and_then(|char| {
+                        while ts_head.1.end <= char
+                            || matches!(ts_head.0, Token::Dedent)
+                        {
+                            ts_head = ts_tail.next()?;
+                        }
+                        if ts_head.1.contains(&char) {
+                            Some(Hover {
+                                contents: HoverContents::Markup(
+                                    MarkupContent {
+                                        value: format!(
+                                            "```\n{}\n```",
+                                            print_type(
+                                                &ts_head.0,
+                                                &token_map,
+                                                &op_precedence_map
+                                            )?
+                                        ),
+                                        kind: MarkupKind::Markdown,
+                                    },
+                                ),
+                                range: Some(Range {
+                                    start: Position {
+                                        line: char_to_utf16_map
+                                            [ts_head.1.start]
+                                            .0,
+                                        character: char_to_utf16_map
+                                            [ts_head.1.start]
+                                            .1,
+                                    },
+                                    end: Position {
+                                        line: char_to_utf16_map[ts_head.1.end]
+                                            .0,
+                                        character: char_to_utf16_map
+                                            [ts_head.1.end]
+                                            .1,
+                                    },
+                                }),
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect()
+        })
+        .collect();
+    (
+        SemanticTokens {
+            result_id: None,
+            data: tokens,
+        },
+        utf16_to_token_map,
+    )
 }
 
-fn make_map(src: &str) -> Vec<(u32, u32)> {
-    let src = src.chars();
-    let mut char_to_utf16_map = Vec::with_capacity(src.size_hint().0);
+type Utf16ToCharMap = Vec<Vec<Option<usize>>>;
+
+fn make_map(src: &str) -> (Vec<(u32, u32)>, Utf16ToCharMap) {
+    let mut char_to_utf16_map = Vec::with_capacity(src.len());
+    let mut utf16_to_char_map = Vec::new();
+    let mut utf16_to_char_line = Vec::new();
     char_to_utf16_map.push((0, 0));
     let mut line = 0;
-    let mut col = 0;
-    for c in src {
+    let mut col_utf16 = 0;
+    for (char_i, c) in src.chars().enumerate() {
         if c == '\n' {
+            utf16_to_char_map.push(utf16_to_char_line);
+            utf16_to_char_line = Vec::new();
             line += 1;
-            col = 0;
+            col_utf16 = 0;
         } else {
-            col += c.len_utf16() as u32;
+            utf16_to_char_line.resize(col_utf16 as usize, None);
+            col_utf16 += c.len_utf16() as u32;
         }
-        char_to_utf16_map.push((line, col));
+        utf16_to_char_line.push(Some(char_i));
+        char_to_utf16_map.push((line, col_utf16));
     }
-    char_to_utf16_map
+    utf16_to_char_map.push(utf16_to_char_line);
+    (char_to_utf16_map, utf16_to_char_map)
+}
+
+fn print_type(
+    token: &Token,
+    token_map: &FxHashMap<TokenId, TokenKind>,
+    op_precedence_map: &OpPrecedenceMap,
+) -> Option<String> {
+    match token {
+        Token::Int(_) => Some("I64".to_string()),
+        Token::Str(_) => Some("String".to_string()),
+        Token::Ident(_, token_id) | Token::Op(_, token_id) => token_map
+            .get(token_id)
+            .and_then(|token_kind| match token_kind {
+                TokenKind::GlobalVariable(_, Some(t))
+                | TokenKind::VariableDeclInInterface(t)
+                | TokenKind::Constructor(Some(t)) => Some(
+                    PrintTypeOfGlobalVariableForUser {
+                        t,
+                        op_precedence_map,
+                    }
+                    .to_string(),
+                ),
+                TokenKind::LocalVariable(_, Some(t)) => Some(
+                    PrintTypeOfLocalVariableForUser {
+                        t: &t.0,
+                        op_precedence_map,
+                        type_variable_decls: &t.1,
+                    }
+                    .to_string(),
+                ),
+                _ => None,
+            }),
+        _ => None,
+    }
 }

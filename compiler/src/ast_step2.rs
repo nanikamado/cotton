@@ -8,7 +8,8 @@ use self::{
     ident_id::IdentId,
     types::{Type, TypeUnit},
 };
-use crate::ast_step3::VariableRequirement;
+use crate::ast_step1::OpPrecedenceMap;
+use crate::ast_step3::{GlobalVariableType, VariableRequirement};
 use crate::{
     ast_step1,
     intrinsics::{
@@ -49,6 +50,7 @@ pub struct Ast<'a> {
 pub struct DataDecl<'a> {
     pub name: &'a str,
     pub fields: Vec<TypeVariable>,
+    pub type_variable_decls: Vec<(TypeVariable, &'a str)>,
     pub decl_id: DeclId,
 }
 
@@ -80,7 +82,7 @@ pub type PatternRestrictions<'a> =
     Vec<(Type<'a>, Vec<PatternUnitForRestriction<'a>>)>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct IncompleteType<'a, T = Type<'a>>
+pub struct TypeWithEnv<'a, T = Type<'a>>
 where
     T: TypeConstructor<'a>,
 {
@@ -91,10 +93,21 @@ where
     pub pattern_restrictions: PatternRestrictions<'a>,
 }
 
+pub struct PrintTypeOfGlobalVariableForUser<'a> {
+    pub t: &'a GlobalVariableType<'a>,
+    pub op_precedence_map: &'a OpPrecedenceMap<'a>,
+}
+
+pub struct PrintTypeOfLocalVariableForUser<'a> {
+    pub t: &'a Type<'a>,
+    pub op_precedence_map: &'a OpPrecedenceMap<'a>,
+    pub type_variable_decls: &'a FxHashMap<TypeVariable, &'a str>,
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct VariableDecl<'a> {
     pub name: &'a str,
-    pub type_annotation: Option<IncompleteType<'a>>,
+    pub type_annotation: Option<GlobalVariableType<'a>>,
     pub implicit_parameters: Vec<(&'a str, Type<'a>, DeclId)>,
     pub value: ExprWithType<'a, TypeVariable>,
     pub decl_id: DeclId,
@@ -168,9 +181,12 @@ impl<'a> Ast<'a> {
             .into_iter()
             .map(|d| {
                 let decl_id = DeclId::new();
+                let mut type_variables = FxHashMap::default();
                 token_map.insert(d.name.1, TokenMapEntry::DataDecl(decl_id));
-                for ((_, id), interfaces) in d.type_variables.type_variables {
+                for ((name, id), interfaces) in d.type_variables.type_variables
+                {
                     token_map.insert(id, TokenMapEntry::TypeVariable);
+                    type_variables.insert(name, TypeVariable::new());
                     for (_, id) in interfaces {
                         token_map.insert(id, TokenMapEntry::Interface);
                     }
@@ -182,10 +198,14 @@ impl<'a> Ast<'a> {
                         .iter()
                         .map(|f| {
                             token_map.insert(f.1, TokenMapEntry::TypeVariable);
-                            TypeVariable::new()
+                            type_variables[f.0]
                         })
                         .collect(),
                     decl_id,
+                    type_variable_decls: type_variables
+                        .into_iter()
+                        .map(|(n, v)| (v, n))
+                        .collect(),
                 }
             })
             .collect();
@@ -281,7 +301,7 @@ impl From<ConstructorId> for TypeId {
     }
 }
 
-impl<'a> From<Type<'a>> for IncompleteType<'a> {
+impl<'a> From<Type<'a>> for TypeWithEnv<'a> {
     fn from(t: Type<'a>) -> Self {
         Self {
             constructor: t,
@@ -311,6 +331,7 @@ fn variable_decl<'a>(
     VariableDecl {
         name: v.name.0,
         type_annotation: v.type_annotation.map(|(t, forall)| {
+            let mut type_variable_decls = FxHashMap::default();
             type_variable_names.extend(forall.type_variables.into_iter().map(
                 |(s, interface_names)| {
                     token_map.insert(s.1, TokenMapEntry::TypeVariable);
@@ -328,10 +349,11 @@ fn variable_decl<'a>(
                             ))
                         }
                     }
+                    type_variable_decls.insert(v, s.0);
                     (s.0, v)
                 },
             ));
-            type_to_type(
+            let type_with_env = type_to_type(
                 t,
                 data_decl_map,
                 &type_variable_names,
@@ -339,7 +361,11 @@ fn variable_decl<'a>(
                 SearchMode::Normal,
                 token_map,
             )
-            .into()
+            .into();
+            GlobalVariableType {
+                type_with_env,
+                type_variable_decls,
+            }
         }),
         value: expr(
             v.value,
@@ -1018,4 +1044,275 @@ impl<'a> PatternUnitForRestriction<'a> {
             Binder(t, decl_id) => (Binder(f(t), decl_id), f),
         }
     }
+}
+
+impl<'a> Display for PrintTypeOfGlobalVariableForUser<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            fmt_type_with_env(
+                &self.t.type_with_env.constructor,
+                self.op_precedence_map,
+                &self.t.type_variable_decls
+            )
+            .0
+        )?;
+        let vs = self.t.type_with_env.constructor.all_type_variables();
+        if !vs.is_empty() {
+            write!(
+                f,
+                " forall {{ {}{} }}",
+                vs.iter().format_with(", ", |v, f| {
+                    if let Some(s) = self.t.type_variable_decls.get(v) {
+                        f(s)
+                    } else {
+                        f(v)
+                    }
+                }),
+                &self.t.type_with_env.subtype_relations.iter().format_with(
+                    "",
+                    |(a, b), f| f(&format_args!(
+                        ", {} <: {}",
+                        fmt_type_with_env(
+                            a,
+                            self.op_precedence_map,
+                            &self.t.type_variable_decls
+                        )
+                        .0,
+                        fmt_type_with_env(
+                            b,
+                            self.op_precedence_map,
+                            &self.t.type_variable_decls
+                        )
+                        .0
+                    ))
+                )
+            )?;
+        }
+        Ok(())
+    }
+}
+
+impl<'a> Display for PrintTypeOfLocalVariableForUser<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            fmt_type_with_env(
+                self.t,
+                self.op_precedence_map,
+                self.type_variable_decls
+            )
+            .0
+        )?;
+        Ok(())
+    }
+}
+
+enum OperatorContext {
+    Single,
+    Fn,
+    Or,
+    OtherOperator,
+}
+
+fn fmt_type_with_env(
+    t: &Type<'_>,
+    op_precedence_map: &OpPrecedenceMap,
+    type_variable_decls: &FxHashMap<TypeVariable, &str>,
+) -> (String, OperatorContext) {
+    if t.is_empty() {
+        ("∅".to_string(), OperatorContext::Single)
+    } else if t.len() == 1 {
+        fmt_type_unit_with_env(
+            t.iter().next().unwrap(),
+            op_precedence_map,
+            type_variable_decls,
+        )
+    } else {
+        (
+            t.iter()
+                .format_with(" | ", |t, f| {
+                    let (t, t_context) = fmt_type_unit_with_env(
+                        t,
+                        op_precedence_map,
+                        type_variable_decls,
+                    );
+                    let s = match t_context {
+                        OperatorContext::Single | OperatorContext::Or => t,
+                        _ => format!("({})", t),
+                    };
+                    f(&s)
+                })
+                .to_string(),
+            OperatorContext::Or,
+        )
+    }
+}
+
+fn fmt_type_unit_with_env(
+    t: &TypeUnit<'_>,
+    op_precedence_map: &OpPrecedenceMap,
+    type_variable_decls: &FxHashMap<TypeVariable, &str>,
+) -> (String, OperatorContext) {
+    use OperatorContext::*;
+    match t {
+        TypeUnit::Fn(a, b) => {
+            let (b, b_context) =
+                fmt_type_with_env(b, op_precedence_map, type_variable_decls);
+            let (a, a_context) =
+                fmt_type_with_env(a, op_precedence_map, type_variable_decls);
+            let s = match (a_context, b_context) {
+                (Single, Single | Fn) => format!("{} -> {}", a, b),
+                (Single, _) => format!("{} -> ({})", a, b),
+                (_, Single | Fn) => format!("({}) -> {}", a, b),
+                _ => format!("({}) -> ({})", a, b),
+            };
+            (s, Fn)
+        }
+        TypeUnit::Variable(v) => {
+            if let Some(s) = type_variable_decls.get(v) {
+                (s.to_string(), Single)
+            } else {
+                (v.to_string(), Single)
+            }
+        }
+        TypeUnit::RecursiveAlias { body } => (
+            format!(
+                "rec[{}]",
+                fmt_type_with_env(body, op_precedence_map, type_variable_decls)
+                    .0
+            ),
+            Single,
+        ),
+        TypeUnit::Const { name, .. } => (format!(":{}", name), Single),
+        TypeUnit::Tuple(hs, ts) => {
+            let ts = collect_tuple_rev(ts);
+            let hts = hs
+                .iter()
+                .flat_map(|h| ts.iter().map(move |t| (h, t)))
+                .collect_vec();
+            if hts.len() == 1 {
+                let (h, tuple_rev) = hts[0];
+                if let TypeUnit::Const { name, .. } = &**h {
+                    fmt_tuple(
+                        &**name,
+                        tuple_rev,
+                        op_precedence_map,
+                        type_variable_decls,
+                    )
+                } else {
+                    panic!()
+                }
+            } else {
+                let t = format!(
+                    "{}",
+                    hts.iter().format_with(" | ", |(h, t), f| {
+                        if let TypeUnit::Const { name, .. } = &***h {
+                            let (t, t_context) = fmt_tuple(
+                                name,
+                                t,
+                                op_precedence_map,
+                                type_variable_decls,
+                            );
+                            match t_context {
+                                Single | Or => f(&t),
+                                _ => f(&format_args!("({})", t)),
+                            }
+                        } else {
+                            panic!()
+                        }
+                    })
+                );
+                (t, Or)
+            }
+        }
+    }
+}
+
+fn fmt_tuple(
+    head: &str,
+    tuple_rev: &[&Type],
+    op_precedence_map: &OpPrecedenceMap,
+    type_variable_decls: &FxHashMap<TypeVariable, &str>,
+) -> (String, OperatorContext) {
+    use OperatorContext::*;
+    if tuple_rev.is_empty() {
+        (head.to_string(), Single)
+    } else if tuple_rev.len() == 1 {
+        (
+            format!(
+                "{}[{}]",
+                head,
+                fmt_type_with_env(
+                    tuple_rev[0],
+                    op_precedence_map,
+                    type_variable_decls
+                )
+                .0
+            ),
+            Single,
+        )
+    } else if op_precedence_map.get(head).is_some() {
+        assert_eq!(tuple_rev.len(), 2);
+        (
+            tuple_rev
+                .iter()
+                .map(|t| {
+                    let (t, t_context) = fmt_type_with_env(
+                        t,
+                        op_precedence_map,
+                        type_variable_decls,
+                    );
+                    match t_context {
+                        Single => t,
+                        _ => format!("({})", t),
+                    }
+                })
+                .format(&format!(" {} ", head))
+                .to_string(),
+            OtherOperator,
+        )
+    } else {
+        (
+            format!(
+                "{}[{}]",
+                head,
+                tuple_rev.iter().rev().format_with(", ", |t, f| {
+                    let (t, t_context) = fmt_type_with_env(
+                        t,
+                        op_precedence_map,
+                        type_variable_decls,
+                    );
+                    let s = match t_context {
+                        Single => t,
+                        _ => format!("({})", t),
+                    };
+                    f(&s)
+                })
+            ),
+            Single,
+        )
+    }
+}
+
+fn collect_tuple_rev<'a, 'b>(tuple: &'b Type<'a>) -> Vec<Vec<&'b Type<'a>>> {
+    tuple
+        .iter()
+        .flat_map(|tuple| match &**tuple {
+            TypeUnit::Tuple(h, t) => collect_tuple_rev(t)
+                .into_iter()
+                .map(|mut v| {
+                    v.push(h);
+                    v
+                })
+                .collect(),
+            TypeUnit::Const {
+                id: TypeId::Intrinsic(IntrinsicType::Unit),
+                ..
+            } => vec![Vec::new()],
+            _ => panic!(),
+        })
+        .collect()
 }

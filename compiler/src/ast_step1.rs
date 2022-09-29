@@ -98,10 +98,14 @@ impl<'a> OpPrecedenceMap<'a> {
         OpPrecedenceMap(m)
     }
 
-    fn get(&self, name: &str) -> (Associativity, i32) {
+    fn get_unwrap(&self, name: &str) -> (Associativity, i32) {
         *self.0.get(name).unwrap_or_else(|| {
             panic!("key {:?} not found in {:?}", name, self.0)
         })
+    }
+
+    pub fn get(&self, name: &str) -> Option<(Associativity, i32)> {
+        self.0.get(name).copied()
     }
 }
 
@@ -175,8 +179,8 @@ impl<T> OpSequenceUnit<'_, T> {
     }
 }
 
-impl<'a> From<&'a parser::Ast> for Ast<'a> {
-    fn from(ast: &'a parser::Ast) -> Self {
+impl<'a> Ast<'a> {
+    pub fn from(ast: &'a parser::Ast) -> (Self, OpPrecedenceMap) {
         let mut vs = Vec::new();
         let mut ds = Vec::new();
         let mut aliases = Vec::new();
@@ -211,7 +215,7 @@ impl<'a> From<&'a parser::Ast> for Ast<'a> {
             }
         }
         let op_precedence_map = OpPrecedenceMap::new(precedence_map);
-        Ast {
+        let ast = Ast {
             variable_decl: vs
                 .into_iter()
                 .map(|v| variable_decl(v, &op_precedence_map, &constructors))
@@ -252,7 +256,8 @@ impl<'a> From<&'a parser::Ast> for Ast<'a> {
                         .collect(),
                 })
                 .collect(),
-        }
+        };
+        (ast, op_precedence_map)
     }
 }
 
@@ -479,7 +484,7 @@ where
                 Operand(e.convert(op_precedence_map, constructors))
             }
             parser::OpSequenceUnit::Op(a) => {
-                let (ass, p) = op_precedence_map.get(&a.0);
+                let (ass, p) = op_precedence_map.get_unwrap(&a.0);
                 Operator((&a.0, a.1), ass, p)
             }
             parser::OpSequenceUnit::Apply(a) => {
