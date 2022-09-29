@@ -1164,7 +1164,6 @@ fn min_type_with_env<'a>(
             let arg_len = arm_types.iter().map(Vec::len).min().unwrap() - 1;
             let mut arm_types =
                 arm_types.into_iter().map(Vec::into_iter).collect_vec();
-            #[allow(clippy::needless_collect)]
             let arg_types: Vec<Type> = (0..arg_len)
                 .map(|_| {
                     let _t: Type = arm_types
