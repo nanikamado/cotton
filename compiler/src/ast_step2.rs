@@ -665,28 +665,6 @@ pub fn type_to_type<'a>(
             if let Some(n) = type_variable_names.get(t.name.0) {
                 token_map.insert(t.name.1, TokenMapEntry::TypeVariable);
                 TypeUnit::Variable(*n).into()
-            } else if let Some(i) = INTRINSIC_TYPES.get(&t.name.0) {
-                let mut tuple = Type::label_from_str("()");
-                for a in t
-                    .args
-                    .into_iter()
-                    .map(|a| {
-                        type_to_type(
-                            a,
-                            data_decl_map,
-                            type_variable_names,
-                            type_alias_map,
-                            search_type,
-                            token_map,
-                        )
-                    })
-                    .rev()
-                {
-                    tuple = TypeUnit::Tuple(a, tuple).into();
-                }
-                let id = TypeId::Intrinsic(*i);
-                token_map.insert(t.name.1, TokenMapEntry::TypeId(id));
-                TypeUnit::Tuple(TypeUnit::Const { id }.into(), tuple).into()
             } else if let Some((mut unaliased, forall)) = type_alias_map.get(
                 t.name,
                 data_decl_map,
