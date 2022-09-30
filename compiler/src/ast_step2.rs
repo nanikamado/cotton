@@ -168,14 +168,15 @@ impl TokenMap {
     }
 }
 
-static TYPE_NAMES: Lazy<RwLock<FxHashMap<TypeId, String>>> = Lazy::new(|| {
-    RwLock::new(
-        INTRINSIC_TYPES
-            .iter()
-            .map(|(name, id)| (TypeId::Intrinsic(*id), name.to_string()))
-            .collect(),
-    )
-});
+pub static TYPE_NAMES: Lazy<RwLock<FxHashMap<TypeId, String>>> =
+    Lazy::new(|| {
+        RwLock::new(
+            INTRINSIC_TYPES
+                .iter()
+                .map(|(name, id)| (TypeId::Intrinsic(*id), name.to_string()))
+                .collect(),
+        )
+    });
 
 impl<'a> Ast<'a> {
     pub fn from(ast: ast_step1::Ast<'a>) -> (Self, TokenMap) {
@@ -1175,7 +1176,7 @@ fn fmt_type_unit_with_env(
                 let (h, tuple_rev) = hts[0];
                 if let TypeUnit::Const { id } = &**h {
                     fmt_tuple(
-                        &id.to_string(), // TODO: name here
+                        TYPE_NAMES.read().unwrap().get(id).unwrap(),
                         tuple_rev,
                         op_precedence_map,
                         type_variable_decls,
@@ -1189,7 +1190,7 @@ fn fmt_type_unit_with_env(
                     hts.iter().format_with(" | ", |(h, t), f| {
                         if let TypeUnit::Const { id } = &***h {
                             let (t, t_context) = fmt_tuple(
-                                &id.to_string(), // TODO: name here
+                                TYPE_NAMES.read().unwrap().get(id).unwrap(),
                                 t,
                                 op_precedence_map,
                                 type_variable_decls,

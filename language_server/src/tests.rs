@@ -11,7 +11,7 @@ fn prime_local_type() {
     {
         assert_eq!(
             c.value,
-            "```\nrec[(I64 .. I64) | Filter[d0, (I64 -> (False | True))]]\n```"
+            "```\nrec[(I64 .. I64) | Filter[d0, (I64 -> (True | False))]]\n```"
         )
     } else {
         panic!()
@@ -21,7 +21,7 @@ fn prime_local_type() {
     {
         assert_eq!(
             c.value,
-            "```\nrec[(I64 .. I64) | Filter[d0, (I64 -> (False | True))]]\n```"
+            "```\nrec[(I64 .. I64) | Filter[d0, (I64 -> (True | False))]]\n```"
         )
     } else {
         panic!()
@@ -37,12 +37,13 @@ fn red_black_tree_local_type() {
     {
         assert_eq!(
             c.value,
-            "```\nE | T[B, I64, rec[E | T[(B | R), I64, d0, d0]], \
-            rec[E | T[(B | R), I64, d0, d0]]] \
-            | T[R, I64, (E | T[B, I64, rec[E | T[(B | R), I64, d0, d0]], \
-            rec[E | T[(B | R), I64, d0, d0]]]), \
-            (E | T[B, I64, rec[E | T[(B | R), I64, d0, d0]], \
-            rec[E | T[(B | R), I64, d0, d0]]])]\n```"
+            "```\nE | T[R, I64, (E | T[B, I64, \
+            rec[E | T[(R | B), I64, d0, d0]], \
+            rec[E | T[(R | B), I64, d0, d0]]]), \
+            (E | T[B, I64, rec[E | T[(R | B), I64, d0, d0]], \
+            rec[E | T[(R | B), I64, d0, d0]]])] | T[B, I64, \
+            rec[E | T[(R | B), I64, d0, d0]], rec[E | T[(R | B), \
+            I64, d0, d0]]]\n```"
         )
     } else {
         panic!()
@@ -52,8 +53,8 @@ fn red_black_tree_local_type() {
     {
         assert_eq!(
             c.value,
-            "```\nE | T[B, I64, rec[E | T[(B | R), I64, d0, d0]], \
-            rec[E | T[(B | R), I64, d0, d0]]]\n```"
+            "```\nE | T[B, I64, rec[E | T[(R | B), I64, d0, d0]], \
+            rec[E | T[(R | B), I64, d0, d0]]]\n```"
         )
     } else {
         panic!()

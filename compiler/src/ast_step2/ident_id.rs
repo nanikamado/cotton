@@ -1,21 +1,17 @@
-use std::{cell::Cell, fmt::Display};
+use std::{fmt::Display, sync::Mutex};
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct IdentId(u32);
 
 impl IdentId {
     pub fn new() -> Self {
-        IDENT_COUNT.with(|c| {
-            let t = c.get();
-            c.set(t + 1);
-            IdentId(t)
-        })
+        let mut c = IDENT_COUNT.lock().unwrap();
+        *c += 1;
+        IdentId(*c - 1)
     }
 }
 
-thread_local! {
-    static IDENT_COUNT: Cell<u32> = Cell::new(0);
-}
+static IDENT_COUNT: Mutex<u32> = Mutex::new(0);
 
 impl Display for IdentId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
