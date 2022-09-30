@@ -18,6 +18,7 @@ use std::{
     fmt::Display,
     hash::Hash,
     iter::Extend,
+    sync::RwLock,
     vec,
 };
 
@@ -1016,11 +1017,21 @@ pub fn simplify_subtype_rel<'a>(
     }
 }
 
+thread_local! {
+    static MEMO: RwLock<FxHashMap<Type, Type>> = RwLock::new(Default::default());
+}
+
 fn unwrap_recursive_alias(body: Type) -> Type {
-    body.clone().replace_num(
-        TypeVariable::RecursiveIndex(0),
-        &(TypeUnit::RecursiveAlias { body }).into(),
-    )
+    if let Some(t) = MEMO.with(|m| m.read().unwrap().get(&body).cloned()) {
+        t
+    } else {
+        let result = body.clone().replace_num(
+            TypeVariable::RecursiveIndex(0),
+            &(TypeUnit::RecursiveAlias { body: body.clone() }).into(),
+        );
+        MEMO.with(|memo| memo.write().unwrap().insert(body, result.clone()));
+        result
+    }
 }
 
 fn possible_weakest<'a>(
