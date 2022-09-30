@@ -1746,7 +1746,7 @@ mod tests {
         };
         let mut map: TypeVariableMap = Default::default();
         let st = simplify_type(&mut map, t).unwrap();
-        assert_eq!(format!("{}", st), "I64 -> [{:I64 | :String}] forall\n--");
+        assert_eq!(format!("{}", st), "I64 -> [{:String | :I64}] forall\n--");
     }
 
     #[test]
@@ -1831,7 +1831,7 @@ mod tests {
                 } = destruct_type_by_pattern(t1, &p);
                 assert_eq!(
                     format!("{}", remained),
-                    r#"/\[{[False, True] | [True, [{:False | :True}]]}]"#
+                    r#"/\[{[True, [{:True | :False}]] | [False, True]}]"#
                 );
                 assert_eq!(
                     format!("{}", matched.unwrap()),

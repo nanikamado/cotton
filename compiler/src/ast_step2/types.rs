@@ -4,6 +4,7 @@ pub use self::type_unit::TypeVariable;
 use super::SubtypeRelations;
 use super::TypeWithEnv;
 use crate::ast_step2::TypeId;
+use crate::ast_step2::TYPE_NAMES;
 use crate::ast_step3::simplify_subtype_rel;
 use crate::ast_step3::TypeVariableMap;
 use crate::intrinsics::IntrinsicType;
@@ -866,7 +867,9 @@ impl Display for Type {
             RecursiveAlias { body } => {
                 write!(f, "rec[{}]", *body)
             }
-            Const { id } => write!(f, ":{}", id),
+            Const { id } => {
+                write!(f, ":{}", TYPE_NAMES.read().unwrap()[&id])
+            }
             Tuple(a, b) => fmt_tuple(a, b, f),
         }
     }
@@ -901,7 +904,7 @@ impl std::fmt::Debug for Type {
             RecursiveAlias { body } => {
                 write!(f, "rec[{:?}]", *body)
             }
-            Const { id } => write!(f, ":{}", id),
+            Const { id } => write!(f, ":{}", TYPE_NAMES.read().unwrap()[&id]),
             Tuple(a, b) => write!(f, "({a:?}, {b:?})"),
         }
     }
@@ -922,7 +925,7 @@ impl std::fmt::Debug for TypeUnit {
             RecursiveAlias { body } => {
                 write!(f, "rec[{:?}]", *body)
             }
-            Const { id } => write!(f, ":{id}"),
+            Const { id } => write!(f, ":{}", TYPE_NAMES.read().unwrap()[id]),
             Tuple(a, b) => write!(f, "({a:?}, {b:?})"),
         }
     }
@@ -943,7 +946,7 @@ impl Display for TypeUnit {
             RecursiveAlias { body } => {
                 write!(f, "rec[{}]", *body)
             }
-            Const { id } => write!(f, ":{id}"),
+            Const { id } => write!(f, ":{}", TYPE_NAMES.read().unwrap()[id]),
             Tuple(a, b) => fmt_tuple(a, b, f),
         }
     }
@@ -955,18 +958,19 @@ fn fmt_tuple(
     f: &mut std::fmt::Formatter<'_>,
 ) -> std::fmt::Result {
     if let TypeMatchableRef::Const { id: id_a } = a.matchable_ref() {
+        let name_a = &TYPE_NAMES.read().unwrap()[&id_a];
         match b.matchable_ref() {
             TypeMatchableRef::Const { id: id_b, .. }
                 if id_b == TypeId::Intrinsic(IntrinsicType::Unit) =>
             {
-                write!(f, "{}", id_a)
+                write!(f, "{}", name_a)
             }
             TypeMatchableRef::Tuple(h, t) => {
-                write!(f, "{}[{}", id_a, h)?;
+                write!(f, "{}[{}", name_a, h)?;
                 fmt_tuple_tail(t, f)
             }
             TypeMatchableRef::Union(u) => {
-                write!(f, "{}[{}]", id_a, u)
+                write!(f, "{}[{}]", name_a, u)
             }
             _ => panic!("expected tuple but found {}", b),
         }

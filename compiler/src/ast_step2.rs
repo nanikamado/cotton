@@ -19,9 +19,11 @@ use crate::{
 };
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
+use once_cell::sync::Lazy;
 use parser::token_id::TokenId;
 use std::collections::BTreeSet;
 use std::fmt::Display;
+use std::sync::RwLock;
 pub use types::TypeConstructor;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -166,6 +168,15 @@ impl TokenMap {
     }
 }
 
+static TYPE_NAMES: Lazy<RwLock<FxHashMap<TypeId, String>>> = Lazy::new(|| {
+    RwLock::new(
+        INTRINSIC_TYPES
+            .iter()
+            .map(|(name, id)| (TypeId::Intrinsic(*id), name.to_string()))
+            .collect(),
+    )
+});
+
 impl<'a> Ast<'a> {
     pub fn from(ast: ast_step1::Ast<'a>) -> (Self, TokenMap) {
         let mut token_map = TokenMap::default();
@@ -204,6 +215,11 @@ impl<'a> Ast<'a> {
             .collect();
         let data_decl_map: FxHashMap<&str, DeclId> =
             data_decl.iter().map(|d| (d.name, d.decl_id)).collect();
+        TYPE_NAMES.write().unwrap().extend(
+            data_decl
+                .iter()
+                .map(|d| (TypeId::DeclId(d.decl_id), d.name.to_string())),
+        );
         let mut type_alias_map = TypeAliasMap(
             ast.type_alias_decl
                 .into_iter()

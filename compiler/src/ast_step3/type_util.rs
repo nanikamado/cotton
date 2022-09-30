@@ -664,7 +664,7 @@ mod tests {
             .constructor;
         assert_eq!(
             format!("{}", t),
-            r#"/\[[{:False | :True}], [{:False | :True}]]"#
+            r#"/\[[{:True | :False}], [{:True | :False}]]"#
         );
     }
 
@@ -690,6 +690,6 @@ mod tests {
             .unwrap()
             .type_with_env
             .constructor;
-        assert_eq!(format!("{}", t), r#"rec[{() | /\[[{:() | :I64}], d0]}]"#);
+        assert_eq!(format!("{}", t), r#"rec[{/\[[{:I64 | :()}], d0] | ()}]"#);
     }
 }
