@@ -861,6 +861,13 @@ fn decrement_index_outside_unit(t: TypeUnit) -> TypeUnit {
             decrement_index_outside(a),
             decrement_index_outside(b),
         ),
+        TypeUnit::TypeLevelFn(f) => {
+            TypeUnit::TypeLevelFn(decrement_index_outside(f))
+        }
+        TypeUnit::TypeLevelApply { f, a } => TypeUnit::TypeLevelApply {
+            f: decrement_index_outside(f),
+            a: decrement_index_outside(a),
+        },
     }
 }
 
@@ -1206,6 +1213,26 @@ fn fmt_type_unit_with_env(
                 );
                 (t, Or)
             }
+        }
+        TypeUnit::TypeLevelFn(f) => (
+            format!(
+                "rec[{}]",
+                fmt_type_with_env(f, op_precedence_map, type_variable_decls).0
+            ),
+            Single,
+        ),
+        TypeUnit::TypeLevelApply { f, a } => {
+            let (f, f_context) =
+                fmt_type_with_env(f, op_precedence_map, type_variable_decls);
+            let (a, a_context) =
+                fmt_type_with_env(a, op_precedence_map, type_variable_decls);
+            let s = match (f_context, a_context) {
+                (Single, Single) => format!("{} {}", f, a),
+                (Single, _) => format!("{}, ({})", f, a),
+                (_, Single) => format!("({}) -> {}", f, a),
+                _ => format!("({}) -> ({})", f, a),
+            };
+            (s, Fn)
         }
     }
 }

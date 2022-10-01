@@ -20,6 +20,8 @@ pub enum TypeMatchable {
     Variable(TypeVariable),
     Empty,
     RecursiveAlias { body: Type },
+    TypeLevelFn(Type),
+    TypeLevelApply { f: Type, a: Type },
     Const { id: TypeId },
     Tuple(Type, Type),
 }
@@ -31,6 +33,8 @@ pub enum TypeMatchableRef<'b> {
     Variable(TypeVariable),
     Empty,
     RecursiveAlias { body: &'b Type },
+    TypeLevelFn(&'b Type),
+    TypeLevelApply { f: &'b Type, a: &'b Type },
     Const { id: TypeId },
     Tuple(&'b Type, &'b Type),
 }
@@ -54,6 +58,8 @@ mod type_unit {
         Fn(Type, Type),
         Variable(TypeVariable),
         RecursiveAlias { body: Type },
+        TypeLevelFn(Type),
+        TypeLevelApply { f: Type, a: Type },
         Const { id: TypeId },
         Tuple(Type, Type),
     }
@@ -199,6 +205,10 @@ mod type_type {
                     TypeUnit::RecursiveAlias { body } => {
                         RecursiveAlias { body }
                     }
+                    TypeUnit::TypeLevelFn(f) => TypeLevelFn(f),
+                    TypeUnit::TypeLevelApply { f, a } => {
+                        TypeLevelApply { f, a }
+                    }
                     TypeUnit::Const { id } => Const { id },
                     TypeUnit::Tuple(a, b) => Tuple(a, b),
                 },
@@ -218,6 +228,10 @@ mod type_type {
                     }
                     TypeUnit::Const { id } => Const { id: *id },
                     TypeUnit::Tuple(a, b) => Tuple(a, b),
+                    TypeUnit::TypeLevelFn(f) => TypeLevelFn(f),
+                    TypeUnit::TypeLevelApply { f, a } => {
+                        TypeLevelApply { f, a }
+                    }
                 },
                 _ => Union(self),
             }
@@ -399,18 +413,8 @@ mod type_type {
                         (Some(a), None, Some(b))
                     }
                 }
-                (
-                    a @ Fn(_, _),
-                    b @ (Variable(_) | Const { .. } | Tuple(_, _)),
-                )
-                | (
-                    a @ Tuple(_, _),
-                    b @ (Variable(_) | Const { .. } | Fn(_, _)),
-                )
-                | (
-                    a @ (Variable(_) | Const { .. }),
-                    b @ (Fn(_, _) | Tuple(_, _)),
-                ) => (Some(a), None, Some(b)),
+                (TypeLevelFn(_), _) | (_, TypeLevelFn(_)) => panic!(),
+                (a, b) => (Some(a), None, Some(b)),
             }
         }
 
@@ -419,7 +423,10 @@ mod type_type {
                 TypeUnit::Fn(_, a) => a.is_empty(),
                 TypeUnit::Tuple(a, b) => a.is_empty() || b.is_empty(),
                 TypeUnit::RecursiveAlias { body } => body.is_empty(),
-                TypeUnit::Const { .. } | TypeUnit::Variable(_) => false,
+                TypeUnit::Const { .. }
+                | TypeUnit::Variable(_)
+                | TypeUnit::TypeLevelFn(_)
+                | TypeUnit::TypeLevelApply { .. } => false,
             }
         }
 
@@ -444,6 +451,16 @@ mod type_type {
                         greater_than_or_equal_to + 1,
                         n,
                     ),
+                },
+                TypeUnit::TypeLevelFn(body) => {
+                    TypeUnit::TypeLevelFn(body.increment_recursive_index(
+                        greater_than_or_equal_to + 1,
+                        n,
+                    ))
+                }
+                TypeUnit::TypeLevelApply { f, a } => TypeUnit::TypeLevelApply {
+                    f: f.increment_recursive_index(greater_than_or_equal_to, n),
+                    a: a.increment_recursive_index(greater_than_or_equal_to, n),
                 },
                 TypeUnit::Const { id } => TypeUnit::Const { id },
                 TypeUnit::Tuple(a, b) => TypeUnit::Tuple(
@@ -511,6 +528,10 @@ impl From<TypeMatchable> for Type {
             }
             TypeMatchable::Const { id } => TypeUnit::Const { id }.into(),
             TypeMatchable::Tuple(a, b) => TypeUnit::Tuple(a, b).into(),
+            TypeMatchable::TypeLevelFn(a) => TypeUnit::TypeLevelFn(a).into(),
+            TypeMatchable::TypeLevelApply { f, a } => {
+                TypeUnit::TypeLevelApply { f, a }.into()
+            }
         }
     }
 }
@@ -688,6 +709,10 @@ impl<'a> TypeConstructor<'a> for Type {
                 a.covariant_type_variables(),
                 b.covariant_type_variables(),
             ),
+            TypeMatchableRef::TypeLevelFn(f) => f.covariant_type_variables(),
+            TypeMatchableRef::TypeLevelApply { f: _, a } => {
+                a.covariant_type_variables()
+            }
         }
     }
 
@@ -715,6 +740,12 @@ impl<'a> TypeConstructor<'a> for Type {
                 a.contravariant_type_variables(),
                 b.contravariant_type_variables(),
             ),
+            TypeMatchableRef::TypeLevelFn(f) => {
+                f.contravariant_type_variables()
+            }
+            TypeMatchableRef::TypeLevelApply { f: _, a } => {
+                a.contravariant_type_variables()
+            }
         }
     }
 
@@ -830,6 +861,8 @@ impl TypeUnit {
             TypeUnit::Tuple(a, b) => {
                 [a, b].iter().find_map(|a| a.find_recursive_alias())
             }
+            TypeUnit::TypeLevelFn(f) => f.find_recursive_alias(),
+            TypeUnit::TypeLevelApply { f: _, a } => a.find_recursive_alias(),
         }
     }
 }
@@ -871,6 +904,8 @@ impl Display for Type {
                 write!(f, ":{}", TYPE_NAMES.read().unwrap()[&id])
             }
             Tuple(a, b) => fmt_tuple(a, b, f),
+            TypeLevelFn(_f) => write!(f, "fn[{_f}]"),
+            TypeLevelApply { f: _f, a } => write!(f, "{_f}[{a}]"),
         }
     }
 }
@@ -906,6 +941,8 @@ impl std::fmt::Debug for Type {
             }
             Const { id } => write!(f, ":{}", TYPE_NAMES.read().unwrap()[&id]),
             Tuple(a, b) => write!(f, "({a:?}, {b:?})"),
+            TypeLevelFn(_f) => write!(f, "fn[{_f:?}]"),
+            TypeLevelApply { f: _f, a } => write!(f, "{_f:?}[{a:?}]"),
         }
     }
 }
@@ -927,6 +964,8 @@ impl std::fmt::Debug for TypeUnit {
             }
             Const { id } => write!(f, ":{}", TYPE_NAMES.read().unwrap()[id]),
             Tuple(a, b) => write!(f, "({a:?}, {b:?})"),
+            TypeLevelFn(_f) => write!(f, "fn[{_f:?}]"),
+            TypeLevelApply { f: _f, a } => write!(f, "{_f:?}[{a:?}]"),
         }
     }
 }
@@ -948,6 +987,8 @@ impl Display for TypeUnit {
             }
             Const { id } => write!(f, ":{}", TYPE_NAMES.read().unwrap()[id]),
             Tuple(a, b) => fmt_tuple(a, b, f),
+            TypeLevelFn(_f) => write!(f, "fn[{_f}]"),
+            TypeLevelApply { f: _f, a } => write!(f, "{_f}[{a}]"),
         }
     }
 }

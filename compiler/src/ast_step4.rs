@@ -952,7 +952,11 @@ fn unify_type_with_ast_sep2_type<'a>(
                     }
                 }
             }
-            Const { .. } | RecursiveAlias { .. } | Variable(_) => {
+            Const { .. }
+            | RecursiveAlias { .. }
+            | Variable(_)
+            | TypeLevelApply { .. }
+            | TypeLevelFn(_) => {
                 unimplemented!()
             }
         }

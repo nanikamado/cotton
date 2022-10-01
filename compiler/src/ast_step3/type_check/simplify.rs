@@ -71,6 +71,14 @@ impl TypeVariableMap {
                     self.normalize_type(b),
                 )
                 .into(),
+                TypeUnit::TypeLevelFn(f) => {
+                    TypeUnit::TypeLevelFn(self.normalize_type(f)).into()
+                }
+                TypeUnit::TypeLevelApply { f, a } => TypeUnit::TypeLevelApply {
+                    f: self.normalize_type(f),
+                    a: self.normalize_type(a),
+                }
+                .into(),
             })
             .collect::<Type>()
             .into_iter()
@@ -1581,6 +1589,21 @@ fn destruct_type_unit_by_pattern(
         },
         (TypeUnit::RecursiveAlias { body }, p) => {
             destruct_type_by_pattern(unwrap_recursive_alias(body), p)
+        }
+        (TypeUnit::TypeLevelApply { f, a }, p)
+            if matches!(
+                f.matchable_ref(),
+                TypeMatchableRef::RecursiveAlias { .. }
+            ) =>
+        {
+            if let TypeMatchable::RecursiveAlias { body } = f.matchable() {
+                destruct_type_by_pattern(
+                    unwrap_recursive_alias(body).type_level_function_apply(a),
+                    p,
+                )
+            } else {
+                unreachable!()
+            }
         }
         (remained, _) => TypeDestructResult {
             remained: remained.into(),

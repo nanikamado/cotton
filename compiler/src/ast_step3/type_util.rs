@@ -4,7 +4,8 @@ use crate::{
     ast_step2::{
         type_to_type,
         types::{
-            unwrap_or_clone, Type, TypeMatchableRef, TypeUnit, TypeVariable,
+            merge_vec, unwrap_or_clone, Type, TypeMatchable, TypeMatchableRef,
+            TypeUnit, TypeVariable,
         },
         TypeConstructor, TypeId, TypeWithEnv,
     },
@@ -32,6 +33,11 @@ impl TypeUnit {
                 .into_iter()
                 .chain(b.all_type_variables_vec().into_iter())
                 .collect(),
+            TypeUnit::TypeLevelFn(f) => f.all_type_variables_vec(),
+            TypeUnit::TypeLevelApply { f, a } => merge_vec(
+                f.all_type_variables_vec(),
+                a.all_type_variables_vec(),
+            ),
         }
     }
 
@@ -93,6 +99,27 @@ impl TypeUnit {
                 );
                 (Self::Tuple(a, b).into(), updated1 || updated2)
             }
+            Self::TypeLevelFn(f) => {
+                let (f, u) = f.replace_num_with_update_flag(
+                    from,
+                    to,
+                    recursive_alias_depth + 1,
+                );
+                (Self::TypeLevelFn(f).into(), u)
+            }
+            Self::TypeLevelApply { f, a } => {
+                let (f, updated1) = f.replace_num_with_update_flag(
+                    from,
+                    to,
+                    recursive_alias_depth,
+                );
+                let (a, updated2) = a.replace_num_with_update_flag(
+                    from,
+                    to,
+                    recursive_alias_depth,
+                );
+                (Self::TypeLevelApply { f, a }.into(), updated1 || updated2)
+            }
         }
     }
 
@@ -142,6 +169,8 @@ impl TypeUnit {
             TypeUnit::RecursiveAlias { body } => RecursiveAlias { body },
             TypeUnit::Const { id } => Const { id: *id },
             TypeUnit::Tuple(a, b) => Tuple(a, b),
+            TypeUnit::TypeLevelFn(f) => TypeLevelFn(f),
+            TypeUnit::TypeLevelApply { f, a } => TypeLevelApply { f, a },
         }
     }
 
@@ -190,6 +219,27 @@ impl TypeUnit {
                 (Self::Tuple(a, b), u1 || u2)
             }
             t @ (Self::Variable(_) | Self::Const { .. }) => (t, false),
+            Self::TypeLevelFn(f) => {
+                let (f, u) = f.replace_type_union_with_update_flag(
+                    from,
+                    to,
+                    recursive_alias_depth,
+                );
+                (Self::TypeLevelFn(f), u)
+            }
+            Self::TypeLevelApply { f, a } => {
+                let (f, u1) = f.replace_type_union_with_update_flag(
+                    from,
+                    to,
+                    recursive_alias_depth,
+                );
+                let (a, u2) = a.replace_type_union_with_update_flag(
+                    from,
+                    to,
+                    recursive_alias_depth,
+                );
+                (Self::TypeLevelApply { f, a }, u1 || u2)
+            }
         }
     }
 
@@ -206,6 +256,13 @@ impl TypeUnit {
             Self::Tuple(a, b) => {
                 a.contains_variable(variable_num)
                     || b.contains_variable(variable_num)
+            }
+            Self::TypeLevelFn(f) => {
+                f.contains_variable(variable_num.increment_recursive_index(1))
+            }
+            Self::TypeLevelApply { f, a } => {
+                f.contains_variable(variable_num)
+                    || a.contains_variable(variable_num)
             }
         }
     }
@@ -233,6 +290,13 @@ impl TypeUnit {
                 a.decrement_recursive_index(greater_than_or_equal_to),
                 b.decrement_recursive_index(greater_than_or_equal_to),
             ),
+            TypeUnit::TypeLevelFn(f) => TypeUnit::TypeLevelFn(
+                f.decrement_recursive_index(greater_than_or_equal_to + 1),
+            ),
+            TypeUnit::TypeLevelApply { f, a } => TypeUnit::TypeLevelApply {
+                f: f.decrement_recursive_index(greater_than_or_equal_to),
+                a: a.decrement_recursive_index(greater_than_or_equal_to),
+            },
         }
     }
 
@@ -521,6 +585,19 @@ impl Type {
     pub fn diff(self, other: &Self) -> Self {
         let (t, _) = self.split(other);
         t
+    }
+
+    pub fn type_level_function_apply(self, arg: Self) -> Self {
+        match self.matchable() {
+            TypeMatchable::TypeLevelFn(f) => f
+                .replace_num(TypeVariable::RecursiveIndex(0), &arg)
+                .decrement_recursive_index(0),
+            t => TypeUnit::TypeLevelApply {
+                f: t.into(),
+                a: arg,
+            }
+            .into(),
+        }
     }
 }
 
