@@ -592,6 +592,21 @@ impl Type {
             TypeMatchable::TypeLevelFn(f) => f
                 .replace_num(TypeVariable::RecursiveIndex(0), &arg)
                 .decrement_recursive_index(0),
+            TypeMatchable::RecursiveAlias { body } => {
+                if let TypeMatchable::TypeLevelFn(f) = body.clone().matchable()
+                {
+                    TypeUnit::RecursiveAlias {
+                        body: apply_arg_to_recursive_fn(f, &arg, 0),
+                    }
+                    .into()
+                } else {
+                    TypeUnit::TypeLevelApply {
+                        f: TypeMatchable::RecursiveAlias { body }.into(),
+                        a: arg,
+                    }
+                    .into()
+                }
+            }
             t => TypeUnit::TypeLevelApply {
                 f: t.into(),
                 a: arg,
@@ -599,6 +614,87 @@ impl Type {
             .into(),
         }
     }
+}
+
+fn apply_arg_to_recursive_fn(
+    f: Type,
+    arg: &Type,
+    recursive_alias_depth: usize,
+) -> Type {
+    use TypeUnit::*;
+    f.into_iter()
+        .flat_map(|t| match unwrap_or_clone(t) {
+            Fn(f, a) => Fn(
+                apply_arg_to_recursive_fn(f, arg, recursive_alias_depth),
+                apply_arg_to_recursive_fn(a, arg, recursive_alias_depth),
+            )
+            .into(),
+            Variable(v) => {
+                if v == TypeVariable::RecursiveIndex(recursive_alias_depth + 1)
+                {
+                    panic!()
+                } else if v
+                    == TypeVariable::RecursiveIndex(recursive_alias_depth)
+                {
+                    arg.clone()
+                } else {
+                    Variable(v.decrement_recursive_index_with_bound(0)).into()
+                }
+            }
+            RecursiveAlias { body } => RecursiveAlias {
+                body: apply_arg_to_recursive_fn(
+                    body,
+                    arg,
+                    recursive_alias_depth + 1,
+                ),
+            }
+            .into(),
+            TypeLevelFn(f) => TypeLevelFn(apply_arg_to_recursive_fn(
+                f,
+                arg,
+                recursive_alias_depth + 1,
+            ))
+            .into(),
+            TypeLevelApply { f, a } => {
+                match (f.matchable_ref(), a.matchable_ref()) {
+                    (
+                        TypeMatchableRef::Variable(
+                            TypeVariable::RecursiveIndex(f),
+                        ),
+                        TypeMatchableRef::Variable(
+                            TypeVariable::RecursiveIndex(a),
+                        ),
+                    ) if f == (recursive_alias_depth + 1)
+                        && a == recursive_alias_depth =>
+                    {
+                        Variable(TypeVariable::RecursiveIndex(
+                            recursive_alias_depth,
+                        ))
+                        .into()
+                    }
+                    _ => TypeLevelApply {
+                        f: apply_arg_to_recursive_fn(
+                            f,
+                            arg,
+                            recursive_alias_depth,
+                        ),
+                        a: apply_arg_to_recursive_fn(
+                            a,
+                            arg,
+                            recursive_alias_depth,
+                        ),
+                    }
+                    .into(),
+                }
+            }
+            Const { id } => Const { id }.into(),
+            Tuple(a, b) => Tuple(
+                apply_arg_to_recursive_fn(a, arg, recursive_alias_depth),
+                apply_arg_to_recursive_fn(b, arg, recursive_alias_depth),
+            )
+            .into(),
+        })
+        .collect()
 }
 
 // impl<'a> PatternUnitForRestriction<'_> {

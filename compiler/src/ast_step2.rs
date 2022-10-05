@@ -2,7 +2,7 @@ pub mod decl_id;
 pub mod ident_id;
 pub mod types;
 
-use self::types::{unwrap_or_clone, TypeVariable};
+use self::types::TypeVariable;
 use self::{
     decl_id::DeclId,
     ident_id::IdentId,
@@ -681,8 +681,19 @@ pub fn type_to_type<'a>(
         _ => {
             if let Some(n) = type_variable_names.get(t.name.0) {
                 token_map.insert(t.name.1, TokenMapEntry::TypeVariable);
-                TypeUnit::Variable(*n).into()
-            } else if let Some((mut unaliased, forall)) = type_alias_map.get(
+                let mut new_t = Type::from(TypeUnit::Variable(*n));
+                for a in t.args {
+                    new_t = new_t.type_level_function_apply(type_to_type(
+                        a,
+                        data_decl_map,
+                        type_variable_names,
+                        type_alias_map,
+                        search_type,
+                        token_map,
+                    ));
+                }
+                new_t
+            } else if let Some(mut unaliased) = type_alias_map.get(
                 t.name,
                 data_decl_map,
                 type_variable_names,
@@ -693,18 +704,16 @@ pub fn type_to_type<'a>(
                 },
                 token_map,
             ) {
-                for (from, to) in forall.0.into_iter().zip(t.args) {
-                    unaliased = unaliased.replace_num(
-                        from,
-                        &type_to_type(
-                            to,
+                for a in t.args {
+                    unaliased =
+                        unaliased.type_level_function_apply(type_to_type(
+                            a,
                             data_decl_map,
                             type_variable_names,
                             type_alias_map,
                             search_type,
                             token_map,
-                        ),
-                    );
+                        ));
                 }
                 unaliased
             } else {
@@ -745,7 +754,7 @@ impl std::fmt::Display for ConstructorId {
 
 #[derive(Debug, Clone)]
 enum AliasComputation {
-    Unaliased(Type, Forall),
+    Unaliased(Type),
     NotUnaliased,
 }
 
@@ -771,33 +780,36 @@ impl<'a> TypeAliasMap<'a> {
         type_variable_names: &FxHashMap<&'a str, TypeVariable>,
         search_type: SearchMode,
         token_map: &mut TokenMap,
-    ) -> Option<(Type, Forall)> {
+    ) -> Option<Type> {
         debug_assert_ne!(search_type, SearchMode::Normal);
+        if let Some(t) = type_variable_names.get(&name.0) {
+            token_map.insert(name.1, TokenMapEntry::TypeAlias);
+            return Some(TypeUnit::Variable(*t).into());
+        }
         let alias = self.0.get(name.0)?;
         Some(match (&alias, search_type) {
-            (
-                (_, AliasComputation::Unaliased(t, forall)),
-                SearchMode::Alias,
-            ) => {
-                let mut t = t.clone();
-                let mut new_forall = Vec::new();
-                for v in &forall.0 {
-                    let new_v = TypeVariable::new();
-                    t = t.replace_num(*v, &TypeUnit::Variable(new_v).into());
-                    new_forall.push(new_v);
-                }
+            ((_, AliasComputation::Unaliased(t)), SearchMode::Alias) => {
                 token_map.insert(name.1, TokenMapEntry::TypeAlias);
-                (t, Forall(new_forall))
+                t.clone()
             }
             ((t, _), _) => {
                 let mut type_variable_names: FxHashMap<&'a str, TypeVariable> =
                     type_variable_names
                         .clone()
                         .into_iter()
-                        .map(|(s, v)| (s, v.increment_recursive_index(1)))
+                        .map(|(s, v)| {
+                            (
+                                s,
+                                v.increment_recursive_index(
+                                    1 + t.1.type_variables.len() as i32,
+                                ),
+                            )
+                        })
                         .collect();
-                type_variable_names
-                    .insert(name.0, TypeVariable::RecursiveIndex(0));
+                type_variable_names.insert(
+                    name.0,
+                    TypeVariable::RecursiveIndex(t.1.type_variables.len()),
+                );
                 let forall =
                     t.1.clone()
                         .type_variables
@@ -812,7 +824,7 @@ impl<'a> TypeAliasMap<'a> {
                             v
                         })
                         .collect_vec();
-                let new_t = type_to_type(
+                let mut t = type_to_type(
                     t.0.clone(),
                     data_decl_map,
                     &type_variable_names,
@@ -820,54 +832,32 @@ impl<'a> TypeAliasMap<'a> {
                     search_type,
                     token_map,
                 );
-                let new_t = if new_t
-                    .contains_variable(TypeVariable::RecursiveIndex(0))
+                token_map.insert(name.1, TokenMapEntry::TypeAlias);
+                for v in forall {
+                    t = TypeUnit::TypeLevelFn(
+                        t.replace_num(
+                            v,
+                            &TypeUnit::Variable(TypeVariable::RecursiveIndex(
+                                0,
+                            ))
+                            .into(),
+                        ),
+                    )
+                    .into();
+                }
+                let t = if t.contains_variable(TypeVariable::RecursiveIndex(0))
                 {
-                    TypeUnit::RecursiveAlias { body: new_t }.into()
+                    TypeUnit::RecursiveAlias { body: t }.into()
                 } else {
-                    new_t
+                    t.decrement_recursive_index(0)
                 };
                 if search_type == SearchMode::Alias {
                     self.0.get_mut(name.0).unwrap().1 =
-                        AliasComputation::Unaliased(
-                            new_t.clone(),
-                            Forall(forall.clone()),
-                        );
+                        AliasComputation::Unaliased(t.clone());
                 }
-                token_map.insert(name.1, TokenMapEntry::TypeAlias);
-                (decrement_index_outside(new_t), Forall(forall))
+                t
             }
         })
-    }
-}
-
-fn decrement_index_outside(t: Type) -> Type {
-    t.into_iter()
-        .map(|t| decrement_index_outside_unit(unwrap_or_clone(t)))
-        .collect()
-}
-
-fn decrement_index_outside_unit(t: TypeUnit) -> TypeUnit {
-    match t {
-        TypeUnit::Fn(a, b) => {
-            TypeUnit::Fn(decrement_index_outside(a), decrement_index_outside(b))
-        }
-        TypeUnit::Variable(v) => {
-            TypeUnit::Variable(v.decrement_recursive_index_with_bound(1))
-        }
-        TypeUnit::RecursiveAlias { body } => TypeUnit::RecursiveAlias { body },
-        TypeUnit::Const { id } => TypeUnit::Const { id },
-        TypeUnit::Tuple(a, b) => TypeUnit::Tuple(
-            decrement_index_outside(a),
-            decrement_index_outside(b),
-        ),
-        TypeUnit::TypeLevelFn(f) => {
-            TypeUnit::TypeLevelFn(decrement_index_outside(f))
-        }
-        TypeUnit::TypeLevelApply { f, a } => TypeUnit::TypeLevelApply {
-            f: decrement_index_outside(f),
-            a: decrement_index_outside(a),
-        },
     }
 }
 

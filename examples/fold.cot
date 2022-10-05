@@ -7,7 +7,7 @@ data A /\ B forall { A, B }
 
 infixr 3 /\
 
-type List = () | (A /\ List) forall { A }
+type List = () | (A /\ List[A]) forall { A }
 
 fold : List[A] -> B -> (B -> A -> B) -> B forall { A, B } =
     | (), init, _ => init
