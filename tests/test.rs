@@ -178,3 +178,8 @@ fn tuple_infer() {
 fn tuple_infer_fail() {
     test_test("tuple_infer_fail.cot").failure();
 }
+
+#[test]
+fn puts() {
+    test_examples("puts.cot", "1\n[1, 2, 3]\n");
+}

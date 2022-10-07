@@ -1,6 +1,7 @@
 mod type_check;
 pub mod type_util;
 
+use self::type_check::ResolvedIdent;
 pub use self::type_check::{
     simplify_subtype_rel, type_check, GlobalVariableType, LocalVariableType,
     ResolvedIdents, TypeVariableMap, VariableId, VariableRequirement,
@@ -186,36 +187,7 @@ fn expr<'a, 'b>(
         ast_step2::Expr::StrLiteral(a) => Expr::StrLiteral(a),
         ast_step2::Expr::Ident { name, ident_id } => {
             let resolved_item = resolved_idents[&ident_id].clone();
-            let mut value = Expr::Ident {
-                name,
-                variable_id: resolved_item.variable_id,
-                variable_kind: resolved_item.variable_kind,
-            };
-            let mut ts = Vec::new();
-            let mut fn_t = map.find(t);
-            for (_, _, implicit_arg_t, _) in
-                resolved_item.implicit_args.iter().rev()
-            {
-                fn_t = TypeUnit::Fn(implicit_arg_t.clone(), fn_t).into();
-                ts.push(fn_t.clone());
-            }
-            for ((_, name, implicit_arg_t, resolved_item), fn_t) in
-                resolved_item.implicit_args.iter().zip(ts.into_iter().rev())
-            {
-                let variable_id = resolved_item.variable_id;
-                value = Expr::Call(
-                    Box::new((value, fn_t)),
-                    Box::new((
-                        Expr::Ident {
-                            name,
-                            variable_id,
-                            variable_kind: resolved_item.variable_kind,
-                        },
-                        implicit_arg_t.clone(),
-                    )),
-                );
-            }
-            value
+            get_expr_from_resolved_ident(name, &resolved_item, map.find(t))
         }
         ast_step2::Expr::Call(f, a) => Expr::Call(
             expr(*f, data_decls, resolved_idents, map).into(),
@@ -228,6 +200,42 @@ fn expr<'a, 'b>(
         ),
     };
     (e, lift_recursive_alias(map.find(t)))
+}
+
+fn get_expr_from_resolved_ident<'a>(
+    name: &'a str,
+    resolved_ident: &ResolvedIdent<'a>,
+    t: Type,
+) -> Expr<'a> {
+    let mut value = Expr::Ident {
+        name,
+        variable_id: resolved_ident.variable_id,
+        variable_kind: resolved_ident.variable_kind,
+    };
+    let mut ts = Vec::new();
+    let mut fn_t = t;
+    for (_, _, implicit_arg_t, _) in resolved_ident.implicit_args.iter().rev() {
+        fn_t = TypeUnit::Fn(implicit_arg_t.clone(), fn_t).into();
+        ts.push(fn_t.clone());
+    }
+    for ((_, name, implicit_arg_t, resolved_ident), fn_t) in resolved_ident
+        .implicit_args
+        .iter()
+        .zip(ts.into_iter().rev())
+    {
+        value = Expr::Call(
+            Box::new((value, fn_t)),
+            Box::new((
+                get_expr_from_resolved_ident(
+                    name,
+                    resolved_ident,
+                    implicit_arg_t.clone(),
+                ),
+                implicit_arg_t.clone(),
+            )),
+        );
+    }
+    value
 }
 
 /// Change `Cons[List[a], a] | Nil` to `List[a]`
