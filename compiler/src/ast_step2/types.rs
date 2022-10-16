@@ -710,8 +710,9 @@ impl<'a> TypeConstructor<'a> for Type {
                 b.covariant_type_variables(),
             ),
             TypeMatchableRef::TypeLevelFn(f) => f.covariant_type_variables(),
-            TypeMatchableRef::TypeLevelApply { f: _, a } => {
-                a.covariant_type_variables()
+            TypeMatchableRef::TypeLevelApply { f, a } => {
+                [f.covariant_type_variables(), a.covariant_type_variables()]
+                    .concat()
             }
         }
     }
@@ -743,9 +744,11 @@ impl<'a> TypeConstructor<'a> for Type {
             TypeMatchableRef::TypeLevelFn(f) => {
                 f.contravariant_type_variables()
             }
-            TypeMatchableRef::TypeLevelApply { f: _, a } => {
-                a.contravariant_type_variables()
-            }
+            TypeMatchableRef::TypeLevelApply { f, a } => [
+                f.contravariant_type_variables(),
+                a.contravariant_type_variables(),
+            ]
+            .concat(),
         }
     }
 
