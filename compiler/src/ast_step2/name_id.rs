@@ -1,10 +1,7 @@
-use dashmap::{mapref, DashMap};
-use fxhash::FxBuildHasher;
+use fxhash::FxHashMap;
 use once_cell::sync::Lazy;
-use std::{
-    fmt::{Debug, Display},
-    sync::Mutex,
-};
+use std::fmt::{Debug, Display};
+use tracing_mutex::stdsync::TracingRwLock as RwLock;
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Name(u32);
@@ -17,27 +14,49 @@ impl Name {
     }
 
     pub fn from_str(name: &str) -> Self {
-        NAME_MAP.get_name_id(name)
+        NAME_MAP.write().unwrap().get_name_id(name)
     }
 
-    pub fn as_str(
-        self,
-    ) -> mapref::one::Ref<'static, Name, String, FxBuildHasher> {
-        NAME_MAP.from_name.get(&self).unwrap()
+    pub fn as_str(self) -> String {
+        NAME_MAP
+            .read()
+            .unwrap()
+            .from_name
+            .get(&self)
+            .unwrap()
+            .clone()
     }
 }
 
-static NAME_COUNT: Mutex<u32> = Mutex::new(0);
+static NAME_COUNT: std::sync::Mutex<u32> = std::sync::Mutex::new(0);
 
 impl Display for Name {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(NAME_MAP.from_name.get(self).unwrap().as_str(), f)
+        Display::fmt(
+            NAME_MAP
+                .read()
+                .unwrap()
+                .from_name
+                .get(self)
+                .unwrap()
+                .as_str(),
+            f,
+        )
     }
 }
 
 impl Debug for Name {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Debug::fmt(NAME_MAP.from_name.get(self).unwrap().as_str(), f)
+        Debug::fmt(
+            NAME_MAP
+                .read()
+                .unwrap()
+                .from_name
+                .get(self)
+                .unwrap()
+                .as_str(),
+            f,
+        )
     }
 }
 
@@ -49,14 +68,14 @@ impl Default for Name {
 
 #[derive(Debug, Default)]
 pub struct NameMap {
-    from_str: DashMap<String, Name, FxBuildHasher>,
-    from_name: DashMap<Name, String, FxBuildHasher>,
+    from_str: FxHashMap<String, Name>,
+    from_name: FxHashMap<Name, String>,
 }
 
 impl NameMap {
-    fn get_name_id(&self, name: &str) -> Name {
+    fn get_name_id(&mut self, name: &str) -> Name {
         if let Some(n) = self.from_str.get(name) {
-            *n.value()
+            *n
         } else {
             let n = Name::new();
             self.from_str.insert(name.to_string(), n);
@@ -66,4 +85,5 @@ impl NameMap {
     }
 }
 
-pub static NAME_MAP: Lazy<NameMap> = Lazy::new(Default::default);
+static NAME_MAP: Lazy<RwLock<NameMap>> =
+    Lazy::new(|| RwLock::new(Default::default()));

@@ -949,7 +949,8 @@ fn unify_type_with_ast_sep2_type(
             | RecursiveAlias { .. }
             | Variable(_)
             | TypeLevelApply { .. }
-            | TypeLevelFn(_) => {
+            | TypeLevelFn(_)
+            | Restrictions { .. } => {
                 unimplemented!()
             }
         }

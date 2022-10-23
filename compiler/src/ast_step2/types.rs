@@ -3,10 +3,11 @@ pub use self::type_unit::TypeUnit;
 pub use self::type_unit::TypeVariable;
 use super::SubtypeRelations;
 use super::TypeWithEnv;
+use crate::ast_step2::get_type_name;
 use crate::ast_step2::TypeId;
-use crate::ast_step2::TYPE_NAMES;
 use crate::ast_step3::simplify_subtype_rel;
 use crate::ast_step3::TypeVariableMap;
+use crate::ast_step3::VariableRequirement;
 use crate::intrinsics::IntrinsicType;
 use fxhash::FxHashSet;
 use itertools::Itertools;
@@ -19,10 +20,22 @@ pub enum TypeMatchable {
     Union(Type),
     Variable(TypeVariable),
     Empty,
-    RecursiveAlias { body: Type },
+    RecursiveAlias {
+        body: Type,
+    },
     TypeLevelFn(Type),
-    TypeLevelApply { f: Type, a: Type },
-    Const { id: TypeId },
+    TypeLevelApply {
+        f: Type,
+        a: Type,
+    },
+    Restrictions {
+        t: Type,
+        variable_requirements: Vec<VariableRequirement>,
+        subtype_relations: SubtypeRelations,
+    },
+    Const {
+        id: TypeId,
+    },
     Tuple(Type, Type),
 }
 
@@ -32,16 +45,31 @@ pub enum TypeMatchableRef<'b> {
     Union(&'b Type),
     Variable(TypeVariable),
     Empty,
-    RecursiveAlias { body: &'b Type },
+    RecursiveAlias {
+        body: &'b Type,
+    },
     TypeLevelFn(&'b Type),
-    TypeLevelApply { f: &'b Type, a: &'b Type },
-    Const { id: TypeId },
+    TypeLevelApply {
+        f: &'b Type,
+        a: &'b Type,
+    },
+    Restrictions {
+        t: &'b Type,
+        variable_requirements: &'b Vec<VariableRequirement>,
+        subtype_relations: &'b SubtypeRelations,
+    },
+    Const {
+        id: TypeId,
+    },
     Tuple(&'b Type, &'b Type),
 }
 
 mod type_unit {
     use super::Type;
-    use crate::ast_step2::TypeId;
+    use crate::{
+        ast_step2::{SubtypeRelations, TypeId},
+        ast_step3::VariableRequirement,
+    };
     use std::{cell::Cell, fmt::Display};
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -57,10 +85,22 @@ mod type_unit {
     pub enum TypeUnit {
         Fn(Type, Type),
         Variable(TypeVariable),
-        RecursiveAlias { body: Type },
+        RecursiveAlias {
+            body: Type,
+        },
         TypeLevelFn(Type),
-        TypeLevelApply { f: Type, a: Type },
-        Const { id: TypeId },
+        TypeLevelApply {
+            f: Type,
+            a: Type,
+        },
+        Restrictions {
+            t: Type,
+            variable_requirements: Vec<VariableRequirement>,
+            subtype_relations: SubtypeRelations,
+        },
+        Const {
+            id: TypeId,
+        },
         Tuple(Type, Type),
     }
 
@@ -151,7 +191,7 @@ mod type_type {
     use super::{TypeMatchable, TypeMatchableRef, TypeUnit};
     use crate::{
         ast_step2::{types::unwrap_or_clone, SubtypeRelations},
-        ast_step3::simplify_subtype_rel,
+        ast_step3::{simplify_subtype_rel, VariableRequirement},
     };
     use std::{iter, rc::Rc, vec};
 
@@ -195,6 +235,15 @@ mod type_type {
                     TypeUnit::TypeLevelApply { f, a } => {
                         TypeLevelApply { f, a }
                     }
+                    TypeUnit::Restrictions {
+                        t,
+                        variable_requirements,
+                        subtype_relations,
+                    } => Restrictions {
+                        t,
+                        variable_requirements,
+                        subtype_relations,
+                    },
                     TypeUnit::Const { id } => Const { id },
                     TypeUnit::Tuple(a, b) => Tuple(a, b),
                 },
@@ -218,6 +267,15 @@ mod type_type {
                     TypeUnit::TypeLevelApply { f, a } => {
                         TypeLevelApply { f, a }
                     }
+                    TypeUnit::Restrictions {
+                        t,
+                        variable_requirements,
+                        subtype_relations,
+                    } => Restrictions {
+                        t,
+                        variable_requirements,
+                        subtype_relations,
+                    },
                 },
                 _ => Union(self),
             }
@@ -409,7 +467,8 @@ mod type_type {
                 TypeUnit::Fn(_, a) => a.is_empty(),
                 TypeUnit::Tuple(a, b) => a.is_empty() || b.is_empty(),
                 TypeUnit::RecursiveAlias { body } => body.is_empty(),
-                TypeUnit::Const { .. }
+                TypeUnit::Restrictions { .. }
+                | TypeUnit::Const { .. }
                 | TypeUnit::Variable(_)
                 | TypeUnit::TypeLevelFn(_)
                 | TypeUnit::TypeLevelApply { .. } => false,
@@ -448,12 +507,70 @@ mod type_type {
                     f: f.increment_recursive_index(greater_than_or_equal_to, n),
                     a: a.increment_recursive_index(greater_than_or_equal_to, n),
                 },
+                TypeUnit::Restrictions {
+                    t,
+                    variable_requirements,
+                    subtype_relations,
+                } => TypeUnit::Restrictions {
+                    t: t.increment_recursive_index(greater_than_or_equal_to, n),
+                    variable_requirements: variable_requirements
+                        .into_iter()
+                        .map(|r| {
+                            r.increment_recursive_index(
+                                greater_than_or_equal_to,
+                                n,
+                            )
+                        })
+                        .collect(),
+                    subtype_relations: subtype_relations
+                        .increment_recursive_index(greater_than_or_equal_to, n),
+                },
                 TypeUnit::Const { id } => TypeUnit::Const { id },
                 TypeUnit::Tuple(a, b) => TypeUnit::Tuple(
                     a.increment_recursive_index(greater_than_or_equal_to, n),
                     b.increment_recursive_index(greater_than_or_equal_to, n),
                 ),
             }
+        }
+    }
+
+    impl VariableRequirement {
+        fn increment_recursive_index(
+            self,
+            greater_than_or_equal_to: usize,
+            n: i32,
+        ) -> Self {
+            Self {
+                name: self.name,
+                required_type: self
+                    .required_type
+                    .increment_recursive_index(greater_than_or_equal_to, n),
+                ident: self.ident,
+                local_env: self.local_env,
+            }
+        }
+    }
+
+    impl SubtypeRelations {
+        fn increment_recursive_index(
+            self,
+            greater_than_or_equal_to: usize,
+            n: i32,
+        ) -> Self {
+            self.into_iter()
+                .map(|(a, b)| {
+                    (
+                        a.increment_recursive_index(
+                            greater_than_or_equal_to,
+                            n,
+                        ),
+                        b.increment_recursive_index(
+                            greater_than_or_equal_to,
+                            n,
+                        ),
+                    )
+                })
+                .collect()
         }
     }
 }
@@ -518,6 +635,16 @@ impl From<TypeMatchable> for Type {
             TypeMatchable::TypeLevelApply { f, a } => {
                 TypeUnit::TypeLevelApply { f, a }.into()
             }
+            TypeMatchable::Restrictions {
+                t,
+                variable_requirements,
+                subtype_relations,
+            } => TypeUnit::Restrictions {
+                t,
+                variable_requirements,
+                subtype_relations,
+            }
+            .into(),
         }
     }
 }
@@ -700,6 +827,15 @@ impl TypeConstructor for Type {
                 [f.covariant_type_variables(), a.covariant_type_variables()]
                     .concat()
             }
+            TypeMatchableRef::Restrictions {
+                t,
+                variable_requirements,
+                ..
+            } => variable_requirements
+                .iter()
+                .flat_map(|r| r.required_type.contravariant_type_variables())
+                .chain(t.covariant_type_variables())
+                .collect(),
         }
     }
 
@@ -735,6 +871,15 @@ impl TypeConstructor for Type {
                 a.contravariant_type_variables(),
             ]
             .concat(),
+            TypeMatchableRef::Restrictions {
+                t,
+                variable_requirements,
+                ..
+            } => variable_requirements
+                .iter()
+                .flat_map(|r| r.required_type.covariant_type_variables())
+                .chain(t.contravariant_type_variables())
+                .collect(),
         }
     }
 
@@ -852,6 +997,7 @@ impl TypeUnit {
             }
             TypeUnit::TypeLevelFn(f) => f.find_recursive_alias(),
             TypeUnit::TypeLevelApply { f: _, a } => a.find_recursive_alias(),
+            TypeUnit::Restrictions { t, .. } => t.find_recursive_alias(),
         }
     }
 }
@@ -890,11 +1036,22 @@ impl Display for Type {
                 write!(f, "rec[{}]", *body)
             }
             Const { id } => {
-                write!(f, ":{}", TYPE_NAMES.read().unwrap()[&id])
+                write!(f, ":{}", get_type_name(id))
             }
             Tuple(a, b) => fmt_tuple(a, b, f),
             TypeLevelFn(_f) => write!(f, "fn[{_f}]"),
             TypeLevelApply { f: _f, a } => write!(f, "{_f}[{a}]"),
+            Restrictions {
+                t,
+                variable_requirements,
+                subtype_relations,
+            } => {
+                write!(
+                    f,
+                    "{t} where {{{subtype_relations}, {}}}",
+                    variable_requirements.iter().format(",\n")
+                )
+            }
         }
     }
 }
@@ -928,10 +1085,19 @@ impl std::fmt::Debug for Type {
             RecursiveAlias { body } => {
                 write!(f, "rec[{:?}]", *body)
             }
-            Const { id } => write!(f, ":{}", TYPE_NAMES.read().unwrap()[&id]),
+            Const { id } => write!(f, ":{}", get_type_name(id)),
             Tuple(a, b) => write!(f, "({a:?}, {b:?})"),
             TypeLevelFn(_f) => write!(f, "fn[{_f:?}]"),
             TypeLevelApply { f: _f, a } => write!(f, "{_f:?}[{a:?}]"),
+            Restrictions {
+                t,
+                variable_requirements,
+                subtype_relations,
+            } => write!(
+                f,
+                "{t:?} where {{{subtype_relations:?}, {:?}}}",
+                variable_requirements.iter().format(",\n")
+            ),
         }
     }
 }
@@ -951,10 +1117,19 @@ impl std::fmt::Debug for TypeUnit {
             RecursiveAlias { body } => {
                 write!(f, "rec[{:?}]", *body)
             }
-            Const { id } => write!(f, ":{}", TYPE_NAMES.read().unwrap()[id]),
+            Const { id } => write!(f, ":{}", get_type_name(*id)),
             Tuple(a, b) => write!(f, "({a:?}, {b:?})"),
             TypeLevelFn(_f) => write!(f, "fn[{_f:?}]"),
             TypeLevelApply { f: _f, a } => write!(f, "{_f:?}[{a:?}]"),
+            Restrictions {
+                t,
+                variable_requirements,
+                subtype_relations,
+            } => write!(
+                f,
+                "{t:?} where {{{subtype_relations:?}, {:?}}}",
+                variable_requirements.iter().format(",\n")
+            ),
         }
     }
 }
@@ -974,10 +1149,19 @@ impl Display for TypeUnit {
             RecursiveAlias { body } => {
                 write!(f, "rec[{}]", *body)
             }
-            Const { id } => write!(f, ":{}", TYPE_NAMES.read().unwrap()[id]),
+            Const { id } => write!(f, ":{}", get_type_name(*id)),
             Tuple(a, b) => fmt_tuple(a, b, f),
             TypeLevelFn(_f) => write!(f, "fn[{_f}]"),
             TypeLevelApply { f: _f, a } => write!(f, "{_f}[{a}]"),
+            Restrictions {
+                t,
+                variable_requirements,
+                subtype_relations,
+            } => write!(
+                f,
+                "{t} where {{{subtype_relations}, {}}}",
+                variable_requirements.iter().format(",\n")
+            ),
         }
     }
 }
@@ -988,7 +1172,7 @@ fn fmt_tuple(
     f: &mut std::fmt::Formatter<'_>,
 ) -> std::fmt::Result {
     if let TypeMatchableRef::Const { id: id_a } = a.matchable_ref() {
-        let name_a = &TYPE_NAMES.read().unwrap()[&id_a];
+        let name_a = &get_type_name(id_a);
         match b.matchable_ref() {
             TypeMatchableRef::Const { id: id_b, .. }
                 if id_b == TypeId::Intrinsic(IntrinsicType::Unit) =>

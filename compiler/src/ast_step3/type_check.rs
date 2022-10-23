@@ -144,7 +144,6 @@ pub fn type_check(
                         req.ident,
                         ResolvedIdent {
                             variable_id: VariableId::Decl(**decl_id),
-                            type_args: Default::default(),
                             implicit_args: Default::default(),
                             variable_kind: VariableKind::Local,
                         },
@@ -220,7 +219,6 @@ pub fn type_check(
                 ident_id,
                 ResolvedIdent {
                     variable_id,
-                    type_args,
                     implicit_args,
                     variable_kind,
                 },
@@ -229,10 +227,6 @@ pub fn type_check(
                     ident_id,
                     ResolvedIdent {
                         variable_id,
-                        type_args: type_args
-                            .into_iter()
-                            .map(|(v, t)| (v, map.normalize_type(t)))
-                            .collect(),
                         implicit_args: implicit_args
                             .into_iter()
                             .map(|(decl_id, name, t, r)| {
@@ -306,7 +300,6 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
 pub struct ResolvedIdent {
     pub variable_id: VariableId,
-    pub type_args: Vec<(TypeVariable, Type)>,
     pub variable_kind: VariableKind,
     pub implicit_args: Vec<(DeclId, Name, Type, ResolvedIdent)>,
 }
@@ -731,7 +724,6 @@ fn resolve_scc(
             req.ident,
             ResolvedIdent {
                 variable_id: satisfied.id_of_satisfied_variable,
-                type_args: satisfied.type_args.clone(),
                 implicit_args: satisfied.implicit_args,
                 variable_kind: satisfied.variable_kind,
             },
@@ -788,7 +780,6 @@ struct SatisfiedType<T> {
     id_of_satisfied_variable: VariableId,
     variable_kind: VariableKind,
     type_of_improved_decl: T,
-    type_args: Vec<(TypeVariable, Type)>,
     implicit_args: Vec<(DeclId, Name, Type, ResolvedIdent)>,
     map: TypeVariableMap,
 }
@@ -889,7 +880,6 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                 } else {
                     candidate.type_with_env
                 };
-                let mut type_args = Vec::new();
                 let mut map = map.clone();
                 log::debug!("~~ {} : {}", candidate.name, cand_t);
                 for (req_name, req_t, decl_id) in
@@ -918,7 +908,6 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                             arg,
                             ResolvedIdent {
                                 variable_id: VariableId::Decl(*decl_id),
-                                type_args: Default::default(),
                                 implicit_args: Default::default(),
                                 variable_kind: VariableKind::Local,
                             },
@@ -941,7 +930,7 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                 }
                 if replace_variables {
                     cand_t = cand_t.normalize(&mut map).unwrap();
-                    (cand_t, type_args) = cand_t.change_variable_num();
+                    (cand_t, _) = cand_t.change_variable_num();
                 }
                 t.subtype_relations.add_subtype_rel(
                     cand_t.constructor.clone(),
@@ -981,7 +970,6 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                                 ResolvedIdent {
                                     variable_id: satisfied
                                         .id_of_satisfied_variable,
-                                    type_args: satisfied.type_args,
                                     implicit_args: satisfied.implicit_args,
                                     variable_kind: satisfied.variable_kind,
                                 },
@@ -998,7 +986,6 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                         SatisfiedType {
                             id_of_satisfied_variable: decl_id,
                             type_of_improved_decl,
-                            type_args,
                             implicit_args: implicit_args
                                 .into_iter()
                                 .map(|(decl_id, name, t, ident_id)| {
@@ -1090,7 +1077,6 @@ fn resolve_recursion_in_scc(
             req.ident,
             ResolvedIdent {
                 variable_id: satisfied.id_of_satisfied_variable,
-                type_args: satisfied.type_args,
                 implicit_args: satisfied.implicit_args,
                 variable_kind: satisfied.variable_kind,
             },
@@ -1363,7 +1349,6 @@ fn arm_min_type(
                 p.ident,
                 ResolvedIdent {
                     variable_id: VariableId::Decl(a.0),
-                    type_args: Vec::new(),
                     implicit_args: Vec::new(),
                     variable_kind: VariableKind::Local,
                 },

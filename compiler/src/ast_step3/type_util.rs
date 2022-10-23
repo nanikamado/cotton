@@ -38,6 +38,7 @@ impl TypeUnit {
                 f.all_type_variables_vec(),
                 a.all_type_variables_vec(),
             ),
+            TypeUnit::Restrictions { t, .. } => t.all_type_variables_vec(),
         }
     }
 
@@ -120,6 +121,42 @@ impl TypeUnit {
                 );
                 (Self::TypeLevelApply { f, a }.into(), updated1 || updated2)
             }
+            Self::Restrictions {
+                t,
+                variable_requirements,
+                subtype_relations,
+            } => {
+                let mut u = false;
+                let (t, u_) = t.replace_num_with_update_flag(
+                    from,
+                    to,
+                    recursive_alias_depth,
+                );
+                u |= u_;
+                let variable_requirements = variable_requirements
+                    .into_iter()
+                    .map(|mut r| {
+                        let (t, u_) =
+                            r.required_type.replace_num_with_update_flag(
+                                from,
+                                to,
+                                recursive_alias_depth,
+                            );
+                        u |= u_;
+                        r.required_type = t;
+                        r
+                    })
+                    .collect();
+                (
+                    Self::Restrictions {
+                        t,
+                        variable_requirements,
+                        subtype_relations,
+                    }
+                    .into(),
+                    u,
+                )
+            }
         }
     }
 
@@ -171,6 +208,15 @@ impl TypeUnit {
             TypeUnit::Tuple(a, b) => Tuple(a, b),
             TypeUnit::TypeLevelFn(f) => TypeLevelFn(f),
             TypeUnit::TypeLevelApply { f, a } => TypeLevelApply { f, a },
+            TypeUnit::Restrictions {
+                t,
+                variable_requirements,
+                subtype_relations,
+            } => Restrictions {
+                t,
+                variable_requirements,
+                subtype_relations,
+            },
         }
     }
 
@@ -240,6 +286,42 @@ impl TypeUnit {
                 );
                 (Self::TypeLevelApply { f, a }, u1 || u2)
             }
+            Self::Restrictions {
+                t,
+                variable_requirements,
+                subtype_relations,
+            } => {
+                let mut u = false;
+                let (t, u_) = t.replace_type_union_with_update_flag(
+                    from,
+                    to,
+                    recursive_alias_depth,
+                );
+                u |= u_;
+                let variable_requirements = variable_requirements
+                    .into_iter()
+                    .map(|mut r| {
+                        let (t, u_) = r
+                            .required_type
+                            .replace_type_union_with_update_flag(
+                                from,
+                                to,
+                                recursive_alias_depth,
+                            );
+                        u |= u_;
+                        r.required_type = t;
+                        r
+                    })
+                    .collect();
+                (
+                    Self::Restrictions {
+                        t,
+                        variable_requirements,
+                        subtype_relations,
+                    },
+                    u,
+                )
+            }
         }
     }
 
@@ -264,6 +346,7 @@ impl TypeUnit {
                 f.contains_variable(variable_num)
                     || a.contains_variable(variable_num)
             }
+            Self::Restrictions { t, .. } => t.contains_variable(variable_num),
         }
     }
 
@@ -649,6 +732,7 @@ fn apply_arg_to_recursive_fn(
                 apply_arg_to_recursive_fn(b, arg, recursive_alias_depth),
             )
             .into(),
+            Restrictions { .. } => unimplemented!(),
         })
         .collect()
 }

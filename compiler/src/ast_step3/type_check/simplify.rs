@@ -18,9 +18,9 @@ use std::{
     fmt::Display,
     hash::Hash,
     iter::Extend,
-    sync::RwLock,
     vec,
 };
+use tracing_mutex::stdsync::TracingRwLock as RwLock;
 
 use super::VariableRequirement;
 
@@ -77,6 +77,28 @@ impl TypeVariableMap {
                 TypeUnit::TypeLevelApply { f, a } => TypeUnit::TypeLevelApply {
                     f: self.normalize_type(f),
                     a: self.normalize_type(a),
+                }
+                .into(),
+                TypeUnit::Restrictions {
+                    t,
+                    variable_requirements,
+                    subtype_relations,
+                } => TypeUnit::Restrictions {
+                    t: self.normalize_type(t),
+                    variable_requirements: variable_requirements
+                        .into_iter()
+                        .map(|mut req| {
+                            req.required_type =
+                                self.normalize_type(req.required_type);
+                            req
+                        })
+                        .collect(),
+                    subtype_relations: subtype_relations
+                        .into_iter()
+                        .map(|(a, b)| {
+                            (self.normalize_type(a), self.normalize_type(b))
+                        })
+                        .collect(),
                 }
                 .into(),
             })
@@ -737,6 +759,8 @@ fn find_eq_types(subtype_rel: &SubtypeRelations) -> Vec<(TypeVariable, Type)> {
             for a in &eq_variable[1..] {
                 r.push((*a, Variable(eq_variable[0]).into()));
             }
+        } else if eq_variable.is_empty() && eq_cons.len() >= 2 {
+            eprintln!("{}", eq_cons.iter().format(" == "))
         } else {
             for a in eq_variable {
                 r.push((a, eq_cons[0].clone()));

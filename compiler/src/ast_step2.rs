@@ -25,7 +25,7 @@ use once_cell::sync::Lazy;
 use parser::token_id::TokenId;
 use std::collections::BTreeSet;
 use std::fmt::Display;
-use std::sync::RwLock;
+use tracing_mutex::stdsync::TracingRwLock as RwLock;
 pub use types::TypeConstructor;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -182,6 +182,10 @@ pub static TYPE_NAMES: Lazy<RwLock<FxHashMap<TypeId, Name>>> =
         )
     });
 
+pub fn get_type_name(type_id: TypeId) -> Name {
+    *TYPE_NAMES.read().unwrap().get(&type_id).unwrap()
+}
+
 impl Ast {
     pub fn from(ast: ast_step1::Ast) -> (Self, TokenMap) {
         let mut token_map = TokenMap::default();
@@ -220,11 +224,13 @@ impl Ast {
             .collect();
         let data_decl_map: FxHashMap<Name, DeclId> =
             data_decl.iter().map(|d| (d.name, d.decl_id)).collect();
-        TYPE_NAMES.write().unwrap().extend(
-            data_decl
-                .iter()
-                .map(|d| (TypeId::DeclId(d.decl_id), d.name)),
-        );
+        {
+            TYPE_NAMES.write().unwrap().extend(
+                data_decl
+                    .iter()
+                    .map(|d| (TypeId::DeclId(d.decl_id), d.name)),
+            );
+        }
         let mut type_alias_map = TypeAliasMap(
             ast.type_alias_decl
                 .into_iter()
@@ -1191,7 +1197,7 @@ fn fmt_type_unit_with_env(
                 let (h, tuple_rev) = hts[0];
                 if let TypeUnit::Const { id } = &**h {
                     fmt_tuple(
-                        *TYPE_NAMES.read().unwrap().get(id).unwrap(),
+                        get_type_name(*id),
                         tuple_rev,
                         op_precedence_map,
                         type_variable_decls,
@@ -1205,7 +1211,7 @@ fn fmt_type_unit_with_env(
                     hts.iter().format_with(" | ", |(h, t), f| {
                         if let TypeUnit::Const { id } = &***h {
                             let (t, t_context) = fmt_tuple(
-                                *TYPE_NAMES.read().unwrap().get(id).unwrap(),
+                                get_type_name(*id),
                                 t,
                                 op_precedence_map,
                                 type_variable_decls,
@@ -1242,6 +1248,18 @@ fn fmt_type_unit_with_env(
             };
             (s, Fn)
         }
+        TypeUnit::Restrictions {
+            t,
+            variable_requirements,
+            subtype_relations,
+        } => (
+            format!(
+                "{} where {{{subtype_relations}, {}}}",
+                t,
+                variable_requirements.iter().format(",\n")
+            ),
+            OtherOperator,
+        ),
     }
 }
 
