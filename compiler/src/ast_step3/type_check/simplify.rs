@@ -217,7 +217,7 @@ impl TypeVariableMap {
     }
 }
 
-impl<'a> SubtypeRelations {
+impl SubtypeRelations {
     pub fn merge(mut self, other: Self) -> Self {
         self.add_subtype_rels(other.0);
         self
@@ -227,7 +227,7 @@ impl<'a> SubtypeRelations {
         &mut self,
         map: &mut TypeVariableMap,
         t: TypeVariable,
-        pattern_restrictions: &PatternRestrictions<'a>,
+        pattern_restrictions: &PatternRestrictions,
         variable_requirements: &[VariableRequirement],
     ) -> Option<Type> {
         let t = map.find(t);
@@ -247,7 +247,7 @@ impl<'a> SubtypeRelations {
         &mut self,
         map: &mut TypeVariableMap,
         t: TypeVariable,
-        pattern_restrictions: &PatternRestrictions<'a>,
+        pattern_restrictions: &PatternRestrictions,
         variable_requirements: &[VariableRequirement],
     ) -> Option<Type> {
         let t = map.find(t);
@@ -346,10 +346,10 @@ impl<'a> SubtypeRelations {
     }
 }
 
-pub fn simplify_type<'a, T: TypeConstructor<'a>>(
+pub fn simplify_type<T: TypeConstructor>(
     map: &mut TypeVariableMap,
-    mut t: TypeWithEnv<'a, T>,
-) -> Option<TypeWithEnv<'a, T>> {
+    mut t: TypeWithEnv<T>,
+) -> Option<TypeWithEnv<T>> {
     let mut i = 0;
     loop {
         i += 1;
@@ -384,10 +384,10 @@ pub fn simplify_type<'a, T: TypeConstructor<'a>>(
     t.normalize(map)
 }
 
-fn _simplify_type<'a, T: TypeConstructor<'a>>(
+fn _simplify_type<T: TypeConstructor>(
     map: &mut TypeVariableMap,
-    mut t: TypeWithEnv<'a, T>,
-) -> Option<(TypeWithEnv<'a, T>, bool)> {
+    mut t: TypeWithEnv<T>,
+) -> Option<(TypeWithEnv<T>, bool)> {
     let t_before_simplify = t.clone();
     log::debug!("t = {}", t);
     // log::trace!("map = {}", map);
@@ -1042,11 +1042,11 @@ fn unwrap_recursive_alias(body: Type) -> Type {
     }
 }
 
-fn possible_weakest<'a>(
+fn possible_weakest(
     t: TypeVariable,
     subtype_relation: &BTreeSet<(Type, Type)>,
     variable_requirements: &[VariableRequirement],
-    pattern_restrictions: &PatternRestrictions<'a>,
+    pattern_restrictions: &PatternRestrictions,
 ) -> Option<Type> {
     if variable_requirements
         .iter()
@@ -1189,10 +1189,10 @@ fn type_intersection(a: Type, b: Type) -> Option<Type> {
     }
 }
 
-fn possible_strongest<'a>(
+fn possible_strongest(
     t: TypeVariable,
     subtype_relation: &BTreeSet<(Type, Type)>,
-    pattern_restrictions: &PatternRestrictions<'a>,
+    pattern_restrictions: &PatternRestrictions,
     variable_requirements: &[VariableRequirement],
 ) -> Option<Type> {
     let mut down = Vec::new();
@@ -1259,8 +1259,8 @@ fn possible_strongest_t(t: Type, subtype_relation: &SubtypeRelations) -> Type {
     }
 }
 
-fn mk_contravariant_candidates<'a, T: TypeConstructor<'a>>(
-    t: &TypeWithEnv<'a, T>,
+fn mk_contravariant_candidates<T: TypeConstructor>(
+    t: &TypeWithEnv<T>,
 ) -> FxHashSet<TypeVariable> {
     let mut rst: Vec<TypeVariable> =
         t.constructor.contravariant_type_variables();
@@ -1270,8 +1270,8 @@ fn mk_contravariant_candidates<'a, T: TypeConstructor<'a>>(
     rst.into_iter().collect()
 }
 
-fn mk_covariant_candidates<'a, T: TypeConstructor<'a>>(
-    t: &TypeWithEnv<'a, T>,
+fn mk_covariant_candidates<T: TypeConstructor>(
+    t: &TypeWithEnv<T>,
 ) -> FxHashSet<TypeVariable> {
     let mut rst: Vec<TypeVariable> = t.constructor.covariant_type_variables();
     for req in &t.variable_requirements {
@@ -1280,9 +1280,9 @@ fn mk_covariant_candidates<'a, T: TypeConstructor<'a>>(
     rst.into_iter().collect()
 }
 
-impl<'a, T> TypeWithEnv<'a, T>
+impl<T> TypeWithEnv<T>
 where
-    T: TypeConstructor<'a>,
+    T: TypeConstructor,
 {
     pub fn normalize(mut self, map: &mut TypeVariableMap) -> Option<Self> {
         self.subtype_relations = self
@@ -1646,7 +1646,7 @@ fn replace_type_test1() {
     );
 }
 
-impl<'a, T: TypeConstructor<'a>> TypeWithEnv<'a, T> {
+impl<T: TypeConstructor> TypeWithEnv<T> {
     fn type_variables_in_constructors_or_variable_requirements(
         &self,
     ) -> FxHashSet<TypeVariable> {
@@ -1658,7 +1658,7 @@ impl<'a, T: TypeConstructor<'a>> TypeWithEnv<'a, T> {
     }
 }
 
-impl Display for VariableRequirement<'_> {
+impl Display for VariableRequirement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -1672,7 +1672,7 @@ impl Display for VariableRequirement<'_> {
     }
 }
 
-impl<'a, T: TypeConstructor<'a>> Display for ast_step2::TypeWithEnv<'a, T> {
+impl<T: TypeConstructor> Display for ast_step2::TypeWithEnv<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "{} forall", self.constructor)?;
         for (a, b) in &self.subtype_relations {
@@ -1724,6 +1724,7 @@ mod tests {
         ast_step1, ast_step2,
         ast_step2::{
             decl_id::DeclId,
+            name_id::Name,
             types::{
                 Type, TypeMatchable, TypeMatchableRef, TypeUnit, TypeVariable,
             },
@@ -1755,7 +1756,7 @@ mod tests {
         let req_t = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == "test")
+            .find(|d| d.name == Name::from_str("test"))
             .unwrap()
             .type_annotation
             .clone()
@@ -1765,7 +1766,7 @@ mod tests {
         let dot = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == "dot")
+            .find(|d| d.name == Name::from_str("dot"))
             .unwrap()
             .type_annotation
             .clone()
@@ -1800,7 +1801,7 @@ mod tests {
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == "test1")
+            .find(|d| d.name == Name::from_str("test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -1810,7 +1811,7 @@ mod tests {
         let t2 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == "test2")
+            .find(|d| d.name == Name::from_str("test2"))
             .unwrap()
             .type_annotation
             .clone()
@@ -1835,7 +1836,7 @@ mod tests {
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == "test1")
+            .find(|d| d.name == Name::from_str("test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -1896,14 +1897,14 @@ mod tests {
         let t_id = ast
             .data_decl
             .iter()
-            .find(|d| d.name == "T")
+            .find(|d| d.name == Name::from_str("T"))
             .unwrap()
             .decl_id;
         let t_id = TypeId::DeclId(t_id);
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == "test1")
+            .find(|d| d.name == Name::from_str("test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2013,14 +2014,14 @@ mod tests {
         let b_id = ast
             .data_decl
             .iter()
-            .find(|d| d.name == "B")
+            .find(|d| d.name == Name::from_str("B"))
             .unwrap()
             .decl_id;
         let b_id = TypeId::DeclId(b_id);
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == "test1")
+            .find(|d| d.name == Name::from_str("test1"))
             .unwrap()
             .type_annotation
             .clone()

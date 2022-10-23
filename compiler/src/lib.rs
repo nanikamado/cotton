@@ -1,4 +1,5 @@
 mod ast_step1;
+#[macro_use]
 mod ast_step2;
 mod ast_step3;
 mod ast_step4;
@@ -10,6 +11,7 @@ mod run_js;
 mod rust_backend;
 
 pub use ast_step1::OpPrecedenceMap;
+use ast_step2::name_id::Name;
 use ast_step2::types::{Type, TypeVariable};
 use ast_step2::TYPE_NAMES;
 pub use ast_step2::{
@@ -95,17 +97,17 @@ pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
     }
 }
 
-pub enum TokenKind<'a> {
-    GlobalVariable(VariableId, Option<GlobalVariableType<'a>>),
-    LocalVariable(VariableId, Option<(Type, FxHashMap<TypeVariable, &'a str>)>),
-    Constructor(Option<GlobalVariableType<'a>>),
+pub enum TokenKind {
+    GlobalVariable(VariableId, Option<GlobalVariableType>),
+    LocalVariable(VariableId, Option<(Type, FxHashMap<TypeVariable, Name>)>),
+    Constructor(Option<GlobalVariableType>),
     Type,
     Interface,
-    VariableDeclInInterface(GlobalVariableType<'a>),
+    VariableDeclInInterface(GlobalVariableType),
 }
 
 pub struct TokenMapWithEnv<'a> {
-    pub token_map: FxHashMap<TokenId, TokenKind<'a>>,
+    pub token_map: FxHashMap<TokenId, TokenKind>,
     pub op_precedence_map: OpPrecedenceMap<'a>,
 }
 

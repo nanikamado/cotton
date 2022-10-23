@@ -1,5 +1,5 @@
 use crate::{
-    ast_step2::decl_id::DeclId,
+    ast_step2::{decl_id::DeclId, name_id::Name},
     ast_step3::DataDecl,
     ast_step4::{Pattern, PatternUnit, Type},
     ast_step5::{Ast, Expr, ExprWithType, FnArm, VariableDecl},
@@ -50,7 +50,7 @@ pub fn codegen(ast: Ast) -> String {
 }
 
 fn data_decl(d: DataDecl) -> String {
-    let name = convert_name(d.name);
+    let name = convert_name(&d.name.as_str());
     format!(
         "let ${}${}={}({{name:'${}${}',{}}});",
         d.decl_id,
@@ -66,12 +66,12 @@ fn variable_decl(d: &VariableDecl) -> String {
     format!(
         "let ${}${}={};",
         d.decl_id,
-        convert_name(d.name),
+        convert_name(&d.name.as_str()),
         expr(&d.value, 0)
     )
 }
 
-static PRIMITIVES_DEF: Lazy<FxHashMap<IntrinsicVariable, &str>> =
+static PRIMITIVES_DEF: Lazy<FxHashMap<IntrinsicVariable, &'static str>> =
     Lazy::new(|| {
         use IntrinsicVariable::*;
         [
@@ -92,18 +92,19 @@ static PRIMITIVES_DEF: Lazy<FxHashMap<IntrinsicVariable, &str>> =
         .collect()
     });
 
-static PRIMITIVE_CONSTRUCTOR_DEF: Lazy<FxHashMap<IntrinsicConstructor, &str>> =
-    Lazy::new(|| {
-        use IntrinsicConstructor::*;
-        [
-            (True, "{name: '$True$True'}"),
-            (False, "{name: '$False$False'}"),
-            (Unit, "{name: '$Unit$unicode_28_29'}"),
-        ]
-        .iter()
-        .copied()
-        .collect()
-    });
+static PRIMITIVE_CONSTRUCTOR_DEF: Lazy<
+    FxHashMap<IntrinsicConstructor, &'static str>,
+> = Lazy::new(|| {
+    use IntrinsicConstructor::*;
+    [
+        (True, "{name: '$True$True'}"),
+        (False, "{name: '$False$False'}"),
+        (Unit, "{name: '$Unit$unicode_28_29'}"),
+    ]
+    .iter()
+    .copied()
+    .collect()
+});
 
 fn expr((e, t): &ExprWithType, name_count: u32) -> String {
     let s = match e {
@@ -121,7 +122,12 @@ fn expr((e, t): &ExprWithType, name_count: u32) -> String {
             variable_id,
             variable_kind: _,
         } => {
-            format!("${}${} /* ({}) */", variable_id, convert_name(info), info,)
+            format!(
+                "${}${} /* ({}) */",
+                variable_id,
+                convert_name(info.as_str().as_str()),
+                info,
+            )
         }
         Expr::Call(f, a) => {
             format!("{}({})", expr(f, name_count), expr(a, name_count))
@@ -186,7 +192,7 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
                         let mut v = vec![format!(
                             "'${}${}'==={}.name",
                             id,
-                            convert_name(name),
+                            convert_name(&name.as_str()),
                             n
                         )];
                         v.append(&mut _condition(
@@ -206,10 +212,10 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn bindings<'a>(
-    pattern: &'a [Pattern],
+fn bindings(
+    pattern: &[Pattern],
     name_count: u32,
-) -> Vec<(&'a str, String, DeclId, &'a Type<'a>)> {
+) -> Vec<(Name, String, DeclId, &Type)> {
     _bindings(
         pattern,
         (0..pattern.len())
@@ -218,10 +224,10 @@ fn bindings<'a>(
     )
 }
 
-fn _bindings<'a>(
-    pattern: &'a [Pattern],
+fn _bindings(
+    pattern: &[Pattern],
     names: Vec<String>,
-) -> Vec<(&'a str, String, DeclId, &'a Type<'a>)> {
+) -> Vec<(Name, String, DeclId, &Type)> {
     pattern
         .iter()
         .zip(names)
@@ -229,7 +235,7 @@ fn _bindings<'a>(
             if p.len() == 1 {
                 match &p[0] {
                     PatternUnit::Binder(a, id) => {
-                        vec![(&a[..], n, *id, t)]
+                        vec![(*a, n, *id, t)]
                     }
                     PatternUnit::Constructor { args, .. } => _bindings(
                         args,

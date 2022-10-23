@@ -542,7 +542,7 @@ pub struct SingleTypeConstructor {
     pub contravariant_candidates_from_annotation: Option<Vec<TypeVariable>>,
 }
 
-impl<'a> TypeConstructor<'a> for SingleTypeConstructor {
+impl TypeConstructor for SingleTypeConstructor {
     fn all_type_variables(&self) -> fxhash::FxHashSet<TypeVariable> {
         self.type_.all_type_variables()
     }
@@ -649,7 +649,7 @@ impl<'a> TypeConstructor<'a> for SingleTypeConstructor {
     }
 }
 
-impl<'a> TypeConstructor<'a> for Type {
+impl TypeConstructor for Type {
     fn all_type_variables(&self) -> fxhash::FxHashSet<TypeVariable> {
         self.all_type_variables_vec().into_iter().collect()
     }
@@ -821,7 +821,7 @@ pub fn merge_vec<T>(mut a: Vec<T>, mut b: Vec<T>) -> Vec<T> {
     a
 }
 
-pub trait TypeConstructor<'a>:
+pub trait TypeConstructor:
     Sized + std::fmt::Debug + std::fmt::Display + Eq + Clone + std::hash::Hash
 {
     fn all_type_variables(&self) -> FxHashSet<TypeVariable>;
@@ -1060,10 +1060,8 @@ impl Display for SingleTypeConstructor {
     }
 }
 
-impl<'a> From<TypeWithEnv<'a, SingleTypeConstructor>>
-    for TypeWithEnv<'a, Type>
-{
-    fn from(t: TypeWithEnv<'a, SingleTypeConstructor>) -> Self {
+impl From<TypeWithEnv<SingleTypeConstructor>> for TypeWithEnv<Type> {
+    fn from(t: TypeWithEnv<SingleTypeConstructor>) -> Self {
         TypeWithEnv {
             constructor: t.constructor.type_,
             variable_requirements: t.variable_requirements,

@@ -5,7 +5,7 @@ use crate::{
 use itertools::Itertools;
 use std::fmt::Display;
 
-pub fn print(ast: &Ast<'_>) {
+pub fn print(ast: &Ast) {
     for d in &ast.variable_decl {
         println!(
             "{} : {}",
@@ -18,9 +18,9 @@ pub fn print(ast: &Ast<'_>) {
     }
 }
 
-struct FormatForTest<'a, 'b>(&'a TypeWithEnv<'b>);
+struct FormatForTest<'a>(&'a TypeWithEnv);
 
-impl Display for FormatForTest<'_, '_> {
+impl Display for FormatForTest<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,

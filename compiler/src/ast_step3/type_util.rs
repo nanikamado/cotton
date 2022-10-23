@@ -715,7 +715,7 @@ fn apply_arg_to_recursive_fn(
 //     }
 // }
 
-impl<'a> TypeWithEnv<'a> {
+impl TypeWithEnv {
     pub fn all_type_variables(&self) -> FxHashSet<TypeVariable> {
         let TypeWithEnv {
             constructor,
@@ -756,9 +756,9 @@ impl<'a> TypeWithEnv<'a> {
     }
 }
 
-impl<'a, T> TypeWithEnv<'a, T>
+impl<T> TypeWithEnv<T>
 where
-    T: TypeConstructor<'a>,
+    T: TypeConstructor,
 {
     pub fn replace_num(self, from: TypeVariable, to: &Type) -> Self {
         self.map_type(|t| t.replace_num(from, to))
@@ -812,7 +812,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{ast_step1, ast_step2};
+    use crate::{
+        ast_step1,
+        ast_step2::{self, name_id::Name},
+    };
 
     #[test]
     fn conjunctive_0() {
@@ -828,7 +831,7 @@ mod tests {
         let t = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == "test1")
+            .find(|d| d.name == Name::from_str("test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -856,7 +859,7 @@ mod tests {
         let t = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == "test1")
+            .find(|d| d.name == Name::from_str("test1"))
             .unwrap()
             .type_annotation
             .clone()

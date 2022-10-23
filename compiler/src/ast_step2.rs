@@ -1,7 +1,9 @@
 pub mod decl_id;
 pub mod ident_id;
+pub mod name_id;
 pub mod types;
 
+use self::name_id::Name;
 use self::types::TypeVariable;
 use self::{
     decl_id::DeclId,
@@ -42,17 +44,17 @@ pub enum TypeId {
 /// - The names of types and constructors are resolved.
 /// - Local variable declarations are converted into lambdas and function calls.
 #[derive(Debug, PartialEq)]
-pub struct Ast<'a> {
-    pub variable_decl: Vec<VariableDecl<'a>>,
-    pub data_decl: Vec<DataDecl<'a>>,
+pub struct Ast {
+    pub variable_decl: Vec<VariableDecl>,
+    pub data_decl: Vec<DataDecl>,
     pub entry_point: DeclId,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct DataDecl<'a> {
-    pub name: &'a str,
+pub struct DataDecl {
+    pub name: Name,
     pub fields: Vec<TypeVariable>,
-    pub type_variable_decls: Vec<(TypeVariable, &'a str)>,
+    pub type_variable_decls: Vec<(TypeVariable, Name)>,
     pub decl_id: DeclId,
 }
 
@@ -73,75 +75,75 @@ pub enum PatternUnitForRestriction {
     Binder(Type, DeclId),
 }
 
-pub type PatternForRestriction<'a> = Vec<PatternUnitForRestriction>;
-pub type PatternRestrictions<'a> = Vec<(Type, Vec<PatternUnitForRestriction>)>;
+pub type PatternForRestriction = Vec<PatternUnitForRestriction>;
+pub type PatternRestrictions = Vec<(Type, Vec<PatternUnitForRestriction>)>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct TypeWithEnv<'a, T = Type>
+pub struct TypeWithEnv<T = Type>
 where
-    T: TypeConstructor<'a>,
+    T: TypeConstructor,
 {
     pub constructor: T,
-    pub variable_requirements: Vec<VariableRequirement<'a>>,
+    pub variable_requirements: Vec<VariableRequirement>,
     pub subtype_relations: SubtypeRelations,
     pub already_considered_relations: SubtypeRelations,
-    pub pattern_restrictions: PatternRestrictions<'a>,
+    pub pattern_restrictions: PatternRestrictions,
 }
 
 pub struct PrintTypeOfGlobalVariableForUser<'a> {
-    pub t: &'a GlobalVariableType<'a>,
+    pub t: &'a GlobalVariableType,
     pub op_precedence_map: &'a OpPrecedenceMap<'a>,
 }
 
 pub struct PrintTypeOfLocalVariableForUser<'a> {
     pub t: &'a Type,
     pub op_precedence_map: &'a OpPrecedenceMap<'a>,
-    pub type_variable_decls: &'a FxHashMap<TypeVariable, &'a str>,
+    pub type_variable_decls: &'a FxHashMap<TypeVariable, Name>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct VariableDecl<'a> {
-    pub name: &'a str,
-    pub type_annotation: Option<GlobalVariableType<'a>>,
-    pub implicit_parameters: Vec<(&'a str, Type, DeclId)>,
-    pub value: ExprWithType<'a, TypeVariable>,
+pub struct VariableDecl {
+    pub name: Name,
+    pub type_annotation: Option<GlobalVariableType>,
+    pub implicit_parameters: Vec<(Name, Type, DeclId)>,
+    pub value: ExprWithType<TypeVariable>,
     pub decl_id: DeclId,
 }
 
-pub type ExprWithType<'a, T> = (Expr<'a, T>, T);
+pub type ExprWithType<T> = (Expr<T>, T);
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Expr<'a, T> {
-    Lambda(Vec<FnArm<'a, T>>),
-    Number(&'a str),
-    StrLiteral(&'a str),
-    Ident { name: &'a str, ident_id: IdentId },
-    Call(Box<ExprWithType<'a, T>>, Box<ExprWithType<'a, T>>),
-    Do(Vec<ExprWithType<'a, T>>),
+pub enum Expr<T> {
+    Lambda(Vec<FnArm<T>>),
+    Number(Name),
+    StrLiteral(Name),
+    Ident { name: Name, ident_id: IdentId },
+    Call(Box<ExprWithType<T>>, Box<ExprWithType<T>>),
+    Do(Vec<ExprWithType<T>>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct FnArm<'a, T> {
-    pub pattern: Vec<Pattern<'a, T>>,
-    pub expr: ExprWithType<'a, T>,
+pub struct FnArm<T> {
+    pub pattern: Vec<Pattern<T>>,
+    pub expr: ExprWithType<T>,
 }
 
 /// Represents a multi-case pattern which matches if any of the `PatternUnit` in it matches.
 /// It should have at least one `PatternUnit`.
-pub type Pattern<'a, T> = Vec<PatternUnit<'a, T>>;
+pub type Pattern<T> = Vec<PatternUnit<T>>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum PatternUnit<'a, T> {
-    I64(&'a str),
-    Str(&'a str),
+pub enum PatternUnit<T> {
+    I64(Name),
+    Str(Name),
     Constructor {
-        name: &'a str,
+        name: Name,
         id: ConstructorId,
-        args: Vec<Pattern<'a, T>>,
+        args: Vec<Pattern<T>>,
     },
-    Binder(&'a str, DeclId, T),
+    Binder(Name, DeclId, T),
     Underscore,
-    TypeRestriction(Pattern<'a, T>, Type),
+    TypeRestriction(Pattern<T>, Type),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -168,18 +170,20 @@ impl TokenMap {
     }
 }
 
-pub static TYPE_NAMES: Lazy<RwLock<FxHashMap<TypeId, String>>> =
+pub static TYPE_NAMES: Lazy<RwLock<FxHashMap<TypeId, Name>>> =
     Lazy::new(|| {
         RwLock::new(
             INTRINSIC_TYPES
                 .iter()
-                .map(|(name, id)| (TypeId::Intrinsic(*id), name.to_string()))
+                .map(|(name, id)| {
+                    (TypeId::Intrinsic(*id), Name::from_str(name))
+                })
                 .collect(),
         )
     });
 
-impl<'a> Ast<'a> {
-    pub fn from(ast: ast_step1::Ast<'a>) -> (Self, TokenMap) {
+impl Ast {
+    pub fn from(ast: ast_step1::Ast) -> (Self, TokenMap) {
         let mut token_map = TokenMap::default();
         let data_decl: Vec<_> = ast
             .data_decl
@@ -197,7 +201,7 @@ impl<'a> Ast<'a> {
                     }
                 }
                 DataDecl {
-                    name: d.name.0,
+                    name: Name::from_str(d.name.0),
                     fields: d
                         .fields
                         .iter()
@@ -209,34 +213,37 @@ impl<'a> Ast<'a> {
                     decl_id,
                     type_variable_decls: type_variables
                         .into_iter()
-                        .map(|(n, v)| (v, n))
+                        .map(|(n, v)| (v, Name::from_str(n)))
                         .collect(),
                 }
             })
             .collect();
-        let data_decl_map: FxHashMap<&str, DeclId> =
+        let data_decl_map: FxHashMap<Name, DeclId> =
             data_decl.iter().map(|d| (d.name, d.decl_id)).collect();
         TYPE_NAMES.write().unwrap().extend(
             data_decl
                 .iter()
-                .map(|d| (TypeId::DeclId(d.decl_id), d.name.to_string())),
+                .map(|d| (TypeId::DeclId(d.decl_id), d.name)),
         );
         let mut type_alias_map = TypeAliasMap(
             ast.type_alias_decl
                 .into_iter()
                 .map(|a| {
                     token_map.insert(a.name.1, TokenMapEntry::TypeAlias);
-                    (a.name.0, (a.body, AliasComputation::NotUnaliased))
+                    (
+                        Name::from_str(a.name.0),
+                        (a.body, AliasComputation::NotUnaliased),
+                    )
                 })
                 .collect(),
         );
-        let interface_decl: FxHashMap<&str, Vec<_>> = ast
+        let interface_decl: FxHashMap<Name, Vec<_>> = ast
             .interface_decl
             .into_iter()
             .map(|i| {
                 token_map.insert(i.name.1, TokenMapEntry::Interface);
                 (
-                    i.name.0,
+                    Name::from_str(i.name.0),
                     i.variables
                         .into_iter()
                         .map(|(name, t, forall)| {
@@ -252,9 +259,15 @@ impl<'a> Ast<'a> {
                                             s.1,
                                             TokenMapEntry::TypeVariable,
                                         );
-                                        (s.0, TypeVariable::new())
+                                        (
+                                            Name::from_str(s.0),
+                                            TypeVariable::new(),
+                                        )
                                     })
-                                    .chain(std::iter::once(("Self", self_)))
+                                    .chain(std::iter::once((
+                                        Name::from_str("Self"),
+                                        self_,
+                                    )))
                                     .collect(),
                                 &mut type_alias_map,
                                 SearchMode::Normal,
@@ -266,7 +279,7 @@ impl<'a> Ast<'a> {
                                     t.clone(),
                                 ),
                             );
-                            (name.0, t, self_)
+                            (Name::from_str(name.0), t, self_)
                         })
                         .collect(),
                 )
@@ -288,7 +301,7 @@ impl<'a> Ast<'a> {
             .collect();
         let entry_point = variable_decl
             .iter()
-            .find(|d| d.name == "main")
+            .find(|d| d.name == Name::from_str("main"))
             .unwrap_or_else(|| panic!("entry point not found"))
             .decl_id;
         (
@@ -320,7 +333,7 @@ impl Display for TypeId {
     }
 }
 
-impl<'a> From<Type> for TypeWithEnv<'a> {
+impl From<Type> for TypeWithEnv {
     fn from(t: Type) -> Self {
         Self {
             constructor: t,
@@ -329,26 +342,26 @@ impl<'a> From<Type> for TypeWithEnv<'a> {
     }
 }
 
-impl<'a, T> From<PatternUnit<'a, T>> for Pattern<'a, T> {
-    fn from(p: PatternUnit<'a, T>) -> Self {
+impl<T> From<PatternUnit<T>> for Pattern<T> {
+    fn from(p: PatternUnit<T>) -> Self {
         vec![p]
     }
 }
 
-fn variable_decl<'a>(
-    v: ast_step1::VariableDecl<'a>,
-    data_decl_map: &FxHashMap<&'a str, DeclId>,
-    type_variable_names: &FxHashMap<&'a str, TypeVariable>,
-    type_alias_map: &mut TypeAliasMap<'a>,
-    interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type, TypeVariable)>>,
+fn variable_decl(
+    v: ast_step1::VariableDecl,
+    data_decl_map: &FxHashMap<Name, DeclId>,
+    type_variable_names: &FxHashMap<Name, TypeVariable>,
+    type_alias_map: &mut TypeAliasMap,
+    interfaces: &FxHashMap<Name, Vec<(Name, Type, TypeVariable)>>,
     token_map: &mut TokenMap,
-) -> VariableDecl<'a> {
+) -> VariableDecl {
     let mut type_variable_names = type_variable_names.clone();
     let mut implicit_parameters = Vec::new();
     let decl_id = DeclId::new();
     token_map.insert(v.name.1, TokenMapEntry::Decl(decl_id));
     VariableDecl {
-        name: v.name.0,
+        name: Name::from_str(v.name.0),
         type_annotation: v.type_annotation.map(|(t, forall)| {
             let mut type_variable_decls = FxHashMap::default();
             type_variable_names.extend(forall.type_variables.into_iter().map(
@@ -357,7 +370,9 @@ fn variable_decl<'a>(
                     let v = TypeVariable::new();
                     for name in interface_names {
                         token_map.insert(name.1, TokenMapEntry::Interface);
-                        for (name, t, self_) in &interfaces[&name.0] {
+                        for (name, t, self_) in
+                            &interfaces[&Name::from_str(name.0)]
+                        {
                             implicit_parameters.push((
                                 *name,
                                 t.clone().replace_num(
@@ -368,8 +383,8 @@ fn variable_decl<'a>(
                             ))
                         }
                     }
-                    type_variable_decls.insert(v, s.0);
-                    (s.0, v)
+                    type_variable_decls.insert(v, Name::from_str(s.0));
+                    (Name::from_str(s.0), v)
                 },
             ));
             let type_with_env = type_to_type(
@@ -399,14 +414,14 @@ fn variable_decl<'a>(
     }
 }
 
-fn expr<'a>(
-    e: ast_step1::Expr<'a>,
-    data_decl_map: &FxHashMap<&'a str, DeclId>,
-    type_variable_names: &FxHashMap<&'a str, TypeVariable>,
-    type_alias_map: &mut TypeAliasMap<'a>,
-    interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type, TypeVariable)>>,
+fn expr(
+    e: ast_step1::Expr,
+    data_decl_map: &FxHashMap<Name, DeclId>,
+    type_variable_names: &FxHashMap<Name, TypeVariable>,
+    type_alias_map: &mut TypeAliasMap,
+    interfaces: &FxHashMap<Name, Vec<(Name, Type, TypeVariable)>>,
     token_map: &mut TokenMap,
-) -> ExprWithType<'a, TypeVariable> {
+) -> ExprWithType<TypeVariable> {
     use Expr::*;
     let e = match e {
         ast_step1::Expr::Lambda(arms) => Lambda(
@@ -423,13 +438,13 @@ fn expr<'a>(
                 })
                 .collect(),
         ),
-        ast_step1::Expr::Number(n) => Number(n),
-        ast_step1::Expr::StrLiteral(s) => StrLiteral(s),
+        ast_step1::Expr::Number(n) => Number(Name::from_str(n)),
+        ast_step1::Expr::StrLiteral(s) => StrLiteral(Name::from_str(s)),
         ast_step1::Expr::Ident(name) => {
             let ident_id = IdentId::new();
             token_map.insert(name.1, TokenMapEntry::Ident(ident_id));
             Ident {
-                name: name.0,
+                name: Name::from_str(name.0),
                 ident_id,
             }
         }
@@ -482,15 +497,15 @@ fn expr<'a>(
     (e, TypeVariable::new())
 }
 
-fn add_expr_in_do<'a>(
-    e: ast_step1::Expr<'a>,
-    mut es: Vec<ExprWithType<'a, TypeVariable>>,
-    data_decl_map: &FxHashMap<&'a str, DeclId>,
-    type_variable_names: &FxHashMap<&'a str, TypeVariable>,
-    type_alias_map: &mut TypeAliasMap<'a>,
-    interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type, TypeVariable)>>,
+fn add_expr_in_do(
+    e: ast_step1::Expr,
+    mut es: Vec<ExprWithType<TypeVariable>>,
+    data_decl_map: &FxHashMap<Name, DeclId>,
+    type_variable_names: &FxHashMap<Name, TypeVariable>,
+    type_alias_map: &mut TypeAliasMap,
+    interfaces: &FxHashMap<Name, Vec<(Name, Type, TypeVariable)>>,
     token_map: &mut TokenMap,
-) -> Vec<ExprWithType<'a, TypeVariable>> {
+) -> Vec<ExprWithType<TypeVariable>> {
     match e {
         ast_step1::Expr::Decl(d) => {
             let d = variable_decl(
@@ -505,7 +520,7 @@ fn add_expr_in_do<'a>(
                 vec![
                     (
                         Expr::Ident {
-                            name: "()",
+                            name: Name::from_str("()"),
                             ident_id: IdentId::new(),
                         },
                         TypeVariable::new(),
@@ -546,14 +561,14 @@ fn add_expr_in_do<'a>(
     }
 }
 
-fn fn_arm<'a>(
-    arm: ast_step1::FnArm<'a>,
-    data_decl_map: &FxHashMap<&'a str, DeclId>,
-    type_variable_names: &FxHashMap<&'a str, TypeVariable>,
-    type_alias_map: &mut TypeAliasMap<'a>,
-    interfaces: &FxHashMap<&'a str, Vec<(&'a str, Type, TypeVariable)>>,
+fn fn_arm(
+    arm: ast_step1::FnArm,
+    data_decl_map: &FxHashMap<Name, DeclId>,
+    type_variable_names: &FxHashMap<Name, TypeVariable>,
+    type_alias_map: &mut TypeAliasMap,
+    interfaces: &FxHashMap<Name, Vec<(Name, Type, TypeVariable)>>,
     token_map: &mut TokenMap,
-) -> FnArm<'a, TypeVariable> {
+) -> FnArm<TypeVariable> {
     FnArm {
         pattern: arm
             .pattern
@@ -572,10 +587,10 @@ fn fn_arm<'a>(
 }
 
 impl TypeId {
-    fn get(name: &str, data_decl_map: &FxHashMap<&str, DeclId>) -> TypeId {
-        if let Some(id) = data_decl_map.get(name) {
+    fn get(name: Name, data_decl_map: &FxHashMap<Name, DeclId>) -> TypeId {
+        if let Some(id) = data_decl_map.get(&name) {
             TypeId::DeclId(*id)
-        } else if let Some(i) = INTRINSIC_TYPES.get(name) {
+        } else if let Some(i) = INTRINSIC_TYPES.get(&name.as_str().as_str()) {
             TypeId::Intrinsic(*i)
         } else {
             panic!("{:?} not fould", name)
@@ -585,12 +600,14 @@ impl TypeId {
 
 impl ConstructorId {
     fn get(
-        name: &str,
-        data_decl_map: &FxHashMap<&str, DeclId>,
+        name: Name,
+        data_decl_map: &FxHashMap<Name, DeclId>,
     ) -> ConstructorId {
-        if let Some(id) = data_decl_map.get(name) {
+        if let Some(id) = data_decl_map.get(&name) {
             ConstructorId::DeclId(*id)
-        } else if let Some(i) = INTRINSIC_CONSTRUCTORS.get(name) {
+        } else if let Some(i) =
+            INTRINSIC_CONSTRUCTORS.get(name.as_str().as_str())
+        {
             ConstructorId::Intrinsic(*i)
         } else {
             panic!("{:?} not fould", name)
@@ -598,20 +615,20 @@ impl ConstructorId {
     }
 }
 
-fn pattern<'a>(
-    p: ast_step1::Pattern<'a>,
-    data_decl_map: &FxHashMap<&str, DeclId>,
+fn pattern(
+    p: ast_step1::Pattern,
+    data_decl_map: &FxHashMap<Name, DeclId>,
     token_map: &mut TokenMap,
-) -> Pattern<'a, TypeVariable> {
+) -> Pattern<TypeVariable> {
     use PatternUnit::*;
     match p {
-        ast_step1::Pattern::Number(n) => I64(n),
-        ast_step1::Pattern::StrLiteral(s) => Str(s),
+        ast_step1::Pattern::Number(n) => I64(Name::from_str(n)),
+        ast_step1::Pattern::StrLiteral(s) => Str(Name::from_str(s)),
         ast_step1::Pattern::Constructor { name, args } => {
-            let id = ConstructorId::get(name.0, data_decl_map);
+            let id = ConstructorId::get(Name::from_str(name.0), data_decl_map);
             token_map.insert(name.1, TokenMapEntry::Constructor(id));
             Constructor {
-                name: name.0,
+                name: Name::from_str(name.0),
                 id,
                 args: args
                     .into_iter()
@@ -622,7 +639,7 @@ fn pattern<'a>(
         ast_step1::Pattern::Binder(name) => {
             let decl_id = DeclId::new();
             token_map.insert(name.1, TokenMapEntry::Decl(decl_id));
-            Binder(name.0, decl_id, TypeVariable::new())
+            Binder(Name::from_str(name.0), decl_id, TypeVariable::new())
         }
         ast_step1::Pattern::Underscore => Underscore,
     }
@@ -636,11 +653,11 @@ pub enum SearchMode {
     AliasSub,
 }
 
-pub fn type_to_type<'a>(
-    t: ast_step1::Type<'a>,
-    data_decl_map: &FxHashMap<&'a str, DeclId>,
-    type_variable_names: &FxHashMap<&'a str, TypeVariable>,
-    type_alias_map: &mut TypeAliasMap<'a>,
+pub fn type_to_type(
+    t: ast_step1::Type,
+    data_decl_map: &FxHashMap<Name, DeclId>,
+    type_variable_names: &FxHashMap<Name, TypeVariable>,
+    type_alias_map: &mut TypeAliasMap,
     search_type: SearchMode,
     token_map: &mut TokenMap,
 ) -> Type {
@@ -679,7 +696,8 @@ pub fn type_to_type<'a>(
         )
         .into(),
         _ => {
-            if let Some(n) = type_variable_names.get(t.name.0) {
+            if let Some(n) = type_variable_names.get(&Name::from_str(t.name.0))
+            {
                 token_map.insert(t.name.1, TokenMapEntry::TypeVariable);
                 let mut new_t = Type::from(TypeUnit::Variable(*n));
                 for a in t.args {
@@ -694,7 +712,7 @@ pub fn type_to_type<'a>(
                 }
                 new_t
             } else if let Some(mut unaliased) = type_alias_map.get(
-                t.name,
+                (Name::from_str(t.name.0), t.name.1),
                 data_decl_map,
                 type_variable_names,
                 if search_type == SearchMode::Normal {
@@ -735,7 +753,7 @@ pub fn type_to_type<'a>(
                 {
                     tuple = TypeUnit::Tuple(a, tuple).into();
                 }
-                let id = TypeId::get(t.name.0, data_decl_map);
+                let id = TypeId::get(Name::from_str(t.name.0), data_decl_map);
                 token_map.insert(t.name.1, TokenMapEntry::TypeId(id));
                 TypeUnit::Tuple(TypeUnit::Const { id }.into(), tuple).into()
             }
@@ -761,7 +779,7 @@ enum AliasComputation {
 #[derive(Debug, Clone, Default)]
 pub struct TypeAliasMap<'a>(
     FxHashMap<
-        &'a str,
+        Name,
         (
             (ast_step1::Type<'a>, ast_step1::Forall<'a>),
             AliasComputation,
@@ -775,9 +793,9 @@ struct Forall(Vec<TypeVariable>);
 impl<'a> TypeAliasMap<'a> {
     fn get(
         &mut self,
-        name: (&'a str, Option<TokenId>),
-        data_decl_map: &FxHashMap<&'a str, DeclId>,
-        type_variable_names: &FxHashMap<&'a str, TypeVariable>,
+        name: (Name, Option<TokenId>),
+        data_decl_map: &FxHashMap<Name, DeclId>,
+        type_variable_names: &FxHashMap<Name, TypeVariable>,
         search_type: SearchMode,
         token_map: &mut TokenMap,
     ) -> Option<Type> {
@@ -786,14 +804,14 @@ impl<'a> TypeAliasMap<'a> {
             token_map.insert(name.1, TokenMapEntry::TypeAlias);
             return Some(TypeUnit::Variable(*t).into());
         }
-        let alias = self.0.get(name.0)?;
+        let alias = self.0.get(&name.0)?;
         Some(match (&alias, search_type) {
             ((_, AliasComputation::Unaliased(t)), SearchMode::Alias) => {
                 token_map.insert(name.1, TokenMapEntry::TypeAlias);
                 t.clone()
             }
             ((t, _), _) => {
-                let mut type_variable_names: FxHashMap<&'a str, TypeVariable> =
+                let mut type_variable_names: FxHashMap<Name, TypeVariable> =
                     type_variable_names
                         .clone()
                         .into_iter()
@@ -820,7 +838,7 @@ impl<'a> TypeAliasMap<'a> {
                             for (_, id) in interfaces {
                                 token_map.insert(id, TokenMapEntry::Interface);
                             }
-                            type_variable_names.insert(s.0, v);
+                            type_variable_names.insert(Name::from_str(s.0), v);
                             v
                         })
                         .collect_vec();
@@ -852,7 +870,7 @@ impl<'a> TypeAliasMap<'a> {
                     t.decrement_recursive_index(0)
                 };
                 if search_type == SearchMode::Alias {
-                    self.0.get_mut(name.0).unwrap().1 =
+                    self.0.get_mut(&name.0).unwrap().1 =
                         AliasComputation::Unaliased(t.clone());
                 }
                 t
@@ -1022,7 +1040,7 @@ impl PatternUnitForRestriction {
     }
 }
 
-impl<'a> Display for PrintTypeOfGlobalVariableForUser<'a> {
+impl Display for PrintTypeOfGlobalVariableForUser<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -1070,7 +1088,7 @@ impl<'a> Display for PrintTypeOfGlobalVariableForUser<'a> {
     }
 }
 
-impl<'a> Display for PrintTypeOfLocalVariableForUser<'a> {
+impl Display for PrintTypeOfLocalVariableForUser<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -1096,7 +1114,7 @@ enum OperatorContext {
 fn fmt_type_with_env(
     t: &Type,
     op_precedence_map: &OpPrecedenceMap,
-    type_variable_decls: &FxHashMap<TypeVariable, &str>,
+    type_variable_decls: &FxHashMap<TypeVariable, Name>,
 ) -> (String, OperatorContext) {
     if t.is_empty() {
         ("∅".to_string(), OperatorContext::Single)
@@ -1130,7 +1148,7 @@ fn fmt_type_with_env(
 fn fmt_type_unit_with_env(
     t: &TypeUnit,
     op_precedence_map: &OpPrecedenceMap,
-    type_variable_decls: &FxHashMap<TypeVariable, &str>,
+    type_variable_decls: &FxHashMap<TypeVariable, Name>,
 ) -> (String, OperatorContext) {
     use OperatorContext::*;
     match t {
@@ -1173,7 +1191,7 @@ fn fmt_type_unit_with_env(
                 let (h, tuple_rev) = hts[0];
                 if let TypeUnit::Const { id } = &**h {
                     fmt_tuple(
-                        TYPE_NAMES.read().unwrap().get(id).unwrap(),
+                        *TYPE_NAMES.read().unwrap().get(id).unwrap(),
                         tuple_rev,
                         op_precedence_map,
                         type_variable_decls,
@@ -1187,7 +1205,7 @@ fn fmt_type_unit_with_env(
                     hts.iter().format_with(" | ", |(h, t), f| {
                         if let TypeUnit::Const { id } = &***h {
                             let (t, t_context) = fmt_tuple(
-                                TYPE_NAMES.read().unwrap().get(id).unwrap(),
+                                *TYPE_NAMES.read().unwrap().get(id).unwrap(),
                                 t,
                                 op_precedence_map,
                                 type_variable_decls,
@@ -1228,10 +1246,10 @@ fn fmt_type_unit_with_env(
 }
 
 fn fmt_tuple(
-    head: &str,
+    head: Name,
     tuple_rev: &[&Type],
     op_precedence_map: &OpPrecedenceMap,
-    type_variable_decls: &FxHashMap<TypeVariable, &str>,
+    type_variable_decls: &FxHashMap<TypeVariable, Name>,
 ) -> (String, OperatorContext) {
     use OperatorContext::*;
     if tuple_rev.is_empty() {
@@ -1250,7 +1268,7 @@ fn fmt_tuple(
             ),
             Single,
         )
-    } else if op_precedence_map.get(head).is_some() {
+    } else if op_precedence_map.get(head.as_str().as_str()).is_some() {
         assert_eq!(tuple_rev.len(), 2);
         (
             tuple_rev
