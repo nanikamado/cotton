@@ -867,7 +867,7 @@ impl<'a> TypeAliasMap<'a> {
                 {
                     TypeUnit::RecursiveAlias { body: t }.into()
                 } else {
-                    t.decrement_recursive_index(0)
+                    t.increment_recursive_index(0, -1)
                 };
                 if search_type == SearchMode::Alias {
                     self.0.get_mut(&name.0).unwrap().1 =

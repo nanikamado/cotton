@@ -57,7 +57,7 @@ impl TypeVariableMap {
                     match body.matchable() {
                         TypeMatchable::RecursiveAlias { body } => {
                             TypeUnit::RecursiveAlias {
-                                body: body.decrement_recursive_index(1),
+                                body: body.increment_recursive_index(1, -1),
                             }
                             .into()
                         }

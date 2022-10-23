@@ -115,20 +115,6 @@ mod type_unit {
             }
         }
 
-        pub fn decrement_recursive_index_with_bound(
-            self,
-            greater_than_or_equal_to: usize,
-        ) -> Self {
-            match self {
-                TypeVariable::RecursiveIndex(n)
-                    if n >= greater_than_or_equal_to && n >= 1 =>
-                {
-                    TypeVariable::RecursiveIndex(n - 1)
-                }
-                n => n,
-            }
-        }
-
         pub fn is_recursive_index(self) -> bool {
             match self {
                 TypeVariable::Normal(_) => false,
@@ -430,7 +416,7 @@ mod type_type {
             }
         }
 
-        fn increment_recursive_index(
+        pub fn increment_recursive_index(
             self,
             greater_than_or_equal_to: usize,
             n: i32,

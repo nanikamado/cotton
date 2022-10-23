@@ -267,39 +267,6 @@ impl TypeUnit {
         }
     }
 
-    fn decrement_recursive_index(
-        self,
-        greater_than_or_equal_to: usize,
-    ) -> Self {
-        match self {
-            TypeUnit::Fn(a, b) => TypeUnit::Fn(
-                a.decrement_recursive_index(greater_than_or_equal_to),
-                b.decrement_recursive_index(greater_than_or_equal_to),
-            ),
-            TypeUnit::Variable(v) => {
-                TypeUnit::Variable(v.decrement_recursive_index_with_bound(
-                    greater_than_or_equal_to,
-                ))
-            }
-            TypeUnit::RecursiveAlias { body } => TypeUnit::RecursiveAlias {
-                body: body
-                    .decrement_recursive_index(greater_than_or_equal_to + 1),
-            },
-            TypeUnit::Const { id } => TypeUnit::Const { id },
-            TypeUnit::Tuple(a, b) => TypeUnit::Tuple(
-                a.decrement_recursive_index(greater_than_or_equal_to),
-                b.decrement_recursive_index(greater_than_or_equal_to),
-            ),
-            TypeUnit::TypeLevelFn(f) => TypeUnit::TypeLevelFn(
-                f.decrement_recursive_index(greater_than_or_equal_to + 1),
-            ),
-            TypeUnit::TypeLevelApply { f, a } => TypeUnit::TypeLevelApply {
-                f: f.decrement_recursive_index(greater_than_or_equal_to),
-                a: a.decrement_recursive_index(greater_than_or_equal_to),
-            },
-        }
-    }
-
     fn split(self, other: &Self) -> (Type, Type) {
         match (self, other) {
             (TypeUnit::Fn(a1, a2), TypeUnit::Fn(b1, b2)) => {
@@ -507,18 +474,6 @@ impl Type {
     //     new_ts.into_iter().collect()
     // }
 
-    pub fn decrement_recursive_index(
-        self,
-        greater_than_or_equal_to: usize,
-    ) -> Self {
-        self.into_iter()
-            .map(|t| {
-                unwrap_or_clone(t)
-                    .decrement_recursive_index(greater_than_or_equal_to)
-            })
-            .collect()
-    }
-
     pub fn intersection_and_difference(
         self,
         other: Self,
@@ -591,7 +546,7 @@ impl Type {
         match self.matchable() {
             TypeMatchable::TypeLevelFn(f) => f
                 .replace_num(TypeVariable::RecursiveIndex(0), &arg)
-                .decrement_recursive_index(0),
+                .increment_recursive_index(0, -1),
             TypeMatchable::RecursiveAlias { body } => {
                 if let TypeMatchable::TypeLevelFn(f) = body.clone().matchable()
                 {
@@ -638,7 +593,8 @@ fn apply_arg_to_recursive_fn(
                 {
                     arg.clone()
                 } else {
-                    Variable(v.decrement_recursive_index_with_bound(0)).into()
+                    Variable(v.increment_recursive_index_with_bound(1, -1))
+                        .into()
                 }
             }
             RecursiveAlias { body } => RecursiveAlias {
