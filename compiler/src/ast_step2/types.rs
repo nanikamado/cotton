@@ -6,7 +6,6 @@ use super::SubtypeRelations;
 use super::TypeWithEnv;
 use crate::ast_step2::TypeId;
 use crate::ast_step3::simplify_subtype_rel;
-use crate::ast_step3::TypeVariableMap;
 use crate::intrinsics::IntrinsicType;
 use fxhash::FxHashSet;
 use itertools::Itertools;
@@ -634,7 +633,7 @@ impl From<TypeMatchable> for Type {
 #[derive(Debug, Hash, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SingleTypeConstructor {
     pub type_: Type,
-    pub contravariant_candidates_from_annotation: Option<Vec<TypeVariable>>,
+    pub has_annotation: bool,
 }
 
 impl TypeConstructor for SingleTypeConstructor {
@@ -667,7 +666,7 @@ impl TypeConstructor for SingleTypeConstructor {
     }
 
     fn covariant_type_variables(&self) -> Vec<TypeVariable> {
-        if self.contravariant_candidates_from_annotation.is_some() {
+        if self.has_annotation {
             self.all_type_variables().into_iter().collect()
         } else {
             self.type_.covariant_type_variables()
@@ -675,9 +674,8 @@ impl TypeConstructor for SingleTypeConstructor {
     }
 
     fn contravariant_type_variables(&self) -> Vec<TypeVariable> {
-        if let Some(cs) = self.contravariant_candidates_from_annotation.as_ref()
-        {
-            cs.clone()
+        if self.has_annotation {
+            Vec::new()
         } else {
             self.type_.contravariant_type_variables()
         }
@@ -715,28 +713,6 @@ impl TypeConstructor for SingleTypeConstructor {
     fn map_type<F: FnMut(Type) -> Type>(mut self, f: F) -> Self {
         self.type_ = self.type_.map_type(f);
         self
-    }
-
-    fn normalize_contravariant_candidates_from_annotation(
-        mut self,
-        map: &mut TypeVariableMap,
-    ) -> Option<Self> {
-        if let Some(a) = self.contravariant_candidates_from_annotation {
-            self.contravariant_candidates_from_annotation = Some(
-                a.into_iter()
-                    .map(|t| {
-                        if let TypeMatchable::Variable(v) =
-                            map.find(t).matchable()
-                        {
-                            Some(v)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<Option<_>>()?,
-            )
-        };
-        Some(self)
     }
 
     fn contains_variable(&self, v: TypeVariable) -> bool {
@@ -917,13 +893,6 @@ impl TypeConstructor for Type {
         f(self)
     }
 
-    fn normalize_contravariant_candidates_from_annotation(
-        self,
-        _map: &mut TypeVariableMap,
-    ) -> Option<Self> {
-        Some(self)
-    }
-
     fn contains_variable(&self, v: TypeVariable) -> bool {
         self.iter().any(|t| t.contains_variable(v))
     }
@@ -959,10 +928,6 @@ pub trait TypeConstructor:
         recursive_alias_depth: usize,
     ) -> (Self, bool);
     fn map_type<F: FnMut(Type) -> Type>(self, f: F) -> Self;
-    fn normalize_contravariant_candidates_from_annotation(
-        self,
-        map: &mut TypeVariableMap,
-    ) -> Option<Self>;
 }
 
 impl TypeUnit {
@@ -1200,18 +1165,7 @@ fn fmt_tuple_tail(
 
 impl Display for SingleTypeConstructor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{} (annotation: {})",
-            self.type_,
-            self.contravariant_candidates_from_annotation
-                .as_ref()
-                .map(|v| format!(
-                    "[{}]",
-                    v.iter().map(|v| format!("{v}")).join(", ")
-                ))
-                .unwrap_or_else(|| "None".to_string())
-        )
+        write!(f, "{} (annotation: {})", self.type_, self.has_annotation)
     }
 }
 

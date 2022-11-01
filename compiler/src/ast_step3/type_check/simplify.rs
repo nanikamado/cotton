@@ -1298,12 +1298,7 @@ where
             .subtype_relations
             .normalize(map, &mut self.already_considered_relations)?;
         Some(Self {
-            constructor: self
-                .constructor
-                .map_type(|t| map.normalize_type(t))
-                .normalize_contravariant_candidates_from_annotation(
-                map,
-            )?,
+            constructor: self.constructor.map_type(|t| map.normalize_type(t)),
             variable_requirements: self
                 .variable_requirements
                 .into_iter()

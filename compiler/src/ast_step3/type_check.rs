@@ -176,9 +176,7 @@ pub fn type_check(
             TypeWithEnv {
                 constructor: SingleTypeConstructor {
                     type_: t.constructor,
-                    contravariant_candidates_from_annotation: type_annotation
-                        .as_ref()
-                        .map(|t| t.constructor.contravariant_type_variables()),
+                    has_annotation: type_annotation.is_some(),
                 },
                 variable_requirements: t.variable_requirements,
                 subtype_relations: t.subtype_relations,
@@ -632,20 +630,6 @@ impl TypeConstructor for SccTypeConstructor {
         )
     }
 
-    fn normalize_contravariant_candidates_from_annotation(
-        self,
-        map: &mut TypeVariableMap,
-    ) -> Option<Self> {
-        Some(Self(
-            self.0
-                .into_iter()
-                .map(|s| {
-                    s.normalize_contravariant_candidates_from_annotation(map)
-                })
-                .collect::<Option<_>>()?,
-        ))
-    }
-
     fn contains_variable(&self, v: TypeVariable) -> bool {
         self.0.iter().any(|s| s.contains_variable(v))
     }
@@ -672,10 +656,7 @@ fn resolve_scc(
         subtype_relations.extend(t.type_with_env.subtype_relations.clone());
         types.push(SingleTypeConstructor {
             type_: t.type_with_env.constructor.clone(),
-            contravariant_candidates_from_annotation: t
-                .type_annotation
-                .as_ref()
-                .map(|t| t.constructor.contravariant_type_variables()),
+            has_annotation: t.type_annotation.is_some(),
         });
         pattern_restrictions
             .extend(t.type_with_env.pattern_restrictions.clone())
