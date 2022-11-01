@@ -38,6 +38,7 @@ pub enum ConstructorId {
 pub enum TypeId {
     DeclId(DeclId),
     Intrinsic(IntrinsicType),
+    FixedVariable(DeclId),
 }
 
 /// # Difference between `ast_step1::Ast` and `ast_step2::Ast`
@@ -104,7 +105,7 @@ pub struct PrintTypeOfLocalVariableForUser<'a> {
 #[derive(Debug, PartialEq, Clone)]
 pub struct VariableDecl {
     pub name: Name,
-    pub type_annotation: Option<GlobalVariableType>,
+    pub type_annotation: Option<TypeWithEnv>,
     pub implicit_parameters: Vec<(Name, Type, DeclId)>,
     pub value: ExprWithType<TypeVariable>,
     pub decl_id: DeclId,
@@ -333,8 +334,8 @@ impl From<ConstructorId> for TypeId {
 impl Display for TypeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TypeId::DeclId(decl_id) => write!(f, "{}", decl_id),
-            TypeId::Intrinsic(i) => write!(f, "{:?}", i),
+            TypeId::FixedVariable(decl_id) => write!(f, "c{}", decl_id),
+            id => write!(f, "{}", get_type_name(*id)),
         }
     }
 }
@@ -370,6 +371,7 @@ fn variable_decl(
         name: Name::from_str(v.name.0),
         type_annotation: v.type_annotation.map(|(t, forall)| {
             let mut type_variable_decls = FxHashMap::default();
+            let mut type_parameters = Vec::new();
             type_variable_names.extend(forall.type_variables.into_iter().map(
                 |(s, interface_names)| {
                     token_map.insert(s.1, TokenMapEntry::TypeVariable);
@@ -389,23 +391,40 @@ fn variable_decl(
                             ))
                         }
                     }
+                    type_parameters.push(v);
                     type_variable_decls.insert(v, Name::from_str(s.0));
                     (Name::from_str(s.0), v)
                 },
             ));
-            let type_with_env = type_to_type(
+            let mut type_ = type_to_type(
                 t,
                 data_decl_map,
                 &type_variable_names,
                 type_alias_map,
                 SearchMode::Normal,
                 token_map,
-            )
-            .into();
-            GlobalVariableType {
-                type_with_env,
-                type_variable_decls,
+            );
+            if !implicit_parameters.is_empty() {
+                type_ = TypeUnit::Restrictions {
+                    t: type_,
+                    variable_requirements: implicit_parameters
+                        .iter()
+                        .map(|(name, required_type, _decl_id)| {
+                            (*name, required_type.clone())
+                        })
+                        .collect(),
+                    subtype_relations: Default::default(),
+                }
+                .into();
             }
+            for p in type_parameters.into_iter().rev() {
+                type_ = type_.replace_num(
+                    p,
+                    &TypeUnit::Variable(TypeVariable::RecursiveIndex(0)).into(),
+                );
+                type_ = TypeUnit::TypeLevelFn(type_).into();
+            }
+            type_.into()
         }),
         value: expr(
             v.value,
@@ -905,7 +924,11 @@ impl<'b> IntoIterator for &'b SubtypeRelations {
 
 impl FromIterator<(Type, Type)> for SubtypeRelations {
     fn from_iter<T: IntoIterator<Item = (Type, Type)>>(iter: T) -> Self {
-        Self(iter.into_iter().collect())
+        let mut s = Self::default();
+        for r in iter {
+            s.insert(r);
+        }
+        s
     }
 }
 
@@ -915,6 +938,8 @@ impl SubtypeRelations {
     }
 
     pub fn insert(&mut self, value: (Type, Type)) -> bool {
+        debug_assert!(!value.0.contains_restriction());
+        debug_assert!(!value.1.contains_restriction());
         self.0.insert(value)
     }
 
@@ -933,7 +958,9 @@ impl SubtypeRelations {
 
 impl Extend<(Type, Type)> for SubtypeRelations {
     fn extend<T: IntoIterator<Item = (Type, Type)>>(&mut self, iter: T) {
-        self.0.extend(iter)
+        for r in iter {
+            self.insert(r);
+        }
     }
 }
 
@@ -1054,7 +1081,7 @@ impl Display for PrintTypeOfGlobalVariableForUser<'_> {
             fmt_type_with_env(
                 &self.t.type_with_env.constructor,
                 self.op_precedence_map,
-                &self.t.type_variable_decls
+                &Default::default()
             )
             .0
         )?;
@@ -1063,13 +1090,7 @@ impl Display for PrintTypeOfGlobalVariableForUser<'_> {
             write!(
                 f,
                 " forall {{ {}{} }}",
-                vs.iter().format_with(", ", |v, f| {
-                    if let Some(s) = self.t.type_variable_decls.get(v) {
-                        f(s)
-                    } else {
-                        f(v)
-                    }
-                }),
+                vs.iter().format_with(", ", |v, f| { f(v) }),
                 &self.t.type_with_env.subtype_relations.iter().format_with(
                     "",
                     |(a, b), f| f(&format_args!(
@@ -1077,13 +1098,13 @@ impl Display for PrintTypeOfGlobalVariableForUser<'_> {
                         fmt_type_with_env(
                             a,
                             self.op_precedence_map,
-                            &self.t.type_variable_decls
+                            &Default::default()
                         )
                         .0,
                         fmt_type_with_env(
                             b,
                             self.op_precedence_map,
-                            &self.t.type_variable_decls
+                            &Default::default()
                         )
                         .0
                     ))
@@ -1197,7 +1218,7 @@ fn fmt_type_unit_with_env(
                 let (h, tuple_rev) = hts[0];
                 if let TypeUnit::Const { id } = &**h {
                     fmt_tuple(
-                        get_type_name(*id),
+                        *id,
                         tuple_rev,
                         op_precedence_map,
                         type_variable_decls,
@@ -1211,7 +1232,7 @@ fn fmt_type_unit_with_env(
                     hts.iter().format_with(" | ", |(h, t), f| {
                         if let TypeUnit::Const { id } = &***h {
                             let (t, t_context) = fmt_tuple(
-                                get_type_name(*id),
+                                *id,
                                 t,
                                 op_precedence_map,
                                 type_variable_decls,
@@ -1230,7 +1251,7 @@ fn fmt_type_unit_with_env(
         }
         TypeUnit::TypeLevelFn(f) => (
             format!(
-                "rec[{}]",
+                "fn[{}]",
                 fmt_type_with_env(f, op_precedence_map, type_variable_decls).0
             ),
             Single,
@@ -1256,7 +1277,10 @@ fn fmt_type_unit_with_env(
             format!(
                 "{} where {{{subtype_relations}, {}}}",
                 t,
-                variable_requirements.iter().format(",\n")
+                variable_requirements.iter().format_with(
+                    ",\n",
+                    |(name, t), f| f(&format_args!("?{} : {}", name, t))
+                )
             ),
             OtherOperator,
         ),
@@ -1264,7 +1288,7 @@ fn fmt_type_unit_with_env(
 }
 
 fn fmt_tuple(
-    head: Name,
+    head: TypeId,
     tuple_rev: &[&Type],
     op_precedence_map: &OpPrecedenceMap,
     type_variable_decls: &FxHashMap<TypeVariable, Name>,
@@ -1286,7 +1310,7 @@ fn fmt_tuple(
             ),
             Single,
         )
-    } else if op_precedence_map.get(head.as_str().as_str()).is_some() {
+    } else if op_precedence_map.get(head.to_string().as_str()).is_some() {
         assert_eq!(tuple_rev.len(), 2);
         (
             tuple_rev

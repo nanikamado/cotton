@@ -87,11 +87,7 @@ impl TypeVariableMap {
                     t: self.normalize_type(t),
                     variable_requirements: variable_requirements
                         .into_iter()
-                        .map(|mut req| {
-                            req.required_type =
-                                self.normalize_type(req.required_type);
-                            req
-                        })
+                        .map(|(name, req)| (name, self.normalize_type(req)))
                         .collect(),
                     subtype_relations: subtype_relations
                         .into_iter()
@@ -858,17 +854,6 @@ pub fn simplify_subtype_rel<'a>(
             })?
             .concat()),
         (Empty, _) => Ok(Vec::new()),
-        (a, RecursiveAlias { body })
-            if Type::from(a.clone()).is_subtype_of_with_rels(
-                body.clone(),
-                already_considered_relations
-                    .as_deref_mut()
-                    .cloned()
-                    .as_mut(),
-            ) =>
-        {
-            Ok(Vec::new())
-        }
         (
             a @ (Tuple { .. } | Fn(_, _) | Const { .. }),
             RecursiveAlias { body },
@@ -1390,19 +1375,21 @@ fn apply_type_to_pattern(
             DestructResultKind::Fail => (),
             DestructResultKind::Ok => {
                 subtype_rels.add_subtype_rels(subtype_r);
-                let mut decl_match_map: FxHashMap<DeclId, Type> =
-                    Default::default();
-                for (decl_id, t) in bind_matched.unwrap() {
-                    decl_match_map
-                        .entry(decl_id)
-                        .or_default()
-                        .union_in_place(t);
-                }
-                for (decl_id, t) in decl_match_map {
-                    subtype_rels.add_subtype_rel(
-                        decl_type_map_in_pattern[&decl_id].clone(),
-                        t,
-                    )
+                if !not_sure {
+                    let mut decl_match_map: FxHashMap<DeclId, Type> =
+                        Default::default();
+                    for (decl_id, t) in bind_matched.unwrap() {
+                        decl_match_map
+                            .entry(decl_id)
+                            .or_default()
+                            .union_in_place(t);
+                    }
+                    for (decl_id, t) in decl_match_map {
+                        subtype_rels.add_subtype_rel(
+                            decl_type_map_in_pattern[&decl_id].clone(),
+                            t,
+                        )
+                    }
                 }
             }
         }
@@ -1777,7 +1764,7 @@ mod tests {
         let ast = parser::parse(src);
         let (ast, _) = ast_step1::Ast::from(&ast);
         let (ast, _) = ast_step2::Ast::from(ast);
-        let req_t = ast
+        let (req_t, _) = ast
             .variable_decl
             .iter()
             .find(|d| d.name == Name::from_str("test"))
@@ -1785,9 +1772,9 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
-            .type_with_env
-            .constructor;
-        let dot = ast
+            .constructor
+            .remove_parameters();
+        let (dot, _) = ast
             .variable_decl
             .iter()
             .find(|d| d.name == Name::from_str("dot"))
@@ -1795,8 +1782,8 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
-            .type_with_env
-            .constructor;
+            .constructor
+            .remove_parameters();
         let t = TypeWithEnv {
             constructor: Type::from_str("I64")
                 .arrow(Type::from_str("I64").union(Type::from_str("String"))),
@@ -1830,9 +1817,8 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
-            .type_with_env
             .constructor;
-        let t2 = ast
+        let (t2, _) = ast
             .variable_decl
             .iter()
             .find(|d| d.name == Name::from_str("test2"))
@@ -1840,8 +1826,8 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
-            .type_with_env
-            .constructor;
+            .constructor
+            .remove_parameters();
         let t = simplify_subtype_rel(t1, t2, Some(&mut Default::default()));
         assert!(t.is_err());
     }
@@ -1865,7 +1851,6 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
-            .type_with_env
             .constructor;
         if let TypeUnit::Tuple(h, _) = &**t1.iter().next().unwrap() {
             if let TypeMatchableRef::Const { id } = h.matchable_ref() {
@@ -1933,7 +1918,6 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
-            .type_with_env
             .constructor;
         let p = PatternUnitForRestriction::Tuple(
             PatternUnitForRestriction::Const { id: t_id }.into(),
@@ -2050,7 +2034,6 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
-            .type_with_env
             .constructor;
         let v2 = TypeVariable::new();
         let r = apply_type_to_pattern(

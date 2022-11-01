@@ -215,11 +215,11 @@ fn get_expr_from_resolved_ident(
     };
     let mut ts = Vec::new();
     let mut fn_t = t;
-    for (_, _, implicit_arg_t, _) in resolved_ident.implicit_args.iter().rev() {
+    for (_, implicit_arg_t, _) in resolved_ident.implicit_args.iter().rev() {
         fn_t = TypeUnit::Fn(implicit_arg_t.clone(), fn_t).into();
         ts.push(fn_t.clone());
     }
-    for ((_, name, implicit_arg_t, resolved_ident), fn_t) in resolved_ident
+    for ((name, implicit_arg_t, resolved_ident), fn_t) in resolved_ident
         .implicit_args
         .iter()
         .zip(ts.into_iter().rev())

@@ -7,7 +7,7 @@ use crate::{
             merge_vec, unwrap_or_clone, Type, TypeMatchable, TypeMatchableRef,
             TypeUnit, TypeVariable,
         },
-        TypeConstructor, TypeId, TypeWithEnv,
+        SubtypeRelations, TypeConstructor, TypeId, TypeWithEnv,
     },
     intrinsics::INTRINSIC_TYPES,
 };
@@ -135,16 +135,33 @@ impl TypeUnit {
                 u |= u_;
                 let variable_requirements = variable_requirements
                     .into_iter()
-                    .map(|mut r| {
-                        let (t, u_) =
-                            r.required_type.replace_num_with_update_flag(
-                                from,
-                                to,
-                                recursive_alias_depth,
-                            );
+                    .map(|(name, mut r)| {
+                        let (t, u_) = r.replace_num_with_update_flag(
+                            from,
+                            to,
+                            recursive_alias_depth,
+                        );
                         u |= u_;
-                        r.required_type = t;
-                        r
+                        r = t;
+                        (name, r)
+                    })
+                    .collect();
+                let subtype_relations = subtype_relations
+                    .into_iter()
+                    .map(|(a, b)| {
+                        let (a, u_) = a.replace_num_with_update_flag(
+                            from,
+                            to,
+                            recursive_alias_depth,
+                        );
+                        u |= u_;
+                        let (b, u_) = b.replace_num_with_update_flag(
+                            from,
+                            to,
+                            recursive_alias_depth,
+                        );
+                        u |= u_;
+                        (a, b)
                     })
                     .collect();
                 (
@@ -300,17 +317,15 @@ impl TypeUnit {
                 u |= u_;
                 let variable_requirements = variable_requirements
                     .into_iter()
-                    .map(|mut r| {
-                        let (t, u_) = r
-                            .required_type
-                            .replace_type_union_with_update_flag(
-                                from,
-                                to,
-                                recursive_alias_depth,
-                            );
+                    .map(|(name, mut r)| {
+                        let (t, u_) = r.replace_type_union_with_update_flag(
+                            from,
+                            to,
+                            recursive_alias_depth,
+                        );
                         u |= u_;
-                        r.required_type = t;
-                        r
+                        r = t;
+                        (name, r)
                     })
                     .collect();
                 (
@@ -465,6 +480,52 @@ impl TypeUnit {
                 },
             },
             a => Err(a),
+        }
+    }
+
+    pub fn contains_broken_index(&self, recursive_alias_depth: usize) -> bool {
+        match self {
+            TypeUnit::Fn(a, b) => {
+                a.contains_broken_index(recursive_alias_depth)
+                    || b.contains_broken_index(recursive_alias_depth)
+            }
+            TypeUnit::Variable(TypeVariable::Normal(_)) => false,
+            TypeUnit::Variable(TypeVariable::RecursiveIndex(d)) => {
+                *d >= recursive_alias_depth
+            }
+            TypeUnit::RecursiveAlias { body } => {
+                body.contains_broken_index(recursive_alias_depth + 1)
+            }
+            TypeUnit::TypeLevelFn(f) => {
+                f.contains_broken_index(recursive_alias_depth + 1)
+            }
+            TypeUnit::TypeLevelApply { f, a } => {
+                f.contains_broken_index(recursive_alias_depth)
+                    || a.contains_broken_index(recursive_alias_depth)
+            }
+            TypeUnit::Restrictions { t, .. } => {
+                t.contains_broken_index(recursive_alias_depth)
+            }
+            TypeUnit::Const { .. } => false,
+            TypeUnit::Tuple(a, b) => {
+                a.contains_broken_index(recursive_alias_depth)
+                    || b.contains_broken_index(recursive_alias_depth)
+            }
+        }
+    }
+
+    pub fn contains_restriction(&self) -> bool {
+        match self {
+            TypeUnit::Fn(a, b)
+            | TypeUnit::Tuple(a, b)
+            | TypeUnit::TypeLevelApply { f: b, a } => {
+                a.contains_restriction() || b.contains_restriction()
+            }
+            TypeUnit::RecursiveAlias { body: a } | TypeUnit::TypeLevelFn(a) => {
+                a.contains_restriction()
+            }
+            TypeUnit::Variable(_) | TypeUnit::Const { .. } => false,
+            TypeUnit::Restrictions { .. } => true,
         }
     }
 }
@@ -652,6 +713,15 @@ impl Type {
             .into(),
         }
     }
+
+    pub fn contains_broken_index(&self, recursive_alias_depth: usize) -> bool {
+        self.iter()
+            .any(|t| t.contains_broken_index(recursive_alias_depth))
+    }
+
+    pub fn contains_restriction(&self) -> bool {
+        self.iter().any(|t| t.contains_restriction())
+    }
 }
 
 fn apply_arg_to_recursive_fn(
@@ -783,16 +853,39 @@ impl TypeWithEnv {
             .collect::<FxHashSet<_>>()
     }
 
-    pub fn change_variable_num(mut self) -> (Self, Vec<(TypeVariable, Type)>) {
-        let anos = self.all_type_variables();
-        let mut variable_map = Vec::new();
-        for a in anos {
-            let new_variable = TypeVariable::new();
-            self =
-                self.replace_num(a, &TypeUnit::Variable(new_variable).into());
-            variable_map.push((a, TypeUnit::Variable(new_variable).into()));
-        }
-        (self, variable_map)
+    pub fn insert_to_subtype_rels_with_restrictions(
+        &mut self,
+        value: (Type, Type),
+    ) {
+        let mut additional_subtype_rel = SubtypeRelations::default();
+        let a = match value.0.matchable() {
+            TypeMatchable::Restrictions {
+                t,
+                variable_requirements: _,
+                subtype_relations,
+            } => {
+                additional_subtype_rel.extend(subtype_relations);
+                // self.variable_requirements
+                //     .append(&mut variable_requirements);
+                t
+            }
+            a => a.into(),
+        };
+        let b = match value.1.matchable() {
+            TypeMatchable::Restrictions {
+                t,
+                variable_requirements: _,
+                subtype_relations,
+            } => {
+                additional_subtype_rel.extend(subtype_relations);
+                // self.variable_requirements
+                //     .append(&mut variable_requirements);
+                t
+            }
+            b => b.into(),
+        };
+        self.subtype_relations.insert((a, b));
+        self.subtype_relations.extend(additional_subtype_rel);
     }
 }
 
@@ -876,7 +969,6 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
-            .type_with_env
             .constructor;
         assert_eq!(
             format!("{}", t),
@@ -904,7 +996,6 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
-            .type_with_env
             .constructor;
         assert_eq!(format!("{}", t), r#"rec[{/\[[{:I64 | :()}], d0] | ()}]"#);
     }

@@ -135,12 +135,8 @@ pub fn get_token_map(ast: &parser::Ast) -> TokenMapWithEnv {
                             .get(&VariableId::Decl(decl_id));
                         TokenKind::LocalVariable(
                             VariableId::Decl(decl_id),
-                            t.map(|LocalVariableType { t, toplevel }| {
-                                let vs = ast.types_of_global_decls
-                                    [&VariableId::Decl(*toplevel)]
-                                    .type_variable_decls
-                                    .clone();
-                                (t.clone(), vs)
+                            t.map(|LocalVariableType { t, .. }| {
+                                (t.clone(), Default::default())
                             }),
                         )
                     }
@@ -172,17 +168,7 @@ pub fn get_token_map(ast: &parser::Ast) -> TokenMapWithEnv {
                                 r.variable_id,
                                 ast.types_of_local_decls
                                     .get(&r.variable_id)
-                                    .and_then(|t| {
-                                        Some((
-                                            t.t.clone(),
-                                            ast.types_of_global_decls
-                                                .get(&VariableId::Decl(
-                                                    t.toplevel,
-                                                ))?
-                                                .type_variable_decls
-                                                .clone(),
-                                        ))
-                                    }),
+                                    .map(|t| (t.t.clone(), Default::default())),
                             )
                         }
                     }
@@ -190,7 +176,6 @@ pub fn get_token_map(ast: &parser::Ast) -> TokenMapWithEnv {
                 ast_step2::TokenMapEntry::VariableDeclInInterface(t) => {
                     TokenKind::VariableDeclInInterface(GlobalVariableType {
                         type_with_env: t.into(),
-                        type_variable_decls: Default::default(),
                     })
                 }
                 ast_step2::TokenMapEntry::DataDecl(_)
@@ -208,7 +193,6 @@ pub fn get_token_map(ast: &parser::Ast) -> TokenMapWithEnv {
                     ast_step2::ConstructorId::Intrinsic(id) => {
                         TokenKind::Constructor(Some(GlobalVariableType {
                             type_with_env: id.to_type().into(),
-                            type_variable_decls: Default::default(),
                         }))
                     }
                 },

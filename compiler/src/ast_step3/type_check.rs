@@ -75,7 +75,7 @@ pub fn type_check(
             resolved_idents: Default::default(),
             decl_id: VariableId::IntrinsicVariable(v),
             name: Name::from_str(v.to_str()),
-            variables_required_by_interface_restrictions: Default::default(),
+            implicit_parameter_len: 0,
             variable_kind: VariableKind::Intrinsic,
         });
     }
@@ -86,7 +86,7 @@ pub fn type_check(
             resolved_idents: Default::default(),
             decl_id: VariableId::IntrinsicConstructor(v),
             name: Name::from_str(v.to_str()),
-            variables_required_by_interface_restrictions: Default::default(),
+            implicit_parameter_len: 0,
             variable_kind: VariableKind::IntrinsicConstructor,
         });
     }
@@ -98,7 +98,7 @@ pub fn type_check(
             resolved_idents: Default::default(),
             decl_id: VariableId::Decl(d.decl_id),
             name: d.name,
-            variables_required_by_interface_restrictions: Default::default(),
+            implicit_parameter_len: 0,
             variable_kind: VariableKind::Constructor,
         });
     }
@@ -115,15 +115,26 @@ pub fn type_check(
                 .map(|(decl_id, t)| (decl_id, (t, d.decl_id))),
         );
         let type_annotation = if let Some(annotation) = &d.type_annotation {
-            t.subtype_relations.insert((
+            let (ann, parameters) =
+                annotation.constructor.clone().remove_parameters();
+            for p in parameters {
+                map.insert(
+                    &mut t.subtype_relations,
+                    p,
+                    TypeUnit::Const {
+                        id: TypeId::FixedVariable(DeclId::new()),
+                    }
+                    .into(),
+                )
+            }
+            t.insert_to_subtype_rels_with_restrictions((
                 t.constructor.clone(),
-                annotation.type_with_env.constructor.clone(),
+                ann,
             ));
             t.subtype_relations
-                .extend(annotation.type_with_env.subtype_relations.clone());
-            t.variable_requirements.append(
-                &mut annotation.type_with_env.variable_requirements.clone(),
-            );
+                .extend(annotation.subtype_relations.clone());
+            t.variable_requirements
+                .append(&mut annotation.variable_requirements.clone());
             Some(annotation.clone())
         } else {
             None
@@ -167,11 +178,7 @@ pub fn type_check(
                     type_: t.constructor,
                     contravariant_candidates_from_annotation: type_annotation
                         .as_ref()
-                        .map(|t| {
-                            t.type_with_env
-                                .constructor
-                                .contravariant_type_variables()
-                        }),
+                        .map(|t| t.constructor.contravariant_type_variables()),
                 },
                 variable_requirements: t.variable_requirements,
                 subtype_relations: t.subtype_relations,
@@ -188,9 +195,7 @@ pub fn type_check(
             resolved_idents: Default::default(),
             decl_id: VariableId::Decl(d.decl_id),
             name: d.name,
-            variables_required_by_interface_restrictions: d
-                .implicit_parameters
-                .clone(),
+            implicit_parameter_len: d.implicit_parameters.len(),
             variable_kind: VariableKind::Global,
         });
     }
@@ -198,7 +203,7 @@ pub fn type_check(
         log::debug!("{:<3} {} : ", top.decl_id, top.name);
         log::debug!("resolved: {:?}", top.resolved_idents);
         if let Some(f) = &top.type_annotation {
-            log::debug!("face: {}", f.type_with_env);
+            log::debug!("face: {}", f);
             log::debug!("type_with_env: {}", top.type_with_env);
         } else {
             log::debug!("not face: {}", top.type_with_env);
@@ -229,8 +234,8 @@ pub fn type_check(
                         variable_id,
                         implicit_args: implicit_args
                             .into_iter()
-                            .map(|(decl_id, name, t, r)| {
-                                (decl_id, name, map.normalize_type(t), r)
+                            .map(|(name, t, r)| {
+                                (name, map.normalize_type(t), r)
                             })
                             .collect(),
                         variable_kind,
@@ -301,7 +306,7 @@ where
 pub struct ResolvedIdent {
     pub variable_id: VariableId,
     pub variable_kind: VariableKind,
-    pub implicit_args: Vec<(DeclId, Name, Type, ResolvedIdent)>,
+    pub implicit_args: Vec<(Name, Type, ResolvedIdent)>,
 }
 
 pub type Resolved = Vec<(IdentId, ResolvedIdent)>;
@@ -309,11 +314,11 @@ pub type Resolved = Vec<(IdentId, ResolvedIdent)>;
 #[derive(Debug, Clone)]
 struct Toplevel {
     type_with_env: ast_step2::TypeWithEnv,
-    type_annotation: Option<GlobalVariableType>,
+    type_annotation: Option<TypeWithEnv>,
     resolved_idents: FxHashMap<IdentId, VariableId>,
     decl_id: VariableId,
     name: Name,
-    variables_required_by_interface_restrictions: Vec<(Name, Type, DeclId)>,
+    implicit_parameter_len: usize,
     variable_kind: VariableKind,
 }
 
@@ -322,7 +327,6 @@ type TypesOfLocalDeclsVec = Vec<(VariableId, ast_step2::types::Type)>;
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct GlobalVariableType {
     pub type_with_env: ast_step2::TypeWithEnv,
-    pub type_variable_decls: FxHashMap<TypeVariable, Name>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -338,19 +342,6 @@ impl GlobalVariableType {
     {
         Self {
             type_with_env: self.type_with_env.map_type(&mut f),
-            type_variable_decls: self
-                .type_variable_decls
-                .into_iter()
-                .map(|(v, n)| {
-                    if let TypeMatchable::Variable(v) =
-                        f(TypeUnit::Variable(v).into()).matchable()
-                    {
-                        (v, n)
-                    } else {
-                        panic!()
-                    }
-                })
-                .collect(),
         }
     }
 }
@@ -377,7 +368,11 @@ fn resolve_names(
                 .type_with_env
                 .variable_requirements
                 .iter()
-                .flat_map(|req| &toplevle_map[&req.name])
+                .flat_map(|req| {
+                    toplevle_map
+                        .get(&req.name)
+                        .unwrap_or_else(|| panic!("{} not found", req.name))
+                })
                 .map(move |to| (*to, from))
         })
         .collect_vec();
@@ -403,10 +398,6 @@ fn resolve_names(
         for (toplevel, improved_type) in
             unresolved_variables.into_iter().zip(resolved.1)
         {
-            debug_assert_eq!(
-                improved_type,
-                simplify::simplify_type(map, improved_type.clone()).unwrap()
-            );
             log::debug!(
                 "improved type of {}:\n{}",
                 toplevel.name,
@@ -416,7 +407,7 @@ fn resolve_names(
                 .entry(toplevel.name)
                 .or_default()
                 .push(Toplevel {
-                    type_with_env: improved_type,
+                    type_with_env: improved_type.into(),
                     ..toplevel
                 });
         }
@@ -429,10 +420,6 @@ fn resolve_names(
                     t.decl_id,
                     GlobalVariableType {
                         type_with_env: t.type_with_env,
-                        type_variable_decls: t
-                            .type_annotation
-                            .map(|t| t.type_variable_decls)
-                            .unwrap_or_default(),
                     },
                 )
             })
@@ -476,6 +463,26 @@ impl Type {
                 panic!("expected AT or Unit but got {}", Type::from(t))
             }
         }
+    }
+
+    fn remove_parameters(mut self) -> (Self, Vec<TypeVariable>) {
+        let mut parameters = Vec::new();
+        let t = loop {
+            match self.matchable() {
+                TypeMatchable::TypeLevelFn(t) => {
+                    let v = TypeVariable::new();
+                    self = t.replace_num(
+                        TypeVariable::RecursiveIndex(0),
+                        &TypeUnit::Variable(v).into(),
+                    );
+                    parameters.push(v);
+                }
+                t => {
+                    break t;
+                }
+            }
+        };
+        (t.into(), parameters)
     }
 }
 
@@ -650,11 +657,7 @@ fn resolve_scc(
     scc: Vec<Toplevel>,
     resolved_variable_map: &FxHashMap<Name, Vec<Toplevel>>,
     map: &mut TypeVariableMap,
-) -> (
-    Resolved,
-    Vec<ast_step2::TypeWithEnv<Type>>,
-    SubtypeRelations,
-) {
+) -> (Resolved, Vec<Type>, SubtypeRelations) {
     // Merge the declarations in a scc to treate them as if they are one declaration,
     let mut resolved_idents = Vec::new();
     let mut name_vec = Vec::new();
@@ -672,9 +675,7 @@ fn resolve_scc(
             contravariant_candidates_from_annotation: t
                 .type_annotation
                 .as_ref()
-                .map(|t| {
-                    t.type_with_env.constructor.contravariant_type_variables()
-                }),
+                .map(|t| t.constructor.contravariant_type_variables()),
         });
         pattern_restrictions
             .extend(t.type_with_env.pattern_restrictions.clone())
@@ -689,10 +690,7 @@ fn resolve_scc(
             resolved_variable_map.get(&req.name).map(|v| {
                 Reverse(
                     v.iter()
-                        .map(|d| {
-                            d.variables_required_by_interface_restrictions.len()
-                                + 1
-                        })
+                        .map(|d| d.implicit_parameter_len + 1)
                         .sum::<usize>(),
                 )
             }),
@@ -754,7 +752,7 @@ fn resolve_scc(
             .0
             .into_iter()
             .map(|t| {
-                simplify::simplify_type(
+                let t = simplify::simplify_type(
                     map,
                     ast_step2::TypeWithEnv {
                         constructor: t.type_,
@@ -768,7 +766,46 @@ fn resolve_scc(
                             .clone(),
                     },
                 )
-                .unwrap()
+                .unwrap();
+                debug_assert_eq!(
+                    t,
+                    simplify::simplify_type(map, t.clone()).unwrap()
+                );
+                // TODO: check remaining pattern_restrictions
+                let vs = t
+                    .constructor
+                    .all_type_variables()
+                    .into_iter()
+                    .filter(|v| !v.is_recursive_index())
+                    .collect_vec();
+                if vs.is_empty() {
+                    t.constructor
+                } else {
+                    assert!(t.variable_requirements.is_empty());
+                    let mut t = if t.subtype_relations.is_empty() {
+                        t.constructor
+                    } else {
+                        TypeUnit::Restrictions {
+                            t: t.constructor,
+                            variable_requirements: Vec::new(),
+                            subtype_relations: t.subtype_relations,
+                        }
+                        .into()
+                    };
+                    for (i, v) in vs.iter().enumerate() {
+                        t = t.replace_num(
+                            *v,
+                            &TypeUnit::Variable(TypeVariable::RecursiveIndex(
+                                i,
+                            ))
+                            .into(),
+                        );
+                    }
+                    for _ in 0..vs.len() {
+                        t = TypeUnit::TypeLevelFn(t).into();
+                    }
+                    t
+                }
             })
             .collect(),
         improved_types.subtype_relations,
@@ -780,7 +817,7 @@ struct SatisfiedType<T> {
     id_of_satisfied_variable: VariableId,
     variable_kind: VariableKind,
     type_of_improved_decl: T,
-    implicit_args: Vec<(DeclId, Name, Type, ResolvedIdent)>,
+    implicit_args: Vec<(Name, Type, ResolvedIdent)>,
     map: TypeVariableMap,
 }
 
@@ -797,10 +834,7 @@ impl CandidatesProvider for &FxHashMap<Name, Vec<Toplevel>> {
             .into_iter()
             .flatten()
             .cloned()
-            .map(|t| Candidate {
-                candidate: t,
-                replace_variables: true,
-            })
+            .map(|t| Candidate { candidate: t })
             .collect_vec()
             .into_iter()
     }
@@ -833,7 +867,6 @@ impl<'b, F: FnMut(usize) -> Candidate + Copy> CandidatesProvider
 #[derive(Debug, Clone)]
 struct Candidate {
     candidate: Toplevel,
-    replace_variables: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -869,143 +902,144 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
     log::trace!("required_type : {}", req.required_type);
     resolved_variable_map
         .get_candidates(req.name)
-        .filter_map(
-            |Candidate {
-                 candidate,
-                 replace_variables,
-             }| {
-                let mut t = type_of_unresolved_decl.clone();
-                let mut cand_t = if let Some(face) = candidate.type_annotation {
-                    face.type_with_env
-                } else {
-                    candidate.type_with_env
-                };
-                let mut map = map.clone();
-                log::debug!("~~ {} : {}", candidate.name, cand_t);
-                for (req_name, req_t, decl_id) in
-                    &candidate.variables_required_by_interface_restrictions
-                {
-                    log::debug!("   {} : {} ({})", req_name, req_t, decl_id);
-                }
-                let mut implicit_args = Vec::new();
-                let mut resolved_implicit_args = FxHashMap::default();
-                for (interface_v_name, interface_v_t, interface_v_decl_id) in
-                    candidate.variables_required_by_interface_restrictions
-                {
-                    let arg = IdentId::new();
-                    implicit_args.push((
-                        interface_v_decl_id,
-                        interface_v_name,
-                        interface_v_t.clone(),
-                        arg,
-                    ));
-                    if let Some((_, decl_id, found_t)) = req
-                        .local_env
-                        .iter()
-                        .find(|(name, _, _)| interface_v_name == *name)
+        .filter_map(|Candidate { candidate }| {
+            let mut t = type_of_unresolved_decl.clone();
+            let mut cand_t = if let Some(face) = candidate.type_annotation {
+                face
+            } else {
+                candidate.type_with_env
+            };
+            let mut map = map.clone();
+            log::debug!("~~ {} : {}", candidate.name, cand_t);
+            let mut implicit_args = Vec::new();
+            let mut resolved_implicit_args = FxHashMap::default();
+            let type_args;
+            (cand_t.constructor, type_args) =
+                cand_t.constructor.remove_parameters();
+            cand_t.constructor = match cand_t.constructor.matchable() {
+                TypeMatchable::Restrictions {
+                    t: constructor,
+                    variable_requirements,
+                    subtype_relations,
+                } => {
+                    for (interface_v_name, interface_v_t) in
+                        variable_requirements
                     {
-                        resolved_implicit_args.insert(
+                        let arg = IdentId::new();
+                        implicit_args.push((
+                            interface_v_name,
+                            interface_v_t.clone(),
                             arg,
-                            ResolvedIdent {
-                                variable_id: VariableId::Decl(*decl_id),
-                                implicit_args: Default::default(),
-                                variable_kind: VariableKind::Local,
-                            },
-                        );
-                        map.insert_type(
-                            &mut t.subtype_relations,
-                            interface_v_t,
-                            found_t.clone(),
-                        );
-                    } else {
-                        cand_t.variable_requirements.push(
-                            VariableRequirement {
-                                name: interface_v_name,
-                                required_type: interface_v_t,
-                                ident: arg,
-                                local_env: req.local_env.clone(),
-                            },
-                        );
-                    }
-                }
-                if replace_variables {
-                    cand_t = cand_t.normalize(&mut map).unwrap();
-                    (cand_t, _) = cand_t.change_variable_num();
-                }
-                t.subtype_relations.add_subtype_rel(
-                    cand_t.constructor.clone(),
-                    req.required_type.clone(),
-                );
-                t.subtype_relations.add_subtype_rel(
-                    req.required_type.clone(),
-                    cand_t.constructor.clone(),
-                );
-                t.subtype_relations
-                    .add_subtype_rels(cand_t.subtype_relations);
-                t.variable_requirements
-                    .extend(cand_t.variable_requirements.clone());
-                let decl_id = candidate.decl_id;
-                simplify::simplify_type(&mut map, t).map(
-                    |mut type_of_improved_decl| {
-                        while let Some(req) = cand_t.variable_requirements.pop()
+                        ));
+                        if let Some((_, decl_id, found_t)) = req
+                            .local_env
+                            .iter()
+                            .find(|(name, _, _)| interface_v_name == *name)
                         {
-                            if names_in_scc.contains(&req.name) {
-                                type_of_improved_decl
-                                    .variable_requirements
-                                    .push(req);
-                                // Skipping the resolveing of recursion.
-                                panic!();
-                                // break;
-                            }
-                            let satisfied = find_satisfied_types(
-                                &req,
-                                &type_of_improved_decl,
-                                resolved_variable_map,
-                                &map,
-                                names_in_scc,
-                            );
-                            let satisfied = get_one_satisfied(satisfied);
                             resolved_implicit_args.insert(
-                                req.ident,
+                                arg,
                                 ResolvedIdent {
-                                    variable_id: satisfied
-                                        .id_of_satisfied_variable,
-                                    implicit_args: satisfied.implicit_args,
-                                    variable_kind: satisfied.variable_kind,
+                                    variable_id: VariableId::Decl(*decl_id),
+                                    implicit_args: Default::default(),
+                                    variable_kind: VariableKind::Local,
                                 },
                             );
-                            map = satisfied.map;
-                            type_of_improved_decl =
-                                satisfied.type_of_improved_decl;
                             map.insert_type(
-                                &mut type_of_improved_decl.subtype_relations,
-                                req.required_type,
-                                satisfied.type_of_satisfied_variable,
+                                &mut t.subtype_relations,
+                                interface_v_t,
+                                found_t.clone(),
+                            );
+                        } else {
+                            cand_t.variable_requirements.push(
+                                VariableRequirement {
+                                    name: interface_v_name,
+                                    required_type: interface_v_t,
+                                    ident: arg,
+                                    local_env: req.local_env.clone(),
+                                },
                             );
                         }
-                        SatisfiedType {
-                            id_of_satisfied_variable: decl_id,
-                            type_of_improved_decl,
-                            implicit_args: implicit_args
-                                .into_iter()
-                                .map(|(decl_id, name, t, ident_id)| {
-                                    (
-                                        decl_id,
-                                        name,
-                                        t,
-                                        resolved_implicit_args[&ident_id]
-                                            .clone(),
-                                    )
-                                })
-                                .collect(),
-                            type_of_satisfied_variable: cand_t.constructor,
-                            map,
-                            variable_kind: candidate.variable_kind,
+                    }
+                    t.subtype_relations.extend(subtype_relations);
+                    constructor
+                }
+                t => t.into(),
+            };
+            let (required_type, ps_from_rec) =
+                req.required_type.clone().remove_parameters();
+            for (a, b) in type_args.iter().zip(ps_from_rec) {
+                map.insert(
+                    &mut t.subtype_relations,
+                    *a,
+                    TypeUnit::Variable(b).into(),
+                );
+            }
+            t.subtype_relations.add_subtype_rel(
+                cand_t.constructor.clone(),
+                required_type.clone(),
+            );
+            t.subtype_relations
+                .add_subtype_rel(required_type, cand_t.constructor.clone());
+            t.subtype_relations
+                .add_subtype_rels(cand_t.subtype_relations);
+            t.variable_requirements
+                .extend(cand_t.variable_requirements.clone());
+            let decl_id = candidate.decl_id;
+            simplify::simplify_type(&mut map, t).map(
+                |mut type_of_improved_decl| {
+                    while let Some(req) = cand_t.variable_requirements.pop() {
+                        if names_in_scc.contains(&req.name) {
+                            type_of_improved_decl
+                                .variable_requirements
+                                .push(req);
+                            // Skipping the resolveing of recursion.
+                            panic!();
+                            // break;
                         }
-                    },
-                )
-            },
-        )
+                        let satisfied = find_satisfied_types(
+                            &req,
+                            &type_of_improved_decl,
+                            resolved_variable_map,
+                            &map,
+                            names_in_scc,
+                        );
+                        let satisfied = get_one_satisfied(satisfied);
+                        resolved_implicit_args.insert(
+                            req.ident,
+                            ResolvedIdent {
+                                variable_id: satisfied.id_of_satisfied_variable,
+                                implicit_args: satisfied.implicit_args,
+                                variable_kind: satisfied.variable_kind,
+                            },
+                        );
+                        map = satisfied.map;
+                        type_of_improved_decl = satisfied.type_of_improved_decl;
+                        map.insert_type(
+                            &mut type_of_improved_decl.subtype_relations,
+                            req.required_type,
+                            satisfied.type_of_satisfied_variable,
+                        );
+                    }
+                    SatisfiedType {
+                        id_of_satisfied_variable: decl_id,
+                        type_of_improved_decl,
+                        implicit_args: implicit_args
+                            .into_iter()
+                            .map(|(name, t, ident_id)| {
+                                (
+                                    name,
+                                    t,
+                                    resolved_implicit_args[&ident_id].clone(),
+                                )
+                            })
+                            .collect(),
+                        type_of_satisfied_variable: cand_t.constructor,
+                        map,
+                        variable_kind: candidate.variable_kind,
+                    }
+                },
+            )
+        })
         .collect_vec()
 }
 
@@ -1058,7 +1092,6 @@ fn resolve_recursion_in_scc(
                                 .into(),
                             ..toplevels[j].clone()
                         },
-                        replace_variables: false,
                     },
                 },
                 normal_map: resolved_variable_map,
@@ -1090,7 +1123,11 @@ fn constructor_type(d: DataDecl) -> TypeUnit {
     let fields: Vec<_> = d
         .fields
         .iter()
-        .map(|t| TypeUnit::Variable(*t).into())
+        .enumerate()
+        .map(|(i, _t)| {
+            TypeUnit::Variable(TypeVariable::RecursiveIndex(i)).into()
+        })
+        .rev()
         .collect();
     let mut t = TypeUnit::Tuple(
         TypeUnit::Const {
@@ -1101,6 +1138,9 @@ fn constructor_type(d: DataDecl) -> TypeUnit {
     );
     for field in fields.into_iter().rev() {
         t = TypeUnit::Fn(field, t.into())
+    }
+    for _ in 0..d.fields.len() {
+        t = TypeUnit::TypeLevelFn(t.into())
     }
     t
 }
