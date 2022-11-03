@@ -77,7 +77,6 @@ impl Ast {
         ) = type_check(&ast);
         let (variable_decl, entry_point) = variable_decl(
             ast.variable_decl,
-            &ast.data_decl,
             ast.entry_point,
             &resolved_idents,
             &mut map,
@@ -115,24 +114,15 @@ impl Ast {
 
 fn variable_decl(
     variable_decls: Vec<ast_step2::VariableDecl>,
-    data_decls: &[ast_step2::DataDecl],
     entry_point: DeclId,
     resolved_idents: &ResolvedIdents,
     map: &mut TypeVariableMap,
     types_of_decls: &mut FxHashMap<VariableId, LocalVariableType>,
 ) -> (Vec<VariableDecl>, DeclId) {
-    let data_decls: FxHashMap<DeclId, &ast_step2::DataDecl> = data_decls
-        .iter()
-        .map(|d| {
-            let did = d.decl_id;
-            (did, d)
-        })
-        .collect();
     let variable_decls = variable_decls
         .into_iter()
         .map(|d| {
-            let (mut value, mut value_t) =
-                expr(d.value, &data_decls, resolved_idents, map);
+            let (mut value, mut value_t) = expr(d.value, resolved_idents, map);
             for (name, t, decl_id) in d.implicit_parameters.into_iter().rev() {
                 types_of_decls.insert(
                     VariableId::Decl(decl_id),
@@ -162,9 +152,8 @@ fn variable_decl(
     (variable_decls, entry_point)
 }
 
-fn expr<'b>(
+fn expr(
     (e, t): ast_step2::ExprWithType<TypeVariable>,
-    data_decls: &FxHashMap<DeclId, &'b ast_step2::DataDecl>,
     resolved_idents: &ResolvedIdents,
     map: &mut TypeVariableMap,
 ) -> ExprWithType {
@@ -172,7 +161,7 @@ fn expr<'b>(
         ast_step2::Expr::Lambda(arms) => Expr::Lambda(
             arms.into_iter()
                 .map(|a| {
-                    let e = expr(a.expr, data_decls, resolved_idents, map);
+                    let e = expr(a.expr, resolved_idents, map);
                     FnArm {
                         pattern: a
                             .pattern
@@ -191,12 +180,12 @@ fn expr<'b>(
             get_expr_from_resolved_ident(name, &resolved_item, map.find(t))
         }
         ast_step2::Expr::Call(f, a) => Expr::Call(
-            expr(*f, data_decls, resolved_idents, map).into(),
-            expr(*a, data_decls, resolved_idents, map).into(),
+            expr(*f, resolved_idents, map).into(),
+            expr(*a, resolved_idents, map).into(),
         ),
         ast_step2::Expr::Do(es) => Expr::DoBlock(
             es.into_iter()
-                .map(|e| expr(e, data_decls, resolved_idents, map))
+                .map(|e| expr(e, resolved_idents, map))
                 .collect(),
         ),
     };
