@@ -366,7 +366,6 @@ fn variable_decl(
                 interfaces,
                 token_map,
             );
-            eprintln!("annotation: {}", t);
             implicit_parameters = ps;
             t.into()
         }),

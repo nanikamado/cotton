@@ -119,7 +119,7 @@ impl TypeUnit {
                     to,
                     recursive_alias_depth,
                 );
-                (Self::TypeLevelApply { f, a }.into(), updated1 || updated2)
+                (f.type_level_function_apply(a), updated1 || updated2)
             }
             Self::Restrictions {
                 t,

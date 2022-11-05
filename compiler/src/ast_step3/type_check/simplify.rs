@@ -74,11 +74,9 @@ impl TypeVariableMap {
                 TypeUnit::TypeLevelFn(f) => {
                     TypeUnit::TypeLevelFn(self.normalize_type(f)).into()
                 }
-                TypeUnit::TypeLevelApply { f, a } => TypeUnit::TypeLevelApply {
-                    f: self.normalize_type(f),
-                    a: self.normalize_type(a),
-                }
-                .into(),
+                TypeUnit::TypeLevelApply { f, a } => self
+                    .normalize_type(f)
+                    .type_level_function_apply(self.normalize_type(a)),
                 TypeUnit::Restrictions {
                     t,
                     variable_requirements,
@@ -173,6 +171,14 @@ impl TypeVariableMap {
             }
             (Variable(_), _) | (_, Variable(_)) => {
                 panic!("recursion is not allowed.",)
+            }
+            (
+                TypeLevelApply { f: a_f, a: a_a },
+                TypeLevelApply { f: b_f, a: b_a },
+            ) => {
+                self._insert_type(subtype, a_f.clone(), b_f.clone());
+                self._insert_type(subtype, a_a.clone(), b_a.clone());
+                return;
             }
             _ => {
                 subtype.add_subtype_rel(key.clone(), value.clone());
@@ -711,6 +717,9 @@ fn _simplify_type<T: TypeConstructor>(
             t.pattern_restrictions = pattern_restrictions;
             return Some((t, true));
         }
+        if try_eq_sub(map, &mut t) {
+            return Some((t, true));
+        }
         // log::trace!("t{{7}} = {}", t);
         // let mut bounded_v = None;
         // for (a, b) in &t.subtype_relations {
@@ -755,8 +764,24 @@ fn find_eq_types(subtype_rel: &SubtypeRelations) -> Vec<(TypeVariable, Type)> {
             for a in &eq_variable[1..] {
                 r.push((*a, Variable(eq_variable[0]).into()));
             }
-        } else if eq_variable.is_empty() && eq_cons.len() >= 2 {
-            eprintln!("{}", eq_cons.iter().format(" == "))
+        } else if eq_variable.is_empty() && eq_cons.len() == 2 {
+            if let TypeMatchableRef::TypeLevelApply { f, a } =
+                eq_cons[0].matchable_ref()
+            {
+                if let TypeMatchableRef::Variable(f) = f.matchable_ref() {
+                    let (replaced_t, u) =
+                        eq_cons[1].clone().replace_type_union_with_update_flag(
+                            a,
+                            &TypeUnit::Variable(TypeVariable::RecursiveIndex(
+                                0,
+                            )),
+                            0,
+                        );
+                    if u {
+                        r.push((f, TypeUnit::TypeLevelFn(replaced_t).into()));
+                    }
+                }
+            }
         } else {
             for a in eq_variable {
                 r.push((a, eq_cons[0].clone()));
@@ -1650,6 +1675,29 @@ fn replace_type_test1() {
             .replace_num(zero, &Variable(one).into()),
         Fn(Variable(one).into(), Variable(two).into()).into()
     );
+}
+
+fn try_eq_sub<T: TypeConstructor>(
+    map: &mut TypeVariableMap,
+    t: &mut TypeWithEnv<T>,
+) -> bool {
+    if t.subtype_relations.is_empty() {
+        return false;
+    }
+    let mut m = TypeVariableMap::default();
+    let mut subtype = SubtypeRelations::default();
+    for (a, b) in &t.subtype_relations {
+        m.insert_type(&mut subtype, a.clone(), b.clone())
+    }
+    if subtype.is_empty() {
+        for (v, k) in m.0 {
+            map.insert(&mut t.subtype_relations, v, k);
+        }
+        t.subtype_relations = SubtypeRelations::default();
+        true
+    } else {
+        false
+    }
 }
 
 impl<T: TypeConstructor> TypeWithEnv<T> {

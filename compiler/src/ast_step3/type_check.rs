@@ -150,7 +150,8 @@ pub fn type_check(
             .into_iter()
             .filter_map(|mut req| {
                 if let Some((t, decl_id)) = vs.get(&req.name) {
-                    suptype_rel.push(((*t).clone(), req.required_type.clone()));
+                    let (t, _) = (*t).clone().remove_parameters();
+                    suptype_rel.push((t, req.required_type.clone()));
                     resolved_idents.push((
                         req.ident,
                         ResolvedIdent {
