@@ -1815,7 +1815,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
-            .constructor
+            .unfixed
             .remove_parameters();
         let (dot, _) = ast
             .variable_decl
@@ -1825,7 +1825,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
-            .constructor
+            .unfixed
             .remove_parameters();
         let t = TypeWithEnv {
             constructor: Type::from_str("I64")
@@ -1860,7 +1860,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
-            .constructor;
+            .unfixed;
         let (t2, _) = ast
             .variable_decl
             .iter()
@@ -1869,7 +1869,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
-            .constructor
+            .unfixed
             .remove_parameters();
         let t = simplify_subtype_rel(t1, t2, Some(&mut Default::default()));
         assert!(t.is_err());
@@ -1894,7 +1894,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
-            .constructor;
+            .unfixed;
         if let TypeUnit::Tuple(h, _) = &**t1.iter().next().unwrap() {
             if let TypeMatchableRef::Const { id } = h.matchable_ref() {
                 let false_ =
@@ -1961,7 +1961,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
-            .constructor;
+            .unfixed;
         let p = PatternUnitForRestriction::Tuple(
             PatternUnitForRestriction::Const { id: t_id }.into(),
             PatternUnitForRestriction::argument_tuple_from_arguments(vec![
@@ -2075,9 +2075,10 @@ mod tests {
             .find(|d| d.name == Name::from_str("test1"))
             .unwrap()
             .type_annotation
-            .clone()
+            .as_ref()
             .unwrap()
-            .constructor;
+            .unfixed
+            .clone();
         let v2 = TypeVariable::new();
         let r = apply_type_to_pattern(
             Type::argument_tuple_from_arguments(vec![t1.clone(), t1]),

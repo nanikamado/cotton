@@ -86,8 +86,7 @@ impl Ast {
             log::debug!(
                 "type_ {} : {}",
                 v.name,
-                types_of_global_decls[&VariableId::Decl(v.decl_id)]
-                    .type_with_env
+                types_of_global_decls[&VariableId::Decl(v.decl_id)].t
             );
         }
         let data_decl = ast
@@ -123,7 +122,12 @@ fn variable_decl(
         .into_iter()
         .map(|d| {
             let (mut value, mut value_t) = expr(d.value, resolved_idents, map);
-            for (name, t, decl_id) in d.implicit_parameters.into_iter().rev() {
+            for (name, t, decl_id) in d
+                .type_annotation
+                .into_iter()
+                .flat_map(|ann| ann.implicit_parameters)
+                .rev()
+            {
                 types_of_decls.insert(
                     VariableId::Decl(decl_id),
                     LocalVariableType {

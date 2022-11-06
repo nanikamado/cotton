@@ -12,11 +12,11 @@ mod rust_backend;
 
 pub use ast_step1::OpPrecedenceMap;
 use ast_step2::name_id::Name;
-use ast_step2::types::{Type, TypeVariable};
+use ast_step2::types::{Type, TypeUnit};
 use ast_step2::TYPE_NAMES;
 pub use ast_step2::{
     types::TypeMatchableRef, PrintTypeOfGlobalVariableForUser,
-    PrintTypeOfLocalVariableForUser, TypeWithEnv,
+    PrintTypeOfLocalVariableForUser,
 };
 use ast_step3::{GlobalVariableType, LocalVariableType, VariableId};
 use codegen::codegen;
@@ -99,7 +99,7 @@ pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
 
 pub enum TokenKind {
     GlobalVariable(VariableId, Option<GlobalVariableType>),
-    LocalVariable(VariableId, Option<(Type, FxHashMap<TypeVariable, Name>)>),
+    LocalVariable(VariableId, Option<(Type, FxHashMap<TypeUnit, Name>)>),
     Constructor(Option<GlobalVariableType>),
     Type,
     Interface,
@@ -119,31 +119,38 @@ pub fn get_token_map(ast: &parser::Ast) -> TokenMapWithEnv {
         .0
         .into_iter()
         .map(|(id, t)| {
-            let t = match t {
-                ast_step2::TokenMapEntry::Decl(decl_id) => {
-                    if let Some(t) = ast
-                        .types_of_global_decls
-                        .get(&VariableId::Decl(decl_id))
-                    {
-                        TokenKind::GlobalVariable(
-                            VariableId::Decl(decl_id),
-                            Some(t.clone()),
-                        )
-                    } else {
-                        let t = ast
-                            .types_of_local_decls
-                            .get(&VariableId::Decl(decl_id));
-                        TokenKind::LocalVariable(
-                            VariableId::Decl(decl_id),
-                            t.map(|LocalVariableType { t, .. }| {
-                                (t.clone(), Default::default())
-                            }),
-                        )
+            let t =
+                match t {
+                    ast_step2::TokenMapEntry::Decl(decl_id) => {
+                        if let Some(t) = ast
+                            .types_of_global_decls
+                            .get(&VariableId::Decl(decl_id))
+                        {
+                            TokenKind::GlobalVariable(
+                                VariableId::Decl(decl_id),
+                                Some(t.clone()),
+                            )
+                        } else {
+                            let t = ast
+                                .types_of_local_decls
+                                .get(&VariableId::Decl(decl_id));
+                            TokenKind::LocalVariable(
+                                VariableId::Decl(decl_id),
+                                t.map(|LocalVariableType { t, toplevel }| {
+                                    (
+                                        t.clone(),
+                                        ast.types_of_global_decls
+                                            [&VariableId::Decl(*toplevel)]
+                                            .fixed_parameters
+                                            .clone(),
+                                    )
+                                }),
+                            )
+                        }
                     }
-                }
-                ast_step2::TokenMapEntry::Ident(ident_id) => {
-                    let r = resolved_idents.get(&ident_id).unwrap();
-                    match r.variable_kind {
+                    ast_step2::TokenMapEntry::Ident(ident_id) => {
+                        let r = resolved_idents.get(&ident_id).unwrap();
+                        match r.variable_kind {
                         ast_step4::VariableKind::IntrinsicConstructor => {
                             TokenKind::Type
                         }
@@ -168,36 +175,46 @@ pub fn get_token_map(ast: &parser::Ast) -> TokenMapWithEnv {
                                 r.variable_id,
                                 ast.types_of_local_decls
                                     .get(&r.variable_id)
-                                    .map(|t| (t.t.clone(), Default::default())),
+                                    .map(|LocalVariableType { t, toplevel }| {
+                                        (
+                                            t.clone(),
+                                            ast.types_of_global_decls
+                                                [&VariableId::Decl(*toplevel)]
+                                                .fixed_parameters
+                                                .clone(),
+                                        )
+                                    }),
                             )
                         }
                     }
-                }
-                ast_step2::TokenMapEntry::VariableDeclInInterface(t) => {
-                    TokenKind::VariableDeclInInterface(GlobalVariableType {
-                        type_with_env: t.into(),
-                    })
-                }
-                ast_step2::TokenMapEntry::DataDecl(_)
-                | ast_step2::TokenMapEntry::TypeId(_)
-                | ast_step2::TokenMapEntry::TypeAlias
-                | ast_step2::TokenMapEntry::TypeVariable => TokenKind::Type,
-                ast_step2::TokenMapEntry::Constructor(id) => match id {
-                    ast_step2::ConstructorId::DeclId(decl_id) => {
-                        TokenKind::Constructor(
-                            ast.types_of_global_decls
-                                .get(&VariableId::Decl(decl_id))
-                                .cloned(),
-                        )
                     }
-                    ast_step2::ConstructorId::Intrinsic(id) => {
-                        TokenKind::Constructor(Some(GlobalVariableType {
-                            type_with_env: id.to_type().into(),
-                        }))
+                    ast_step2::TokenMapEntry::VariableDeclInInterface(t) => {
+                        TokenKind::VariableDeclInInterface(GlobalVariableType {
+                            t,
+                            fixed_parameters: Default::default(),
+                        })
                     }
-                },
-                ast_step2::TokenMapEntry::Interface => TokenKind::Interface,
-            };
+                    ast_step2::TokenMapEntry::DataDecl(_)
+                    | ast_step2::TokenMapEntry::TypeId(_)
+                    | ast_step2::TokenMapEntry::TypeAlias
+                    | ast_step2::TokenMapEntry::TypeVariable => TokenKind::Type,
+                    ast_step2::TokenMapEntry::Constructor(id) => match id {
+                        ast_step2::ConstructorId::DeclId(decl_id) => {
+                            TokenKind::Constructor(
+                                ast.types_of_global_decls
+                                    .get(&VariableId::Decl(decl_id))
+                                    .cloned(),
+                            )
+                        }
+                        ast_step2::ConstructorId::Intrinsic(id) => {
+                            TokenKind::Constructor(Some(GlobalVariableType {
+                                t: id.to_type(),
+                                fixed_parameters: Default::default(),
+                            }))
+                        }
+                    },
+                    ast_step2::TokenMapEntry::Interface => TokenKind::Interface,
+                };
             (id, t)
         })
         .collect();

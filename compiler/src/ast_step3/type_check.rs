@@ -77,6 +77,7 @@ pub fn type_check(
             name: Name::from_str(v.to_str()),
             implicit_parameter_len: 0,
             variable_kind: VariableKind::Intrinsic,
+            fixed_parameters: Default::default(),
         });
     }
     for v in IntrinsicConstructor::iter() {
@@ -88,6 +89,7 @@ pub fn type_check(
             name: Name::from_str(v.to_str()),
             implicit_parameter_len: 0,
             variable_kind: VariableKind::IntrinsicConstructor,
+            fixed_parameters: Default::default(),
         });
     }
     for d in &ast.data_decl {
@@ -100,6 +102,7 @@ pub fn type_check(
             name: d.name,
             implicit_parameter_len: 0,
             variable_kind: VariableKind::Constructor,
+            fixed_parameters: Default::default(),
         });
     }
     let mut resolved_idents = Vec::new();
@@ -115,34 +118,22 @@ pub fn type_check(
                 .map(|(decl_id, t)| (decl_id, (t, d.decl_id))),
         );
         let type_annotation = if let Some(annotation) = &d.type_annotation {
-            let (ann, parameters) =
-                annotation.constructor.clone().remove_parameters();
-            for p in parameters {
-                map.insert(
-                    &mut t.subtype_relations,
-                    p,
-                    TypeUnit::Const {
-                        id: TypeId::FixedVariable(DeclId::new()),
-                    }
-                    .into(),
-                )
-            }
             t.insert_to_subtype_rels_with_restrictions((
                 t.constructor.clone(),
-                ann,
+                annotation.fixed.clone(),
             ));
-            t.subtype_relations
-                .extend(annotation.subtype_relations.clone());
-            t.variable_requirements
-                .append(&mut annotation.variable_requirements.clone());
-            Some(annotation.clone())
+            Some(annotation.unfixed.clone())
         } else {
             None
         };
         let vs: FxHashMap<_, _> = d
-            .implicit_parameters
+            .type_annotation
             .iter()
-            .map(|(s, t, decl_id)| (*s, (t, decl_id)))
+            .flat_map(|ann| {
+                ann.implicit_parameters
+                    .iter()
+                    .map(|(s, t, decl_id)| (*s, (t, decl_id)))
+            })
             .collect();
         let mut suptype_rel = Vec::new();
         t.variable_requirements = t
@@ -194,8 +185,17 @@ pub fn type_check(
             resolved_idents: Default::default(),
             decl_id: VariableId::Decl(d.decl_id),
             name: d.name,
-            implicit_parameter_len: d.implicit_parameters.len(),
+            implicit_parameter_len: d
+                .type_annotation
+                .as_ref()
+                .map(|ann| ann.implicit_parameters.len())
+                .unwrap_or_default(),
             variable_kind: VariableKind::Global,
+            fixed_parameters: d
+                .type_annotation
+                .as_ref()
+                .map(|ann| ann.fixed_parameter_names.clone())
+                .unwrap_or_default(),
         });
     }
     for top in &toplevels {
@@ -313,19 +313,21 @@ pub type Resolved = Vec<(IdentId, ResolvedIdent)>;
 #[derive(Debug, Clone)]
 struct Toplevel {
     type_with_env: ast_step2::TypeWithEnv,
-    type_annotation: Option<TypeWithEnv>,
+    type_annotation: Option<Type>,
     resolved_idents: FxHashMap<IdentId, VariableId>,
     decl_id: VariableId,
     name: Name,
     implicit_parameter_len: usize,
     variable_kind: VariableKind,
+    fixed_parameters: FxHashMap<TypeUnit, Name>,
 }
 
 type TypesOfLocalDeclsVec = Vec<(VariableId, ast_step2::types::Type)>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct GlobalVariableType {
-    pub type_with_env: ast_step2::TypeWithEnv,
+    pub t: Type,
+    pub fixed_parameters: FxHashMap<TypeUnit, Name>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -340,7 +342,8 @@ impl GlobalVariableType {
         F: FnMut(Type) -> Type,
     {
         Self {
-            type_with_env: self.type_with_env.map_type(&mut f),
+            t: self.t.map_type(&mut f),
+            fixed_parameters: self.fixed_parameters,
         }
     }
 }
@@ -418,7 +421,9 @@ fn resolve_names(
                 (
                     t.decl_id,
                     GlobalVariableType {
-                        type_with_env: t.type_with_env,
+                        t: t.type_annotation
+                            .unwrap_or(t.type_with_env.constructor),
+                        fixed_parameters: t.fixed_parameters,
                     },
                 )
             })
@@ -464,7 +469,7 @@ impl Type {
         }
     }
 
-    fn remove_parameters(mut self) -> (Self, Vec<TypeVariable>) {
+    pub fn remove_parameters(mut self) -> (Self, Vec<TypeVariable>) {
         let mut parameters = Vec::new();
         let t = loop {
             match self.matchable() {
@@ -736,7 +741,7 @@ fn resolve_scc(
             .map(|t| {
                 let t = simplify::simplify_type(
                     map,
-                    ast_step2::TypeWithEnv {
+                    TypeWithEnv {
                         constructor: t.type_,
                         variable_requirements: variable_requirements.clone(),
                         subtype_relations: subtype_relation.clone(),
@@ -887,7 +892,7 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
         .filter_map(|Candidate { candidate }| {
             let mut t = type_of_unresolved_decl.clone();
             let mut cand_t = if let Some(face) = candidate.type_annotation {
-                face
+                face.into()
             } else {
                 candidate.type_with_env
             };

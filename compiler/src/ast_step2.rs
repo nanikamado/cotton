@@ -4,7 +4,7 @@ pub mod name_id;
 pub mod types;
 
 use self::name_id::Name;
-use self::types::TypeVariable;
+use self::types::{TypeMatchable, TypeVariable};
 use self::{
     decl_id::DeclId,
     ident_id::IdentId,
@@ -99,16 +99,23 @@ pub struct PrintTypeOfGlobalVariableForUser<'a> {
 pub struct PrintTypeOfLocalVariableForUser<'a> {
     pub t: &'a Type,
     pub op_precedence_map: &'a OpPrecedenceMap<'a>,
-    pub type_variable_decls: &'a FxHashMap<TypeVariable, Name>,
+    pub type_variable_decls: &'a FxHashMap<TypeUnit, Name>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct VariableDecl {
     pub name: Name,
-    pub type_annotation: Option<TypeWithEnv>,
-    pub implicit_parameters: Vec<(Name, Type, DeclId)>,
+    pub type_annotation: Option<Annotation>,
     pub value: ExprWithType<TypeVariable>,
     pub decl_id: DeclId,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Annotation {
+    pub unfixed: Type,
+    pub fixed: Type,
+    pub implicit_parameters: Vec<(Name, Type, DeclId)>,
+    pub fixed_parameter_names: FxHashMap<TypeUnit, Name>, // pub implicit_type_parameters: Vec<Name>,
 }
 
 pub type ExprWithType<T> = (Expr<T>, T);
@@ -255,7 +262,7 @@ impl Ast {
                         .into_iter()
                         .map(|(name, t, forall)| {
                             let self_ = TypeVariable::new();
-                            let (t, _) = type_to_type_with_forall(
+                            let t = type_to_type_with_forall(
                                 t,
                                 &data_decl_map,
                                 std::iter::once((
@@ -351,13 +358,17 @@ fn variable_decl(
     interfaces: &FxHashMap<Name, Vec<(Name, Type, TypeVariable)>>,
     token_map: &mut TokenMap,
 ) -> VariableDecl {
-    let mut implicit_parameters = Vec::new();
     let decl_id = DeclId::new();
     token_map.insert(v.name.1, TokenMapEntry::Decl(decl_id));
     VariableDecl {
         name: Name::from_str(v.name.0),
         type_annotation: v.type_annotation.map(|(t, forall)| {
-            let (t, ps) = type_to_type_with_forall(
+            let implicit_type_parameters: Vec<_> = forall
+                .type_variables
+                .iter()
+                .map(|(name, _)| Name::from_str(name.0))
+                .collect();
+            let t = type_to_type_with_forall(
                 t,
                 data_decl_map,
                 type_variable_names.clone(),
@@ -366,8 +377,46 @@ fn variable_decl(
                 interfaces,
                 token_map,
             );
-            implicit_parameters = ps;
-            t.into()
+            let mut fixed_parameter_names = FxHashMap::default();
+            let (mut fixed_t, parameters) = t.clone().remove_parameters();
+            for (p, name) in parameters
+                .into_iter()
+                .zip_eq(implicit_type_parameters.iter())
+            {
+                let new_const = TypeUnit::Const {
+                    id: TypeId::FixedVariable(DeclId::new()),
+                };
+                fixed_t = fixed_t.replace_num(p, &new_const.clone().into());
+                fixed_parameter_names.insert(new_const, *name);
+            }
+            let variable_requirements = match fixed_t.matchable() {
+                TypeMatchable::Restrictions {
+                    t,
+                    variable_requirements,
+                    subtype_relations,
+                } => {
+                    fixed_t = TypeUnit::Restrictions {
+                        t,
+                        variable_requirements: Vec::new(),
+                        subtype_relations,
+                    }
+                    .into();
+                    variable_requirements
+                }
+                t => {
+                    fixed_t = t.into();
+                    Vec::new()
+                }
+            };
+            Annotation {
+                unfixed: t,
+                fixed: fixed_t,
+                implicit_parameters: variable_requirements
+                    .into_iter()
+                    .map(|(name, t)| (name, t, DeclId::new()))
+                    .collect(),
+                fixed_parameter_names,
+            }
         }),
         value: expr(
             v.value,
@@ -378,7 +427,6 @@ fn variable_decl(
             token_map,
         ),
         decl_id,
-        implicit_parameters,
     }
 }
 
@@ -737,9 +785,8 @@ fn type_to_type_with_forall(
     forall: ast_step1::Forall,
     interfaces: &FxHashMap<Name, Vec<(Name, Type, TypeVariable)>>,
     token_map: &mut TokenMap,
-) -> (Type, Vec<(Name, Type, DeclId)>) {
-    let mut implicit_parameters = Vec::new();
-    let mut type_variable_decls = FxHashMap::default();
+) -> Type {
+    let mut variable_requirements = Vec::new();
     let mut type_parameters = Vec::new();
     for (s, interface_names) in forall.type_variables {
         token_map.insert(s.1, TokenMapEntry::TypeVariable);
@@ -747,16 +794,14 @@ fn type_to_type_with_forall(
         for name in interface_names {
             token_map.insert(name.1, TokenMapEntry::Interface);
             for (name, t, self_) in &interfaces[&Name::from_str(name.0)] {
-                implicit_parameters.push((
+                variable_requirements.push((
                     *name,
                     t.clone()
                         .replace_num(*self_, &TypeUnit::Variable(v).into()),
-                    DeclId::new(),
                 ))
             }
         }
         type_parameters.push(v);
-        type_variable_decls.insert(v, Name::from_str(s.0));
         type_variable_names.insert(Name::from_str(s.0), v);
     }
     let mut t = type_to_type(
@@ -767,15 +812,10 @@ fn type_to_type_with_forall(
         SearchMode::Normal,
         token_map,
     );
-    if !implicit_parameters.is_empty() {
+    if !variable_requirements.is_empty() {
         t = TypeUnit::Restrictions {
             t,
-            variable_requirements: implicit_parameters
-                .iter()
-                .map(|(name, required_type, _decl_id)| {
-                    (*name, required_type.clone())
-                })
-                .collect(),
+            variable_requirements,
             subtype_relations: Default::default(),
         }
         .into();
@@ -787,7 +827,7 @@ fn type_to_type_with_forall(
         );
         t = TypeUnit::TypeLevelFn(t).into();
     }
-    (t, implicit_parameters)
+    t
 }
 
 impl std::fmt::Display for ConstructorId {
@@ -1083,38 +1123,12 @@ impl Display for PrintTypeOfGlobalVariableForUser<'_> {
             f,
             "{}",
             fmt_type_with_env(
-                &self.t.type_with_env.constructor,
+                &self.t.t,
                 self.op_precedence_map,
                 &Default::default()
             )
             .0
         )?;
-        let vs = self.t.type_with_env.constructor.all_type_variables();
-        if !vs.is_empty() {
-            write!(
-                f,
-                " forall {{ {}{} }}",
-                vs.iter().format_with(", ", |v, f| { f(v) }),
-                &self.t.type_with_env.subtype_relations.iter().format_with(
-                    "",
-                    |(a, b), f| f(&format_args!(
-                        ", {} <: {}",
-                        fmt_type_with_env(
-                            a,
-                            self.op_precedence_map,
-                            &Default::default()
-                        )
-                        .0,
-                        fmt_type_with_env(
-                            b,
-                            self.op_precedence_map,
-                            &Default::default()
-                        )
-                        .0
-                    ))
-                )
-            )?;
-        }
         Ok(())
     }
 }
@@ -1145,7 +1159,7 @@ enum OperatorContext {
 fn fmt_type_with_env(
     t: &Type,
     op_precedence_map: &OpPrecedenceMap,
-    type_variable_decls: &FxHashMap<TypeVariable, Name>,
+    type_variable_decls: &FxHashMap<TypeUnit, Name>,
 ) -> (String, OperatorContext) {
     if t.is_empty() {
         ("∅".to_string(), OperatorContext::Single)
@@ -1179,9 +1193,12 @@ fn fmt_type_with_env(
 fn fmt_type_unit_with_env(
     t: &TypeUnit,
     op_precedence_map: &OpPrecedenceMap,
-    type_variable_decls: &FxHashMap<TypeVariable, Name>,
+    type_variable_decls: &FxHashMap<TypeUnit, Name>,
 ) -> (String, OperatorContext) {
     use OperatorContext::*;
+    if let Some(s) = type_variable_decls.get(t) {
+        return (s.to_string(), Single);
+    }
     match t {
         TypeUnit::Fn(a, b) => {
             let (b, b_context) =
@@ -1196,13 +1213,7 @@ fn fmt_type_unit_with_env(
             };
             (s, Fn)
         }
-        TypeUnit::Variable(v) => {
-            if let Some(s) = type_variable_decls.get(v) {
-                (s.to_string(), Single)
-            } else {
-                (v.to_string(), Single)
-            }
-        }
+        TypeUnit::Variable(v) => (v.to_string(), Single),
         TypeUnit::RecursiveAlias { body } => (
             format!(
                 "rec[{}]",
@@ -1295,7 +1306,7 @@ fn fmt_tuple(
     head: TypeId,
     tuple_rev: &[&Type],
     op_precedence_map: &OpPrecedenceMap,
-    type_variable_decls: &FxHashMap<TypeVariable, Name>,
+    type_variable_decls: &FxHashMap<TypeUnit, Name>,
 ) -> (String, OperatorContext) {
     use OperatorContext::*;
     if tuple_rev.is_empty() {

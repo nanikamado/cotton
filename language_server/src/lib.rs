@@ -4,7 +4,7 @@ mod tests;
 use compiler::{
     FxHashMap, OpPrecedenceMap, PrintTypeOfGlobalVariableForUser,
     PrintTypeOfLocalVariableForUser, Token, TokenId, TokenKind,
-    TokenMapWithEnv, TypeMatchableRef,
+    TokenMapWithEnv,
 };
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
@@ -206,18 +206,14 @@ fn semantic_tokens_from_src(src: &str) -> (SemanticTokens, HoverMap) {
                         Some(e) => match e {
                             TokenKind::GlobalVariable(_, Some(b))
                             | TokenKind::VariableDeclInInterface(b) => {
-                                if let TypeMatchableRef::Fn(_, _) =
-                                    b.type_with_env.constructor.matchable_ref()
-                                {
+                                if b.t.is_function() {
                                     SemanticTokenType::FUNCTION
                                 } else {
                                     SemanticTokenType::VARIABLE
                                 }
                             }
                             TokenKind::LocalVariable(_, Some(t)) => {
-                                if let TypeMatchableRef::Fn(_, _) =
-                                    t.0.matchable_ref()
-                                {
+                                if t.0.is_function() {
                                     SemanticTokenType::FUNCTION
                                 } else {
                                     SemanticTokenType::VARIABLE

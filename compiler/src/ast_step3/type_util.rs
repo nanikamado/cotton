@@ -1,4 +1,3 @@
-use super::VariableRequirement;
 use crate::{
     ast_step1,
     ast_step2::{
@@ -11,7 +10,6 @@ use crate::{
     },
     intrinsics::INTRINSIC_TYPES,
 };
-use fxhash::FxHashSet;
 use std::rc::Rc;
 
 impl TypeUnit {
@@ -722,6 +720,21 @@ impl Type {
     pub fn contains_restriction(&self) -> bool {
         self.iter().any(|t| t.contains_restriction())
     }
+
+    pub fn is_function(&self) -> bool {
+        match self.matchable_ref() {
+            TypeMatchableRef::Fn(_, _) => true,
+            TypeMatchableRef::TypeLevelFn(t)
+            | TypeMatchableRef::Restrictions { t, .. }
+            | TypeMatchableRef::RecursiveAlias { body: t } => t.is_function(),
+            TypeMatchableRef::TypeLevelApply { .. }
+            | TypeMatchableRef::Const { .. }
+            | TypeMatchableRef::Tuple(_, _)
+            | TypeMatchableRef::Union(_)
+            | TypeMatchableRef::Variable(_)
+            | TypeMatchableRef::Empty => false,
+        }
+    }
 }
 
 fn apply_arg_to_recursive_fn(
@@ -826,33 +839,6 @@ fn apply_arg_to_recursive_fn(
 // }
 
 impl TypeWithEnv {
-    pub fn all_type_variables(&self) -> FxHashSet<TypeVariable> {
-        let TypeWithEnv {
-            constructor,
-            variable_requirements,
-            subtype_relations: subtype_relation,
-            pattern_restrictions: _,
-            already_considered_relations: _,
-        } = self;
-        variable_requirements
-            .iter()
-            .flat_map(|req| req.required_type.all_type_variables())
-            .chain(subtype_relation.iter().flat_map(|(a, b)| {
-                let mut a = a.all_type_variables();
-                a.extend(b.all_type_variables());
-                a
-            }))
-            .chain(constructor.all_type_variables())
-            // .chain(pattern_restrictions.into_iter().flat_map(
-            //     |(v, p)| {
-            //         p.into_iter()
-            //             .flat_map(|p| p.all_type_variables())
-            //             .chain(v.all_type_variables())
-            //     },
-            // ))
-            .collect::<FxHashSet<_>>()
-    }
-
     pub fn insert_to_subtype_rels_with_restrictions(
         &mut self,
         value: (Type, Type),
@@ -889,60 +875,6 @@ impl TypeWithEnv {
     }
 }
 
-impl<T> TypeWithEnv<T>
-where
-    T: TypeConstructor,
-{
-    pub fn replace_num(self, from: TypeVariable, to: &Type) -> Self {
-        self.map_type(|t| t.replace_num(from, to))
-    }
-
-    pub fn map_type<F>(self, mut f: F) -> Self
-    where
-        F: FnMut(Type) -> Type,
-    {
-        let TypeWithEnv {
-            constructor,
-            variable_requirements,
-            subtype_relations: subtype_relationship,
-            pattern_restrictions,
-            already_considered_relations,
-        } = self;
-        TypeWithEnv {
-            constructor: constructor.map_type(&mut f),
-            variable_requirements: variable_requirements
-                .into_iter()
-                .map(
-                    |VariableRequirement {
-                         name,
-                         required_type,
-                         ident,
-                         local_env,
-                     }| VariableRequirement {
-                        name,
-                        required_type: f(required_type),
-                        ident,
-                        local_env,
-                    },
-                )
-                .collect(),
-            subtype_relations: subtype_relationship
-                .into_iter()
-                .map(|(a, b)| (f(a), f(b)))
-                .collect(),
-            pattern_restrictions,
-            already_considered_relations: already_considered_relations
-                .into_iter()
-                .map(|(a, b)| (f(a), f(b)))
-                .collect(),
-        }
-    }
-
-    // pub fn conjunctive(self) -> Self {
-    //     self.map_type(|t| t.conjunctive())
-    // }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -969,7 +901,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
-            .constructor;
+            .unfixed;
         assert_eq!(
             format!("{}", t),
             r#"/\[[{:True | :False}], [{:True | :False}]]"#
@@ -996,7 +928,7 @@ mod tests {
             .type_annotation
             .clone()
             .unwrap()
-            .constructor;
+            .unfixed;
         assert_eq!(format!("{}", t), r#"rec[{/\[[{:I64 | :()}], d0] | ()}]"#);
     }
 }
