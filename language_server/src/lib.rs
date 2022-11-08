@@ -101,11 +101,12 @@ impl LanguageServer for Backend {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let src = params.text_document.text;
-        let tokens =
+        if let Ok(Some(tokens)) =
             tokio::task::spawn_blocking(move || semantic_tokens_from_src(&src))
                 .await
-                .unwrap();
-        self.tokens.insert(params.text_document.uri, tokens);
+        {
+            self.tokens.insert(params.text_document.uri, tokens);
+        }
     }
 
     async fn did_change(&self, _params: DidChangeTextDocumentParams) {
@@ -115,14 +116,18 @@ impl LanguageServer for Backend {
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        self.client
+            .log_message(MessageType::INFO, "file saved")
+            .await;
         let path = params.text_document.uri.path();
         if let Ok(src) = fs::read_to_string(path) {
-            let tokens = tokio::task::spawn_blocking(move || {
+            if let Ok(Some(tokens)) = tokio::task::spawn_blocking(move || {
                 semantic_tokens_from_src(&src)
             })
             .await
-            .unwrap();
-            self.tokens.insert(params.text_document.uri, tokens);
+            {
+                self.tokens.insert(params.text_document.uri, tokens);
+            }
         }
     }
 
@@ -141,14 +146,18 @@ impl LanguageServer for Backend {
             let tokens = r.value();
             Ok(Some(tokens.0.clone().into()))
         } else if let Ok(src) = fs::read_to_string(uri.path()) {
-            let tokens = tokio::task::spawn_blocking(move || {
+            if let Ok(Some(tokens)) = tokio::task::spawn_blocking(move || {
                 semantic_tokens_from_src(&src)
             })
             .await
-            .unwrap();
-            let semantic_tokens = tokens.0.clone();
-            self.tokens.insert(uri, tokens);
-            Ok(Some(semantic_tokens.into()))
+            {
+                let semantic_tokens = tokens.0.clone();
+                self.tokens.insert(uri, tokens);
+                Ok(Some(semantic_tokens.into()))
+            } else {
+                eprintln!("error");
+                Ok(None)
+            }
         } else {
             Ok(None)
         }
@@ -182,10 +191,10 @@ pub async fn run() {
     Server::new(stdin, stdout, socket).serve(service).await;
 }
 
-fn semantic_tokens_from_src(src: &str) -> (SemanticTokens, HoverMap) {
+fn semantic_tokens_from_src(src: &str) -> Option<(SemanticTokens, HoverMap)> {
     let (char_to_utf16_map, utf16_to_char_map) = make_map(src);
     let (ts, src_len) = compiler::lex(src);
-    let ast = compiler::parse(ts.clone(), src, src_len);
+    let ast = compiler::parse_result(ts.clone(), src_len).ok()?;
     let TokenMapWithEnv {
         token_map,
         op_precedence_map,
@@ -317,13 +326,13 @@ fn semantic_tokens_from_src(src: &str) -> (SemanticTokens, HoverMap) {
                 .collect()
         })
         .collect();
-    (
+    Some((
         SemanticTokens {
             result_id: None,
             data: tokens,
         },
         utf16_to_token_map,
-    )
+    ))
 }
 
 type Utf16ToCharMap = Vec<Vec<Option<usize>>>;

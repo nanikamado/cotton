@@ -387,11 +387,19 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         .then_ignore(end())
 }
 
+pub fn parse_result(
+    ts: Vec<(Token, Span)>,
+    src_len: usize,
+) -> Result<Ast, Vec<Simple<Token>>> {
+    parser()
+        .parse(Stream::from_iter(src_len..src_len + 1, ts.into_iter()))
+        .map(|decls| Ast { decls })
+}
+
 pub fn parse(ts: Vec<(Token, Span)>, src: &str, src_len: usize) -> Ast {
-    let r =
-        parser().parse(Stream::from_iter(src_len..src_len + 1, ts.into_iter()));
+    let r = parse_result(ts, src_len);
     match r {
-        Ok(decls) => Ast { decls },
+        Ok(ast) => ast,
         Err(es) => {
             for e in es {
                 let e = e.map(|c| format!("{:?}", c));

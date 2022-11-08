@@ -22,7 +22,7 @@ use ast_step3::{GlobalVariableType, LocalVariableType, VariableId};
 use codegen::codegen;
 pub use fxhash::FxHashMap;
 pub use parser::token_id::TokenId;
-pub use parser::{lex, parse::parse, Token};
+pub use parser::{lex, parse::parse, parse::parse_result, Token};
 use simplelog::{
     self, ColorChoice, ConfigBuilder, LevelFilter, TermLogger, TerminalMode,
 };
