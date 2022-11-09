@@ -223,6 +223,7 @@ impl TypeVariableMap {
         k: TypeVariable,
         v: Type,
     ) {
+        debug_assert!(!k.is_recursive_index());
         let key = self.find(k);
         let value = self.normalize_type(v.clone());
         log::debug!(
@@ -253,6 +254,7 @@ impl SubtypeRelations {
         t: TypeVariable,
         pattern_restrictions: &PatternRestrictions,
         variable_requirements: &[VariableRequirement],
+        fn_apply_dummies: &BTreeMap<Type, Type>,
     ) -> Option<Type> {
         let t = map.find(t);
         if let TypeMatchableRef::Variable(v) = t.matchable_ref() {
@@ -261,6 +263,7 @@ impl SubtypeRelations {
                 &self.0,
                 pattern_restrictions,
                 variable_requirements,
+                fn_apply_dummies,
             )
         } else {
             Some(t)
@@ -273,6 +276,7 @@ impl SubtypeRelations {
         t: TypeVariable,
         pattern_restrictions: &PatternRestrictions,
         variable_requirements: &[VariableRequirement],
+        fn_apply_dummies: &BTreeMap<Type, Type>,
     ) -> Option<Type> {
         let t = map.find(t);
         if let TypeMatchableRef::Variable(v) = t.matchable_ref() {
@@ -281,6 +285,7 @@ impl SubtypeRelations {
                 &self.0,
                 variable_requirements,
                 pattern_restrictions,
+                fn_apply_dummies,
             )
         } else {
             Some(t)
@@ -418,12 +423,15 @@ fn _simplify_type<T: TypeConstructor>(
     t = t.normalize(map)?;
     log::trace!("t{{0.5}} = {}", t);
     for cov in mk_covariant_candidates(&t) {
-        if !mk_contravariant_candidates(&t).contains(&cov) {
+        if !cov.is_recursive_index()
+            && !mk_contravariant_candidates(&t).contains(&cov)
+        {
             if let Some(s) = t.subtype_relations.possible_strongest(
                 map,
                 cov,
                 &t.pattern_restrictions,
                 &t.variable_requirements,
+                &t.fn_apply_dummies,
             ) {
                 if s.is_empty() {
                     log::trace!("t{{0.5}} = {}", t);
@@ -436,12 +444,15 @@ fn _simplify_type<T: TypeConstructor>(
     }
     log::trace!("t{{1}} = {}", t);
     for cont in mk_contravariant_candidates(&t) {
-        if !mk_covariant_candidates(&t).contains(&cont) {
+        if !cont.is_recursive_index()
+            && !mk_covariant_candidates(&t).contains(&cont)
+        {
             if let Some(s) = t.subtype_relations.possible_weakest(
                 map,
                 cont,
                 &t.pattern_restrictions,
                 &t.variable_requirements,
+                &t.fn_apply_dummies,
             ) {
                 map.insert(&mut t.subtype_relations, cont, s);
                 t = t.normalize(map)?;
@@ -449,22 +460,34 @@ fn _simplify_type<T: TypeConstructor>(
             }
         }
     }
+    log::trace!("t{{2}} = {}", t);
+    let (t, updated) = replace_fn_apply_with_dummy_variable(t);
+    if updated {
+        return Some((t, true));
+    }
+    log::trace!("t{{3}} = {}", t);
+    let (mut t, updated) = simplify_dummies(t, map);
+    if updated {
+        return Some((t, true));
+    }
     log::trace!("t' = {}", t);
     let type_variables_in_sub_rel: FxHashSet<TypeVariable> =
         t.subtype_relations.type_variables_in_sub_rel();
     for a in &type_variables_in_sub_rel {
-        let vs = t.type_variables_in_constructors_or_variable_requirements();
+        let vs = t.type_variables_in_env_except_for_subtype_rel();
         let st = t.subtype_relations.possible_strongest(
             map,
             *a,
             &t.pattern_restrictions,
             &t.variable_requirements,
+            &t.fn_apply_dummies,
         );
         let we = t.subtype_relations.possible_weakest(
             map,
             *a,
             &t.pattern_restrictions,
             &t.variable_requirements,
+            &t.fn_apply_dummies,
         );
         match (st, we) {
             (Some(st), Some(we)) if st == we => {
@@ -496,20 +519,17 @@ fn _simplify_type<T: TypeConstructor>(
         }
     }
     log::trace!("t'' = {}", t);
-    let covariant_candidates = mk_covariant_candidates(&t);
-    let contravariant_candidates = mk_contravariant_candidates(&t);
+    let v_in_env = t.type_variables_in_env_except_for_subtype_rel();
     let type_variables_in_sub_rel: HashBag<TypeVariable> =
         t.subtype_relations.type_variables_in_sub_rel();
     for (v, count) in type_variables_in_sub_rel {
-        if count == 1
-            && !covariant_candidates.contains(&v)
-            && !contravariant_candidates.contains(&v)
-        {
+        if count == 1 && !v_in_env.contains(&v) {
             if let Some(new_t) = t.subtype_relations.possible_strongest(
                 map,
                 v,
                 &t.pattern_restrictions,
                 &t.variable_requirements,
+                &t.fn_apply_dummies,
             ) {
                 map.insert(&mut t.subtype_relations, v, new_t);
                 t = t.normalize(map)?;
@@ -553,6 +573,7 @@ fn _simplify_type<T: TypeConstructor>(
                                     *s,
                                     &t.pattern_restrictions,
                                     &t.variable_requirements,
+                                    &t.fn_apply_dummies,
                                 )
                             {
                                 let b = simplify_subtype_rel(
@@ -608,12 +629,14 @@ fn _simplify_type<T: TypeConstructor>(
                     v,
                     &t.pattern_restrictions,
                     &t.variable_requirements,
+                    &t.fn_apply_dummies,
                 ),
                 t.subtype_relations.possible_strongest(
                     map,
                     v,
                     &t.pattern_restrictions,
                     &t.variable_requirements,
+                    &t.fn_apply_dummies,
                 ),
             ) {
                 let replaced_with_we = c
@@ -685,12 +708,14 @@ fn _simplify_type<T: TypeConstructor>(
                                         v,
                                         &t.pattern_restrictions,
                                         &t.variable_requirements,
+                                        &t.fn_apply_dummies,
                                     ),
                                     t.subtype_relations.possible_strongest(
                                         map,
                                         v,
                                         &t.pattern_restrictions,
                                         &t.variable_requirements,
+                                        &t.fn_apply_dummies,
                                     ),
                                 ) {
                                     let replaced_with_we = c
@@ -1081,12 +1106,18 @@ fn possible_weakest(
     subtype_relation: &BTreeSet<(Type, Type)>,
     variable_requirements: &[VariableRequirement],
     pattern_restrictions: &PatternRestrictions,
+    fn_apply_dummies: &BTreeMap<Type, Type>,
 ) -> Option<Type> {
     if variable_requirements
         .iter()
         .any(|req| req.required_type.contains_variable(t))
     {
         return None;
+    }
+    for a in fn_apply_dummies.keys() {
+        if a.all_type_variables().contains(&t) {
+            return None;
+        }
     }
     let mut up = FxHashSet::default();
     for (sub, sup) in subtype_relation
@@ -1228,6 +1259,7 @@ fn possible_strongest(
     subtype_relation: &BTreeSet<(Type, Type)>,
     pattern_restrictions: &PatternRestrictions,
     variable_requirements: &[VariableRequirement],
+    fn_apply_dummies: &BTreeMap<Type, Type>,
 ) -> Option<Type> {
     let mut down = Vec::new();
     if variable_requirements
@@ -1235,6 +1267,11 @@ fn possible_strongest(
         .any(|req| req.required_type.contains_variable(t))
     {
         return None;
+    }
+    for a in fn_apply_dummies.keys() {
+        if a.all_type_variables().contains(&t) {
+            return None;
+        }
     }
     for (sub, sup) in subtype_relation {
         if sub.contravariant_type_variables().contains(&t) {
@@ -1350,6 +1387,11 @@ where
                 })
                 .collect(),
             already_considered_relations: self.already_considered_relations,
+            fn_apply_dummies: self
+                .fn_apply_dummies
+                .into_iter()
+                .map(|(a, b)| (map.normalize_type(a), map.normalize_type(b)))
+                .collect(),
         })
     }
 }
@@ -1441,6 +1483,47 @@ fn pattern_unit_to_type(p: &PatternUnitForRestriction) -> Type {
         Const { id, .. } => TypeUnit::Const { id: *id }.into(),
         Tuple(a, b) => TypeUnit::Tuple((&**a).into(), (&**b).into()).into(),
     }
+}
+
+fn simplify_dummies<T: TypeConstructor>(
+    mut t: TypeWithEnv<T>,
+    map: &mut TypeVariableMap,
+) -> (TypeWithEnv<T>, bool) {
+    let mut updated = false;
+    t.fn_apply_dummies = t
+        .fn_apply_dummies
+        .into_iter()
+        .flat_map(|(a, b)| match a.matchable() {
+            TypeMatchable::TypeLevelApply { f, a } => match a.matchable() {
+                TypeMatchable::Variable(a)
+                    if b.all_type_variables_vec() == vec![a] =>
+                {
+                    let b = b.replace_num(
+                        a,
+                        &TypeUnit::Variable(TypeVariable::RecursiveIndex(0))
+                            .into(),
+                    );
+                    map.insert_type(
+                        &mut t.subtype_relations,
+                        f,
+                        TypeUnit::TypeLevelFn(b).into(),
+                    );
+                    updated = true;
+                    None
+                }
+                a => Some((
+                    TypeUnit::TypeLevelApply { f, a: a.into() }.into(),
+                    b,
+                )),
+            },
+            a => {
+                map.insert_type(&mut t.subtype_relations, a.into(), b);
+                updated = true;
+                None
+            }
+        })
+        .collect();
+    (t, updated)
 }
 
 fn pattern_to_type(p: &[PatternUnitForRestriction]) -> Type {
@@ -1700,13 +1783,56 @@ fn try_eq_sub<T: TypeConstructor>(
     }
 }
 
+fn replace_fn_apply_with_dummy_variable<T: TypeConstructor>(
+    mut t: TypeWithEnv<T>,
+) -> (TypeWithEnv<T>, bool) {
+    let mut updated = false;
+    t.subtype_relations = t
+        .subtype_relations
+        .into_iter()
+        .map(|(a, b)| {
+            let (a, u1) = replace_fn_apply(a, &mut t.fn_apply_dummies);
+            let (b, u2) = replace_fn_apply(b, &mut t.fn_apply_dummies);
+            updated |= u1 || u2;
+            (a, b)
+        })
+        .collect();
+    (t, updated)
+}
+
+fn replace_fn_apply(
+    t: Type,
+    dummies: &mut BTreeMap<Type, Type>,
+) -> (Type, bool) {
+    match t.matchable_ref() {
+        TypeMatchableRef::TypeLevelApply { f, a: _ }
+            if matches!(f.matchable_ref(), TypeMatchableRef::Variable(_)) =>
+        {
+            (
+                if let Some(t) = dummies.get(&t) {
+                    t.clone()
+                } else {
+                    let new_t: Type = TypeUnit::new_variable().into();
+                    dummies.insert(t, new_t.clone());
+                    new_t
+                },
+                true,
+            )
+        }
+        _ => (t, false),
+    }
+}
+
 impl<T: TypeConstructor> TypeWithEnv<T> {
-    fn type_variables_in_constructors_or_variable_requirements(
+    fn type_variables_in_env_except_for_subtype_rel(
         &self,
     ) -> FxHashSet<TypeVariable> {
         let mut s = self.constructor.all_type_variables();
         for req in &self.variable_requirements {
-            s.extend(req.required_type.all_type_variables())
+            s.extend(req.required_type.all_type_variables_vec())
+        }
+        for t in self.fn_apply_dummies.values() {
+            s.extend(t.all_type_variables_vec())
         }
         s
     }
@@ -1746,6 +1872,16 @@ impl<T: TypeConstructor> Display for ast_step2::TypeWithEnv<T> {
         if !self.already_considered_relations.is_empty() {
             writeln!(f, "already_considered_relations:")?;
             write!(f, "{}", self.already_considered_relations)?;
+        }
+        if !self.fn_apply_dummies.is_empty() {
+            writeln!(f, "fn_apply_dummies:")?;
+            write!(
+                f,
+                "{}",
+                self.fn_apply_dummies.iter().format_with("", |(a, b), f| f(
+                    &format_args!("{} = {},\n", a, b)
+                ))
+            )?;
         }
         write!(f, "--")?;
         Ok(())

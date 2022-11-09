@@ -868,7 +868,11 @@ impl TypeConstructor for Type {
         recursive_alias_depth: usize,
     ) -> (Self, bool) {
         if self == *from {
-            (to.clone().into(), true)
+            (
+                Type::from(to.clone())
+                    .increment_recursive_index(0, recursive_alias_depth as i32),
+                true,
+            )
         } else {
             let mut updated = false;
             (
@@ -1177,6 +1181,7 @@ impl From<TypeWithEnv<SingleTypeConstructor>> for TypeWithEnv<Type> {
             subtype_relations: t.subtype_relations,
             pattern_restrictions: t.pattern_restrictions,
             already_considered_relations: t.already_considered_relations,
+            fn_apply_dummies: t.fn_apply_dummies,
         }
     }
 }

@@ -183,3 +183,12 @@ fn tuple_infer_fail() {
 fn puts() {
     test_examples("puts.cot", "1\n[1, 2, 3]\n");
 }
+
+#[test]
+fn flat_map() {
+    test_examples(
+        "flat_map.cot",
+        "ok\n[1, 10001, 101, 10101, 2, \
+        10002, 102, 10102, 3, 10003, 103, 10103]\n",
+    );
+}

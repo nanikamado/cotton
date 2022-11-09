@@ -174,6 +174,7 @@ pub fn type_check(
                 subtype_relations: t.subtype_relations,
                 pattern_restrictions: t.pattern_restrictions,
                 already_considered_relations: t.already_considered_relations,
+                fn_apply_dummies: t.fn_apply_dummies,
             },
         )
         .unwrap();
@@ -689,6 +690,7 @@ fn resolve_scc(
         subtype_relations,
         pattern_restrictions,
         already_considered_relations: Default::default(),
+        fn_apply_dummies: Default::default(),
     };
     // Recursions are not resolved in this loop.
     while let Some(req) = unresolved_type.variable_requirements.pop() {
@@ -715,11 +717,6 @@ fn resolve_scc(
         ));
         *map = satisfied.map;
         unresolved_type = satisfied.type_of_improved_decl;
-        map.insert_type(
-            &mut unresolved_type.subtype_relations,
-            req.required_type,
-            satisfied.type_of_satisfied_variable,
-        );
     }
     // Resolve recursive requirements.
     let (mut resolved, improved_types) = resolve_recursion_in_scc(
@@ -750,6 +747,9 @@ fn resolve_scc(
                             .clone(),
                         already_considered_relations: improved_types
                             .already_considered_relations
+                            .clone(),
+                        fn_apply_dummies: improved_types
+                            .fn_apply_dummies
                             .clone(),
                     },
                 )
@@ -1001,11 +1001,6 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                         );
                         map = satisfied.map;
                         type_of_improved_decl = satisfied.type_of_improved_decl;
-                        map.insert_type(
-                            &mut type_of_improved_decl.subtype_relations,
-                            req.required_type,
-                            satisfied.type_of_satisfied_variable,
-                        );
                     }
                     SatisfiedType {
                         id_of_satisfied_variable: decl_id,
@@ -1200,6 +1195,7 @@ fn min_type_with_env(
                         .collect(),
                     pattern_restrictions,
                     already_considered_relations: Default::default(),
+                    fn_apply_dummies: Default::default(),
                 },
                 resolved_idents,
                 types_of_decls.concat(),
@@ -1229,6 +1225,7 @@ fn min_type_with_env(
                     subtype_relations: SubtypeRelations::default(),
                     pattern_restrictions: PatternRestrictions::default(),
                     already_considered_relations: Default::default(),
+                    fn_apply_dummies: Default::default(),
                 },
                 Default::default(),
                 Default::default(),
@@ -1276,6 +1273,7 @@ fn min_type_with_env(
                     ]
                     .concat(),
                     already_considered_relations: Default::default(),
+                    fn_apply_dummies: Default::default(),
                 },
                 [resolved1, resolved2].concat(),
                 [types_of_decls_f, types_of_decls_a].concat(),
@@ -1314,6 +1312,7 @@ fn min_type_with_env(
                     subtype_relations,
                     pattern_restrictions,
                     already_considered_relations: Default::default(),
+                    fn_apply_dummies: Default::default(),
                 },
                 resolved_idents,
                 types_of_decls,

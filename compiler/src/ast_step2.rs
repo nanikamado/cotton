@@ -23,7 +23,7 @@ use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use parser::token_id::TokenId;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use tracing_mutex::stdsync::TracingRwLock as RwLock;
 pub use types::TypeConstructor;
@@ -89,6 +89,7 @@ where
     pub subtype_relations: SubtypeRelations,
     pub already_considered_relations: SubtypeRelations,
     pub pattern_restrictions: PatternRestrictions,
+    pub fn_apply_dummies: BTreeMap<Type, Type>,
 }
 
 pub struct PrintTypeOfGlobalVariableForUser<'a> {

@@ -15,6 +15,19 @@ infixr 5 /\
 
 type List = Nil | A /\ List[A] forall { A }
 
+to_string : I64 -> String = i64_to_string
+
+interface ToString where
+    to_string : Self -> String
+
+list_to_string_rec : List[A] -> String forall { A : ToString } =
+    | Nil => ""
+    | h /\ t => ", " <> h.to_string <> t.list_to_string_rec
+
+to_string : List[A] -> String forall { A : ToString } =
+    | Nil => "[]"
+    | h /\ t => "[" <> h.to_string <> t.list_to_string_rec <> "]"
+
 interface Map where
     map : Self[A] -> (A -> B) -> Self[B] forall { A, B }
 
@@ -50,4 +63,9 @@ main : () -> () =
         None.flat_map(| a => None)
         Some("ok").flat_map(| a => None)
         Some("ok").flat_map(| a => Some(a.println))
+        (1 /\ 2 /\ 3 /\ Nil)
+            .flat_map(| a => a /\ (a + 100) /\ Nil)
+            .flat_map(| a => a /\ (a + 10000) /\ Nil)
+            .to_string
+            .println
         ()

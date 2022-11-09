@@ -31,7 +31,11 @@ impl TypeUnit {
                 .into_iter()
                 .chain(b.all_type_variables_vec().into_iter())
                 .collect(),
-            TypeUnit::TypeLevelFn(f) => f.all_type_variables_vec(),
+            TypeUnit::TypeLevelFn(f) => f
+                .all_type_variables_vec()
+                .into_iter()
+                .filter(|d| !d.is_recursive_index())
+                .collect(),
             TypeUnit::TypeLevelApply { f, a } => merge_vec(
                 f.all_type_variables_vec(),
                 a.all_type_variables_vec(),
@@ -242,7 +246,11 @@ impl TypeUnit {
         recursive_alias_depth: usize,
     ) -> (Self, bool) {
         if self.matchable_ref() == from.matchable_ref() {
-            return (to.clone(), true);
+            return (
+                to.clone()
+                    .increment_recursive_index(0, recursive_alias_depth as i32),
+                true,
+            );
         }
         match self {
             Self::Fn(args, rtn) => {
@@ -262,7 +270,7 @@ impl TypeUnit {
                 let (body, updated) = body.replace_type_union_with_update_flag(
                     from,
                     to,
-                    recursive_alias_depth,
+                    recursive_alias_depth + 1,
                 );
                 (Self::RecursiveAlias { body }, updated)
             }
@@ -284,7 +292,7 @@ impl TypeUnit {
                 let (f, u) = f.replace_type_union_with_update_flag(
                     from,
                     to,
-                    recursive_alias_depth,
+                    recursive_alias_depth + 1,
                 );
                 (Self::TypeLevelFn(f), u)
             }
@@ -686,9 +694,9 @@ impl Type {
 
     pub fn type_level_function_apply(self, arg: Self) -> Self {
         match self.matchable() {
-            TypeMatchable::TypeLevelFn(f) => f
-                .replace_num(TypeVariable::RecursiveIndex(0), &arg)
-                .increment_recursive_index(0, -1),
+            TypeMatchable::TypeLevelFn(f) => {
+                f.replace_index_zero_and_decrement_indices(arg)
+            }
             TypeMatchable::RecursiveAlias { body } => {
                 if let TypeMatchable::TypeLevelFn(f) = body.clone().matchable()
                 {
@@ -710,6 +718,14 @@ impl Type {
             }
             .into(),
         }
+    }
+
+    pub fn replace_index_zero_and_decrement_indices(self, t: Self) -> Self {
+        self.replace_num(
+            TypeVariable::RecursiveIndex(0),
+            &t.increment_recursive_index(0, 1),
+        )
+        .increment_recursive_index(0, -1)
     }
 
     pub fn contains_broken_index(&self, recursive_alias_depth: usize) -> bool {
