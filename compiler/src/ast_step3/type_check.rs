@@ -62,9 +62,9 @@ pub fn type_check<'a>(
 ) -> (
     ResolvedIdents<'a>,
     FxHashMap<VariableId, GlobalVariableType<'a>>,
-    FxHashMap<VariableId, LocalVariableType<'a>>,
-    SubtypeRelations<'a>,
-    TypeVariableMap<'a>,
+    FxHashMap<VariableId, LocalVariableType>,
+    SubtypeRelations,
+    TypeVariableMap,
 ) {
     let mut toplevels: Vec<Toplevel<'a>> = Default::default();
     for v in IntrinsicVariable::iter() {
@@ -305,9 +305,9 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
 pub struct ResolvedIdent<'a> {
     pub variable_id: VariableId,
-    pub type_args: Vec<(TypeVariable, Type<'a>)>,
+    pub type_args: Vec<(TypeVariable, Type)>,
     pub variable_kind: VariableKind,
-    pub implicit_args: Vec<(DeclId, &'a str, Type<'a>, ResolvedIdent<'a>)>,
+    pub implicit_args: Vec<(DeclId, &'a str, Type, ResolvedIdent<'a>)>,
 }
 
 pub type Resolved<'a> = Vec<(IdentId, ResolvedIdent<'a>)>;
@@ -319,12 +319,11 @@ struct Toplevel<'a> {
     resolved_idents: FxHashMap<IdentId, VariableId>,
     decl_id: VariableId,
     name: &'a str,
-    variables_required_by_interface_restrictions:
-        Vec<(&'a str, Type<'a>, DeclId)>,
+    variables_required_by_interface_restrictions: Vec<(&'a str, Type, DeclId)>,
     variable_kind: VariableKind,
 }
 
-type TypesOfLocalDeclsVec<'a> = Vec<(VariableId, ast_step2::types::Type<'a>)>;
+type TypesOfLocalDeclsVec = Vec<(VariableId, ast_step2::types::Type)>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct GlobalVariableType<'a> {
@@ -333,15 +332,15 @@ pub struct GlobalVariableType<'a> {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct LocalVariableType<'a> {
-    pub t: Type<'a>,
+pub struct LocalVariableType {
+    pub t: Type,
     pub toplevel: DeclId,
 }
 
 impl<'a> GlobalVariableType<'a> {
     pub fn map_type<F>(self, mut f: F) -> Self
     where
-        F: FnMut(Type<'a>) -> Type<'a>,
+        F: FnMut(Type) -> Type,
     {
         Self {
             type_with_env: self.type_with_env.map_type(&mut f),
@@ -366,12 +365,8 @@ type TypesOfGlobalDeclsVec<'a> = Vec<(VariableId, GlobalVariableType<'a>)>;
 
 fn resolve_names<'a>(
     toplevels: Vec<Toplevel<'a>>,
-    map: &mut TypeVariableMap<'a>,
-) -> (
-    Resolved<'a>,
-    TypesOfGlobalDeclsVec<'a>,
-    SubtypeRelations<'a>,
-) {
+    map: &mut TypeVariableMap,
+) -> (Resolved<'a>, TypesOfGlobalDeclsVec<'a>, SubtypeRelations) {
     let mut toplevel_graph = Graph::<Toplevel, ()>::new();
     for t in toplevels {
         toplevel_graph.add_node(t);
@@ -453,9 +448,9 @@ fn resolve_names<'a>(
 }
 
 #[derive(Debug, Hash, Clone, PartialEq, Eq, PartialOrd, Ord)]
-struct SccTypeConstructor<'a>(Vec<SingleTypeConstructor<'a>>);
+struct SccTypeConstructor(Vec<SingleTypeConstructor>);
 
-impl Display for SccTypeConstructor<'_> {
+impl Display for SccTypeConstructor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "[")?;
         write!(f, "{}", self.0.iter().join(", "))?;
@@ -463,7 +458,7 @@ impl Display for SccTypeConstructor<'_> {
     }
 }
 
-impl<'a> Type<'a> {
+impl Type {
     fn argument_tuple_from_arguments(ts: Vec<Self>) -> Self {
         let mut new_ts = Type::label_from_str("()");
         for t in ts.into_iter().rev() {
@@ -490,11 +485,10 @@ impl<'a> Type<'a> {
     }
 }
 
-impl<'a> PatternUnitForRestriction<'a> {
+impl PatternUnitForRestriction {
     fn argument_tuple_from_arguments(ps: Vec<Self>) -> Self {
         let mut new_p = PatternUnitForRestriction::Const {
             id: TypeId::Intrinsic(IntrinsicType::Unit),
-            name: "()",
         };
         for p in ps.iter().rev() {
             new_p = PatternUnitForRestriction::Tuple(
@@ -536,7 +530,7 @@ impl<'a> PatternUnitForRestriction<'a> {
     }
 }
 
-impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
+impl<'a> TypeConstructor<'a> for SccTypeConstructor {
     fn all_type_variables(&self) -> FxHashSet<TypeVariable> {
         self.all_type_variables_vec().into_iter().collect()
     }
@@ -548,14 +542,14 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
             .collect()
     }
 
-    fn replace_num(self, from: TypeVariable, to: &Type<'a>) -> Self {
+    fn replace_num(self, from: TypeVariable, to: &Type) -> Self {
         self.replace_num_with_update_flag(from, to, 0).0
     }
 
     fn replace_num_with_update_flag(
         self,
         from: TypeVariable,
-        to: &Type<'a>,
+        to: &Type,
         recursive_alias_depth: usize,
     ) -> (Self, bool) {
         let mut updated = false;
@@ -582,13 +576,13 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
             .collect()
     }
 
-    fn find_recursive_alias(&self) -> Option<&Type<'a>> {
+    fn find_recursive_alias(&self) -> Option<&Type> {
         self.0
             .iter()
             .find_map(TypeConstructor::find_recursive_alias)
     }
 
-    fn replace_type(self, from: &TypeUnit<'a>, to: &TypeUnit<'a>) -> Self {
+    fn replace_type(self, from: &TypeUnit, to: &TypeUnit) -> Self {
         SccTypeConstructor(
             self.0
                 .into_iter()
@@ -597,7 +591,7 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
         )
     }
 
-    fn replace_type_union(self, from: &Type, to: &TypeUnit<'a>) -> Self {
+    fn replace_type_union(self, from: &Type, to: &TypeUnit) -> Self {
         SccTypeConstructor(
             self.0
                 .into_iter()
@@ -609,7 +603,7 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
     fn replace_type_union_with_update_flag(
         self,
         from: &Type,
-        to: &TypeUnit<'a>,
+        to: &TypeUnit,
         recursive_alias_depth: usize,
     ) -> (Self, bool) {
         let mut updated = false;
@@ -625,7 +619,7 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
         (t, updated)
     }
 
-    fn map_type<F: FnMut(Type<'a>) -> Type<'a>>(self, mut f: F) -> Self {
+    fn map_type<F: FnMut(Type) -> Type>(self, mut f: F) -> Self {
         Self(
             self.0
                 .into_iter()
@@ -639,7 +633,7 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
 
     fn normalize_contravariant_candidates_from_annotation(
         self,
-        map: &mut TypeVariableMap<'a>,
+        map: &mut TypeVariableMap,
     ) -> Option<Self> {
         Some(Self(
             self.0
@@ -661,11 +655,11 @@ impl<'a> TypeConstructor<'a> for SccTypeConstructor<'a> {
 fn resolve_scc<'a>(
     scc: Vec<Toplevel<'a>>,
     resolved_variable_map: &FxHashMap<&str, Vec<Toplevel<'a>>>,
-    map: &mut TypeVariableMap<'a>,
+    map: &mut TypeVariableMap,
 ) -> (
     Resolved<'a>,
-    Vec<ast_step2::TypeWithEnv<'a, Type<'a>>>,
-    SubtypeRelations<'a>,
+    Vec<ast_step2::TypeWithEnv<'a, Type>>,
+    SubtypeRelations,
 ) {
     // Merge the declarations in a scc to treate them as if they are one declaration,
     let mut resolved_idents = Vec::new();
@@ -789,13 +783,13 @@ fn resolve_scc<'a>(
 }
 
 struct SatisfiedType<'a, T> {
-    type_of_satisfied_variable: Type<'a>,
+    type_of_satisfied_variable: Type,
     id_of_satisfied_variable: VariableId,
     variable_kind: VariableKind,
     type_of_improved_decl: T,
-    type_args: Vec<(TypeVariable, Type<'a>)>,
-    implicit_args: Vec<(DeclId, &'a str, Type<'a>, ResolvedIdent<'a>)>,
-    map: TypeVariableMap<'a>,
+    type_args: Vec<(TypeVariable, Type)>,
+    implicit_args: Vec<(DeclId, &'a str, Type, ResolvedIdent<'a>)>,
+    map: TypeVariableMap,
 }
 
 trait CandidatesProvider<'a>: Copy {
@@ -879,7 +873,7 @@ fn find_satisfied_types<
     req: &VariableRequirement<'a>,
     type_of_unresolved_decl: &TypeWithEnv<'a, T>,
     resolved_variable_map: C,
-    map: &TypeVariableMap<'a>,
+    map: &TypeVariableMap,
     names_in_scc: &FxHashSet<&str>,
 ) -> Vec<SatisfiedType<'a, TypeWithEnv<'a, T>>> {
     log::trace!("type_of_unresolved_decl:");
@@ -1054,12 +1048,12 @@ fn get_one_satisfied<T: Display>(
 
 /// The reterned `TypeWithEnv` does not contain variable_requirements, but contains subtype relationship.
 fn resolve_recursion_in_scc<'a>(
-    mut scc: TypeWithEnv<'a, SccTypeConstructor<'a>>,
+    mut scc: TypeWithEnv<'a, SccTypeConstructor>,
     toplevels: &[Toplevel<'a>],
     resolved_variable_map: &FxHashMap<&str, Vec<Toplevel<'a>>>,
-    map: &mut TypeVariableMap<'a>,
+    map: &mut TypeVariableMap,
     names_in_scc: &FxHashSet<&str>,
-) -> (Resolved<'a>, TypeWithEnv<'a, SccTypeConstructor<'a>>) {
+) -> (Resolved<'a>, TypeWithEnv<'a, SccTypeConstructor>) {
     let mut scc_map: FxHashMap<&str, Vec<usize>> = FxHashMap::default();
     for (i, t) in toplevels.iter().enumerate() {
         scc_map.entry(t.name).or_default().push(i);
@@ -1117,7 +1111,6 @@ fn constructor_type(d: DataDecl) -> TypeUnit {
         .collect();
     let mut t = TypeUnit::Tuple(
         TypeUnit::Const {
-            name: d.name,
             id: TypeId::DeclId(d.decl_id),
         }
         .into(),
@@ -1131,12 +1124,12 @@ fn constructor_type(d: DataDecl) -> TypeUnit {
 
 fn min_type_with_env<'a>(
     (expr, type_variable): &ExprWithType<'a, TypeVariable>,
-    subtype_relations: &mut SubtypeRelations<'a>,
-    map: &mut TypeVariableMap<'a>,
+    subtype_relations: &mut SubtypeRelations,
+    map: &mut TypeVariableMap,
 ) -> (
     ast_step2::TypeWithEnv<'a>,
     Resolved<'a>,
-    TypesOfLocalDeclsVec<'a>,
+    TypesOfLocalDeclsVec,
 ) {
     match expr {
         Expr::Lambda(arms) => {
@@ -1164,7 +1157,6 @@ fn min_type_with_env<'a>(
             let arg_len = arm_types.iter().map(Vec::len).min().unwrap() - 1;
             let mut arm_types =
                 arm_types.into_iter().map(Vec::into_iter).collect_vec();
-            #[allow(clippy::needless_collect)]
             let arg_types: Vec<Type> = (0..arg_len)
                 .map(|_| {
                     let _t: Type = arm_types
@@ -1324,9 +1316,7 @@ fn min_type_with_env<'a>(
     }
 }
 
-fn types_to_fn_type<'a>(
-    types: impl DoubleEndedIterator<Item = Type<'a>>,
-) -> Type<'a> {
+fn types_to_fn_type(types: impl DoubleEndedIterator<Item = Type>) -> Type {
     let mut ts = types.rev();
     let mut r = ts.next().unwrap();
     for t in ts {
@@ -1338,25 +1328,25 @@ fn types_to_fn_type<'a>(
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct VariableRequirement<'a> {
     pub name: &'a str,
-    pub required_type: Type<'a>,
+    pub required_type: Type,
     pub ident: IdentId,
-    pub local_env: Vec<(&'a str, DeclId, Type<'a>)>,
+    pub local_env: Vec<(&'a str, DeclId, Type)>,
 }
 
 /// Returns `vec![argument type, argument type, ..., return type]`,
 /// variable requirements, subtype relation, resolved idents.
 fn arm_min_type<'a>(
     arm: &FnArm<'a, TypeVariable>,
-    subtype_relations: &mut SubtypeRelations<'a>,
-    map: &mut TypeVariableMap<'a>,
+    subtype_relations: &mut SubtypeRelations,
+    map: &mut TypeVariableMap,
 ) -> (
-    Vec<types::Type<'a>>,
-    Vec<PatternUnitForRestriction<'a>>,
+    Vec<types::Type>,
+    Vec<PatternUnitForRestriction>,
     Vec<VariableRequirement<'a>>,
-    SubtypeRelations<'a>,
+    SubtypeRelations,
     Resolved<'a>,
     PatternRestrictions<'a>,
-    TypesOfLocalDeclsVec<'a>,
+    TypesOfLocalDeclsVec,
 ) {
     let (body_type, mut resolved_idents, mut types_of_decls) =
         min_type_with_env(&arm.expr, subtype_relations, map);
@@ -1412,9 +1402,9 @@ fn arm_min_type<'a>(
 fn pattern_unit_to_type<'a>(
     p: &PatternUnit<'a, TypeVariable>,
 ) -> (
-    types::Type<'a>,
-    FxHashMap<&'a str, (DeclId, types::Type<'a>)>,
-    PatternUnitForRestriction<'a>,
+    types::Type,
+    FxHashMap<&'a str, (DeclId, types::Type)>,
+    PatternUnitForRestriction,
 ) {
     use PatternUnit::*;
     match p {
@@ -1428,7 +1418,7 @@ fn pattern_unit_to_type<'a>(
             Default::default(),
             PatternUnitForRestriction::Str,
         ),
-        Constructor { name, id, args } => {
+        Constructor { id, args, .. } => {
             let (types, bindings, pattern_restrictions): (
                 Vec<_>,
                 Vec<_>,
@@ -1436,22 +1426,15 @@ fn pattern_unit_to_type<'a>(
             ) = args.iter().map(pattern_to_type).multiunzip();
             (
                 TypeUnit::Tuple(
-                    TypeUnit::Const {
-                        name,
-                        id: (*id).into(),
-                    }
-                    .into(),
+                    TypeUnit::Const { id: (*id).into() }.into(),
                     Type::argument_tuple_from_arguments(types),
                 )
                 .into(),
                 // TypeUnit::new_variable().into(),
                 bindings.into_iter().flatten().collect(),
                 PatternUnitForRestriction::Tuple(
-                    PatternUnitForRestriction::Const {
-                        name,
-                        id: (*id).into(),
-                    }
-                    .into(),
+                    PatternUnitForRestriction::Const { id: (*id).into() }
+                        .into(),
                     PatternUnitForRestriction::argument_tuple_from_arguments(
                         pattern_restrictions,
                     )
@@ -1491,9 +1474,9 @@ fn pattern_unit_to_type<'a>(
 fn pattern_to_type<'a>(
     p: &Pattern<'a, TypeVariable>,
 ) -> (
-    types::Type<'a>,
-    FxHashMap<&'a str, (DeclId, types::Type<'a>)>,
-    PatternUnitForRestriction<'a>,
+    types::Type,
+    FxHashMap<&'a str, (DeclId, types::Type)>,
+    PatternUnitForRestriction,
 ) {
     if p.len() >= 2 {
         unimplemented!()

@@ -13,7 +13,7 @@ use crate::{
 use fxhash::FxHashSet;
 use std::rc::Rc;
 
-impl<'a> TypeUnit<'a> {
+impl TypeUnit {
     pub fn all_type_variables(&self) -> Vec<TypeVariable> {
         match self {
             TypeUnit::Fn(arg, ret) => arg
@@ -38,9 +38,9 @@ impl<'a> TypeUnit<'a> {
     pub fn replace_num_with_update_flag(
         self,
         from: TypeVariable,
-        to: &Type<'a>,
+        to: &Type,
         recursive_alias_depth: usize,
-    ) -> (Type<'a>, bool) {
+    ) -> (Type, bool) {
         match self {
             Self::Fn(args, rtn) => {
                 let (args, updated1) = args.replace_num_with_update_flag(
@@ -79,9 +79,7 @@ impl<'a> TypeUnit<'a> {
                 let t = (Self::RecursiveAlias { body }).into();
                 (t, updated)
             }
-            Self::Const { name, id } => {
-                (Self::Const { name, id }.into(), false)
-            }
+            Self::Const { id } => (Self::Const { id }.into(), false),
             Self::Tuple(a, b) => {
                 let (a, updated1) = a.replace_num_with_update_flag(
                     from,
@@ -98,11 +96,11 @@ impl<'a> TypeUnit<'a> {
         }
     }
 
-    pub fn replace_num(self, from: TypeVariable, to: &Type<'a>) -> Type<'a> {
+    pub fn replace_num(self, from: TypeVariable, to: &Type) -> Type {
         self.replace_num_with_update_flag(from, to, 0).0
     }
 
-    pub fn replace_type(self, from: &TypeUnit<'a>, to: &TypeUnit<'a>) -> Self {
+    pub fn replace_type(self, from: &TypeUnit, to: &TypeUnit) -> Self {
         match self {
             t if t == *from => to.clone(),
             Self::Fn(args, rtn) => Self::Fn(
@@ -119,7 +117,7 @@ impl<'a> TypeUnit<'a> {
         }
     }
 
-    pub fn replace_type_union(self, from: &Type, to: &TypeUnit<'a>) -> Self {
+    pub fn replace_type_union(self, from: &Type, to: &TypeUnit) -> Self {
         match self {
             Self::Fn(args, rtn) => Self::Fn(
                 args.replace_type_union(from, to),
@@ -136,13 +134,13 @@ impl<'a> TypeUnit<'a> {
         }
     }
 
-    pub fn matchable_ref<'b>(&'b self) -> TypeMatchableRef<'a, 'b> {
+    pub fn matchable_ref(&self) -> TypeMatchableRef {
         use TypeMatchableRef::*;
         match self {
             TypeUnit::Fn(a, b) => Fn(a, b),
             TypeUnit::Variable(v) => Variable(*v),
             TypeUnit::RecursiveAlias { body } => RecursiveAlias { body },
-            TypeUnit::Const { name, id } => Const { name, id: *id },
+            TypeUnit::Const { id } => Const { id: *id },
             TypeUnit::Tuple(a, b) => Tuple(a, b),
         }
     }
@@ -150,7 +148,7 @@ impl<'a> TypeUnit<'a> {
     pub fn replace_type_union_with_update_flag(
         self,
         from: &Type,
-        to: &TypeUnit<'a>,
+        to: &TypeUnit,
         recursive_alias_depth: usize,
     ) -> (Self, bool) {
         if self.matchable_ref() == from.matchable_ref() {
@@ -230,7 +228,7 @@ impl<'a> TypeUnit<'a> {
                 body: body
                     .decrement_recursive_index(greater_than_or_equal_to + 1),
             },
-            TypeUnit::Const { name, id } => TypeUnit::Const { name, id },
+            TypeUnit::Const { id } => TypeUnit::Const { id },
             TypeUnit::Tuple(a, b) => TypeUnit::Tuple(
                 a.decrement_recursive_index(greater_than_or_equal_to),
                 b.decrement_recursive_index(greater_than_or_equal_to),
@@ -238,7 +236,7 @@ impl<'a> TypeUnit<'a> {
         }
     }
 
-    fn split(self, other: &Self) -> (Type<'a>, Type<'a>) {
+    fn split(self, other: &Self) -> (Type, Type) {
         match (self, other) {
             (TypeUnit::Fn(a1, a2), TypeUnit::Fn(b1, b2)) => {
                 if b1.clone().is_subtype_of(a1.clone()) {
@@ -251,11 +249,10 @@ impl<'a> TypeUnit<'a> {
                     (TypeUnit::Fn(a1, a2).into(), Type::default())
                 }
             }
-            (
-                TypeUnit::Const { name, id: id1 },
-                TypeUnit::Const { id: id2, .. },
-            ) if id1 == *id2 => {
-                (Type::default(), TypeUnit::Const { name, id: id1 }.into())
+            (TypeUnit::Const { id: id1 }, TypeUnit::Const { id: id2, .. })
+                if id1 == *id2 =>
+            {
+                (Type::default(), TypeUnit::Const { id: id1 }.into())
             }
             (TypeUnit::Tuple(a1, a2), TypeUnit::Tuple(b1, b2)) => {
                 let (a1_out, a1_in) = a1.split(b1);
@@ -274,7 +271,7 @@ impl<'a> TypeUnit<'a> {
         }
     }
 
-    fn split_broad(self, other: &Self) -> (Type<'a>, Type<'a>) {
+    fn split_broad(self, other: &Self) -> (Type, Type) {
         match (self, other) {
             (
                 t @ (TypeUnit::Variable(_) | TypeUnit::RecursiveAlias { .. }),
@@ -294,11 +291,10 @@ impl<'a> TypeUnit<'a> {
                     (Type::default(), TypeUnit::Fn(a1, a2).into())
                 }
             }
-            (
-                TypeUnit::Const { name, id: id1 },
-                TypeUnit::Const { id: id2, .. },
-            ) if id1 == *id2 => {
-                (Type::default(), TypeUnit::Const { name, id: id1 }.into())
+            (TypeUnit::Const { id: id1 }, TypeUnit::Const { id: id2, .. })
+                if id1 == *id2 =>
+            {
+                (Type::default(), TypeUnit::Const { id: id1 }.into())
             }
             (TypeUnit::Tuple(a1, a2), TypeUnit::Tuple(b1, b2)) => {
                 let (a1_out, a1_in) = a1.split_broad(b1);
@@ -359,7 +355,7 @@ impl<'a> TypeUnit<'a> {
     }
 }
 
-impl<'a> Type<'a> {
+impl Type {
     // pub fn is_singleton(&self) -> bool {
     //     use TypeMatchableRef::*;
     //     match self.matchable_ref() {
@@ -387,7 +383,6 @@ impl<'a> Type<'a> {
 
     pub fn label_from_str(t: &'static str) -> Self {
         Type::from(TypeUnit::Const {
-            name: t,
             id: TypeId::Intrinsic(INTRINSIC_TYPES[t]),
         })
     }
@@ -404,7 +399,7 @@ impl<'a> Type<'a> {
         self
     }
 
-    pub fn union_unit(mut self, other: TypeUnit<'a>) -> Self {
+    pub fn union_unit(mut self, other: TypeUnit) -> Self {
         self.insert(other.into());
         self
     }
@@ -422,7 +417,7 @@ impl<'a> Type<'a> {
     //     t.into_iter().collect()
     // }
 
-    pub fn disjunctive(self) -> Result<Vec<Rc<TypeUnit<'a>>>, TypeUnit<'a>> {
+    pub fn disjunctive(self) -> Result<Vec<Rc<TypeUnit>>, TypeUnit> {
         if self.len() > 1 {
             Ok(self.into_iter().collect())
         } else {
@@ -490,7 +485,7 @@ impl<'a> Type<'a> {
         (out, in_)
     }
 
-    pub fn split_unit(self, other: &TypeUnit<'a>) -> (Self, Self) {
+    pub fn split_unit(self, other: &TypeUnit) -> (Self, Self) {
         let mut in_ = Type::default();
         let mut out = Type::default();
         for t in self {
@@ -512,7 +507,7 @@ impl<'a> Type<'a> {
         (out, in_)
     }
 
-    pub fn split_broad_unit(self, other: &TypeUnit<'a>) -> (Self, Self) {
+    pub fn split_broad_unit(self, other: &TypeUnit) -> (Self, Self) {
         let mut in_ = Type::default();
         let mut out = Type::default();
         for t in self {
@@ -575,9 +570,7 @@ impl<'a> TypeWithEnv<'a> {
             .collect::<FxHashSet<_>>()
     }
 
-    pub fn change_variable_num(
-        mut self,
-    ) -> (Self, Vec<(TypeVariable, Type<'static>)>) {
+    pub fn change_variable_num(mut self) -> (Self, Vec<(TypeVariable, Type)>) {
         let anos = self.all_type_variables();
         let mut variable_map = Vec::new();
         for a in anos {
@@ -594,13 +587,13 @@ impl<'a, T> TypeWithEnv<'a, T>
 where
     T: TypeConstructor<'a>,
 {
-    pub fn replace_num(self, from: TypeVariable, to: &Type<'a>) -> Self {
+    pub fn replace_num(self, from: TypeVariable, to: &Type) -> Self {
         self.map_type(|t| t.replace_num(from, to))
     }
 
     pub fn map_type<F>(self, mut f: F) -> Self
     where
-        F: FnMut(Type<'a>) -> Type<'a>,
+        F: FnMut(Type) -> Type,
     {
         let TypeWithEnv {
             constructor,
@@ -668,11 +661,10 @@ mod tests {
             .clone()
             .unwrap()
             .type_with_env
-            .constructor
-            .clone();
+            .constructor;
         assert_eq!(
             format!("{}", t),
-            r#"/\[[{:False | :True}], [{:False | :True}]]"#
+            r#"/\[[{:True | :False}], [{:True | :False}]]"#
         );
     }
 
@@ -697,8 +689,7 @@ mod tests {
             .clone()
             .unwrap()
             .type_with_env
-            .constructor
-            .clone();
-        assert_eq!(format!("{}", t), r#"rec[{() | /\[[{:() | :I64}], d0]}]"#);
+            .constructor;
+        assert_eq!(format!("{}", t), r#"rec[{/\[[{:I64 | :()}], d0] | ()}]"#);
     }
 }

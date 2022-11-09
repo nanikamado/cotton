@@ -11,6 +11,7 @@ mod rust_backend;
 
 pub use ast_step1::OpPrecedenceMap;
 use ast_step2::types::{Type, TypeVariable};
+use ast_step2::TYPE_NAMES;
 pub use ast_step2::{
     types::TypeMatchableRef, PrintTypeOfGlobalVariableForUser,
     PrintTypeOfLocalVariableForUser, TypeWithEnv,
@@ -76,7 +77,8 @@ pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
     if command == Command::PrintTypes {
         print_types::print(&ast);
     } else {
-        let ast = ast_step4::Ast::from(ast);
+        let type_names = TYPE_NAMES.read().unwrap();
+        let ast = ast_step4::Ast::from(ast, &type_names);
         let ast = ast_step5::Ast::from(ast);
         if command == Command::RunRust {
             rust_backend::run(ast);
@@ -95,10 +97,7 @@ pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
 
 pub enum TokenKind<'a> {
     GlobalVariable(VariableId, Option<GlobalVariableType<'a>>),
-    LocalVariable(
-        VariableId,
-        Option<(Type<'a>, FxHashMap<TypeVariable, &'a str>)>,
-    ),
+    LocalVariable(VariableId, Option<(Type, FxHashMap<TypeVariable, &'a str>)>),
     Constructor(Option<GlobalVariableType<'a>>),
     Type,
     Interface,

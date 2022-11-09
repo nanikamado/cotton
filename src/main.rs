@@ -65,8 +65,13 @@ fn main() {
         (false, true, false, false) => Command::RunRust,
         (false, false, true, false) => Command::PrintTypes,
         (false, false, false, true) => {
-            language_server::run();
-            return;
+            #[cfg(feature = "language-server")]
+            {
+                language_server::run();
+                return;
+            }
+            #[cfg(not(feature = "language-server"))]
+            panic!();
         }
         (false, false, false, false) => Command::RunJs,
         _ => unreachable!(),

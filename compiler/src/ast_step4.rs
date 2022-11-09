@@ -145,18 +145,31 @@ impl<'a> TryFrom<LinkedType<'a>> for Type<'a> {
     }
 }
 
-impl<'a> From<ast_step3::Ast<'a>> for Ast<'a> {
-    fn from(ast: ast_step3::Ast<'a>) -> Self {
+impl<'a> Ast<'a> {
+    pub fn from(
+        ast: ast_step3::Ast<'a>,
+        type_names: &'a FxHashMap<TypeId, String>,
+    ) -> Self {
         let mut memo = VariableMemo::new(ast.variable_decl, &ast.data_decl);
         for d in IntrinsicVariable::iter() {
             let p = memo.type_map.new_pointer();
-            unify_type_with_ast_sep2_type(&d.to_type(), p, &mut memo.type_map);
+            unify_type_with_ast_sep2_type(
+                &d.to_type(),
+                p,
+                &mut memo.type_map,
+                type_names,
+            );
             memo.intrinsic_variables
                 .insert(VariableId::IntrinsicVariable(d), p);
         }
         for d in IntrinsicConstructor::iter() {
             let p = memo.type_map.new_pointer();
-            unify_type_with_ast_sep2_type(&d.to_type(), p, &mut memo.type_map);
+            unify_type_with_ast_sep2_type(
+                &d.to_type(),
+                p,
+                &mut memo.type_map,
+                type_names,
+            );
             memo.intrinsic_variables
                 .insert(VariableId::IntrinsicConstructor(d), p);
         }
@@ -790,7 +803,7 @@ impl<'a, 'b> VariableMemo<'a, 'b> {
     fn unify_type_with_pattern(
         &mut self,
         type_pointer: TypePointer,
-        pattern: &ast_step2::Pattern<'a, ast_step2::types::Type<'a>>,
+        pattern: &ast_step2::Pattern<'a, ast_step2::types::Type>,
         local_variables: &mut FxHashMap<VariableId, TypePointer>,
     ) -> Pattern<'a, TypePointer> {
         if pattern.len() != 1 {
@@ -909,25 +922,31 @@ impl Display for TypeUnit<'_> {
 }
 
 fn unify_type_with_ast_sep2_type<'a>(
-    t: &ast_step2::types::Type<'a>,
+    t: &ast_step2::types::Type,
     p: TypePointer,
     map: &mut PaddedTypeMap<'a>,
+    type_names: &'a FxHashMap<TypeId, String>,
 ) {
     for t in t.iter() {
         use ast_step2::types::TypeUnit::*;
         match &**t {
             Fn(a, b) => {
                 let (p_a, p_b) = map.get_fn(p);
-                unify_type_with_ast_sep2_type(a, p_a, map);
-                unify_type_with_ast_sep2_type(b, p_b, map);
+                unify_type_with_ast_sep2_type(a, p_a, map, type_names);
+                unify_type_with_ast_sep2_type(b, p_b, map, type_names);
             }
             Tuple(a, b) => {
                 let len = tuple_len(b);
                 let args = (0..len).map(|_| map.new_pointer()).collect_vec();
                 for a in a.iter() {
-                    if let Const { name, id } = &**a {
-                        unify_type_with_tuple(b, &args, map);
-                        map.insert_normal(p, *id, name, args.clone());
+                    if let Const { id } = &**a {
+                        unify_type_with_tuple(b, &args, map, type_names);
+                        map.insert_normal(
+                            p,
+                            *id,
+                            &type_names[id],
+                            args.clone(),
+                        );
                     } else {
                         panic!()
                     }
@@ -941,9 +960,10 @@ fn unify_type_with_ast_sep2_type<'a>(
 }
 
 fn unify_type_with_tuple<'a>(
-    t: &ast_step2::types::Type<'a>,
+    t: &ast_step2::types::Type,
     ps: &[TypePointer],
     map: &mut PaddedTypeMap<'a>,
+    type_names: &'a FxHashMap<TypeId, String>,
 ) {
     for t in t.iter() {
         match &**t {
@@ -953,15 +973,15 @@ fn unify_type_with_tuple<'a>(
                 debug_assert!(ps.is_empty());
             }
             ast_step2::types::TypeUnit::Tuple(h, t) => {
-                unify_type_with_ast_sep2_type(h, ps[0], map);
-                unify_type_with_tuple(t, &ps[1..], map);
+                unify_type_with_ast_sep2_type(h, ps[0], map, type_names);
+                unify_type_with_tuple(t, &ps[1..], map, type_names);
             }
             _ => panic!(),
         }
     }
 }
 
-fn tuple_len(tuple: &ast_step2::types::Type<'_>) -> usize {
+fn tuple_len(tuple: &ast_step2::types::Type) -> usize {
     use ast_step2::types::TypeUnit::*;
     tuple
         .iter()

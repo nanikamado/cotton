@@ -5,8 +5,8 @@ edition = "2021"
 description = "A programming language."
 
 [workspace]
-default-members = [".", "compiler", "language_server"]
-members = ["compiler/parser"]
+default-members = [".", "compiler"]
+members = ["compiler/parser", "language_server"]
 
 [profile.release]
 debug = true
@@ -17,8 +17,12 @@ opt-level = 2
 [dependencies]
 clap = { version = "3.2.22", features = ["cargo"] }
 compiler = { path = "compiler" }
-language_server = { path = "language_server" }
+language_server = { path = "language_server", optional = true }
 log = "0.4.14"
+
+[features]
+default = []
+language-server = ["language_server"]
 
 [dev-dependencies]
 assert_cmd = "2.0.4"
