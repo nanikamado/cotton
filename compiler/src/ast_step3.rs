@@ -1,6 +1,7 @@
 mod type_check;
 pub mod type_util;
 
+use self::type_check::ResolvedIdent;
 pub use self::type_check::{
     simplify_subtype_rel, type_check, GlobalVariableType, LocalVariableType,
     ResolvedIdents, TypeVariableMap, VariableId, VariableRequirement,
@@ -9,6 +10,7 @@ use crate::{
     ast_step2::{
         self,
         decl_id::DeclId,
+        name_id::Name,
         types::{Type, TypeUnit, TypeVariable},
         Pattern, PatternUnit, TypeConstructor,
     },
@@ -20,52 +22,52 @@ use fxhash::FxHashMap;
 /// - The names of variables are resolved.
 /// - Implicit parameters are converted to explicit parameters.
 #[derive(Debug, PartialEq)]
-pub struct Ast<'a> {
-    pub variable_decl: Vec<VariableDecl<'a>>,
-    pub data_decl: Vec<DataDecl<'a>>,
+pub struct Ast {
+    pub variable_decl: Vec<VariableDecl>,
+    pub data_decl: Vec<DataDecl>,
     pub entry_point: DeclId,
-    pub types_of_global_decls: FxHashMap<VariableId, GlobalVariableType<'a>>,
+    pub types_of_global_decls: FxHashMap<VariableId, GlobalVariableType>,
     pub types_of_local_decls: FxHashMap<VariableId, LocalVariableType>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct VariableDecl<'a> {
-    pub name: &'a str,
-    pub value: ExprWithType<'a>,
+pub struct VariableDecl {
+    pub name: Name,
+    pub value: ExprWithType,
     pub decl_id: DeclId,
 }
 
-pub type ExprWithType<'a> = (Expr<'a>, Type);
+pub type ExprWithType = (Expr, Type);
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Expr<'a> {
-    Lambda(Vec<FnArm<'a>>),
-    Number(&'a str),
-    StrLiteral(&'a str),
+pub enum Expr {
+    Lambda(Vec<FnArm>),
+    Number(Name),
+    StrLiteral(Name),
     Ident {
-        name: &'a str,
+        name: Name,
         variable_id: VariableId,
         variable_kind: VariableKind,
     },
-    Call(Box<ExprWithType<'a>>, Box<ExprWithType<'a>>),
-    DoBlock(Vec<ExprWithType<'a>>),
+    Call(Box<ExprWithType>, Box<ExprWithType>),
+    DoBlock(Vec<ExprWithType>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct FnArm<'a> {
-    pub pattern: Vec<Pattern<'a, Type>>,
-    pub expr: ExprWithType<'a>,
+pub struct FnArm {
+    pub pattern: Vec<Pattern<Type>>,
+    pub expr: ExprWithType,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct DataDecl<'a> {
-    pub name: &'a str,
+pub struct DataDecl {
+    pub name: Name,
     pub field_len: usize,
     pub decl_id: DeclId,
 }
 
-impl<'a> Ast<'a> {
-    pub fn from(ast: ast_step2::Ast<'a>) -> (Self, ResolvedIdents<'a>) {
+impl Ast {
+    pub fn from(ast: ast_step2::Ast) -> (Self, ResolvedIdents) {
         let (
             resolved_idents,
             types_of_global_decls,
@@ -75,7 +77,6 @@ impl<'a> Ast<'a> {
         ) = type_check(&ast);
         let (variable_decl, entry_point) = variable_decl(
             ast.variable_decl,
-            &ast.data_decl,
             ast.entry_point,
             &resolved_idents,
             &mut map,
@@ -85,8 +86,7 @@ impl<'a> Ast<'a> {
             log::debug!(
                 "type_ {} : {}",
                 v.name,
-                types_of_global_decls[&VariableId::Decl(v.decl_id)]
-                    .type_with_env
+                types_of_global_decls[&VariableId::Decl(v.decl_id)].t
             );
         }
         let data_decl = ast
@@ -111,27 +111,23 @@ impl<'a> Ast<'a> {
     }
 }
 
-fn variable_decl<'a>(
-    variable_decls: Vec<ast_step2::VariableDecl<'a>>,
-    data_decls: &[ast_step2::DataDecl<'a>],
+fn variable_decl(
+    variable_decls: Vec<ast_step2::VariableDecl>,
     entry_point: DeclId,
-    resolved_idents: &ResolvedIdents<'a>,
+    resolved_idents: &ResolvedIdents,
     map: &mut TypeVariableMap,
     types_of_decls: &mut FxHashMap<VariableId, LocalVariableType>,
-) -> (Vec<VariableDecl<'a>>, DeclId) {
-    let data_decls: FxHashMap<DeclId, &ast_step2::DataDecl<'a>> = data_decls
-        .iter()
-        .map(|d| {
-            let did = d.decl_id;
-            (did, d)
-        })
-        .collect();
+) -> (Vec<VariableDecl>, DeclId) {
     let variable_decls = variable_decls
         .into_iter()
         .map(|d| {
-            let (mut value, mut value_t) =
-                expr(d.value, &data_decls, resolved_idents, map);
-            for (name, t, decl_id) in d.implicit_parameters.into_iter().rev() {
+            let (mut value, mut value_t) = expr(d.value, resolved_idents, map);
+            for (name, t, decl_id) in d
+                .type_annotation
+                .into_iter()
+                .flat_map(|ann| ann.implicit_parameters)
+                .rev()
+            {
                 types_of_decls.insert(
                     VariableId::Decl(decl_id),
                     LocalVariableType {
@@ -160,17 +156,16 @@ fn variable_decl<'a>(
     (variable_decls, entry_point)
 }
 
-fn expr<'a, 'b>(
-    (e, t): ast_step2::ExprWithType<'a, TypeVariable>,
-    data_decls: &FxHashMap<DeclId, &'b ast_step2::DataDecl<'a>>,
-    resolved_idents: &ResolvedIdents<'a>,
+fn expr(
+    (e, t): ast_step2::ExprWithType<TypeVariable>,
+    resolved_idents: &ResolvedIdents,
     map: &mut TypeVariableMap,
-) -> ExprWithType<'a> {
+) -> ExprWithType {
     let e = match e {
         ast_step2::Expr::Lambda(arms) => Expr::Lambda(
             arms.into_iter()
                 .map(|a| {
-                    let e = expr(a.expr, data_decls, resolved_idents, map);
+                    let e = expr(a.expr, resolved_idents, map);
                     FnArm {
                         pattern: a
                             .pattern
@@ -186,54 +181,61 @@ fn expr<'a, 'b>(
         ast_step2::Expr::StrLiteral(a) => Expr::StrLiteral(a),
         ast_step2::Expr::Ident { name, ident_id } => {
             let resolved_item = resolved_idents[&ident_id].clone();
-            let mut value = Expr::Ident {
-                name,
-                variable_id: resolved_item.variable_id,
-                variable_kind: resolved_item.variable_kind,
-            };
-            let mut ts = Vec::new();
-            let mut fn_t = map.find(t);
-            for (_, _, implicit_arg_t, _) in
-                resolved_item.implicit_args.iter().rev()
-            {
-                fn_t = TypeUnit::Fn(implicit_arg_t.clone(), fn_t).into();
-                ts.push(fn_t.clone());
-            }
-            for ((_, name, implicit_arg_t, resolved_item), fn_t) in
-                resolved_item.implicit_args.iter().zip(ts.into_iter().rev())
-            {
-                let variable_id = resolved_item.variable_id;
-                value = Expr::Call(
-                    Box::new((value, fn_t)),
-                    Box::new((
-                        Expr::Ident {
-                            name,
-                            variable_id,
-                            variable_kind: resolved_item.variable_kind,
-                        },
-                        implicit_arg_t.clone(),
-                    )),
-                );
-            }
-            value
+            get_expr_from_resolved_ident(name, &resolved_item, map.find(t))
         }
         ast_step2::Expr::Call(f, a) => Expr::Call(
-            expr(*f, data_decls, resolved_idents, map).into(),
-            expr(*a, data_decls, resolved_idents, map).into(),
+            expr(*f, resolved_idents, map).into(),
+            expr(*a, resolved_idents, map).into(),
         ),
         ast_step2::Expr::Do(es) => Expr::DoBlock(
             es.into_iter()
-                .map(|e| expr(e, data_decls, resolved_idents, map))
+                .map(|e| expr(e, resolved_idents, map))
                 .collect(),
         ),
     };
     (e, lift_recursive_alias(map.find(t)))
 }
 
+fn get_expr_from_resolved_ident(
+    name: Name,
+    resolved_ident: &ResolvedIdent,
+    t: Type,
+) -> Expr {
+    let mut value = Expr::Ident {
+        name,
+        variable_id: resolved_ident.variable_id,
+        variable_kind: resolved_ident.variable_kind,
+    };
+    let mut ts = Vec::new();
+    let mut fn_t = t;
+    for (_, implicit_arg_t, _) in resolved_ident.implicit_args.iter().rev() {
+        fn_t = TypeUnit::Fn(implicit_arg_t.clone(), fn_t).into();
+        ts.push(fn_t.clone());
+    }
+    for ((name, implicit_arg_t, resolved_ident), fn_t) in resolved_ident
+        .implicit_args
+        .iter()
+        .zip(ts.into_iter().rev())
+    {
+        value = Expr::Call(
+            Box::new((value, fn_t)),
+            Box::new((
+                get_expr_from_resolved_ident(
+                    *name,
+                    resolved_ident,
+                    implicit_arg_t.clone(),
+                ),
+                implicit_arg_t.clone(),
+            )),
+        );
+    }
+    value
+}
+
 /// Change `Cons[List[a], a] | Nil` to `List[a]`
-fn lift_recursive_alias<'a, T>(t: T) -> T
+fn lift_recursive_alias<T>(t: T) -> T
 where
-    T: TypeConstructor<'a>,
+    T: TypeConstructor,
 {
     if let Some(body) = t.find_recursive_alias().cloned() {
         let r = &TypeUnit::RecursiveAlias { body: body.clone() };
@@ -259,20 +261,20 @@ where
     }
 }
 
-fn normalize_types_in_pattern<'a>(
-    pattern: Pattern<'a, TypeVariable>,
+fn normalize_types_in_pattern(
+    pattern: Pattern<TypeVariable>,
     map: &mut TypeVariableMap,
-) -> Pattern<'a, Type> {
+) -> Pattern<Type> {
     pattern
         .into_iter()
         .map(|p| normalize_types_in_pattern_unit(p, map))
         .collect()
 }
 
-fn normalize_types_in_pattern_unit<'a>(
-    pattern: PatternUnit<'a, TypeVariable>,
+fn normalize_types_in_pattern_unit(
+    pattern: PatternUnit<TypeVariable>,
     map: &mut TypeVariableMap,
-) -> PatternUnit<'a, Type> {
+) -> PatternUnit<Type> {
     match pattern {
         PatternUnit::Binder(name, ident_id, t) => {
             PatternUnit::Binder(name, ident_id, map.find(t))

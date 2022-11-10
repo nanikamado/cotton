@@ -5,7 +5,7 @@ use tower_lsp::lsp_types::*;
 #[test]
 fn prime_local_type() {
     let src = fs::read_to_string("../examples/prime.cot").unwrap();
-    let (_, hover_map) = semantic_tokens_from_src(&src);
+    let (_, hover_map) = semantic_tokens_from_src(&src).unwrap();
     if let HoverContents::Markup(c) =
         &hover_map[40][6].as_ref().unwrap().contents
     {
@@ -31,7 +31,7 @@ fn prime_local_type() {
 #[test]
 fn red_black_tree_local_type() {
     let src = fs::read_to_string("../examples/red_black_tree.cot").unwrap();
-    let (_, hover_map) = semantic_tokens_from_src(&src);
+    let (_, hover_map) = semantic_tokens_from_src(&src).unwrap();
     if let HoverContents::Markup(c) =
         &hover_map[40][14].as_ref().unwrap().contents
     {

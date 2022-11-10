@@ -7,7 +7,7 @@ data A /\ B forall { A, B }
 
 infixr 3 /\
 
-type List = Nil | (A /\ List) forall { A }
+type List = Nil | (A /\ List[A]) forall { A }
 
 data E
 data T(A, B, C) forall { A, B, C }

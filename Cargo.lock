@@ -167,6 +167,7 @@ dependencies = [
  "simplelog",
  "stripmargin",
  "strum",
+ "tracing-mutex",
  "unic-ucd-category",
 ]
 
@@ -986,6 +987,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5aeea4303076558a00714b823f9ad67d58a3bbda1df83d8827d21193156e22f7"
 dependencies = [
  "once_cell",
+]
+
+[[package]]
+name = "tracing-mutex"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3df21ca58f0e0b5ee3181d8eebb8f2ec16d6ecbb2a04f351aa6abd7cf700f22"
+dependencies = [
+ "lazy_static",
 ]
 
 [[package]]

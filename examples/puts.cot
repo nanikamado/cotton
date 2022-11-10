@@ -1,0 +1,28 @@
+(.) = | a, f => f(a)
+
+infixl 10 .
+
+to_string : I64 -> String = i64_to_string
+
+interface ToString where
+    to_string : Self -> String
+
+data A /\ B forall { A, B }
+infixr 3 /\
+type List = () | (A /\ List[A]) forall { A }
+
+list_to_string_rec : List[A] -> String forall { A : ToString } =
+    | () => ""
+    | h /\ t => ", " <> h.to_string <> t.list_to_string_rec
+
+to_string : List[A] -> String forall { A : ToString } =
+    | () => "[]"
+    | h /\ t => "[" <> h.to_string <> t.list_to_string_rec <> "]"
+
+puts : A -> () forall { A : ToString } =
+    | a => a.to_string.println
+
+main : () -> () =
+    | () => do
+        1.puts
+        (1 /\ 2 /\ 3 /\ ()).puts

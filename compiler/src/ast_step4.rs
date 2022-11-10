@@ -1,6 +1,6 @@
 pub use self::padded_type_map::{PaddedTypeMap, TypePointer};
 use crate::{
-    ast_step2::{self, decl_id::DeclId, ConstructorId, TypeId},
+    ast_step2::{self, decl_id::DeclId, name_id::Name, ConstructorId, TypeId},
     ast_step3::VariableId,
     ast_step3::{self, DataDecl},
     intrinsics::{IntrinsicConstructor, IntrinsicType, IntrinsicVariable},
@@ -16,21 +16,21 @@ use std::{
 use strum::IntoEnumIterator;
 
 #[derive(Debug)]
-pub struct Ast<'a> {
-    pub variable_decl: Vec<VariableDecl<'a, TypePointer>>,
-    pub data_decl: Vec<DataDecl<'a>>,
+pub struct Ast {
+    pub variable_decl: Vec<VariableDecl<TypePointer>>,
+    pub data_decl: Vec<DataDecl>,
     pub entry_point: DeclId,
-    pub map: PaddedTypeMap<'a>,
+    pub map: PaddedTypeMap,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct VariableDecl<'a, T = Type<'a>> {
-    pub name: &'a str,
-    pub value: ExprWithType<'a, T>,
+pub struct VariableDecl<T = Type> {
+    pub name: Name,
+    pub value: ExprWithType<T>,
     pub decl_id: DeclId,
 }
 
-pub type ExprWithType<'a, T = Type<'a>> = (Expr<'a, T>, T);
+pub type ExprWithType<T = Type> = (Expr<T>, T);
 
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash, Copy)]
 pub enum VariableKind {
@@ -42,82 +42,82 @@ pub enum VariableKind {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Expr<'a, T = Type<'a>> {
-    Lambda(Vec<FnArm<'a, T>>),
-    Number(&'a str),
-    StrLiteral(&'a str),
+pub enum Expr<T = Type> {
+    Lambda(Vec<FnArm<T>>),
+    Number(Name),
+    StrLiteral(Name),
     Ident {
-        name: &'a str,
+        name: Name,
         variable_id: VariableId,
         variable_kind: VariableKind,
     },
     GlobalVariable {
-        name: &'a str,
+        name: Name,
         decl_id: DeclId,
         replace_map: FxHashMap<TypePointer, TypePointer>,
     },
-    Call(Box<ExprWithType<'a, T>>, Box<ExprWithType<'a, T>>),
-    DoBlock(Vec<ExprWithType<'a, T>>),
+    Call(Box<ExprWithType<T>>, Box<ExprWithType<T>>),
+    DoBlock(Vec<ExprWithType<T>>),
 }
 
 /// Represents a multi-case pattern which matches if any of the `PatternUnit` in it matches.
 /// It should have at least one `PatternUnit`.
-pub type Pattern<'a, T = Type<'a>> = (Vec<PatternUnit<'a, T>>, T);
+pub type Pattern<T = Type> = (Vec<PatternUnit<T>>, T);
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum PatternUnit<'a, T> {
-    I64(&'a str),
-    Str(&'a str),
+pub enum PatternUnit<T> {
+    I64(Name),
+    Str(Name),
     Constructor {
-        name: &'a str,
+        name: Name,
         id: ConstructorId,
-        args: Vec<Pattern<'a, T>>,
+        args: Vec<Pattern<T>>,
     },
-    Binder(&'a str, DeclId),
+    Binder(Name, DeclId),
     Underscore,
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct FnArm<'a, T = Type<'a>> {
-    pub pattern: Vec<Pattern<'a, T>>,
-    pub expr: ExprWithType<'a, T>,
+pub struct FnArm<T = Type> {
+    pub pattern: Vec<Pattern<T>>,
+    pub expr: ExprWithType<T>,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Clone)]
-struct LinkedType<'a>(BTreeSet<LinkedTypeUnit<'a>>);
+struct LinkedType(BTreeSet<LinkedTypeUnit>);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
-enum LinkedTypeUnit<'a, T = LinkedType<'a>> {
+enum LinkedTypeUnit<T = LinkedType> {
     Normal {
-        name: &'a str,
+        name: Name,
         id: TypeId,
         args: Vec<T>,
     },
     Fn(T, T),
     RecursionPoint,
-    RecursiveAlias(LinkedType<'a>),
+    RecursiveAlias(LinkedType),
     Pointer(TypePointer),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Clone)]
-pub struct Type<'a>(BTreeSet<TypeUnit<'a>>);
+pub struct Type(BTreeSet<TypeUnit>);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
-pub enum TypeUnit<'a> {
+pub enum TypeUnit {
     Normal {
-        name: &'a str,
+        name: Name,
         id: TypeId,
-        args: Vec<Type<'a>>,
+        args: Vec<Type>,
     },
-    Fn(Type<'a>, Type<'a>),
-    RecursiveAlias(Type<'a>),
+    Fn(Type, Type),
+    RecursiveAlias(Type),
     RecursionPoint,
 }
 
-impl<'a> TryFrom<LinkedType<'a>> for Type<'a> {
+impl TryFrom<LinkedType> for Type {
     type Error = ();
 
-    fn try_from(value: LinkedType<'a>) -> Result<Self, Self::Error> {
+    fn try_from(value: LinkedType) -> Result<Self, Self::Error> {
         use TypeUnit::*;
         Ok(Type(
             value
@@ -145,10 +145,10 @@ impl<'a> TryFrom<LinkedType<'a>> for Type<'a> {
     }
 }
 
-impl<'a> Ast<'a> {
+impl Ast {
     pub fn from(
-        ast: ast_step3::Ast<'a>,
-        type_names: &'a FxHashMap<TypeId, String>,
+        ast: ast_step3::Ast,
+        type_names: &FxHashMap<TypeId, Name>,
     ) -> Self {
         let mut memo = VariableMemo::new(ast.variable_decl, &ast.data_decl);
         for d in IntrinsicVariable::iter() {
@@ -187,7 +187,7 @@ impl<'a> Ast<'a> {
     }
 }
 
-impl<'a> LinkedType<'a> {
+impl LinkedType {
     fn replace_pointer(self, from: TypePointer, to: &Self) -> (Self, bool) {
         let mut t = BTreeSet::default();
         let mut replaced = false;
@@ -229,15 +229,15 @@ impl<'a> LinkedType<'a> {
     }
 }
 
-impl<'a> From<LinkedTypeUnit<'a>> for LinkedType<'a> {
-    fn from(t: LinkedTypeUnit<'a>) -> Self {
+impl From<LinkedTypeUnit> for LinkedType {
+    fn from(t: LinkedTypeUnit) -> Self {
         LinkedType(iter::once(t).collect())
     }
 }
 
 mod padded_type_map {
     use super::{LinkedType, LinkedTypeUnit, Type};
-    use crate::ast_step2::TypeId;
+    use crate::ast_step2::{name_id::Name, TypeId};
     use fxhash::{FxHashMap, FxHashSet};
     use itertools::Itertools;
     use std::{convert::TryInto, fmt::Display, iter, mem};
@@ -246,29 +246,29 @@ mod padded_type_map {
     pub struct TypePointer(usize);
 
     #[derive(Debug, PartialEq, Clone)]
-    struct NormalType<'a> {
-        name: &'a str,
+    struct NormalType {
+        name: Name,
         args: Vec<TypePointer>,
     }
 
     #[derive(Debug, PartialEq, Clone, Default)]
-    pub struct TypeMap<'a> {
+    pub struct TypeMap {
         function: Option<(TypePointer, TypePointer)>,
-        normals: FxHashMap<TypeId, NormalType<'a>>,
+        normals: FxHashMap<TypeId, NormalType>,
     }
 
     #[derive(Debug, PartialEq, Clone)]
-    pub enum Node<'a> {
+    pub enum Node {
         Pointer(TypePointer),
-        Terminal(TypeMap<'a>),
+        Terminal(TypeMap),
     }
 
     #[derive(Debug, Default)]
-    pub struct PaddedTypeMap<'a> {
-        map: Vec<Node<'a>>,
+    pub struct PaddedTypeMap {
+        map: Vec<Node>,
     }
 
-    impl<'a> PaddedTypeMap<'a> {
+    impl PaddedTypeMap {
         pub fn new_pointer(&mut self) -> TypePointer {
             let p = self.map.len();
             self.map.push(Node::Terminal(TypeMap::default()));
@@ -334,7 +334,7 @@ mod padded_type_map {
             &mut self,
             p: TypePointer,
             id: TypeId,
-            name: &'a str,
+            name: Name,
             args: Vec<TypePointer>,
         ) {
             let t = self.dereference_mut(p);
@@ -381,7 +381,7 @@ mod padded_type_map {
             &mut self,
             p: TypePointer,
             replace_map: &FxHashMap<TypePointer, TypePointer>,
-        ) -> Type<'a> {
+        ) -> Type {
             let replace_map = replace_map
                 .iter()
                 .flat_map(|(a, b)| {
@@ -394,11 +394,9 @@ mod padded_type_map {
                     }
                 })
                 .collect();
-            let t = self
-                .get_type_rec(p, &replace_map, Default::default())
+            self.get_type_rec(p, &replace_map, Default::default())
                 .try_into()
-                .unwrap();
-            t
+                .unwrap()
         }
 
         fn get_type_rec(
@@ -406,7 +404,7 @@ mod padded_type_map {
             p: TypePointer,
             replace_map: &FxHashMap<TypePointer, TypePointer>,
             mut trace: FxHashSet<TypePointer>,
-        ) -> LinkedType<'a> {
+        ) -> LinkedType {
             let p = self.find(p);
             if let Some(v) = replace_map.get(&p) {
                 let t = self.get_type_rec(*v, replace_map, trace);
@@ -480,7 +478,7 @@ mod padded_type_map {
             }
         }
 
-        fn dereference(&mut self, p: TypePointer) -> &TypeMap<'a> {
+        fn dereference(&mut self, p: TypePointer) -> &TypeMap {
             let p = self.find(p);
             if let Node::Terminal(t) = &self.map[p.0] {
                 t
@@ -489,7 +487,7 @@ mod padded_type_map {
             }
         }
 
-        fn dereference_mut(&mut self, p: TypePointer) -> &mut TypeMap<'a> {
+        fn dereference_mut(&mut self, p: TypePointer) -> &mut TypeMap {
             let p = self.find(p);
             if let Node::Terminal(t) = &mut self.map[p.0] {
                 t
@@ -556,19 +554,19 @@ mod padded_type_map {
     }
 }
 
-struct VariableMemo<'a, 'b> {
-    pub type_map: PaddedTypeMap<'a>,
+struct VariableMemo<'b> {
+    pub type_map: PaddedTypeMap,
     pub global_variable_types: FxHashMap<VariableId, TypePointer>,
     pub intrinsic_variables: FxHashMap<VariableId, TypePointer>,
-    pub global_variables_step4: FxHashMap<DeclId, ast_step3::VariableDecl<'a>>,
-    pub global_variables_done: Vec<VariableDecl<'a, TypePointer>>,
-    pub data_decls: FxHashMap<DeclId, &'b ast_step3::DataDecl<'a>>,
+    pub global_variables_step4: FxHashMap<DeclId, ast_step3::VariableDecl>,
+    pub global_variables_done: Vec<VariableDecl<TypePointer>>,
+    pub data_decls: FxHashMap<DeclId, &'b ast_step3::DataDecl>,
 }
 
-impl<'a, 'b> VariableMemo<'a, 'b> {
+impl<'b> VariableMemo<'b> {
     pub fn new(
-        global_variables: Vec<ast_step3::VariableDecl<'a>>,
-        data_decls: &'b [ast_step3::DataDecl<'a>],
+        global_variables: Vec<ast_step3::VariableDecl>,
+        data_decls: &'b [ast_step3::DataDecl],
     ) -> Self {
         Self {
             type_map: Default::default(),
@@ -619,11 +617,11 @@ impl<'a, 'b> VariableMemo<'a, 'b> {
 
     fn expr(
         &mut self,
-        (e, _): ast_step3::ExprWithType<'a>,
+        (e, _): ast_step3::ExprWithType,
         type_pointer: TypePointer,
         local_variables: &FxHashMap<VariableId, TypePointer>,
         trace: &FxHashMap<VariableId, TypePointer>,
-    ) -> Expr<'a, TypePointer> {
+    ) -> Expr<TypePointer> {
         match e {
             ast_step3::Expr::Lambda(arms) => {
                 let arms = arms
@@ -638,7 +636,7 @@ impl<'a, 'b> VariableMemo<'a, 'b> {
                 self.type_map.insert_normal(
                     type_pointer,
                     TypeId::Intrinsic(IntrinsicType::I64),
-                    "I64",
+                    Name::from_str("I64"),
                     Vec::new(),
                 );
                 Expr::Number(a)
@@ -647,7 +645,7 @@ impl<'a, 'b> VariableMemo<'a, 'b> {
                 self.type_map.insert_normal(
                     type_pointer,
                     TypeId::Intrinsic(IntrinsicType::String),
-                    "String",
+                    Name::from_str("String"),
                     Vec::new(),
                 );
                 Expr::StrLiteral(a)
@@ -777,11 +775,11 @@ impl<'a, 'b> VariableMemo<'a, 'b> {
 
     fn fn_arm(
         &mut self,
-        arm: ast_step3::FnArm<'a>,
+        arm: ast_step3::FnArm,
         local_variables: &FxHashMap<VariableId, TypePointer>,
         mut type_pointer: TypePointer,
         trace: &FxHashMap<VariableId, TypePointer>,
-    ) -> FnArm<'a, TypePointer> {
+    ) -> FnArm<TypePointer> {
         let mut local_variables = local_variables.clone();
         let mut pattern = Vec::new();
         for p in arm.pattern {
@@ -803,9 +801,9 @@ impl<'a, 'b> VariableMemo<'a, 'b> {
     fn unify_type_with_pattern(
         &mut self,
         type_pointer: TypePointer,
-        pattern: &ast_step2::Pattern<'a, ast_step2::types::Type>,
+        pattern: &ast_step2::Pattern<ast_step2::types::Type>,
         local_variables: &mut FxHashMap<VariableId, TypePointer>,
-    ) -> Pattern<'a, TypePointer> {
+    ) -> Pattern<TypePointer> {
         if pattern.len() != 1 {
             unimplemented!()
         } else {
@@ -815,19 +813,19 @@ impl<'a, 'b> VariableMemo<'a, 'b> {
                     self.type_map.insert_normal(
                         type_pointer,
                         TypeId::Intrinsic(IntrinsicType::I64),
-                        "I64",
+                        Name::from_str("I64"),
                         Vec::new(),
                     );
-                    PatternUnit::I64(a)
+                    PatternUnit::I64(*a)
                 }
                 Str(a) => {
                     self.type_map.insert_normal(
                         type_pointer,
                         TypeId::Intrinsic(IntrinsicType::String),
-                        "String",
+                        Name::from_str("String"),
                         Vec::new(),
                     );
-                    PatternUnit::Str(a)
+                    PatternUnit::Str(*a)
                 }
                 Constructor { name, id, args } => {
                     let args = args
@@ -844,18 +842,18 @@ impl<'a, 'b> VariableMemo<'a, 'b> {
                     self.type_map.insert_normal(
                         type_pointer,
                         (*id).into(),
-                        name,
+                        *name,
                         args.iter().map(|(_, p)| *p).collect(),
                     );
                     PatternUnit::Constructor {
-                        name,
+                        name: *name,
                         id: *id,
                         args,
                     }
                 }
                 Binder(name, d, _) => {
                     local_variables.insert(VariableId::Decl(*d), type_pointer);
-                    PatternUnit::Binder(name, *d)
+                    PatternUnit::Binder(*name, *d)
                 }
                 Underscore => PatternUnit::Underscore,
                 TypeRestriction(_, _) => unimplemented!(),
@@ -865,11 +863,11 @@ impl<'a, 'b> VariableMemo<'a, 'b> {
     }
 }
 
-fn make_constructor_type<'a>(
+fn make_constructor_type(
     field_len: usize,
-    name: &'a str,
+    name: Name,
     id: TypeId,
-    map: &mut PaddedTypeMap<'a>,
+    map: &mut PaddedTypeMap,
 ) -> TypePointer {
     let r = map.new_pointer();
     let mut args = Vec::new();
@@ -886,7 +884,7 @@ fn make_constructor_type<'a>(
     f
 }
 
-impl Display for Type<'_> {
+impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0.len() {
             0 => write!(f, "∅"),
@@ -896,7 +894,7 @@ impl Display for Type<'_> {
     }
 }
 
-impl Display for TypeUnit<'_> {
+impl Display for TypeUnit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TypeUnit::Normal { name, args, .. } => {
@@ -921,11 +919,11 @@ impl Display for TypeUnit<'_> {
     }
 }
 
-fn unify_type_with_ast_sep2_type<'a>(
+fn unify_type_with_ast_sep2_type(
     t: &ast_step2::types::Type,
     p: TypePointer,
-    map: &mut PaddedTypeMap<'a>,
-    type_names: &'a FxHashMap<TypeId, String>,
+    map: &mut PaddedTypeMap,
+    type_names: &FxHashMap<TypeId, Name>,
 ) {
     for t in t.iter() {
         use ast_step2::types::TypeUnit::*;
@@ -941,29 +939,29 @@ fn unify_type_with_ast_sep2_type<'a>(
                 for a in a.iter() {
                     if let Const { id } = &**a {
                         unify_type_with_tuple(b, &args, map, type_names);
-                        map.insert_normal(
-                            p,
-                            *id,
-                            &type_names[id],
-                            args.clone(),
-                        );
+                        map.insert_normal(p, *id, type_names[id], args.clone());
                     } else {
                         panic!()
                     }
                 }
             }
-            Const { .. } | RecursiveAlias { .. } | Variable(_) => {
+            Const { .. }
+            | RecursiveAlias { .. }
+            | Variable(_)
+            | TypeLevelApply { .. }
+            | TypeLevelFn(_)
+            | Restrictions { .. } => {
                 unimplemented!()
             }
         }
     }
 }
 
-fn unify_type_with_tuple<'a>(
+fn unify_type_with_tuple(
     t: &ast_step2::types::Type,
     ps: &[TypePointer],
-    map: &mut PaddedTypeMap<'a>,
-    type_names: &'a FxHashMap<TypeId, String>,
+    map: &mut PaddedTypeMap,
+    type_names: &FxHashMap<TypeId, Name>,
 ) {
     for t in t.iter() {
         match &**t {
