@@ -75,7 +75,7 @@ pub fn type_check(
             resolved_idents: Default::default(),
             decl_id: VariableId::IntrinsicVariable(v),
             name: Name::from_str(v.to_str()),
-            implicit_parameter_len: 0,
+            implicit_parameter_names: Default::default(),
             variable_kind: VariableKind::Intrinsic,
             fixed_parameters: Default::default(),
         });
@@ -87,7 +87,7 @@ pub fn type_check(
             resolved_idents: Default::default(),
             decl_id: VariableId::IntrinsicConstructor(v),
             name: Name::from_str(v.to_str()),
-            implicit_parameter_len: 0,
+            implicit_parameter_names: Default::default(),
             variable_kind: VariableKind::IntrinsicConstructor,
             fixed_parameters: Default::default(),
         });
@@ -100,7 +100,7 @@ pub fn type_check(
             resolved_idents: Default::default(),
             decl_id: VariableId::Decl(d.decl_id),
             name: d.name,
-            implicit_parameter_len: 0,
+            implicit_parameter_names: Default::default(),
             variable_kind: VariableKind::Constructor,
             fixed_parameters: Default::default(),
         });
@@ -186,10 +186,15 @@ pub fn type_check(
             resolved_idents: Default::default(),
             decl_id: VariableId::Decl(d.decl_id),
             name: d.name,
-            implicit_parameter_len: d
+            implicit_parameter_names: d
                 .type_annotation
                 .as_ref()
-                .map(|ann| ann.implicit_parameters.len())
+                .map(|ann| {
+                    ann.implicit_parameters
+                        .iter()
+                        .map(|(name, _, _)| *name)
+                        .collect()
+                })
                 .unwrap_or_default(),
             variable_kind: VariableKind::Global,
             fixed_parameters: d
@@ -318,7 +323,7 @@ struct Toplevel {
     resolved_idents: FxHashMap<IdentId, VariableId>,
     decl_id: VariableId,
     name: Name,
-    implicit_parameter_len: usize,
+    implicit_parameter_names: Vec<Name>,
     variable_kind: VariableKind,
     fixed_parameters: FxHashMap<TypeUnit, Name>,
 }
@@ -673,16 +678,11 @@ fn resolve_scc(
     // The order of resolving is important.
     // Requirements that are easier to solve should be solved earlier.
     variable_requirements.sort_unstable_by_key(|req| {
-        (
-            !names_in_scc.contains(&req.name),
-            resolved_variable_map.get(&req.name).map(|v| {
-                Reverse(
-                    v.iter()
-                        .map(|d| d.implicit_parameter_len + 1)
-                        .sum::<usize>(),
-                )
-            }),
-        )
+        Reverse(difficulty_of_resolving(
+            req.name,
+            &names_in_scc,
+            resolved_variable_map,
+        ))
     });
     let mut unresolved_type = TypeWithEnv {
         constructor: SccTypeConstructor(types),
@@ -799,6 +799,94 @@ fn resolve_scc(
     )
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct Difficulty {
+    same_scc: bool,
+    implicit_parameters_are_recurring: bool,
+    number_of_candidates: usize,
+    diff_of_implicit_parameter_required_by_candidates: Option<Box<Difficulty>>,
+}
+
+fn difficulty_of_resolving(
+    req_name: Name,
+    names_in_scc: &FxHashSet<Name>,
+    resolved_variable_map: &FxHashMap<Name, Vec<Toplevel>>,
+) -> Difficulty {
+    fn difficulty_of_resolving_rec(
+        req_name: Name,
+        names_in_scc: &FxHashSet<Name>,
+        resolved_variable_map: &FxHashMap<Name, Vec<Toplevel>>,
+        mut visited_names: FxHashSet<Name>,
+    ) -> Difficulty {
+        let implicit_parameters_are_recurring =
+            visited_names.contains(&req_name);
+        visited_names.insert(req_name);
+        Difficulty {
+            same_scc: names_in_scc.contains(&req_name),
+            implicit_parameters_are_recurring,
+            diff_of_implicit_parameter_required_by_candidates:
+                if implicit_parameters_are_recurring {
+                    None
+                } else {
+                    resolved_variable_map
+                        .get(&req_name)
+                        .and_then(|v| {
+                            v.iter()
+                                .flat_map(|d| {
+                                    d.implicit_parameter_names.iter().map(
+                                        |name| {
+                                            difficulty_of_resolving_rec(
+                                                *name,
+                                                names_in_scc,
+                                                resolved_variable_map,
+                                                visited_names.clone(),
+                                            )
+                                        },
+                                    )
+                                })
+                                .max()
+                        })
+                        .map(Box::new)
+                },
+            number_of_candidates: resolved_variable_map
+                .get(&req_name)
+                .map(|v| v.len())
+                .unwrap_or_default(),
+        }
+    }
+    difficulty_of_resolving_rec(
+        req_name,
+        names_in_scc,
+        resolved_variable_map,
+        FxHashSet::default(),
+    )
+}
+
+impl Ord for Difficulty {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (
+            self.same_scc,
+            self.implicit_parameters_are_recurring,
+            self.number_of_candidates != 0,
+            &self.diff_of_implicit_parameter_required_by_candidates,
+            self.number_of_candidates,
+        )
+            .cmp(&(
+                other.same_scc,
+                other.implicit_parameters_are_recurring,
+                other.number_of_candidates != 0,
+                &other.diff_of_implicit_parameter_required_by_candidates,
+                other.number_of_candidates,
+            ))
+    }
+}
+
+impl PartialOrd for Difficulty {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 struct SatisfiedType<T> {
     type_of_satisfied_variable: Type,
     id_of_satisfied_variable: VariableId,
@@ -897,6 +985,7 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                 candidate.type_with_env
             };
             let mut map = map.clone();
+            log::debug!("req: {}", req.required_type);
             log::debug!("~~ {} : {}", candidate.name, cand_t);
             let mut implicit_args = Vec::new();
             let mut resolved_implicit_args = FxHashMap::default();
