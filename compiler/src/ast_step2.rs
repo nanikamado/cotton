@@ -607,7 +607,8 @@ impl TypeId {
     fn get(name: Name, data_decl_map: &FxHashMap<Name, DeclId>) -> TypeId {
         if let Some(id) = data_decl_map.get(&name) {
             TypeId::DeclId(*id)
-        } else if let Some(i) = INTRINSIC_TYPES.get(&name.as_str().as_str()) {
+        } else if let Some(i) = INTRINSIC_TYPES.get(&name.to_string().as_str())
+        {
             TypeId::Intrinsic(*i)
         } else {
             panic!("{:?} not fould", name)
@@ -623,7 +624,7 @@ impl ConstructorId {
         if let Some(id) = data_decl_map.get(&name) {
             ConstructorId::DeclId(*id)
         } else if let Some(i) =
-            INTRINSIC_CONSTRUCTORS.get(name.as_str().as_str())
+            INTRINSIC_CONSTRUCTORS.get(name.to_string().as_str())
         {
             ConstructorId::Intrinsic(*i)
         } else {

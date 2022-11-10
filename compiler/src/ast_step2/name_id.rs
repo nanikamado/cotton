@@ -16,16 +16,6 @@ impl Name {
     pub fn from_str(name: &str) -> Self {
         NAME_MAP.write().unwrap().get_name_id(name)
     }
-
-    pub fn as_str(self) -> String {
-        NAME_MAP
-            .read()
-            .unwrap()
-            .from_name
-            .get(&self)
-            .unwrap()
-            .clone()
-    }
 }
 
 static NAME_COUNT: std::sync::Mutex<u32> = std::sync::Mutex::new(0);

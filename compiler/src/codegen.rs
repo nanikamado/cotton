@@ -50,7 +50,7 @@ pub fn codegen(ast: Ast) -> String {
 }
 
 fn data_decl(d: DataDecl) -> String {
-    let name = convert_name(&d.name.as_str());
+    let name = convert_name(&d.name.to_string());
     format!(
         "let ${}${}={}({{name:'${}${}',{}}});",
         d.decl_id,
@@ -66,7 +66,7 @@ fn variable_decl(d: &VariableDecl) -> String {
     format!(
         "let ${}${}={};",
         d.decl_id,
-        convert_name(&d.name.as_str()),
+        convert_name(&d.name.to_string()),
         expr(&d.value, 0)
     )
 }
@@ -125,7 +125,7 @@ fn expr((e, t): &ExprWithType, name_count: u32) -> String {
             format!(
                 "${}${} /* ({}) */",
                 variable_id,
-                convert_name(info.as_str().as_str()),
+                convert_name(info.to_string().as_str()),
                 info,
             )
         }
@@ -192,7 +192,7 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
                         let mut v = vec![format!(
                             "'${}${}'==={}.name",
                             id,
-                            convert_name(&name.as_str()),
+                            convert_name(&name.to_string()),
                             n
                         )];
                         v.append(&mut _condition(
