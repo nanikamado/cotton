@@ -5,6 +5,7 @@ mod ast_step3;
 mod ast_step4;
 mod ast_step5;
 mod codegen;
+mod errors;
 mod intrinsics;
 mod print_types;
 mod run_js;
@@ -20,6 +21,7 @@ pub use ast_step2::{
 };
 use ast_step3::{GlobalVariableType, LocalVariableType, VariableId};
 use codegen::codegen;
+use errors::CompileError;
 pub use fxhash::FxHashMap;
 pub use parser::token_id::TokenId;
 pub use parser::{lex, parse::parse, parse::parse_result, Token};
@@ -39,7 +41,11 @@ pub enum Command {
     PrintTypes,
 }
 
-pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
+pub fn run(
+    source: &str,
+    command: Command,
+    loglevel: LevelFilter,
+) -> Result<(), CompileError> {
     TermLogger::init(
         loglevel,
         ConfigBuilder::new()
@@ -75,7 +81,7 @@ pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
     let ast = parser::parse::parse(tokens, source, src_len);
     let (ast, _) = ast_step1::Ast::from(&ast);
     let (ast, _token_map) = ast_step2::Ast::from(ast);
-    let (ast, _resolved_idents) = ast_step3::Ast::from(ast);
+    let (ast, _resolved_idents) = ast_step3::Ast::from(ast)?;
     if command == Command::PrintTypes {
         print_types::print(&ast);
     } else {
@@ -95,6 +101,7 @@ pub fn run(source: &str, command: Command, loglevel: LevelFilter) {
             }
         }
     }
+    Ok(())
 }
 
 pub enum TokenKind {
@@ -111,10 +118,12 @@ pub struct TokenMapWithEnv<'a> {
     pub op_precedence_map: OpPrecedenceMap<'a>,
 }
 
-pub fn get_token_map(ast: &parser::Ast) -> TokenMapWithEnv {
+pub fn get_token_map(
+    ast: &parser::Ast,
+) -> Result<TokenMapWithEnv, CompileError> {
     let (ast, op_precedence_map) = ast_step1::Ast::from(ast);
     let (ast, token_map) = ast_step2::Ast::from(ast);
-    let (ast, resolved_idents) = ast_step3::Ast::from(ast);
+    let (ast, resolved_idents) = ast_step3::Ast::from(ast)?;
     let token_map = token_map
         .0
         .into_iter()
@@ -218,8 +227,8 @@ pub fn get_token_map(ast: &parser::Ast) -> TokenMapWithEnv {
             (id, t)
         })
         .collect();
-    TokenMapWithEnv {
+    Ok(TokenMapWithEnv {
         token_map,
         op_precedence_map,
-    }
+    })
 }

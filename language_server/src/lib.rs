@@ -198,7 +198,7 @@ fn semantic_tokens_from_src(src: &str) -> Option<(SemanticTokens, HoverMap)> {
     let TokenMapWithEnv {
         token_map,
         op_precedence_map,
-    } = compiler::get_token_map(&ast);
+    } = compiler::get_token_map(&ast).ok()?;
     let mut tokens = Vec::new();
     let mut line = 0;
     let mut start = 0;

@@ -1,20 +1,22 @@
 mod type_check;
 pub mod type_util;
 
-use self::type_check::ResolvedIdent;
 pub use self::type_check::{
-    simplify_subtype_rel, type_check, GlobalVariableType, LocalVariableType,
-    ResolvedIdents, TypeVariableMap, VariableId, VariableRequirement,
+    simplify_subtype_rel, GlobalVariableType, LocalVariableType,
+    TypeVariableMap, VariableId, VariableRequirement,
 };
+use self::type_check::{type_check, ResolvedIdent, TypeCheckResult};
 use crate::{
     ast_step2::{
         self,
         decl_id::DeclId,
+        ident_id::IdentId,
         name_id::Name,
         types::{Type, TypeUnit, TypeVariable},
         Pattern, PatternUnit, TypeConstructor,
     },
     ast_step4::VariableKind,
+    errors::CompileError,
 };
 use fxhash::FxHashMap;
 
@@ -67,26 +69,27 @@ pub struct DataDecl {
 }
 
 impl Ast {
-    pub fn from(ast: ast_step2::Ast) -> (Self, ResolvedIdents) {
-        let (
+    pub fn from(
+        ast: ast_step2::Ast,
+    ) -> Result<(Self, FxHashMap<IdentId, ResolvedIdent>), CompileError> {
+        let TypeCheckResult {
             resolved_idents,
-            types_of_global_decls,
-            mut types_of_local_decls,
-            _subtype_relations,
-            mut map,
-        ) = type_check(&ast);
+            global_variable_types,
+            mut local_variable_types,
+            type_variable_map: mut map,
+        } = type_check(&ast)?;
         let (variable_decl, entry_point) = variable_decl(
             ast.variable_decl,
             ast.entry_point,
             &resolved_idents,
             &mut map,
-            &mut types_of_local_decls,
+            &mut local_variable_types,
         );
         for v in &variable_decl {
             log::debug!(
                 "type_ {} : {}",
                 v.name,
-                types_of_global_decls[&VariableId::Decl(v.decl_id)].t
+                global_variable_types[&VariableId::Decl(v.decl_id)].t
             );
         }
         let data_decl = ast
@@ -98,23 +101,23 @@ impl Ast {
                 decl_id: d.decl_id,
             })
             .collect();
-        (
+        Ok((
             Self {
                 variable_decl,
                 data_decl,
                 entry_point,
-                types_of_global_decls,
-                types_of_local_decls,
+                types_of_global_decls: global_variable_types,
+                types_of_local_decls: local_variable_types,
             },
             resolved_idents,
-        )
+        ))
     }
 }
 
 fn variable_decl(
     variable_decls: Vec<ast_step2::VariableDecl>,
     entry_point: DeclId,
-    resolved_idents: &ResolvedIdents,
+    resolved_idents: &FxHashMap<IdentId, ResolvedIdent>,
     map: &mut TypeVariableMap,
     types_of_decls: &mut FxHashMap<VariableId, LocalVariableType>,
 ) -> (Vec<VariableDecl>, DeclId) {
@@ -158,7 +161,7 @@ fn variable_decl(
 
 fn expr(
     (e, t): ast_step2::ExprWithType<TypeVariable>,
-    resolved_idents: &ResolvedIdents,
+    resolved_idents: &FxHashMap<IdentId, ResolvedIdent>,
     map: &mut TypeVariableMap,
 ) -> ExprWithType {
     let e = match e {

@@ -4,7 +4,7 @@
 infixl 10 .
 
 data O
-data S(N)
+data S(N) forall { N }
 
 type Even = O | S[Odd]
 type Odd = S[Even]
