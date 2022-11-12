@@ -156,7 +156,7 @@ impl TypeVariableMap {
         use TypeMatchableRef::*;
         let (key, value) = match (key.matchable_ref(), value.matchable_ref()) {
             (Variable(key), Variable(value)) => {
-                if value < key {
+                if key < value {
                     (value, TypeUnit::Variable(key).into())
                 } else {
                     (key, TypeUnit::Variable(value).into())

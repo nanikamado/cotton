@@ -15,16 +15,17 @@ pub struct VariableDecl {
     pub name: StringWithId,
     pub type_annotation: Option<(Type, Forall)>,
     pub expr: Expr,
+    pub span: Span,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum OpSequenceUnit<T> {
     Operand(T),
-    Op(StringWithId),
+    Op(StringWithId, Span),
     Apply(Vec<OpSequenceUnit<T>>),
 }
 
-pub type Expr = Vec<OpSequenceUnit<ExprUnit>>;
+pub type Expr = Vec<OpSequenceUnit<(ExprUnit, Span)>>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ExprUnit {
@@ -44,7 +45,7 @@ pub enum TypeUnit {
 }
 
 pub type StringWithId = (String, Option<TokenId>);
-pub type Type = Vec<OpSequenceUnit<TypeUnit>>;
+pub type Type = Vec<OpSequenceUnit<(TypeUnit, Span)>>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PatternUnit {
@@ -54,7 +55,7 @@ pub enum PatternUnit {
     Underscore,
 }
 
-pub type Pattern = Vec<OpSequenceUnit<PatternUnit>>;
+pub type Pattern = Vec<OpSequenceUnit<(PatternUnit, Span)>>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FnArm {
@@ -138,37 +139,57 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         just(Token::Paren('(')).or(just(Token::OpenParenWithoutPad));
     let ident_or_op =
         ident.or(op.delimited_by(open_paren.clone(), just(Token::Paren(')'))));
-    let pattern = recursive(|pattern| {
-        let constructor_pattern = ident
-            .then(
-                pattern
-                    .separated_by(just(Token::Comma))
-                    .allow_trailing()
-                    .delimited_by(open_paren.clone(), just(Token::Paren(')')))
-                    .or_not(),
-            )
-            .map(|((name, id), args)| {
-                PatternUnit::Ident((name, Some(id)), args.unwrap_or_default())
-            });
-        let pattern_unit = constructor_pattern
-            .or(underscore.map(|_| PatternUnit::Underscore))
-            .or(int.map(PatternUnit::Int))
-            .or(str.map(PatternUnit::Str));
-        pattern_unit
-            .clone()
-            .then(
-                op.then(pattern_unit.clone())
-                    .map(|((s, id), e)| {
-                        vec![
-                            OpSequenceUnit::Op((s, Some(id))),
-                            OpSequenceUnit::Operand(e),
-                        ]
-                    })
-                    .repeated()
-                    .flatten(),
-            )
-            .map(|(e, oes)| [vec![OpSequenceUnit::Operand(e)], oes].concat())
-    });
+    let pattern = recursive(
+        |pattern: Recursive<
+            Token,
+            Vec<OpSequenceUnit<(PatternUnit, Span)>>,
+            _,
+        >| {
+            let constructor_pattern = ident
+                .then(
+                    pattern
+                        .separated_by(just(Token::Comma))
+                        .allow_trailing()
+                        .delimited_by(
+                            open_paren.clone(),
+                            just(Token::Paren(')')),
+                        )
+                        .or_not(),
+                )
+                .map(|((name, id), args)| {
+                    PatternUnit::Ident(
+                        (name, Some(id)),
+                        args.unwrap_or_default(),
+                    )
+                });
+            let pattern_unit = constructor_pattern
+                .or(underscore.map(|_| PatternUnit::Underscore))
+                .or(int.map(PatternUnit::Int))
+                .or(str.map(PatternUnit::Str));
+            pattern_unit
+                .clone()
+                .map_with_span(|p, s: Span| (p, s))
+                .then(
+                    op.map_with_span(|op, span: Span| (op, span))
+                        .then(
+                            pattern_unit
+                                .clone()
+                                .map_with_span(|p, s: Span| (p, s)),
+                        )
+                        .map(|(((s, id), s_span), (e, e_span))| {
+                            vec![
+                                OpSequenceUnit::Op((s, Some(id)), s_span),
+                                OpSequenceUnit::Operand((e, e_span)),
+                            ]
+                        })
+                        .repeated()
+                        .flatten(),
+                )
+                .map(|((e, e_span), oes)| {
+                    [vec![OpSequenceUnit::Operand((e, e_span))], oes].concat()
+                })
+        },
+    );
     let patterns = pattern
         .separated_by(just(Token::Comma))
         .allow_trailing()
@@ -198,33 +219,45 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 })
                 .collect(),
         });
-    let type_ = recursive(|type_| {
-        let type_unit =
-            ident.map(|(s, id)| TypeUnit::Ident((s, Some(id)))).or(type_
+    let type_ = recursive(
+        |type_: Recursive<Token, Vec<OpSequenceUnit<(TypeUnit, Span)>>, _>| {
+            let type_unit =
+                ident.map(|(s, id)| TypeUnit::Ident((s, Some(id)))).or(type_
+                    .clone()
+                    .delimited_by(open_paren.clone(), just(Token::Paren(')')))
+                    .map(TypeUnit::Paren));
+            let apply = type_
+                .separated_by(just(Token::Comma))
+                .at_least(1)
+                .allow_trailing()
+                .delimited_by(just(Token::Paren('[')), just(Token::Paren(']')))
+                .map(|es| es.into_iter().map(OpSequenceUnit::Apply).collect());
+            type_unit
                 .clone()
-                .delimited_by(open_paren.clone(), just(Token::Paren(')')))
-                .map(TypeUnit::Paren));
-        let apply = type_
-            .separated_by(just(Token::Comma))
-            .at_least(1)
-            .allow_trailing()
-            .delimited_by(just(Token::Paren('[')), just(Token::Paren(']')))
-            .map(|es| es.into_iter().map(OpSequenceUnit::Apply).collect());
-        type_unit
-            .clone()
-            .then(
-                op.map(|(s, id)| (s, Some(id)))
-                    .or(just(Token::Bar).map(|_| ("|".to_string(), None)))
-                    .then(type_unit.clone())
-                    .map(|(o, e)| {
-                        vec![OpSequenceUnit::Op(o), OpSequenceUnit::Operand(e)]
-                    })
-                    .or(apply)
-                    .repeated()
-                    .flatten(),
-            )
-            .map(|(e, oes)| [vec![OpSequenceUnit::Operand(e)], oes].concat())
-    });
+                .map_with_span(|t, s: Span| (t, s))
+                .then(
+                    op.map_with_span(|(s, id), span: Span| (s, Some(id), span))
+                        .or(just(Token::Bar).map_with_span(|_, span| {
+                            ("|".to_string(), None, span)
+                        }))
+                        .then(type_unit.clone())
+                        .map_with_span(
+                            |((o, o_token, o_span), e), span: Span| {
+                                vec![
+                                    OpSequenceUnit::Op((o, o_token), o_span),
+                                    OpSequenceUnit::Operand((e, span)),
+                                ]
+                            },
+                        )
+                        .or(apply)
+                        .repeated()
+                        .flatten(),
+                )
+                .map(|((e, e_span), oes)| {
+                    [vec![OpSequenceUnit::Operand((e, e_span))], oes].concat()
+                })
+        },
+    );
     let type_ = type_.then(forall.clone().or_not()).map(|(t, forall)| {
         (
             t,
@@ -234,75 +267,93 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         )
     });
     let variable_decl = recursive(|variable_decl| {
-        let expr = recursive(|expr| {
-            let lambda = just(Token::Bar)
-                .ignore_then(patterns)
-                .then_ignore(just(Token::BArrow))
-                .then(expr.clone())
-                .map(|(pattern, expr)| {
-                    let l = pattern.len();
-                    FnArm {
-                        pattern,
-                        expr,
-                        pattern_type: vec![None; l],
-                    }
-                });
-            let case = just(Token::Case)
-                .or_not()
-                .ignore_then(indented(lambda.clone().repeated().at_least(1)))
-                .map(ExprUnit::Case);
-            let do_ = just(Token::Do)
-                .ignore_then(indented(expr.clone().repeated()))
-                .map(ExprUnit::Do);
-            let expr_unit = do_
-                .or(case)
-                .or(int.map(ExprUnit::Int))
-                .or(str.map(ExprUnit::Str))
-                .or(variable_decl.map(ExprUnit::VariableDecl))
-                .or(ident_or_op
+        let expr = recursive(
+            |expr: Recursive<
+                Token,
+                Vec<OpSequenceUnit<(ExprUnit, Span)>>,
+                _,
+            >| {
+                let lambda = just(Token::Bar)
+                    .ignore_then(patterns)
+                    .then_ignore(just(Token::BArrow))
+                    .then(expr.clone())
+                    .map(|(pattern, expr)| {
+                        let l = pattern.len();
+                        FnArm {
+                            pattern,
+                            expr,
+                            pattern_type: vec![None; l],
+                        }
+                    });
+                let case = just(Token::Case)
+                    .or_not()
+                    .ignore_then(indented(
+                        lambda.clone().repeated().at_least(1),
+                    ))
+                    .map(ExprUnit::Case);
+                let do_ = just(Token::Do)
+                    .ignore_then(indented(expr.clone().repeated()))
+                    .map(ExprUnit::Do);
+                let expr_unit = do_
+                    .or(case)
+                    .or(int.map(ExprUnit::Int))
+                    .or(str.map(ExprUnit::Str))
+                    .or(variable_decl.map(ExprUnit::VariableDecl))
+                    .or(ident_or_op
+                        .clone()
+                        .map(|(s, id)| ExprUnit::Ident((s, Some(id)))))
+                    .or(lambda.map(|a| ExprUnit::Case(vec![a])))
+                    .or(expr
+                        .clone()
+                        .delimited_by(open_paren, just(Token::Paren(')')))
+                        .map(ExprUnit::Paren));
+                let apply = expr
+                    .separated_by(just(Token::Comma))
+                    .at_least(1)
+                    .allow_trailing()
+                    .delimited_by(
+                        just(Token::OpenParenWithoutPad),
+                        just(Token::Paren(')')),
+                    )
+                    .map(|es| {
+                        es.into_iter().map(OpSequenceUnit::Apply).collect()
+                    });
+                expr_unit
                     .clone()
-                    .map(|(s, id)| ExprUnit::Ident((s, Some(id)))))
-                .or(lambda.map(|a| ExprUnit::Case(vec![a])))
-                .or(expr
-                    .clone()
-                    .delimited_by(open_paren, just(Token::Paren(')')))
-                    .map(ExprUnit::Paren));
-            let apply = expr
-                .separated_by(just(Token::Comma))
-                .at_least(1)
-                .allow_trailing()
-                .delimited_by(
-                    just(Token::OpenParenWithoutPad),
-                    just(Token::Paren(')')),
-                )
-                .map(|es| es.into_iter().map(OpSequenceUnit::Apply).collect());
-            expr_unit
-                .clone()
-                .then(
-                    op.then(expr_unit.clone())
-                        .map(|((s, id), e)| {
-                            vec![
-                                OpSequenceUnit::Op((s, Some(id))),
-                                OpSequenceUnit::Operand(e),
-                            ]
-                        })
-                        .or(apply)
-                        .repeated()
-                        .flatten(),
-                )
-                .map(|(e, oes)| {
-                    [vec![OpSequenceUnit::Operand(e)], oes].concat()
-                })
-        });
+                    .then(
+                        op.map_with_span(|op, span: Span| (op, span))
+                            .then(
+                                expr_unit
+                                    .clone()
+                                    .map_with_span(|e, span| (e, span)),
+                            )
+                            .map(|(((s, id), s_span), (e, e_span))| {
+                                vec![
+                                    OpSequenceUnit::Op((s, Some(id)), s_span),
+                                    OpSequenceUnit::Operand((e, e_span)),
+                                ]
+                            })
+                            .or(apply)
+                            .repeated()
+                            .flatten(),
+                    )
+                    .map_with_span(|(e, oes), span: Span| {
+                        [vec![OpSequenceUnit::Operand((e, span))], oes].concat()
+                    })
+            },
+        );
         ident_or_op
             .clone()
             .then(just(Token::Colon).ignore_then(type_.clone()).or_not())
             .then_ignore(just(Token::Assign))
             .then(expr)
-            .map(|(((name, id), type_annotation), expr)| VariableDecl {
-                name: (name, Some(id)),
-                type_annotation,
-                expr,
+            .map_with_span(|(((name, id), type_annotation), expr), span| {
+                VariableDecl {
+                    name: (name, Some(id)),
+                    type_annotation,
+                    expr,
+                    span,
+                }
             })
     });
     let op_precedence_decl = just(Token::Infixl)

@@ -188,10 +188,11 @@ mod type_type {
         ast_step2::{types::unwrap_or_clone, SubtypeRelations},
         ast_step3::simplify_subtype_rel,
     };
+    use parser::token_id::TokenId;
     use std::{iter, rc::Rc, vec};
 
     #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-    pub struct Type(Vec<Rc<TypeUnit>>);
+    pub struct Type(Vec<Rc<TypeUnit>>, Option<TokenId>);
 
     impl IntoIterator for Type {
         type Item = Rc<TypeUnit>;
@@ -335,7 +336,7 @@ mod type_type {
                     already_considered_relations,
                 );
                 if let Some(t2) = t2 {
-                    self.insert(Rc::new(t2)); //
+                    self.insert(Rc::new(t2));
                 }
                 if let Some(u) = u {
                     self.push_tuple(u);
@@ -367,19 +368,20 @@ mod type_type {
                         ))
                     })
                     .collect(),
+                self.1,
             )
         }
     }
 
     impl From<TypeUnit> for Type {
         fn from(t: TypeUnit) -> Self {
-            Type(iter::once(Rc::new(t)).collect())
+            Type(iter::once(Rc::new(t)).collect(), None)
         }
     }
 
     impl From<Rc<TypeUnit>> for Type {
         fn from(t: Rc<TypeUnit>) -> Self {
-            Type(iter::once(t).collect())
+            Type(iter::once(t).collect(), None)
         }
     }
 

@@ -10,7 +10,7 @@ use self::{
     ident_id::IdentId,
     types::{Type, TypeUnit},
 };
-use crate::ast_step1::OpPrecedenceMap;
+use crate::ast_step1::{merge_span, OpPrecedenceMap};
 use crate::ast_step3::{GlobalVariableType, VariableRequirement};
 use crate::{
     ast_step1,
@@ -23,6 +23,7 @@ use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use parser::token_id::TokenId;
+use parser::Span;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use tracing_mutex::stdsync::TracingRwLock as RwLock;
@@ -107,7 +108,7 @@ pub struct PrintTypeOfLocalVariableForUser<'a> {
 pub struct VariableDecl {
     pub name: Name,
     pub type_annotation: Option<Annotation>,
-    pub value: ExprWithType<TypeVariable>,
+    pub value: ExprWithTypeAndSpan<TypeVariable>,
     pub decl_id: DeclId,
 }
 
@@ -119,7 +120,7 @@ pub struct Annotation {
     pub fixed_parameter_names: FxHashMap<TypeUnit, Name>, // pub implicit_type_parameters: Vec<Name>,
 }
 
-pub type ExprWithType<T> = (Expr<T>, T);
+pub type ExprWithTypeAndSpan<T> = (Expr<T>, T, Span);
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr<T> {
@@ -127,14 +128,14 @@ pub enum Expr<T> {
     Number(Name),
     StrLiteral(Name),
     Ident { name: Name, ident_id: IdentId },
-    Call(Box<ExprWithType<T>>, Box<ExprWithType<T>>),
-    Do(Vec<ExprWithType<T>>),
+    Call(Box<ExprWithTypeAndSpan<T>>, Box<ExprWithTypeAndSpan<T>>),
+    Do(Vec<ExprWithTypeAndSpan<T>>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FnArm<T> {
     pub pattern: Vec<Pattern<T>>,
-    pub expr: ExprWithType<T>,
+    pub expr: ExprWithTypeAndSpan<T>,
 }
 
 /// Represents a multi-case pattern which matches if any of the `PatternUnit` in it matches.
@@ -432,15 +433,16 @@ fn variable_decl(
 }
 
 fn expr(
-    e: ast_step1::Expr,
+    e: ast_step1::ExprWithSpan,
     data_decl_map: &FxHashMap<Name, DeclId>,
     type_variable_names: &FxHashMap<Name, TypeVariable>,
     type_alias_map: &mut TypeAliasMap,
     interfaces: &FxHashMap<Name, Vec<(Name, Type, TypeVariable)>>,
     token_map: &mut TokenMap,
-) -> ExprWithType<TypeVariable> {
+) -> ExprWithTypeAndSpan<TypeVariable> {
     use Expr::*;
-    let e = match e {
+    let span = e.1;
+    let e = match e.0 {
         ast_step1::Expr::Lambda(arms) => Lambda(
             arms.into_iter()
                 .map(move |arm| {
@@ -496,10 +498,12 @@ fn expr(
         ),
         ast_step1::Expr::Do(es) => {
             let mut new_es = Vec::new();
+            let mut es_span = 0..0;
             for e in es.into_iter().rev() {
-                new_es = add_expr_in_do(
+                (new_es, es_span) = add_expr_in_do(
                     e,
                     new_es,
+                    es_span,
                     data_decl_map,
                     type_variable_names,
                     type_alias_map,
@@ -511,20 +515,22 @@ fn expr(
             Do(new_es)
         }
     };
-    (e, TypeVariable::new())
+    (e, TypeVariable::new(), span)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_expr_in_do(
-    e: ast_step1::Expr,
-    mut es: Vec<ExprWithType<TypeVariable>>,
+    e: ast_step1::ExprWithSpan,
+    mut es: Vec<ExprWithTypeAndSpan<TypeVariable>>,
+    es_span: Span,
     data_decl_map: &FxHashMap<Name, DeclId>,
     type_variable_names: &FxHashMap<Name, TypeVariable>,
     type_alias_map: &mut TypeAliasMap,
     interfaces: &FxHashMap<Name, Vec<(Name, Type, TypeVariable)>>,
     token_map: &mut TokenMap,
-) -> Vec<ExprWithType<TypeVariable>> {
+) -> (Vec<ExprWithTypeAndSpan<TypeVariable>>, Span) {
     match e {
-        ast_step1::Expr::Decl(d) => {
+        (ast_step1::Expr::Decl(d), d_span) => {
             let d = variable_decl(
                 *d,
                 data_decl_map,
@@ -534,16 +540,20 @@ fn add_expr_in_do(
                 token_map,
             );
             if es.is_empty() {
-                vec![
-                    (
-                        Expr::Ident {
-                            name: Name::from_str("()"),
-                            ident_id: IdentId::new(),
-                        },
-                        TypeVariable::new(),
-                    ),
-                    d.value,
-                ]
+                (
+                    vec![
+                        (
+                            Expr::Ident {
+                                name: Name::from_str("()"),
+                                ident_id: IdentId::new(),
+                            },
+                            TypeVariable::new(),
+                            d_span.clone(),
+                        ),
+                        d.value,
+                    ],
+                    d_span,
+                )
             } else {
                 es.reverse();
                 let l = Expr::Lambda(vec![FnArm {
@@ -553,18 +563,23 @@ fn add_expr_in_do(
                         TypeVariable::new(),
                     )
                     .into()],
-                    expr: (Expr::Do(es), TypeVariable::new()),
+                    expr: (Expr::Do(es), TypeVariable::new(), es_span.clone()),
                 }]);
-                vec![(
-                    Expr::Call(
-                        Box::new((l, TypeVariable::new())),
-                        Box::new(d.value),
-                    ),
-                    TypeVariable::new(),
-                )]
+                (
+                    vec![(
+                        Expr::Call(
+                            Box::new((l, TypeVariable::new(), d_span.clone())),
+                            Box::new(d.value),
+                        ),
+                        TypeVariable::new(),
+                        d_span.clone(),
+                    )],
+                    merge_span(&es_span, &d_span),
+                )
             }
         }
         e => {
+            let e_span = e.1.clone();
             es.push(expr(
                 e,
                 data_decl_map,
@@ -573,7 +588,7 @@ fn add_expr_in_do(
                 interfaces,
                 token_map,
             ));
-            es
+            (es, merge_span(&es_span, &e_span))
         }
     }
 }

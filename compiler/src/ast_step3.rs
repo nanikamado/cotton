@@ -160,7 +160,7 @@ fn variable_decl(
 }
 
 fn expr(
-    (e, t): ast_step2::ExprWithType<TypeVariable>,
+    (e, t, _): ast_step2::ExprWithTypeAndSpan<TypeVariable>,
     resolved_idents: &FxHashMap<IdentId, ResolvedIdent>,
     map: &mut TypeVariableMap,
 ) -> ExprWithType {

@@ -9,9 +9,9 @@ use crate::{
         name_id::Name,
         types::{self, SingleTypeConstructor, TypeMatchable},
         types::{Type, TypeUnit, TypeVariable},
-        Ast, DataDecl, Expr, ExprWithType, FnArm, Pattern, PatternRestrictions,
-        PatternUnit, PatternUnitForRestriction, SubtypeRelations, TypeId,
-        TypeWithEnv,
+        Ast, DataDecl, Expr, ExprWithTypeAndSpan, FnArm, Pattern,
+        PatternRestrictions, PatternUnit, PatternUnitForRestriction,
+        SubtypeRelations, TypeId, TypeWithEnv,
     },
     ast_step4::VariableKind,
     errors::CompileError,
@@ -1217,7 +1217,7 @@ fn constructor_type(d: DataDecl) -> TypeUnit {
 }
 
 fn min_type_with_env(
-    (expr, type_variable): &ExprWithType<TypeVariable>,
+    (expr, type_variable, _span): &ExprWithTypeAndSpan<TypeVariable>,
     subtype_relations: &mut SubtypeRelations,
     map: &mut TypeVariableMap,
 ) -> (ast_step2::TypeWithEnv, Resolved, TypesOfLocalDeclsVec) {
