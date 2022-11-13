@@ -103,7 +103,7 @@ fn mutal_recursive_type_alias() {
 
 #[test]
 fn list_fail() {
-    test_test("list_fail.cot").failure();
+    test_test("list_fail.cot").code(1);
 }
 
 #[test]
@@ -114,7 +114,7 @@ fn list_without_types() {
 
 #[test]
 fn mutual_recursive_type_alias_fail() {
-    test_test("mutual_recursive_type_alias_fail.cot").failure();
+    test_test("mutual_recursive_type_alias_fail.cot").code(1);
 }
 
 #[test]
@@ -129,7 +129,7 @@ fn red_black_tree() {
 
 #[test]
 fn to_string_fail() {
-    test_test("to_string.cot").failure();
+    test_test("to_string.cot").code(1);
 }
 
 #[test]
@@ -149,12 +149,12 @@ fn red_black_tree_strongly_typed() {
 
 #[test]
 fn red_black_tree_strongly_typed_fail1() {
-    test_test("red_black_tree_strongly_typed_fail1.cot").failure();
+    test_test("red_black_tree_strongly_typed_fail1.cot").code(1);
 }
 
 #[test]
 fn red_black_tree_strongly_typed_fail2() {
-    test_test("red_black_tree_strongly_typed_fail2.cot").failure();
+    test_test("red_black_tree_strongly_typed_fail2.cot").code(1);
 }
 
 #[test]
@@ -176,7 +176,7 @@ fn tuple_infer() {
 
 #[test]
 fn tuple_infer_fail() {
-    test_test("tuple_infer_fail.cot").failure();
+    test_test("tuple_infer_fail.cot").code(1);
 }
 
 #[test]
