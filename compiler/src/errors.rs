@@ -1,6 +1,9 @@
-use crate::ast_step2::{name_id::Name, types::Type};
+use crate::{
+    ast_step2::{name_id::Name, types::Type},
+    OpPrecedenceMap, PrintTypeOfLocalVariableForUser,
+};
 use ariadne::{Label, Report, ReportKind, Source};
-use colored::Colorize;
+use colored::{ColoredString, Colorize};
 use itertools::Itertools;
 use parser::Span;
 use std::{fmt::Display, io::Write};
@@ -31,13 +34,14 @@ impl CompileError {
         src: &str,
         w: &mut W,
         filename: &str,
+        op_precedence_map: &OpPrecedenceMap,
     ) -> std::io::Result<()> {
         match self {
             CompileError::NoSuitableVariable { name, reason } => {
                 if reason.is_empty() {
                     write!(w, "{} not found", name)
                 } else if reason.len() == 1 {
-                    reason[0].write(src, w, filename)
+                    reason[0].write(src, w, filename, op_precedence_map)
                 } else {
                     writeln!(
                         w,
@@ -48,7 +52,7 @@ impl CompileError {
                         reason.len(),
                     )?;
                     for r in reason {
-                        r.write(src, w, filename)?;
+                        r.write(src, w, filename, op_precedence_map)?;
                     }
                     Ok(())
                 }
@@ -72,12 +76,16 @@ impl CompileError {
                             Label::new((filename, span.clone())).with_message(
                                 format!(
                                     "expected `{}` but found `{}`.",
-                                    super_type.to_string().bold(),
-                                    sub_type.to_string().bold(),
+                                    print_type(super_type, op_precedence_map),
+                                    print_type(sub_type, op_precedence_map),
                                 ),
                             ),
                         )
-                        .with_message(reason);
+                        .with_message(NotSubtypeReasonDisplay {
+                            reason,
+                            depth: 0,
+                            op_precedence_map,
+                        });
                 report.finish().write((filename, Source::from(src)), w)?;
                 Ok(())
             }
@@ -86,6 +94,16 @@ impl CompileError {
             }
         }
     }
+}
+
+fn print_type(t: &Type, op_precedence_map: &OpPrecedenceMap) -> ColoredString {
+    PrintTypeOfLocalVariableForUser {
+        t,
+        op_precedence_map,
+        type_variable_decls: &Default::default(),
+    }
+    .to_string()
+    .bold()
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -102,22 +120,10 @@ pub enum NotSubtypeReason {
     },
 }
 
-impl Display for NotSubtypeReason {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            NotSubtypeReasonDisplay {
-                reason: self,
-                depth: 0
-            }
-        )
-    }
-}
-
 struct NotSubtypeReasonDisplay<'a> {
     reason: &'a NotSubtypeReason,
     depth: usize,
+    op_precedence_map: &'a OpPrecedenceMap<'a>,
 }
 
 impl Display for NotSubtypeReasonDisplay<'_> {
@@ -131,10 +137,10 @@ impl Display for NotSubtypeReasonDisplay<'_> {
                 write!(
                     f,
                     "`{}` is not subtype of `{}`",
-                    left.to_string().bold(),
-                    right.to_string().bold()
+                    print_type(left, self.op_precedence_map),
+                    print_type(right, self.op_precedence_map)
                 )?;
-                fmt_reasons(reasons, f, self.depth)
+                fmt_reasons(reasons, f, self.depth, self.op_precedence_map)
             }
             NotSubtypeReason::NoIntersection {
                 left,
@@ -144,10 +150,10 @@ impl Display for NotSubtypeReasonDisplay<'_> {
                 write!(
                     f,
                     "`{}` and `{}` are disjoint",
-                    left.to_string().bold(),
-                    right.to_string().bold()
+                    print_type(left, self.op_precedence_map),
+                    print_type(right, self.op_precedence_map)
                 )?;
-                fmt_reasons(reasons, f, self.depth)
+                fmt_reasons(reasons, f, self.depth, self.op_precedence_map)
             }
         }
     }
@@ -157,6 +163,7 @@ fn fmt_reasons(
     reasons: &[NotSubtypeReason],
     f: &mut std::fmt::Formatter<'_>,
     depth: usize,
+    op_precedence_map: &OpPrecedenceMap,
 ) -> std::fmt::Result {
     match reasons.len() {
         0 => Ok(()),
@@ -166,7 +173,8 @@ fn fmt_reasons(
             " ".repeat(depth * 4),
             NotSubtypeReasonDisplay {
                 reason: &reasons[0],
-                depth
+                depth,
+                op_precedence_map
             }
         ),
         _ => write!(
@@ -180,13 +188,15 @@ fn fmt_reasons(
                     " ".repeat((depth + 1) * 4),
                     NotSubtypeReasonDisplay {
                         reason: r,
-                        depth: depth + 2
+                        depth: depth + 2,
+                        op_precedence_map
                     }
                 ))),
             " ".repeat((depth + 1) * 4),
             NotSubtypeReasonDisplay {
                 reason: reasons.last().unwrap(),
-                depth: depth + 2
+                depth: depth + 2,
+                op_precedence_map
             }
         ),
     }

@@ -1268,7 +1268,10 @@ fn fmt_type_unit_with_env(
             };
             (s, Fn)
         }
-        TypeUnit::Variable(v) => (v.to_string(), Single),
+        TypeUnit::Variable(TypeVariable::Normal(_)) => {
+            ("_".to_string(), Single)
+        }
+        TypeUnit::Variable(d) => (d.to_string(), Single),
         TypeUnit::RecursiveAlias { body } => (
             format!(
                 "rec[{}]",
@@ -1294,7 +1297,15 @@ fn fmt_type_unit_with_env(
                         type_variable_decls,
                     )
                 } else {
-                    panic!()
+                    (
+                        fmt_tuple_as_tuple(
+                            h,
+                            tuple_rev,
+                            op_precedence_map,
+                            type_variable_decls,
+                        ),
+                        OperatorContext::Single,
+                    )
                 }
             } else {
                 let t = format!(
@@ -1312,7 +1323,12 @@ fn fmt_type_unit_with_env(
                                 _ => f(&format_args!("({})", t)),
                             }
                         } else {
-                            panic!()
+                            f(&fmt_tuple_as_tuple(
+                                h,
+                                t,
+                                op_precedence_map,
+                                type_variable_decls,
+                            ))
                         }
                     })
                 );
@@ -1441,4 +1457,23 @@ fn collect_tuple_rev(tuple: &Type) -> Vec<Vec<&Type>> {
             _ => panic!(),
         })
         .collect()
+}
+
+fn fmt_tuple_as_tuple(
+    head: &TypeUnit,
+    tuple_rev: &[&Type],
+    op_precedence_map: &OpPrecedenceMap,
+    type_variable_decls: &FxHashMap<TypeUnit, Name>,
+) -> String {
+    format!(
+        "({}{})",
+        fmt_type_unit_with_env(head, op_precedence_map, type_variable_decls).0,
+        tuple_rev
+            .iter()
+            .rev()
+            .format_with("", |t, f| f(&format_args!(
+                ", {}",
+                fmt_type_with_env(t, op_precedence_map, type_variable_decls).0
+            )))
+    )
 }

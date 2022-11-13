@@ -43,9 +43,10 @@ pub enum Command {
 
 pub fn run(
     source: &str,
+    filename: &str,
     command: Command,
     loglevel: LevelFilter,
-) -> Result<(), CompileError> {
+) {
     TermLogger::init(
         loglevel,
         ConfigBuilder::new()
@@ -79,9 +80,21 @@ pub fn run(
     }
     let (tokens, src_len) = lex(source);
     let ast = parser::parse::parse(tokens, source, src_len);
-    let (ast, _) = ast_step1::Ast::from(&ast);
+    let (ast, op_precedence_map) = ast_step1::Ast::from(&ast);
     let (ast, _token_map) = ast_step2::Ast::from(ast);
-    let (ast, _resolved_idents) = ast_step3::Ast::from(ast)?;
+    let (ast, _resolved_idents) = match ast_step3::Ast::from(ast) {
+        Ok((ast, resolved_idents)) => (ast, resolved_idents),
+        Err(e) => {
+            e.write(
+                source,
+                &mut std::io::stderr(),
+                filename,
+                &op_precedence_map,
+            )
+            .unwrap();
+            process::exit(1)
+        }
+    };
     if command == Command::PrintTypes {
         print_types::print(&ast);
     } else {
@@ -101,7 +114,6 @@ pub fn run(
             }
         }
     }
-    Ok(())
 }
 
 pub enum TokenKind {
