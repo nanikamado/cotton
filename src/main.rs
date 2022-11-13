@@ -82,7 +82,7 @@ fn main() {
     match fs::read_to_string(file_name) {
         Ok(source) => {
             if let Err(e) = run(&source, command, loglevel) {
-                e.write(&source, &mut stderr()).unwrap();
+                e.write(&source, &mut stderr(), file_name).unwrap();
                 process::exit(1)
             }
         }

@@ -26,13 +26,18 @@ pub enum CompileError {
 }
 
 impl CompileError {
-    pub fn write<W: Write>(&self, src: &str, w: &mut W) -> std::io::Result<()> {
+    pub fn write<W: Write>(
+        &self,
+        src: &str,
+        w: &mut W,
+        filename: &str,
+    ) -> std::io::Result<()> {
         match self {
             CompileError::NoSuitableVariable { name, reason } => {
                 if reason.is_empty() {
                     write!(w, "{} not found", name)
                 } else if reason.len() == 1 {
-                    reason[0].write(src, w)
+                    reason[0].write(src, w, filename)
                 } else {
                     writeln!(
                         w,
@@ -43,7 +48,7 @@ impl CompileError {
                         reason.len(),
                     )?;
                     for r in reason {
-                        r.write(src, w)?;
+                        r.write(src, w, filename)?;
                     }
                     Ok(())
                 }
@@ -61,14 +66,19 @@ impl CompileError {
                 reason,
                 span,
             } => {
-                let report = Report::build(ReportKind::Error, (), 4)
-                    .with_label(Label::new(span.clone()).with_message(format!(
-                        "expected `{}` but found `{}`.",
-                        super_type.to_string().bold(),
-                        sub_type.to_string().bold(),
-                    )))
-                    .with_message(reason);
-                report.finish().write(Source::from(src), w)?;
+                let report =
+                    Report::build(ReportKind::Error, filename, span.start)
+                        .with_label(
+                            Label::new((filename, span.clone())).with_message(
+                                format!(
+                                    "expected `{}` but found `{}`.",
+                                    super_type.to_string().bold(),
+                                    sub_type.to_string().bold(),
+                                ),
+                            ),
+                        )
+                        .with_message(reason);
+                report.finish().write((filename, Source::from(src)), w)?;
                 Ok(())
             }
             CompileError::InexhaustiveMatch { description } => {
