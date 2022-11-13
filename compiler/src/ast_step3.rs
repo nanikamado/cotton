@@ -173,7 +173,9 @@ fn expr(
                         pattern: a
                             .pattern
                             .into_iter()
-                            .map(|p| normalize_types_in_pattern(p, map))
+                            .map(|(p, _span)| {
+                                normalize_types_in_pattern(p, map)
+                            })
                             .collect(),
                         expr: e,
                     }

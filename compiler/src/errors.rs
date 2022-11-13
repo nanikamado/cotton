@@ -1,6 +1,9 @@
 use crate::ast_step2::{name_id::Name, types::Type};
+use ariadne::{Label, Report, ReportKind, Source};
+use colored::Colorize;
 use itertools::Itertools;
-use std::fmt::Display;
+use parser::Span;
+use std::{fmt::Display, io::Write};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CompileError {
@@ -15,34 +18,38 @@ pub enum CompileError {
         sub_type: Type,
         super_type: Type,
         reason: NotSubtypeReason,
+        span: Span,
     },
     InexhaustiveMatch {
         description: String,
     },
 }
 
-impl Display for CompileError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl CompileError {
+    pub fn write<W: Write>(&self, src: &str, w: &mut W) -> std::io::Result<()> {
         match self {
             CompileError::NoSuitableVariable { name, reason } => {
                 if reason.is_empty() {
-                    write!(f, "{} not found", name)
+                    write!(w, "{} not found", name)
                 } else if reason.len() == 1 {
-                    write!(f, "{}", reason[0])
+                    reason[0].write(src, w)
                 } else {
-                    write!(
-                        f,
+                    writeln!(
+                        w,
                         "Can not find suitable variable for {}. \
                         There are {} candidates \
-                        but no one could be used because:\n{}",
+                        but no one could be used because:",
                         name,
                         reason.len(),
-                        reason.iter().format("\n")
-                    )
+                    )?;
+                    for r in reason {
+                        r.write(src, w)?;
+                    }
+                    Ok(())
                 }
             }
             CompileError::ManyCandidates { satisfied } => write!(
-                f,
+                w,
                 "There are {} candidates for one requirement: {}.\
                 Can not dicide which one to use.",
                 satisfied.len(),
@@ -52,15 +59,20 @@ impl Display for CompileError {
                 sub_type,
                 super_type,
                 reason,
+                span,
             } => {
-                write!(
-                    f,
-                    "expected `{}` but found `{}`. {}",
-                    super_type, sub_type, reason,
-                )
+                let report = Report::build(ReportKind::Error, (), 4)
+                    .with_label(Label::new(span.clone()).with_message(format!(
+                        "expected `{}` but found `{}`.",
+                        super_type.to_string().bold(),
+                        sub_type.to_string().bold(),
+                    )))
+                    .with_message(reason);
+                report.finish().write(Source::from(src), w)?;
+                Ok(())
             }
             CompileError::InexhaustiveMatch { description } => {
-                write!(f, "{}", description)
+                write!(w, "{}", description)
             }
         }
     }
@@ -106,7 +118,12 @@ impl Display for NotSubtypeReasonDisplay<'_> {
                 right,
                 reasons,
             } => {
-                write!(f, "`{left}` is not subtype of `{right}`",)?;
+                write!(
+                    f,
+                    "`{}` is not subtype of `{}`",
+                    left.to_string().bold(),
+                    right.to_string().bold()
+                )?;
                 fmt_reasons(reasons, f, self.depth)
             }
             NotSubtypeReason::NoIntersection {
@@ -114,7 +131,12 @@ impl Display for NotSubtypeReasonDisplay<'_> {
                 right,
                 reasons,
             } => {
-                write!(f, "`{left}` and `{right}` are disjoint",)?;
+                write!(
+                    f,
+                    "`{}` and `{}` are disjoint",
+                    left.to_string().bold(),
+                    right.to_string().bold()
+                )?;
                 fmt_reasons(reasons, f, self.depth)
             }
         }

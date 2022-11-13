@@ -25,8 +25,9 @@ pub struct Forall<'a> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VariableDecl<'a> {
     pub name: StrWithId<'a>,
-    pub type_annotation: Option<(Type<'a>, Forall<'a>)>,
+    pub type_annotation: Option<(Type<'a>, Forall<'a>, Span)>,
     pub value: ExprWithSpan<'a>,
+    pub span: Span,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -69,7 +70,7 @@ pub enum Expr<'a> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FnArm<'a> {
-    pub pattern: Vec<Pattern<'a>>,
+    pub pattern: Vec<(Pattern<'a>, Span)>,
     pub expr: ExprWithSpan<'a>,
 }
 
@@ -297,21 +298,19 @@ fn variable_decl<'a>(
     VariableDecl {
         name: (&v.name.0, v.name.1),
         type_annotation: v.type_annotation.as_ref().map(|(s, forall)| {
-            (
-                infix_op_sequence(op_sequence(
-                    s,
-                    op_precedence_map,
-                    constructors,
-                ))
-                .0,
-                forall.into(),
-            )
+            let (t, span) = infix_op_sequence(op_sequence(
+                s,
+                op_precedence_map,
+                constructors,
+            ));
+            (t, forall.into(), span)
         }),
         value: infix_op_sequence(op_sequence(
             &v.expr,
             op_precedence_map,
             constructors,
         )),
+        span: v.span.clone(),
     }
 }
 
@@ -588,7 +587,6 @@ fn fn_arm<'a>(
                     op_precedence_map,
                     constructors,
                 ))
-                .0
             })
             .collect(),
         expr: infix_op_sequence(op_sequence(

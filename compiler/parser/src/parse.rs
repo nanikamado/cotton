@@ -320,6 +320,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                     });
                 expr_unit
                     .clone()
+                    .map_with_span(|e, s| (e, s))
                     .then(
                         op.map_with_span(|op, span: Span| (op, span))
                             .then(
@@ -337,8 +338,8 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                             .repeated()
                             .flatten(),
                     )
-                    .map_with_span(|(e, oes), span: Span| {
-                        [vec![OpSequenceUnit::Operand((e, span))], oes].concat()
+                    .map(|(e, oes)| {
+                        [vec![OpSequenceUnit::Operand(e)], oes].concat()
                     })
             },
         );

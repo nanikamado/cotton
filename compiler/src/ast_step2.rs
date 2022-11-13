@@ -60,8 +60,32 @@ pub struct DataDecl {
     pub decl_id: DeclId,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct RelOrigin {
+    pub left: Type,
+    pub right: Type,
+    pub span: Span,
+}
+
+impl Ord for RelOrigin {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (&self.left, &self.right, self.span.start, self.span.end).cmp(&(
+            &other.left,
+            &other.right,
+            other.span.start,
+            other.span.end,
+        ))
+    }
+}
+
+impl PartialOrd for RelOrigin {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-pub struct SubtypeRelations(pub BTreeSet<(Type, Type)>);
+pub struct SubtypeRelations(pub BTreeSet<(Type, Type, RelOrigin)>);
 
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash)]
 pub enum PatternUnitForRestriction {
@@ -77,10 +101,11 @@ pub enum PatternUnitForRestriction {
     Binder(Type, DeclId),
 }
 
-pub type PatternForRestriction = Vec<PatternUnitForRestriction>;
-pub type PatternRestrictions = Vec<(Type, Vec<PatternUnitForRestriction>)>;
+pub type PatternForRestriction = Vec<(PatternUnitForRestriction, Span)>;
+pub type PatternRestrictions =
+    Vec<(Type, Vec<(PatternUnitForRestriction, Span)>, Span)>;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct TypeWithEnv<T = Type>
 where
     T: TypeConstructor,
@@ -88,7 +113,7 @@ where
     pub constructor: T,
     pub variable_requirements: Vec<VariableRequirement>,
     pub subtype_relations: SubtypeRelations,
-    pub already_considered_relations: SubtypeRelations,
+    pub already_considered_relations: BTreeSet<(Type, Type)>,
     pub pattern_restrictions: PatternRestrictions,
     pub fn_apply_dummies: BTreeMap<Type, Type>,
 }
@@ -110,6 +135,7 @@ pub struct VariableDecl {
     pub type_annotation: Option<Annotation>,
     pub value: ExprWithTypeAndSpan<TypeVariable>,
     pub decl_id: DeclId,
+    pub span: Span,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -117,7 +143,8 @@ pub struct Annotation {
     pub unfixed: Type,
     pub fixed: Type,
     pub implicit_parameters: Vec<(Name, Type, DeclId)>,
-    pub fixed_parameter_names: FxHashMap<TypeUnit, Name>, // pub implicit_type_parameters: Vec<Name>,
+    pub fixed_parameter_names: FxHashMap<TypeUnit, Name>,
+    pub span: Span,
 }
 
 pub type ExprWithTypeAndSpan<T> = (Expr<T>, T, Span);
@@ -134,7 +161,7 @@ pub enum Expr<T> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FnArm<T> {
-    pub pattern: Vec<Pattern<T>>,
+    pub pattern: Vec<(Pattern<T>, Span)>,
     pub expr: ExprWithTypeAndSpan<T>,
 }
 
@@ -364,7 +391,7 @@ fn variable_decl(
     token_map.insert(v.name.1, TokenMapEntry::Decl(decl_id));
     VariableDecl {
         name: Name::from_str(v.name.0),
-        type_annotation: v.type_annotation.map(|(t, forall)| {
+        type_annotation: v.type_annotation.map(|(t, forall, span)| {
             let implicit_type_parameters: Vec<_> = forall
                 .type_variables
                 .iter()
@@ -418,6 +445,7 @@ fn variable_decl(
                     .map(|(name, t)| (name, t, DeclId::new()))
                     .collect(),
                 fixed_parameter_names,
+                span,
             }
         }),
         value: expr(
@@ -429,6 +457,7 @@ fn variable_decl(
             token_map,
         ),
         decl_id,
+        span: v.span,
     }
 }
 
@@ -557,12 +586,15 @@ fn add_expr_in_do(
             } else {
                 es.reverse();
                 let l = Expr::Lambda(vec![FnArm {
-                    pattern: vec![PatternUnit::Binder(
-                        d.name,
-                        d.decl_id,
-                        TypeVariable::new(),
-                    )
-                    .into()],
+                    pattern: vec![(
+                        PatternUnit::Binder(
+                            d.name,
+                            d.decl_id,
+                            TypeVariable::new(),
+                        )
+                        .into(),
+                        d.span,
+                    )],
                     expr: (Expr::Do(es), TypeVariable::new(), es_span.clone()),
                 }]);
                 (
@@ -605,7 +637,7 @@ fn fn_arm(
         pattern: arm
             .pattern
             .into_iter()
-            .map(|p| pattern(p, data_decl_map, token_map))
+            .map(|(p, span)| (pattern(p, data_decl_map, token_map), span))
             .collect(),
         expr: expr(
             arm.expr,
@@ -966,8 +998,8 @@ impl<'a> TypeAliasMap<'a> {
 }
 
 impl IntoIterator for SubtypeRelations {
-    type Item = (Type, Type);
-    type IntoIter = std::collections::btree_set::IntoIter<(Type, Type)>;
+    type Item = (Type, Type, RelOrigin);
+    type IntoIter = std::collections::btree_set::IntoIter<Self::Item>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
@@ -975,16 +1007,19 @@ impl IntoIterator for SubtypeRelations {
 }
 
 impl<'b> IntoIterator for &'b SubtypeRelations {
-    type Item = &'b (Type, Type);
-    type IntoIter = std::collections::btree_set::Iter<'b, (Type, Type)>;
+    type Item = &'b (Type, Type, RelOrigin);
+    type IntoIter =
+        std::collections::btree_set::Iter<'b, (Type, Type, RelOrigin)>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.iter()
     }
 }
 
-impl FromIterator<(Type, Type)> for SubtypeRelations {
-    fn from_iter<T: IntoIterator<Item = (Type, Type)>>(iter: T) -> Self {
+impl FromIterator<(Type, Type, RelOrigin)> for SubtypeRelations {
+    fn from_iter<T: IntoIterator<Item = (Type, Type, RelOrigin)>>(
+        iter: T,
+    ) -> Self {
         let mut s = Self::default();
         for r in iter {
             s.insert(r);
@@ -994,31 +1029,34 @@ impl FromIterator<(Type, Type)> for SubtypeRelations {
 }
 
 impl SubtypeRelations {
-    pub fn iter(&self) -> std::collections::btree_set::Iter<(Type, Type)> {
+    pub fn iter(&self) -> impl Iterator<Item = &(Type, Type, RelOrigin)> {
         self.0.iter()
     }
 
-    pub fn insert(&mut self, value: (Type, Type)) -> bool {
+    pub fn insert(&mut self, value: (Type, Type, RelOrigin)) -> bool {
         debug_assert!(!value.0.contains_restriction());
         debug_assert!(!value.1.contains_restriction());
         self.0.insert(value)
     }
 
-    pub fn remove(&mut self, value: &(Type, Type)) -> bool {
-        self.0.remove(value)
-    }
+    // pub fn remove(&mut self, value: &(Type, Type)) -> bool {
+    //     self.0.remove(value)
+    // }
 
-    pub fn contains(&self, value: &(Type, Type)) -> bool {
-        self.0.contains(value)
-    }
+    // pub fn contains(&self, value: &(Type, Type)) -> bool {
+    //     self.0.contains(value)
+    // }
 
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 }
 
-impl Extend<(Type, Type)> for SubtypeRelations {
-    fn extend<T: IntoIterator<Item = (Type, Type)>>(&mut self, iter: T) {
+impl Extend<(Type, Type, RelOrigin)> for SubtypeRelations {
+    fn extend<T: IntoIterator<Item = (Type, Type, RelOrigin)>>(
+        &mut self,
+        iter: T,
+    ) {
         for r in iter {
             self.insert(r);
         }

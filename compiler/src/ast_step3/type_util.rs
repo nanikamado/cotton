@@ -6,7 +6,7 @@ use crate::{
             merge_vec, unwrap_or_clone, Type, TypeMatchable, TypeMatchableRef,
             TypeUnit, TypeVariable,
         },
-        SubtypeRelations, TypeConstructor, TypeId, TypeWithEnv,
+        RelOrigin, SubtypeRelations, TypeConstructor, TypeId, TypeWithEnv,
     },
     errors::NotSubtypeReason,
     intrinsics::INTRINSIC_TYPES,
@@ -151,7 +151,7 @@ impl TypeUnit {
                     .collect();
                 let subtype_relations = subtype_relations
                     .into_iter()
-                    .map(|(a, b)| {
+                    .map(|(a, b, origin)| {
                         let (a, u_) = a.replace_num_with_update_flag(
                             from,
                             to,
@@ -164,7 +164,7 @@ impl TypeUnit {
                             recursive_alias_depth,
                         );
                         u |= u_;
-                        (a, b)
+                        (a, b, origin)
                     })
                     .collect();
                 (
@@ -917,7 +917,7 @@ fn apply_arg_to_recursive_fn(
 impl TypeWithEnv {
     pub fn insert_to_subtype_rels_with_restrictions(
         &mut self,
-        value: (Type, Type),
+        value: (Type, Type, RelOrigin),
     ) {
         let mut additional_subtype_rel = SubtypeRelations::default();
         let a = match value.0.matchable() {
@@ -946,7 +946,7 @@ impl TypeWithEnv {
             }
             b => b.into(),
         };
-        self.subtype_relations.insert((a, b));
+        self.subtype_relations.insert((a, b, value.2));
         self.subtype_relations.extend(additional_subtype_rel);
     }
 }

@@ -1,7 +1,7 @@
 use clap::{command, Arg, ArgAction, ArgGroup};
 use compiler::{run, Command};
 use log::LevelFilter;
-use std::{fs, process, str::FromStr};
+use std::{fs, io::stderr, process, str::FromStr};
 
 fn main() {
     let matches = command!()
@@ -82,7 +82,7 @@ fn main() {
     match fs::read_to_string(file_name) {
         Ok(source) => {
             if let Err(e) = run(&source, command, loglevel) {
-                eprintln!("{}", e);
+                e.write(&source, &mut stderr()).unwrap();
                 process::exit(1)
             }
         }
