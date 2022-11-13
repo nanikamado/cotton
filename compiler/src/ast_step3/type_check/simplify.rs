@@ -1,16 +1,20 @@
-use crate::ast_step2::{
-    self,
-    decl_id::DeclId,
-    types::{
-        merge_vec, unwrap_or_clone, Type, TypeMatchable, TypeMatchableRef,
-        TypeUnit, TypeVariable,
+use crate::{
+    ast_step2::{
+        self,
+        decl_id::DeclId,
+        types::{
+            merge_vec, unwrap_or_clone, Type, TypeMatchable, TypeMatchableRef,
+            TypeUnit, TypeVariable,
+        },
+        PatternForRestriction, PatternRestrictions, PatternUnitForRestriction,
+        RelOrigin, SubtypeRelations, TypeConstructor, TypeWithEnv,
     },
-    PatternForRestriction, PatternRestrictions, PatternUnitForRestriction,
-    SubtypeRelations, TypeConstructor, TypeWithEnv,
+    errors::{CompileError, NotSubtypeReason},
 };
 use fxhash::{FxHashMap, FxHashSet};
 use hashbag::HashBag;
 use itertools::Itertools;
+use parser::Span;
 use petgraph::{self, algo::tarjan_scc, graphmap::DiGraphMap};
 use std::{
     cmp::Ordering,
@@ -89,8 +93,12 @@ impl TypeVariableMap {
                         .collect(),
                     subtype_relations: subtype_relations
                         .into_iter()
-                        .map(|(a, b)| {
-                            (self.normalize_type(a), self.normalize_type(b))
+                        .map(|(a, b, origin)| {
+                            (
+                                self.normalize_type(a),
+                                self.normalize_type(b),
+                                origin,
+                            )
                         })
                         .collect(),
                 }
@@ -146,6 +154,7 @@ impl TypeVariableMap {
         subtype: &mut SubtypeRelations,
         key: Type,
         value: Type,
+        origin: Option<RelOrigin>,
     ) {
         if key == value {
             return;
@@ -153,7 +162,7 @@ impl TypeVariableMap {
         use TypeMatchableRef::*;
         let (key, value) = match (key.matchable_ref(), value.matchable_ref()) {
             (Variable(key), Variable(value)) => {
-                if value < key {
+                if key < value {
                     (value, TypeUnit::Variable(key).into())
                 } else {
                     (key, TypeUnit::Variable(value).into())
@@ -176,13 +185,22 @@ impl TypeVariableMap {
                 TypeLevelApply { f: a_f, a: a_a },
                 TypeLevelApply { f: b_f, a: b_a },
             ) => {
-                self._insert_type(subtype, a_f.clone(), b_f.clone());
-                self._insert_type(subtype, a_a.clone(), b_a.clone());
+                self._insert_type(
+                    subtype,
+                    a_f.clone(),
+                    b_f.clone(),
+                    origin.clone(),
+                );
+                self._insert_type(subtype, a_a.clone(), b_a.clone(), origin);
                 return;
             }
             _ => {
-                subtype.add_subtype_rel(key.clone(), value.clone());
-                subtype.add_subtype_rel(value, key);
+                subtype.insert((
+                    key.clone(),
+                    value.clone(),
+                    origin.clone().unwrap(),
+                ));
+                subtype.insert((value, key, origin.unwrap()));
                 return;
             }
         };
@@ -198,6 +216,7 @@ impl TypeVariableMap {
         subtype: &mut SubtypeRelations,
         k: Type,
         v: Type,
+        origin: Option<RelOrigin>,
     ) {
         let key = self.normalize_type(k.clone());
         let value = self.normalize_type(v.clone());
@@ -214,7 +233,7 @@ impl TypeVariableMap {
                 format!("({})", value)
             }
         );
-        self._insert_type(subtype, key, value)
+        self._insert_type(subtype, key, value, origin)
     }
 
     pub fn insert(
@@ -238,13 +257,13 @@ impl TypeVariableMap {
                 format!("({})", value)
             }
         );
-        self._insert_type(subtype, key, value)
+        self._insert_type(subtype, key, value, None)
     }
 }
 
 impl SubtypeRelations {
     pub fn merge(mut self, other: Self) -> Self {
-        self.add_subtype_rels(other.0);
+        self.extend(other.0);
         self
     }
 
@@ -260,7 +279,7 @@ impl SubtypeRelations {
         if let TypeMatchableRef::Variable(v) = t.matchable_ref() {
             possible_strongest(
                 v,
-                &self.0,
+                self,
                 pattern_restrictions,
                 variable_requirements,
                 fn_apply_dummies,
@@ -282,7 +301,7 @@ impl SubtypeRelations {
         if let TypeMatchableRef::Variable(v) = t.matchable_ref() {
             possible_weakest(
                 v,
-                &self.0,
+                self,
                 variable_requirements,
                 pattern_restrictions,
                 fn_apply_dummies,
@@ -296,7 +315,7 @@ impl SubtypeRelations {
         &self,
     ) -> T {
         self.iter()
-            .flat_map(|(a, b)| {
+            .flat_map(|(a, b, _)| {
                 a.all_type_variables()
                     .into_iter()
                     .chain(b.all_type_variables())
@@ -307,8 +326,8 @@ impl SubtypeRelations {
     pub fn normalize(
         mut self,
         map: &mut TypeVariableMap,
-        already_considered_relations: &mut SubtypeRelations,
-    ) -> Option<Self> {
+        already_considered_relations: &mut BTreeSet<(Type, Type)>,
+    ) -> Result<Self, CompileError> {
         self = self.normalize_subtype_rel(map, already_considered_relations)?;
         let eqs = find_eq_types(&self);
         let eqs_is_empty = eqs.is_empty();
@@ -316,7 +335,7 @@ impl SubtypeRelations {
             map.insert(&mut self, from, to);
         }
         if eqs_is_empty {
-            Some(self)
+            Ok(self)
         } else {
             self.normalize(map, already_considered_relations)
         }
@@ -325,60 +344,54 @@ impl SubtypeRelations {
     fn normalize_subtype_rel(
         mut self,
         map: &mut TypeVariableMap,
-        already_considered_relations: &mut SubtypeRelations,
-    ) -> Option<Self> {
+        already_considered_relations: &mut BTreeSet<(Type, Type)>,
+    ) -> Result<Self, CompileError> {
         self = self
             .into_iter()
-            .map(|(a, b)| {
+            .map(|(a, b, origin)| {
                 let a = map.normalize_type(a);
                 let b = map.normalize_type(b);
                 match simplify_subtype_rel(
-                    a.clone(),
-                    b.clone(),
+                    a,
+                    b,
                     Some(already_considered_relations),
                 ) {
-                    Ok(r) => Some(r),
-                    Err(r) => {
-                        log::debug!("a !<: b");
-                        log::debug!("a = {a}");
-                        log::debug!("b = {b}");
-                        log::debug!(
-                            "{}",
-                            r.into_iter().rev().format_with(
-                                "\n",
-                                |(a, b), f| f(&format_args!(
-                                    "because `{}` is not subtype of `{}`",
-                                    a, b
-                                ))
-                            )
-                        );
-                        None
+                    Ok(r) => Ok(r
+                        .into_iter()
+                        .map(move |(a, b)| (a, b, origin.clone()))),
+                    Err(_) => {
+                        let mut already_considered_relations =
+                            Default::default();
+                        let origin_a = map.normalize_type(origin.left);
+                        let origin_b = map.normalize_type(origin.right);
+                        let r = simplify_subtype_rel(
+                            origin_a.clone(),
+                            origin_b.clone(),
+                            Some(&mut already_considered_relations),
+                        )
+                        .err()
+                        .unwrap();
+                        Err(CompileError::NotSubtypeOf {
+                            sub_type: origin_a,
+                            super_type: origin_b,
+                            reason: r,
+                            span: origin.span,
+                        })
                     }
                 }
             })
-            .collect::<Option<Vec<_>>>()?
+            .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .flatten()
             .collect();
-        Some(self)
-    }
-
-    pub fn add_subtype_rel(&mut self, sub: Type, sup: Type) {
-        self.insert((sub, sup));
-    }
-
-    pub fn add_subtype_rels<T>(&mut self, iter: T)
-    where
-        T: IntoIterator<Item = (Type, Type)>,
-    {
-        self.extend(iter)
+        Ok(self)
     }
 }
 
 pub fn simplify_type<T: TypeConstructor>(
     map: &mut TypeVariableMap,
     mut t: TypeWithEnv<T>,
-) -> Option<TypeWithEnv<T>> {
+) -> Result<TypeWithEnv<T>, CompileError> {
     let mut i = 0;
     loop {
         i += 1;
@@ -416,7 +429,7 @@ pub fn simplify_type<T: TypeConstructor>(
 fn _simplify_type<T: TypeConstructor>(
     map: &mut TypeVariableMap,
     mut t: TypeWithEnv<T>,
-) -> Option<(TypeWithEnv<T>, bool)> {
+) -> Result<(TypeWithEnv<T>, bool), CompileError> {
     let t_before_simplify = t.clone();
     log::debug!("t = {}", t);
     // log::trace!("map = {}", map);
@@ -438,7 +451,7 @@ fn _simplify_type<T: TypeConstructor>(
                 }
                 map.insert(&mut t.subtype_relations, cov, s);
                 t = t.normalize(map)?;
-                return Some((t, true));
+                return Ok((t, true));
             }
         }
     }
@@ -456,19 +469,19 @@ fn _simplify_type<T: TypeConstructor>(
             ) {
                 map.insert(&mut t.subtype_relations, cont, s);
                 t = t.normalize(map)?;
-                return Some((t, true));
+                return Ok((t, true));
             }
         }
     }
     log::trace!("t{{2}} = {}", t);
     let (t, updated) = replace_fn_apply_with_dummy_variable(t);
     if updated {
-        return Some((t, true));
+        return Ok((t, true));
     }
     log::trace!("t{{3}} = {}", t);
     let (mut t, updated) = simplify_dummies(t, map);
     if updated {
-        return Some((t, true));
+        return Ok((t, true));
     }
     log::trace!("t' = {}", t);
     let type_variables_in_sub_rel: FxHashSet<TypeVariable> =
@@ -496,7 +509,7 @@ fn _simplify_type<T: TypeConstructor>(
                 }
                 map.insert(&mut t.subtype_relations, *a, st);
                 t = t.normalize(map)?;
-                return Some((t, true));
+                return Ok((t, true));
             }
             (Some(st), _) if !vs.contains(a) => {
                 if st.is_empty() {
@@ -504,7 +517,7 @@ fn _simplify_type<T: TypeConstructor>(
                 }
                 map.insert(&mut t.subtype_relations, *a, st);
                 t = t.normalize(map)?;
-                return Some((t, true));
+                return Ok((t, true));
             }
             (_, Some(we)) if we.is_empty() => {
                 map.insert(
@@ -513,7 +526,7 @@ fn _simplify_type<T: TypeConstructor>(
                     TypeMatchable::Empty.into(),
                 );
                 t = t.normalize(map)?;
-                return Some((t, true));
+                return Ok((t, true));
             }
             _ => (),
         }
@@ -533,17 +546,18 @@ fn _simplify_type<T: TypeConstructor>(
             ) {
                 map.insert(&mut t.subtype_relations, v, new_t);
                 t = t.normalize(map)?;
-                return Some((t, true));
+                return Ok((t, true));
             }
         }
     }
-    for (i, (ts, patterns)) in t.pattern_restrictions.iter().enumerate() {
+    for (i, (ts, patterns, _span)) in t.pattern_restrictions.iter().enumerate()
+    {
         if patterns.len() == 1
             && ts
                 .clone()
                 .arguments_from_argument_tuple()
                 .iter()
-                .zip(&patterns[0].clone().arguments_from_argument_tuple())
+                .zip(&patterns[0].0.clone().arguments_from_argument_tuple())
                 .all(|(t, p)| {
                     if let PatternUnitForRestriction::Binder(p_t, _) = p {
                         t == p_t
@@ -553,7 +567,7 @@ fn _simplify_type<T: TypeConstructor>(
                 })
         {
             t.pattern_restrictions.remove(i);
-            return Some((t, true));
+            return Ok((t, true));
         }
     }
     log::trace!("t{{4}} = {}", t);
@@ -562,7 +576,7 @@ fn _simplify_type<T: TypeConstructor>(
         .subtype_relations
         .clone()
         .into_iter()
-        .map(|(sub, sup)| {
+        .map(|(sub, sup, origin)| {
             let sup = if sup.len() >= 2 {
                 sup.into_iter()
                     .filter(|s| {
@@ -601,21 +615,22 @@ fn _simplify_type<T: TypeConstructor>(
             } else {
                 sup
             };
-            (sub, sup)
+            (sub, sup, origin)
         })
         .collect();
     if updated {
-        return Some((t, true));
+        return Ok((t, true));
     }
     log::trace!("t{{5}} = {}", t);
-    for (pattern_ts, pattern) in &t.pattern_restrictions {
-        let subtype = apply_type_to_pattern(pattern_ts.clone(), pattern)?;
+    for (pattern_ts, pattern, span) in &t.pattern_restrictions {
+        let subtype =
+            apply_type_to_pattern(pattern_ts.clone(), pattern, span.clone())?;
         if !subtype.0.is_empty() {
             let mut t_normalized = t.clone();
             t_normalized.subtype_relations.extend(subtype);
             t_normalized = t_normalized.normalize(map)?;
             if t_normalized != t {
-                return Some((t_normalized, true));
+                return Ok((t_normalized, true));
             }
         }
     }
@@ -649,7 +664,7 @@ fn _simplify_type<T: TypeConstructor>(
                     .map_type(|t| map.normalize_type(t));
                 if replaced_with_we == replaced_with_st {
                     map.insert(&mut t.subtype_relations, v, st);
-                    return Some((t, true));
+                    return Ok((t, true));
                 }
             }
         }
@@ -658,7 +673,7 @@ fn _simplify_type<T: TypeConstructor>(
         t.pattern_restrictions =
             t.pattern_restrictions
                 .into_iter()
-                .map(|(pattern_ts, pattern)| {
+                .map(|(pattern_ts, pattern, span)| {
                     let pattern_ts: Vec<_> =
                         pattern_ts
                             .arguments_from_argument_tuple()
@@ -676,17 +691,25 @@ fn _simplify_type<T: TypeConstructor>(
                                 }
                             })
                             .collect();
-                    (Type::argument_tuple_from_arguments(pattern_ts), pattern)
+                    (
+                        Type::argument_tuple_from_arguments(pattern_ts),
+                        pattern,
+                        span,
+                    )
                 })
                 .collect();
-        for (pattern_ts, pattern) in &t.pattern_restrictions {
-            let subtype = apply_type_to_pattern(pattern_ts.clone(), pattern)?;
+        for (pattern_ts, pattern, span) in &t.pattern_restrictions {
+            let subtype = apply_type_to_pattern(
+                pattern_ts.clone(),
+                pattern,
+                span.clone(),
+            )?;
             if !subtype.0.is_empty() {
                 let mut t_normalized = t.clone();
                 t_normalized.subtype_relations.extend(subtype);
                 t_normalized = t_normalized.normalize(map)?;
                 if t_normalized != t_before_simplify {
-                    return Some((t_normalized, true));
+                    return Ok((t_normalized, true));
                 }
             }
         }
@@ -696,11 +719,11 @@ fn _simplify_type<T: TypeConstructor>(
         let pattern_restrictions = old_pattern_restrictions
             .clone()
             .into_iter()
-            .map(|(pattern_t, pattern)| {
+            .map(|(pattern_t, pattern, span)| {
                 let pattern = pattern
                     .into_iter()
-                    .map(|p| {
-                        p.map_type(|mut t_in_p| {
+                    .map(|(p, span)| {
+                        let p = p.map_type(|mut t_in_p| {
                             for v in t_in_p.all_type_variables() {
                                 if let (Some(we), Some(st)) = (
                                     t.subtype_relations.possible_weakest(
@@ -732,18 +755,19 @@ fn _simplify_type<T: TypeConstructor>(
                                 }
                             }
                             t_in_p
-                        })
+                        });
+                        (p, span)
                     })
                     .collect();
-                (pattern_t, pattern)
+                (pattern_t, pattern, span)
             })
             .collect();
         if old_pattern_restrictions != pattern_restrictions {
             t.pattern_restrictions = pattern_restrictions;
-            return Some((t, true));
+            return Ok((t, true));
         }
         if try_eq_sub(map, &mut t) {
-            return Some((t, true));
+            return Ok((t, true));
         }
         // log::trace!("t{{7}} = {}", t);
         // let mut bounded_v = None;
@@ -766,7 +790,7 @@ fn _simplify_type<T: TypeConstructor>(
         // }
     }
     let updated = t != t_before_simplify;
-    Some((t, updated))
+    Ok((t, updated))
 }
 
 fn find_eq_types(subtype_rel: &SubtypeRelations) -> Vec<(TypeVariable, Type)> {
@@ -816,13 +840,13 @@ fn find_eq_types(subtype_rel: &SubtypeRelations) -> Vec<(TypeVariable, Type)> {
     r
 }
 
-type SubtypeRelationsVec<'a> = Vec<(Type, Type)>;
+type SubtypeRelationsVec = Vec<(Type, Type)>;
 
-pub fn simplify_subtype_rel<'a>(
+pub fn simplify_subtype_rel(
     sub: Type,
     sup: Type,
-    mut already_considered_relations: Option<&mut SubtypeRelations>,
-) -> Result<SubtypeRelationsVec<'a>, SubtypeRelationsVec<'a>> {
+    mut already_considered_relations: Option<&mut BTreeSet<(Type, Type)>>,
+) -> Result<SubtypeRelationsVec, NotSubtypeReason> {
     let subsup = (sub, sup);
     let c = already_considered_relations
         .as_deref()
@@ -840,18 +864,20 @@ pub fn simplify_subtype_rel<'a>(
                 a1,
                 already_considered_relations.as_deref_mut(),
             )
-            .map_err(|mut a| {
-                a.push((sub.clone(), sup.clone()));
-                a
+            .map_err(|a| NotSubtypeReason::NotSubtype {
+                left: sub.clone(),
+                right: sup.clone(),
+                reasons: vec![a],
             })?;
             let r = simplify_subtype_rel(
                 r1,
                 r2,
                 already_considered_relations.as_deref_mut(),
             )
-            .map_err(|mut a| {
-                a.push((sub, sup));
-                a
+            .map_err(|a| NotSubtypeReason::NotSubtype {
+                left: sub,
+                right: sup,
+                reasons: vec![a],
             })?;
             Ok(merge_vec(a, r))
         }
@@ -861,15 +887,17 @@ pub fn simplify_subtype_rel<'a>(
                 a2,
                 already_considered_relations.as_deref_mut(),
             )
-            .map_err(|mut a| {
-                a.push((sub.clone(), sup.clone()));
-                a
+            .map_err(|a| NotSubtypeReason::NotSubtype {
+                left: sub.clone(),
+                right: sup.clone(),
+                reasons: vec![a],
             })?;
             r.append(
                 &mut simplify_subtype_rel(b1, b2, already_considered_relations)
-                    .map_err(|mut a| {
-                        a.push((sub, sup));
-                        a
+                    .map_err(|a| NotSubtypeReason::NotSubtype {
+                        left: sub,
+                        right: sup,
+                        reasons: vec![a],
                     })?,
             );
             Ok(r)
@@ -878,7 +906,11 @@ pub fn simplify_subtype_rel<'a>(
             if id1 == id2 {
                 Ok(Vec::new())
             } else {
-                Err(vec![(sub, sup)])
+                Err(NotSubtypeReason::NotSubtype {
+                    left: sub,
+                    right: sup,
+                    reasons: vec![],
+                })
             }
         }
         (Fn(_, _), Tuple { .. } | Const { .. })
@@ -886,7 +918,11 @@ pub fn simplify_subtype_rel<'a>(
         | (Tuple(..), Const { .. })
         | (Const { .. }, Tuple(..))
         | (Fn(_, _) | Tuple { .. } | Const { .. }, Empty) => {
-            Err(vec![(sub, sup)])
+            Err(NotSubtypeReason::NotSubtype {
+                left: sub,
+                right: sup,
+                reasons: vec![],
+            })
         }
         (Union(cs), b) => Ok(cs
             .into_iter()
@@ -897,10 +933,11 @@ pub fn simplify_subtype_rel<'a>(
                     already_considered_relations.as_deref_mut(),
                 )
             })
-            .collect::<Result<Vec<_>, Vec<_>>>()
-            .map_err(|mut a| {
-                a.push((sub, sup));
-                a
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|a| NotSubtypeReason::NotSubtype {
+                left: sub,
+                right: sup,
+                reasons: vec![a],
             })?
             .concat()),
         (Empty, _) => Ok(Vec::new()),
@@ -920,9 +957,10 @@ pub fn simplify_subtype_rel<'a>(
                 unwrap_recursive_alias(body),
                 already_considered_relations,
             )
-            .map_err(|mut a| {
-                a.push((sub, sup));
-                a
+            .map_err(|a| NotSubtypeReason::NotSubtype {
+                left: sub,
+                right: sup,
+                reasons: vec![a],
             })
         }
         (
@@ -948,9 +986,10 @@ pub fn simplify_subtype_rel<'a>(
                 b,
                 already_considered_relations,
             )
-            .map_err(|mut a| {
-                a.push((sub, sup));
-                a
+            .map_err(|a| NotSubtypeReason::NotSubtype {
+                left: sub,
+                right: sup,
+                reasons: vec![a],
             })
         }
         (Tuple(h, t), Union(b))
@@ -979,6 +1018,7 @@ pub fn simplify_subtype_rel<'a>(
             let a: Type = a.into();
             let mut new_bs = Type::default();
             let mut updated = false;
+            let mut reasons = Vec::new();
             for b in b.iter() {
                 if a.clone().is_subtype_of_with_rels(
                     b.clone().into(),
@@ -989,19 +1029,25 @@ pub fn simplify_subtype_rel<'a>(
                 ) {
                     return Ok(Vec::new());
                 }
-                let (_, _, b_in, b_out) = a
-                    .clone()
-                    .intersection_and_difference_broad((*b).clone().into());
-                new_bs.union_in_place(b_in);
+                let (b_out, b_in, reason) =
+                    Type::from((*b).clone()).split_broad(&a);
+                new_bs.union_in_place(b_in.clone());
                 if !b_out.is_empty() {
                     updated = true;
+                    if let Some(reason) = reason {
+                        reasons.push(reason);
+                    }
                 }
             }
             if updated {
                 simplify_subtype_rel(a, new_bs, already_considered_relations)
-                    .map_err(|mut a| {
-                        a.push((sub, sup));
-                        a
+                    .map_err(|a| {
+                        reasons.push(a);
+                        NotSubtypeReason::NotSubtype {
+                            left: sub.clone(),
+                            right: sup,
+                            reasons,
+                        }
                     })
             } else if already_considered_relations.is_some()
                 && b.iter()
@@ -1023,9 +1069,10 @@ pub fn simplify_subtype_rel<'a>(
                     })
                     .collect();
                 simplify_subtype_rel(a, b, already_considered_relations)
-                    .map_err(|mut a| {
-                        a.push((sub, sup));
-                        a
+                    .map_err(|a| NotSubtypeReason::NotSubtype {
+                        left: sub,
+                        right: sup,
+                        reasons: vec![a],
                     })
             } else {
                 match a.disjunctive() {
@@ -1038,10 +1085,11 @@ pub fn simplify_subtype_rel<'a>(
                                 already_considered_relations.as_deref_mut(),
                             )
                         })
-                        .collect::<Result<Vec<_>, Vec<_>>>()
-                        .map_err(|mut a| {
-                            a.push((sub, sup));
-                            a
+                        .collect::<Result<Vec<_>, _>>()
+                        .map_err(|a| NotSubtypeReason::NotSubtype {
+                            left: sub,
+                            right: sup,
+                            reasons: vec![a],
                         })?
                         .concat()),
                     Err(a) => Ok(vec![(a.into(), b)]),
@@ -1075,9 +1123,10 @@ pub fn simplify_subtype_rel<'a>(
                 TypeUnit::RecursiveAlias { body: b }.into(),
                 already_considered_relations,
             )
-            .map_err(|mut a| {
-                a.push((sub, sup));
-                a
+            .map_err(|a| NotSubtypeReason::NotSubtype {
+                left: sub,
+                right: sup,
+                reasons: vec![a],
             })
         }
         (sub, sup) => Ok(vec![(sub.into(), sup.into())]),
@@ -1103,7 +1152,7 @@ fn unwrap_recursive_alias(body: Type) -> Type {
 
 fn possible_weakest(
     t: TypeVariable,
-    subtype_relation: &BTreeSet<(Type, Type)>,
+    subtype_relation: &SubtypeRelations,
     variable_requirements: &[VariableRequirement],
     pattern_restrictions: &PatternRestrictions,
     fn_apply_dummies: &BTreeMap<Type, Type>,
@@ -1121,15 +1170,18 @@ fn possible_weakest(
     }
     let mut up = FxHashSet::default();
     for (sub, sup) in subtype_relation
+        .0
         .iter()
-        .map(|(a, b)| (a.clone(), b.clone()))
-        .chain(pattern_restrictions.iter().flat_map(|(match_t, pattern)| {
-            match_t
-                .clone()
-                .arguments_from_argument_tuple()
-                .into_iter()
-                .zip(type_from_pattern_for_restriction(pattern))
-        }))
+        .map(|(a, b, _)| (a.clone(), b.clone()))
+        .chain(pattern_restrictions.iter().flat_map(
+            |(match_t, pattern, _span)| {
+                match_t
+                    .clone()
+                    .arguments_from_argument_tuple()
+                    .into_iter()
+                    .zip(type_from_pattern_for_restriction(pattern))
+            },
+        ))
     {
         if sup.contravariant_type_variables().contains(&t) {
             return None;
@@ -1169,7 +1221,7 @@ fn type_from_pattern_for_restriction(
 ) -> Vec<Type> {
     let r = pattern
         .iter()
-        .map(|p| p.arguments_from_argument_tuple_ref())
+        .map(|(p, _span)| p.arguments_from_argument_tuple_ref())
         .collect_vec();
     transpose(r)
         .into_iter()
@@ -1256,7 +1308,7 @@ fn type_intersection(a: Type, b: Type) -> Option<Type> {
 
 fn possible_strongest(
     t: TypeVariable,
-    subtype_relation: &BTreeSet<(Type, Type)>,
+    subtype_relation: &SubtypeRelations,
     pattern_restrictions: &PatternRestrictions,
     variable_requirements: &[VariableRequirement],
     fn_apply_dummies: &BTreeMap<Type, Type>,
@@ -1273,7 +1325,7 @@ fn possible_strongest(
             return None;
         }
     }
-    for (sub, sup) in subtype_relation {
+    for (sub, sup, _) in subtype_relation {
         if sub.contravariant_type_variables().contains(&t) {
             return None;
         } else if *sup == TypeUnit::Variable(t).into() {
@@ -1282,10 +1334,10 @@ fn possible_strongest(
             return None;
         }
     }
-    for (_, pattern) in pattern_restrictions {
+    for (_, pattern, _) in pattern_restrictions {
         if pattern
             .iter()
-            .any(|p| p.covariant_type_variables().contains(&t))
+            .any(|p| p.0.covariant_type_variables().contains(&t))
         {
             return None;
         }
@@ -1315,7 +1367,7 @@ fn possible_strongest(
 fn possible_strongest_t(t: Type, subtype_relation: &SubtypeRelations) -> Type {
     let mut down_up: Type = TypeMatchable::Empty.into();
     let mut down_down: Type = TypeMatchable::Empty.into();
-    for (a, b) in subtype_relation {
+    for (a, b, _) in subtype_relation {
         if a.all_type_variables().is_empty()
             && b.clone().is_subtype_of(t.clone())
         {
@@ -1355,11 +1407,14 @@ impl<T> TypeWithEnv<T>
 where
     T: TypeConstructor,
 {
-    pub fn normalize(mut self, map: &mut TypeVariableMap) -> Option<Self> {
+    pub fn normalize(
+        mut self,
+        map: &mut TypeVariableMap,
+    ) -> Result<Self, CompileError> {
         self.subtype_relations = self
             .subtype_relations
             .normalize(map, &mut self.already_considered_relations)?;
-        Some(Self {
+        Ok(Self {
             constructor: self.constructor.map_type(|t| map.normalize_type(t)),
             variable_requirements: self
                 .variable_requirements
@@ -1372,17 +1427,22 @@ where
             subtype_relations: self
                 .subtype_relations
                 .into_iter()
-                .map(|(a, b)| (map.normalize_type(a), map.normalize_type(b)))
+                .map(|(a, b, origin)| {
+                    (map.normalize_type(a), map.normalize_type(b), origin)
+                })
                 .collect(),
             pattern_restrictions: self
                 .pattern_restrictions
                 .into_iter()
-                .map(|(t, p)| {
+                .map(|(t, p, span)| {
                     (
                         map.normalize_type(t),
                         p.into_iter()
-                            .map(|p| map.normalize_pattern_unit(p))
+                            .map(|(p, span)| {
+                                (map.normalize_pattern_unit(p), span)
+                            })
                             .collect(),
+                        span,
                     )
                 })
                 .collect(),
@@ -1398,59 +1458,76 @@ where
 
 fn apply_type_to_pattern(
     t: Type,
-    pattern: &Vec<PatternUnitForRestriction>,
-) -> Option<SubtypeRelations> {
+    pattern: &Vec<(PatternUnitForRestriction, Span)>,
+    t_span: Span,
+) -> Result<SubtypeRelations, CompileError> {
     log::trace!("ts = ({})", t.iter().map(|t| format!("{t}")).join(", "));
     log::trace!(
         "pattern = {}",
-        pattern.iter().map(|p| format!("{}", p)).join(" | ")
+        pattern.iter().map(|p| format!("{}", p.0)).join(" | ")
     );
     let mut remained = t.clone();
     let decl_type_map_in_pattern: FxHashMap<DeclId, Type> = pattern
         .iter()
-        .flat_map(|p| p.decl_type_map())
+        .flat_map(|(p, _)| p.decl_type_map())
         .map(|(d, t)| (d, t.clone()))
         .collect();
     let mut subtype_rels = SubtypeRelations::default();
     let mut not_sure = false;
-    for p in pattern {
+    for (p, p_span) in pattern {
         let TypeDestructResult {
             remained: r,
             matched: _,
             bind_matched,
             kind,
-        } = destruct_type_by_pattern(remained, p);
+        } = destruct_type_by_pattern(remained, p, p_span.clone());
         remained = r;
         let subtype_r: SubtypeRelations = bind_matched
             .iter()
             .flat_map(|v| {
-                v.iter().map(|(decl_id, t)| {
-                    (t.clone(), decl_type_map_in_pattern[decl_id].clone())
+                v.iter().map(|(decl_id, t, span)| {
+                    (
+                        t.clone(),
+                        decl_type_map_in_pattern[decl_id].clone(),
+                        RelOrigin {
+                            left: t.clone(),
+                            right: decl_type_map_in_pattern[decl_id].clone(),
+                            span: span.clone(),
+                        },
+                    )
                 })
             })
             .collect();
         match kind {
             DestructResultKind::NotSure => {
-                subtype_rels.add_subtype_rels(subtype_r);
+                subtype_rels.extend(subtype_r);
                 not_sure = true;
             }
             DestructResultKind::Fail => (),
             DestructResultKind::Ok => {
-                subtype_rels.add_subtype_rels(subtype_r);
+                subtype_rels.extend(subtype_r);
                 if !not_sure {
                     let mut decl_match_map: FxHashMap<DeclId, Type> =
                         Default::default();
-                    for (decl_id, t) in bind_matched.unwrap() {
+                    let mut spans: FxHashMap<DeclId, Span> = Default::default();
+                    for (decl_id, t, span) in bind_matched.unwrap() {
                         decl_match_map
                             .entry(decl_id)
                             .or_default()
                             .union_in_place(t);
+                        spans.insert(decl_id, span);
                     }
                     for (decl_id, t) in decl_match_map {
-                        subtype_rels.add_subtype_rel(
+                        subtype_rels.insert((
                             decl_type_map_in_pattern[&decl_id].clone(),
-                            t,
-                        )
+                            t.clone(),
+                            RelOrigin {
+                                left: decl_type_map_in_pattern[&decl_id]
+                                    .clone(),
+                                right: t,
+                                span: spans[&decl_id].clone(),
+                            },
+                        ));
                     }
                 }
             }
@@ -1458,19 +1535,36 @@ fn apply_type_to_pattern(
     }
     if !remained.is_empty() && !not_sure {
         log::debug!("missing type = {}", remained);
-        None
+        Err(CompileError::InexhaustiveMatch {
+            description: format!("missing type = {}", remained),
+        })
     } else {
         if not_sure {
             let pattern_t = pattern_to_type(pattern);
             let r = simplify_subtype_rel(
-                t,
-                pattern_t,
+                t.clone(),
+                pattern_t.clone(),
                 Some(&mut Default::default()),
             )
-            .ok()?;
-            subtype_rels.add_subtype_rels(r);
+            .map_err(|reason| CompileError::NotSubtypeOf {
+                sub_type: t,
+                super_type: pattern_t,
+                reason,
+                span: t_span.clone(),
+            })?;
+            subtype_rels.extend(r.into_iter().map(|(a, b)| {
+                (
+                    a.clone(),
+                    b.clone(),
+                    RelOrigin {
+                        left: a,
+                        right: b,
+                        span: t_span.clone(),
+                    },
+                )
+            }));
         }
-        Some(subtype_rels)
+        Ok(subtype_rels)
     }
 }
 
@@ -1507,6 +1601,7 @@ fn simplify_dummies<T: TypeConstructor>(
                         &mut t.subtype_relations,
                         f,
                         TypeUnit::TypeLevelFn(b).into(),
+                        None,
                     );
                     updated = true;
                     None
@@ -1517,7 +1612,7 @@ fn simplify_dummies<T: TypeConstructor>(
                 )),
             },
             a => {
-                map.insert_type(&mut t.subtype_relations, a.into(), b);
+                map.insert_type(&mut t.subtype_relations, a.into(), b, None);
                 updated = true;
                 None
             }
@@ -1526,9 +1621,9 @@ fn simplify_dummies<T: TypeConstructor>(
     (t, updated)
 }
 
-fn pattern_to_type(p: &[PatternUnitForRestriction]) -> Type {
+fn pattern_to_type(p: &[(PatternUnitForRestriction, Span)]) -> Type {
     let mut t = Type::default();
-    for p in p {
+    for (p, _) in p {
         t = t.union(pattern_unit_to_type(p));
     }
     t
@@ -1544,13 +1639,14 @@ enum DestructResultKind {
 struct TypeDestructResult {
     remained: Type,
     matched: Option<Type>,
-    bind_matched: Option<Vec<(DeclId, Type)>>,
+    bind_matched: Option<Vec<(DeclId, Type, Span)>>,
     kind: DestructResultKind,
 }
 
 fn destruct_type_by_pattern(
     t: Type,
     pattern: &PatternUnitForRestriction,
+    pattern_span: Span,
 ) -> TypeDestructResult {
     let mut remained: Type = TypeMatchable::Empty.into();
     let mut destructed = false;
@@ -1563,7 +1659,11 @@ fn destruct_type_by_pattern(
             matched: m,
             bind_matched: bm,
             kind,
-        } = destruct_type_unit_by_pattern(unwrap_or_clone(tu), pattern);
+        } = destruct_type_unit_by_pattern(
+            unwrap_or_clone(tu),
+            pattern,
+            pattern_span.clone(),
+        );
         remained = remained.union(r);
         match kind {
             DestructResultKind::NotSure => {
@@ -1606,6 +1706,7 @@ fn destruct_type_by_pattern(
 fn destruct_type_unit_by_pattern(
     t: TypeUnit,
     pattern: &PatternUnitForRestriction,
+    pattern_span: Span,
 ) -> TypeDestructResult {
     match (t, pattern) {
         (
@@ -1627,7 +1728,7 @@ fn destruct_type_unit_by_pattern(
             kind: DestructResultKind::Ok,
         },
         (TypeUnit::Tuple(a1, a2), PatternUnitForRestriction::Tuple(p1, p2)) => {
-            let r1 = destruct_type_by_pattern(a1, p1);
+            let r1 = destruct_type_by_pattern(a1, p1, pattern_span.clone());
             if r1.kind == DestructResultKind::Fail {
                 TypeDestructResult {
                     remained: TypeUnit::Tuple(r1.remained, a2).into(),
@@ -1636,7 +1737,7 @@ fn destruct_type_unit_by_pattern(
                     kind: DestructResultKind::Fail,
                 }
             } else {
-                let r2 = destruct_type_by_pattern(a2, p2);
+                let r2 = destruct_type_by_pattern(a2, p2, pattern_span);
                 if r2.kind == DestructResultKind::Fail {
                     TypeDestructResult {
                         remained: TypeUnit::Tuple(
@@ -1691,7 +1792,7 @@ fn destruct_type_unit_by_pattern(
             TypeDestructResult {
                 remained: Type::default(),
                 matched: Some(t.clone()),
-                bind_matched: Some(vec![(*decl_id, t)]),
+                bind_matched: Some(vec![(*decl_id, t, pattern_span)]),
                 kind: DestructResultKind::Ok,
             }
         }
@@ -1701,9 +1802,11 @@ fn destruct_type_unit_by_pattern(
             bind_matched: None,
             kind: DestructResultKind::NotSure,
         },
-        (TypeUnit::RecursiveAlias { body }, p) => {
-            destruct_type_by_pattern(unwrap_recursive_alias(body), p)
-        }
+        (TypeUnit::RecursiveAlias { body }, p) => destruct_type_by_pattern(
+            unwrap_recursive_alias(body),
+            p,
+            pattern_span,
+        ),
         (TypeUnit::TypeLevelApply { f, a }, p)
             if matches!(
                 f.matchable_ref(),
@@ -1714,6 +1817,7 @@ fn destruct_type_unit_by_pattern(
                 destruct_type_by_pattern(
                     unwrap_recursive_alias(body).type_level_function_apply(a),
                     p,
+                    pattern_span,
                 )
             } else {
                 unreachable!()
@@ -1730,7 +1834,7 @@ fn destruct_type_unit_by_pattern(
 
 fn mk_graph(subtype_relations: &SubtypeRelations) -> DiGraphMap<&Type, ()> {
     let mut g = DiGraphMap::new();
-    for (a, b) in subtype_relations {
+    for (a, b, _) in subtype_relations {
         g.add_edge(a, b, ());
     }
     g
@@ -1769,8 +1873,8 @@ fn try_eq_sub<T: TypeConstructor>(
     }
     let mut m = TypeVariableMap::default();
     let mut subtype = SubtypeRelations::default();
-    for (a, b) in &t.subtype_relations {
-        m.insert_type(&mut subtype, a.clone(), b.clone())
+    for (a, b, origin) in &t.subtype_relations {
+        m.insert_type(&mut subtype, a.clone(), b.clone(), Some(origin.clone()))
     }
     if subtype.is_empty() {
         for (v, k) in m.0 {
@@ -1790,11 +1894,11 @@ fn replace_fn_apply_with_dummy_variable<T: TypeConstructor>(
     t.subtype_relations = t
         .subtype_relations
         .into_iter()
-        .map(|(a, b)| {
+        .map(|(a, b, origin)| {
             let (a, u1) = replace_fn_apply(a, &mut t.fn_apply_dummies);
             let (b, u2) = replace_fn_apply(b, &mut t.fn_apply_dummies);
             updated |= u1 || u2;
-            (a, b)
+            (a, b, origin)
         })
         .collect();
     (t, updated)
@@ -1855,23 +1959,39 @@ impl Display for VariableRequirement {
 impl<T: TypeConstructor> Display for ast_step2::TypeWithEnv<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "{} forall", self.constructor)?;
-        for (a, b) in &self.subtype_relations {
-            writeln!(f, "    {} < {},", a, b)?;
+        for (a, b, origin) in &self.subtype_relations {
+            if a != &origin.left || b != &origin.right {
+                writeln!(
+                    f,
+                    "    {} < {} ({:?}) (from {} < {}),",
+                    a, b, origin.span, origin.left, origin.right
+                )?;
+            } else {
+                writeln!(f, "    {} < {} ({:?}),", a, b, origin.span)?;
+            }
         }
         for req in &self.variable_requirements {
             writeln!(f, "{},", req)?;
         }
-        for (a, b) in &self.pattern_restrictions {
+        for (a, b, span) in &self.pattern_restrictions {
             writeln!(
                 f,
-                "    ({}) = pat[{}],",
+                "    ({}) = pat[{}] ({:?}),",
                 a.iter().map(|a| format!("{a}")).join(", "),
-                b.iter().map(|p| format!("({})", p)).join(" | ")
+                b.iter().map(|p| format!("({:?})", p)).join(" | "),
+                span
             )?;
         }
         if !self.already_considered_relations.is_empty() {
             writeln!(f, "already_considered_relations:")?;
-            write!(f, "{}", self.already_considered_relations)?;
+            write!(
+                f,
+                "{}",
+                self.already_considered_relations.iter().format_with(
+                    "\n",
+                    |(a, b), f| f(&format_args!("{} < {}", a, b))
+                )
+            )?;
         }
         if !self.fn_apply_dummies.is_empty() {
             writeln!(f, "fn_apply_dummies:")?;
@@ -1890,8 +2010,16 @@ impl<T: TypeConstructor> Display for ast_step2::TypeWithEnv<T> {
 
 impl Display for SubtypeRelations {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for (a, b) in self {
-            writeln!(f, "    {} < {},", a, b)?;
+        for (a, b, origin) in self {
+            if a != &origin.left || b != &origin.right {
+                writeln!(
+                    f,
+                    "    {} < {} ({:?}) (from {} < {}),",
+                    a, b, origin.span, origin.left, origin.right
+                )?;
+            } else {
+                writeln!(f, "    {} < {} ({:?}),", a, b, origin.span)?;
+            }
         }
         Ok(())
     }
@@ -1918,7 +2046,7 @@ mod tests {
             types::{
                 Type, TypeMatchable, TypeMatchableRef, TypeUnit, TypeVariable,
             },
-            PatternUnitForRestriction, TypeId, TypeWithEnv,
+            PatternUnitForRestriction, RelOrigin, TypeId, TypeWithEnv,
         },
         ast_step3::type_check::simplify::{
             apply_type_to_pattern, simplify_subtype_rel, simplify_type,
@@ -1966,7 +2094,17 @@ mod tests {
         let t = TypeWithEnv {
             constructor: Type::from_str("I64")
                 .arrow(Type::from_str("I64").union(Type::from_str("String"))),
-            subtype_relations: vec![(dot, req_t)].into_iter().collect(),
+            subtype_relations: vec![(
+                dot.clone(),
+                req_t.clone(),
+                RelOrigin {
+                    left: dot,
+                    right: req_t,
+                    span: 0..0,
+                },
+            )]
+            .into_iter()
+            .collect(),
             ..Default::default()
         };
         let mut map: TypeVariableMap = Default::default();
@@ -2035,15 +2173,19 @@ mod tests {
             if let TypeMatchableRef::Const { id } = h.matchable_ref() {
                 let false_ =
                     PatternUnitForRestriction::argument_tuple_from_arguments(
-                        vec![PatternUnitForRestriction::Const {
-                            id: TypeId::Intrinsic(IntrinsicType::False),
-                        }],
+                        vec![(
+                            PatternUnitForRestriction::Const {
+                                id: TypeId::Intrinsic(IntrinsicType::False),
+                            },
+                            0..0,
+                        )],
                     );
                 let p = PatternUnitForRestriction::Tuple(
                     PatternUnitForRestriction::Const { id }.into(),
                     PatternUnitForRestriction::argument_tuple_from_arguments(
                         vec![false_.clone(), false_],
                     )
+                    .0
                     .into(),
                 );
                 let TypeDestructResult {
@@ -2051,7 +2193,7 @@ mod tests {
                     matched,
                     bind_matched: _,
                     kind: _,
-                } = destruct_type_by_pattern(t1, &p);
+                } = destruct_type_by_pattern(t1, &p, 0..0);
                 assert_eq!(
                     format!("{}", remained),
                     r#"/\[{[True, [{:True | :False}]] | [False, True]}]"#
@@ -2101,35 +2243,36 @@ mod tests {
         let p = PatternUnitForRestriction::Tuple(
             PatternUnitForRestriction::Const { id: t_id }.into(),
             PatternUnitForRestriction::argument_tuple_from_arguments(vec![
-                PatternUnitForRestriction::Binder(
+                (PatternUnitForRestriction::Binder(
                     TypeMatchable::Empty.into(),
                     DeclId::new(),
-                ),
-                PatternUnitForRestriction::Tuple(
+                ),0..0),
+                (PatternUnitForRestriction::Tuple(
                     PatternUnitForRestriction::Const { id: t_id }.into(),
                     PatternUnitForRestriction::argument_tuple_from_arguments(
                         vec![
-                            PatternUnitForRestriction::Binder(
+                            (PatternUnitForRestriction::Binder(
                                 TypeMatchable::Empty.into(),
                                 DeclId::new(),
-                            ),
-                            PatternUnitForRestriction::Binder(
+                            ),0..0),
+                            (PatternUnitForRestriction::Binder(
                                 TypeMatchable::Empty.into(),
                                 DeclId::new(),
-                            ),
-                            PatternUnitForRestriction::Binder(
+                            ),0..0),
+                            (PatternUnitForRestriction::Binder(
                                 TypeMatchable::Empty.into(),
                                 DeclId::new(),
-                            ),
+                            ),0..0),
                         ],
-                    )
+                    ).0
                     .into(),
-                ),
-                PatternUnitForRestriction::Binder(
+                ),0..0),
+                (PatternUnitForRestriction::Binder(
                     TypeMatchable::Empty.into(),
                     DeclId::new(),
-                ),
+                ),0..0),
             ])
+            .0
             .into(),
         );
         let TypeDestructResult {
@@ -2137,7 +2280,7 @@ mod tests {
             matched,
             bind_matched: _,
             kind: _,
-        } = destruct_type_by_pattern(t1, &p);
+        } = destruct_type_by_pattern(t1, &p, 0..0);
         assert_eq!(
             format!("{}", remained),
             r#"{E | T[(), E, rec[{E | T[(), d0, d0]}]]}"#
@@ -2161,23 +2304,27 @@ mod tests {
             Type::argument_tuple_from_arguments(vec![t1]),
             &vec![
                 PatternUnitForRestriction::argument_tuple_from_arguments(vec![
-                    PatternUnitForRestriction::I64,
+                    (PatternUnitForRestriction::I64, 0..0),
                 ]),
                 PatternUnitForRestriction::argument_tuple_from_arguments(vec![
-                    PatternUnitForRestriction::Binder(
-                        TypeUnit::Variable(v2).into(),
-                        DeclId::new(),
+                    (
+                        PatternUnitForRestriction::Binder(
+                            TypeUnit::Variable(v2).into(),
+                            DeclId::new(),
+                        ),
+                        0..0,
                     ),
                 ]),
             ],
+            0..0,
         );
         let subtype_rels = r.unwrap();
         assert_eq!(
             format!("{}", subtype_rels),
             format!(
-                r#"    {1} < {0},
-                  |    t1 < {{{1} | I64}},
-                  |    I64 < {0},
+                r#"    {1} < {0} (0..0),
+                  |    t1 < {{{1} | I64}} (0..0),
+                  |    I64 < {0} (0..0),
                   |"#,
                 v2, v1,
             )
@@ -2220,14 +2367,18 @@ mod tests {
             Type::argument_tuple_from_arguments(vec![t1.clone(), t1]),
             &vec![PatternUnitForRestriction::argument_tuple_from_arguments(
                 vec![
-                    PatternUnitForRestriction::Const { id: b_id },
-                    PatternUnitForRestriction::Binder(
-                        TypeUnit::Variable(v2).into(),
-                        DeclId::new(),
+                    (PatternUnitForRestriction::Const { id: b_id }, 0..0),
+                    (
+                        PatternUnitForRestriction::Binder(
+                            TypeUnit::Variable(v2).into(),
+                            DeclId::new(),
+                        ),
+                        0..0,
                     ),
                 ],
             )],
+            0..0,
         );
-        assert_eq!(r, None)
+        assert!(r.is_err())
     }
 }

@@ -80,7 +80,7 @@ fn main() {
     let loglevel =
         LevelFilter::from_str(matches.value_of("loglevel").unwrap()).unwrap();
     match fs::read_to_string(file_name) {
-        Ok(source) => run(&source, command, loglevel),
+        Ok(source) => run(&source, file_name, command, loglevel),
         Err(e) => {
             eprintln!("{}", e);
             process::exit(1)

@@ -9,6 +9,7 @@ use crate::ast_step3::simplify_subtype_rel;
 use crate::intrinsics::IntrinsicType;
 use fxhash::FxHashSet;
 use itertools::Itertools;
+use std::collections::BTreeSet;
 use std::fmt::Display;
 use std::rc::Rc;
 
@@ -188,10 +189,11 @@ mod type_type {
         ast_step2::{types::unwrap_or_clone, SubtypeRelations},
         ast_step3::simplify_subtype_rel,
     };
-    use std::{iter, rc::Rc, vec};
+    use parser::token_id::TokenId;
+    use std::{collections::BTreeSet, iter, rc::Rc, vec};
 
     #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-    pub struct Type(Vec<Rc<TypeUnit>>);
+    pub struct Type(Vec<Rc<TypeUnit>>, Option<TokenId>);
 
     impl IntoIterator for Type {
         type Item = Rc<TypeUnit>;
@@ -324,7 +326,7 @@ mod type_type {
         pub fn insert_with_already_considered_relations(
             &mut self,
             other: Rc<TypeUnit>,
-            already_considered_relations: Option<SubtypeRelations>,
+            already_considered_relations: Option<BTreeSet<(Type, Type)>>,
         ) {
             if other.contains_empty_in_covariant_candidate() {
                 return;
@@ -335,7 +337,7 @@ mod type_type {
                     already_considered_relations,
                 );
                 if let Some(t2) = t2 {
-                    self.insert(Rc::new(t2)); //
+                    self.insert(Rc::new(t2));
                 }
                 if let Some(u) = u {
                     self.push_tuple(u);
@@ -367,19 +369,20 @@ mod type_type {
                         ))
                     })
                     .collect(),
+                self.1,
             )
         }
     }
 
     impl From<TypeUnit> for Type {
         fn from(t: TypeUnit) -> Self {
-            Type(iter::once(Rc::new(t)).collect())
+            Type(iter::once(Rc::new(t)).collect(), None)
         }
     }
 
     impl From<Rc<TypeUnit>> for Type {
         fn from(t: Rc<TypeUnit>) -> Self {
-            Type(iter::once(t).collect())
+            Type(iter::once(t).collect(), None)
         }
     }
 
@@ -387,7 +390,7 @@ mod type_type {
         pub fn merge_union_with(
             self,
             other: Self,
-            mut already_considered_relations: Option<SubtypeRelations>,
+            mut already_considered_relations: Option<BTreeSet<(Type, Type)>>,
         ) -> (Option<Self>, Option<Self>, Option<Self>) {
             use TypeUnit::*;
             match (self, other) {
@@ -539,7 +542,7 @@ mod type_type {
             n: i32,
         ) -> Self {
             self.into_iter()
-                .map(|(a, b)| {
+                .map(|(a, b, origin)| {
                     (
                         a.increment_recursive_index(
                             greater_than_or_equal_to,
@@ -549,6 +552,7 @@ mod type_type {
                             greater_than_or_equal_to,
                             n,
                         ),
+                        origin,
                     )
                 })
                 .collect()
@@ -567,7 +571,7 @@ impl Type {
     pub fn is_subtype_of_with_rels(
         self,
         other: Self,
-        already_considered_relations: Option<&mut SubtypeRelations>,
+        already_considered_relations: Option<&mut BTreeSet<(Type, Type)>>,
     ) -> bool {
         let r = simplify_subtype_rel(self, other, already_considered_relations);
         r.map(|v| v.is_empty()).unwrap_or(false)

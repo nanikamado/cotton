@@ -6,8 +6,9 @@ use crate::{
             merge_vec, unwrap_or_clone, Type, TypeMatchable, TypeMatchableRef,
             TypeUnit, TypeVariable,
         },
-        SubtypeRelations, TypeConstructor, TypeId, TypeWithEnv,
+        RelOrigin, SubtypeRelations, TypeConstructor, TypeId, TypeWithEnv,
     },
+    errors::NotSubtypeReason,
     intrinsics::INTRINSIC_TYPES,
 };
 use std::rc::Rc;
@@ -150,7 +151,7 @@ impl TypeUnit {
                     .collect();
                 let subtype_relations = subtype_relations
                     .into_iter()
-                    .map(|(a, b)| {
+                    .map(|(a, b, origin)| {
                         let (a, u_) = a.replace_num_with_update_flag(
                             from,
                             to,
@@ -163,7 +164,7 @@ impl TypeUnit {
                             recursive_alias_depth,
                         );
                         u |= u_;
-                        (a, b)
+                        (a, b, origin)
                     })
                     .collect();
                 (
@@ -406,45 +407,71 @@ impl TypeUnit {
         }
     }
 
-    fn split_broad(self, other: &Self) -> (Type, Type) {
+    fn split_broad(
+        self,
+        other: &Self,
+    ) -> (Type, Type, Option<NotSubtypeReason>) {
         match (self, other) {
             (
                 t @ (TypeUnit::Variable(_) | TypeUnit::RecursiveAlias { .. }),
                 _,
             )
             | (t, TypeUnit::Variable(_) | TypeUnit::RecursiveAlias { .. }) => {
-                (Type::default(), t.into())
+                (Type::default(), t.into(), None)
             }
-            (TypeUnit::Fn(a1, a2), TypeUnit::Fn(b1, b2)) => {
-                if b1.clone().is_subtype_of(a1.clone()) {
-                    let (a2_out, a2_in) = a2.split_broad(b2);
-                    (
-                        TypeUnit::Fn(a1.clone(), a2_out).into(),
-                        TypeUnit::Fn(a1, a2_in).into(),
-                    )
-                } else {
-                    (Type::default(), TypeUnit::Fn(a1, a2).into())
-                }
+            (TypeUnit::Fn(a1, a2), TypeUnit::Fn(_, b2)) => {
+                let (a2_out, a2_in, r) = a2.split_broad(b2);
+                let out: Type = TypeUnit::Fn(a1.clone(), a2_out).into();
+                (
+                    out.clone(),
+                    TypeUnit::Fn(a1, a2_in).into(),
+                    Some(NotSubtypeReason::NoIntersection {
+                        left: other.clone().into(),
+                        right: out,
+                        reasons: r.into_iter().collect(),
+                    }),
+                )
             }
             (TypeUnit::Const { id: id1 }, TypeUnit::Const { id: id2, .. })
                 if id1 == *id2 =>
             {
-                (Type::default(), TypeUnit::Const { id: id1 }.into())
+                (Type::default(), TypeUnit::Const { id: id1 }.into(), None)
             }
             (TypeUnit::Tuple(a1, a2), TypeUnit::Tuple(b1, b2)) => {
-                let (a1_out, a1_in) = a1.split_broad(b1);
-                let (a2_out, a2_in) = a2.split_broad(b2);
+                let (a1_out, a1_in, r1) = a1.split_broad(b1);
+                let (a2_out, a2_in, r2) = a2.split_broad(b2);
+                let out = Type::default()
+                    .union_unit(TypeUnit::Tuple(
+                        a1_out,
+                        a2_out.clone().union(a2_in.clone()),
+                    ))
+                    .union_unit(TypeUnit::Tuple(a1_in.clone(), a2_out));
                 (
-                    Type::default()
-                        .union_unit(TypeUnit::Tuple(
-                            a1_out,
-                            a2_out.clone().union(a2_in.clone()),
-                        ))
-                        .union_unit(TypeUnit::Tuple(a1_in.clone(), a2_out)),
+                    out.clone(),
                     TypeUnit::Tuple(a1_in, a2_in).into(),
+                    if out.is_empty() {
+                        None
+                    } else {
+                        Some(NotSubtypeReason::NoIntersection {
+                            left: other.clone().into(),
+                            right: out,
+                            reasons: vec![r1, r2]
+                                .into_iter()
+                                .flatten()
+                                .collect(),
+                        })
+                    },
                 )
             }
-            (t, _) => (t.into(), Type::default()),
+            (t, _) => (
+                t.clone().into(),
+                Type::default(),
+                Some(NotSubtypeReason::NoIntersection {
+                    left: other.clone().into(),
+                    right: t.into(),
+                    reasons: Vec::new(),
+                }),
+            ),
         }
     }
 
@@ -634,15 +661,6 @@ impl Type {
         (a, b, c)
     }
 
-    pub fn intersection_and_difference_broad(
-        self,
-        other: Self,
-    ) -> (Self, Self, Self, Self) {
-        let (a, b) = self.split_broad(&other);
-        let (c, d) = other.split_broad(&b);
-        (a, b, d, c)
-    }
-
     pub fn split(self, other: &Self) -> (Self, Self) {
         let mut in_ = Type::default();
         let mut out = self;
@@ -665,26 +683,63 @@ impl Type {
         (out, in_)
     }
 
-    pub fn split_broad(self, other: &Self) -> (Self, Self) {
+    pub fn split_broad(
+        self,
+        other: &Self,
+    ) -> (Self, Self, Option<NotSubtypeReason>) {
         let mut in_ = Type::default();
         let mut out = self;
+        let mut reasons = Vec::new();
         for t in other.iter() {
             let i;
-            (out, i) = out.split_broad_unit(t);
+            let r;
+            (out, i, r) = out.split_broad_unit(t);
             in_.union_in_place(i);
+            if let Some(r) = r {
+                reasons.push(r);
+            }
         }
-        (out, in_)
+        (
+            out.clone(),
+            in_,
+            if other.len() == 1 {
+                reasons.into_iter().next()
+            } else {
+                Some(NotSubtypeReason::NoIntersection {
+                    left: out,
+                    right: other.clone(),
+                    reasons,
+                })
+            },
+        )
     }
 
-    pub fn split_broad_unit(self, other: &TypeUnit) -> (Self, Self) {
+    pub fn split_broad_unit(
+        self,
+        other: &TypeUnit,
+    ) -> (Self, Self, Option<NotSubtypeReason>) {
         let mut in_ = Type::default();
         let mut out = Type::default();
+        let mut reasons = Vec::new();
+        let self_len = self.len();
         for t in self {
-            let (o, i) = unwrap_or_clone(t).split_broad(other);
+            let (o, i, r) = unwrap_or_clone(t).split_broad(other);
             in_.union_in_place(i);
             out.union_in_place(o);
+            if let Some(r) = r {
+                reasons.push(r);
+            }
         }
-        (out, in_)
+        let reason = if self_len == 1 {
+            reasons.into_iter().next()
+        } else {
+            Some(NotSubtypeReason::NoIntersection {
+                left: other.clone().into(),
+                right: out.clone(),
+                reasons,
+            })
+        };
+        (out, in_, reason)
     }
 
     pub fn diff(self, other: &Self) -> Self {
@@ -769,10 +824,15 @@ fn apply_arg_to_recursive_fn(
             Variable(v) => {
                 if v == TypeVariable::RecursiveIndex(recursive_alias_depth + 1)
                 {
-                    panic!()
+                    // v is the recurring function
+                    TypeUnit::Variable(TypeVariable::RecursiveIndex(
+                        recursive_alias_depth,
+                    ))
+                    .into()
                 } else if v
                     == TypeVariable::RecursiveIndex(recursive_alias_depth)
                 {
+                    // v is the function parameter
                     arg.clone()
                 } else {
                     Variable(v.increment_recursive_index_with_bound(1, -1))
@@ -857,7 +917,7 @@ fn apply_arg_to_recursive_fn(
 impl TypeWithEnv {
     pub fn insert_to_subtype_rels_with_restrictions(
         &mut self,
-        value: (Type, Type),
+        value: (Type, Type, RelOrigin),
     ) {
         let mut additional_subtype_rel = SubtypeRelations::default();
         let a = match value.0.matchable() {
@@ -886,7 +946,7 @@ impl TypeWithEnv {
             }
             b => b.into(),
         };
-        self.subtype_relations.insert((a, b));
+        self.subtype_relations.insert((a, b, value.2));
         self.subtype_relations.extend(additional_subtype_rel);
     }
 }
