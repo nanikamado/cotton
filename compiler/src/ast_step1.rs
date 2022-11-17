@@ -70,6 +70,7 @@ pub enum Expr<'a> {
     Decl(Box<VariableDecl<'a>>),
     Call(Box<ExprWithSpan<'a>>, Box<ExprWithSpan<'a>>),
     Do(Vec<ExprWithSpan<'a>>),
+    Question(Box<ExprWithSpan<'a>>, Span),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -213,7 +214,10 @@ impl<'a> ApplySuffixOp<'a> for (Expr<'a>, Span) {
                 op_precedence_map,
                 constructors,
             )),
-            ExprSuffixOp::Question => todo!(),
+            ExprSuffixOp::Question(question_span) => {
+                let span = self.1.clone();
+                (Expr::Question(Box::new(self), question_span.clone()), span)
+            }
         }
     }
 }

@@ -30,6 +30,7 @@ pub enum Token {
     Type,
     Interface,
     Where,
+    Question,
 }
 
 trait RequiresIndet {
@@ -183,6 +184,7 @@ fn lexer(
         "|" => Token::Bar,
         "=" => Token::Assign,
         ":" => Token::Colon,
+        "?" => Token::Question,
         _ => Token::Op(op, TokenId::new()),
     });
 

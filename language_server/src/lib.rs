@@ -250,7 +250,7 @@ fn semantic_tokens_from_src(src: &str) -> Option<(SemanticTokens, HoverMap)> {
                     }
                 }
             }
-            Op(_, _) | Assign | Bar | BArrow | Colon => {
+            Op(_, _) | Assign | Bar | BArrow | Colon | Question => {
                 SemanticTokenType::OPERATOR
             }
             Paren(_) | OpenParenWithoutPad | Indent | Dedent | Comma => {

@@ -66,12 +66,15 @@ pub enum TypeMatchableRef<'b> {
 mod type_unit {
     use super::Type;
     use crate::ast_step2::{name_id::Name, SubtypeRelations, TypeId};
-    use std::{cell::Cell, fmt::Display};
+    use std::{
+        cell::Cell,
+        fmt::{Debug, Display},
+    };
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct TypeVariableInner(usize);
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub enum TypeVariable {
         Normal(TypeVariableInner),
         RecursiveIndex(usize),
@@ -179,6 +182,12 @@ mod type_unit {
                     write!(f, "d{}", n)
                 }
             }
+        }
+    }
+
+    impl Debug for TypeVariable {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self)
         }
     }
 }

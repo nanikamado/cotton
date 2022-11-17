@@ -6,15 +6,19 @@ use tracing_mutex::stdsync::TracingRwLock as RwLock;
 #[derive(Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Name(u32);
 
-impl Name {
-    fn new() -> Self {
-        let mut c = NAME_COUNT.lock().unwrap();
-        *c += 1;
-        Name(*c - 1)
-    }
+fn new_name() -> Name {
+    let mut c = NAME_COUNT.lock().unwrap();
+    *c += 1;
+    Name(*c - 1)
+}
 
+impl Name {
     pub fn from_str(name: &str) -> Self {
         NAME_MAP.write().unwrap().get_name_id(name)
+    }
+
+    pub fn get_unique() -> Self {
+        NAME_MAP.write().unwrap().get_unique_name()
     }
 }
 
@@ -50,12 +54,6 @@ impl Debug for Name {
     }
 }
 
-impl Default for Name {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[derive(Debug, Default)]
 pub struct NameMap {
     from_str: FxHashMap<String, Name>,
@@ -67,11 +65,19 @@ impl NameMap {
         if let Some(n) = self.from_str.get(name) {
             *n
         } else {
-            let n = Name::new();
+            let n = new_name();
             self.from_str.insert(name.to_string(), n);
             self.from_name.insert(n, name.to_string());
             n
         }
+    }
+
+    fn get_unique_name(&mut self) -> Name {
+        let n = new_name();
+        let name = format!("unique_name_{}", n.0);
+        self.from_str.insert(name.to_string(), n);
+        self.from_name.insert(n, name);
+        n
     }
 }
 

@@ -196,6 +196,20 @@ pub enum TokenMapEntry {
     VariableDeclInInterface(Type),
 }
 
+enum FlatMapEnv {
+    FlatMap {
+        variable_name: Name,
+        pre_calc: ExprWithTypeAndSpan<TypeVariable>,
+        question_span: Span,
+    },
+    Decl(Name, ExprWithTypeAndSpan<TypeVariable>),
+}
+
+struct WithFlatMapEnv<Value = ExprWithTypeAndSpan<TypeVariable>> {
+    value: Value,
+    env: Vec<FlatMapEnv>,
+}
+
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct TokenMap(pub FxHashMap<TokenId, TokenMapEntry>);
 
@@ -320,14 +334,31 @@ impl Ast {
             .variable_decl
             .into_iter()
             .map(|d| {
-                variable_decl(
+                let WithFlatMapEnv {
+                    value:
+                        VariableDecl {
+                            value,
+                            name,
+                            type_annotation,
+                            decl_id,
+                            span,
+                        },
+                    env,
+                } = variable_decl(
                     d,
                     &data_decl_map,
                     &Default::default(),
                     &mut type_alias_map,
                     &interface_decl,
                     &mut token_map,
-                )
+                );
+                VariableDecl {
+                    value: catch_flat_map(WithFlatMapEnv { value, env }),
+                    name,
+                    type_annotation,
+                    decl_id,
+                    span,
+                }
             })
             .collect();
         let entry_point = variable_decl
@@ -386,10 +417,18 @@ fn variable_decl(
     type_alias_map: &mut TypeAliasMap,
     interfaces: &FxHashMap<Name, Vec<(Name, Type, TypeVariable)>>,
     token_map: &mut TokenMap,
-) -> VariableDecl {
+) -> WithFlatMapEnv<VariableDecl> {
     let decl_id = DeclId::new();
     token_map.insert(v.name.1, TokenMapEntry::Decl(decl_id));
-    VariableDecl {
+    let expr = expr(
+        v.value,
+        data_decl_map,
+        type_variable_names,
+        type_alias_map,
+        interfaces,
+        token_map,
+    );
+    let d = VariableDecl {
         name: Name::from_str(v.name.0),
         type_annotation: v.type_annotation.map(|(t, forall, span)| {
             let implicit_type_parameters: Vec<_> = forall
@@ -448,17 +487,79 @@ fn variable_decl(
                 span,
             }
         }),
-        value: expr(
-            v.value,
-            data_decl_map,
-            type_variable_names,
-            type_alias_map,
-            interfaces,
-            token_map,
-        ),
+        value: expr.value,
         decl_id,
         span: v.span,
+    };
+    WithFlatMapEnv {
+        value: d,
+        env: expr.env,
     }
+}
+
+fn catch_flat_map(e: WithFlatMapEnv) -> ExprWithTypeAndSpan<TypeVariable> {
+    let mut expr = e.value;
+    for env in e.env.into_iter().rev() {
+        match env {
+            FlatMapEnv::FlatMap {
+                variable_name,
+                pre_calc,
+                question_span,
+            } => {
+                let continuation = Expr::Lambda(vec![FnArm {
+                    pattern: vec![(
+                        vec![PatternUnit::Binder(
+                            variable_name,
+                            DeclId::new(),
+                            TypeVariable::new(),
+                        )],
+                        0..0,
+                    )],
+                    expr,
+                }]);
+                expr = (
+                    Expr::Call(
+                        Box::new((
+                            Expr::Call(
+                                Box::new((
+                                    Expr::Ident {
+                                        name: Name::from_str("flat_map"),
+                                        ident_id: IdentId::new(),
+                                    },
+                                    TypeVariable::new(),
+                                    question_span,
+                                )),
+                                Box::new(pre_calc),
+                            ),
+                            TypeVariable::new(),
+                            0..0,
+                        )),
+                        Box::new((continuation, TypeVariable::new(), 0..0)),
+                    ),
+                    TypeVariable::new(),
+                    0..0,
+                );
+            }
+            FlatMapEnv::Decl(name, e) => {
+                let l = Expr::Lambda(vec![FnArm {
+                    pattern: vec![(
+                        PatternUnit::Binder(name, DeclId::new(), e.1).into(),
+                        0..0,
+                    )],
+                    expr,
+                }]);
+                expr = (
+                    Expr::Call(
+                        Box::new((l, TypeVariable::new(), 0..0)),
+                        Box::new(e),
+                    ),
+                    TypeVariable::new(),
+                    0..0,
+                );
+            }
+        }
+    }
+    expr
 }
 
 fn expr(
@@ -468,63 +569,87 @@ fn expr(
     type_alias_map: &mut TypeAliasMap,
     interfaces: &FxHashMap<Name, Vec<(Name, Type, TypeVariable)>>,
     token_map: &mut TokenMap,
-) -> ExprWithTypeAndSpan<TypeVariable> {
+) -> WithFlatMapEnv {
     use Expr::*;
     let span = e.1;
-    let e = match e.0 {
-        ast_step1::Expr::Lambda(arms) => Lambda(
-            arms.into_iter()
-                .map(move |arm| {
-                    fn_arm(
-                        arm,
-                        data_decl_map,
-                        type_variable_names,
-                        type_alias_map,
-                        interfaces,
-                        token_map,
-                    )
-                })
-                .collect(),
+    let (flat_map_env, e) = match e.0 {
+        ast_step1::Expr::Lambda(arms) => (
+            Vec::new(),
+            Lambda(
+                arms.into_iter()
+                    .map(move |arm| {
+                        fn_arm(
+                            arm,
+                            data_decl_map,
+                            type_variable_names,
+                            type_alias_map,
+                            interfaces,
+                            token_map,
+                        )
+                    })
+                    .collect(),
+            ),
         ),
-        ast_step1::Expr::Number(n) => Number(Name::from_str(n)),
-        ast_step1::Expr::StrLiteral(s) => StrLiteral(Name::from_str(s)),
+        ast_step1::Expr::Number(n) => (Vec::new(), Number(Name::from_str(n))),
+        ast_step1::Expr::StrLiteral(s) => {
+            (Vec::new(), StrLiteral(Name::from_str(s)))
+        }
         ast_step1::Expr::Ident(name) => {
             let ident_id = IdentId::new();
             token_map.insert(name.1, TokenMapEntry::Ident(ident_id));
-            Ident {
-                name: Name::from_str(name.0),
-                ident_id,
-            }
+            (
+                Vec::new(),
+                Ident {
+                    name: Name::from_str(name.0),
+                    ident_id,
+                },
+            )
         }
-        ast_step1::Expr::Decl(d) => {
-            let d = variable_decl(
-                *d,
-                data_decl_map,
-                type_variable_names,
-                type_alias_map,
-                interfaces,
-                token_map,
-            );
-            d.value.0
+        ast_step1::Expr::Decl(_) => {
+            panic!()
         }
-        ast_step1::Expr::Call(f, a) => Call(
-            Box::new(expr(
+        ast_step1::Expr::Call(f, a) => {
+            let f = expr(
                 *f,
                 data_decl_map,
                 type_variable_names,
                 type_alias_map,
                 interfaces,
                 token_map,
-            )),
-            Box::new(expr(
+            );
+            let mut a = expr(
                 *a,
                 data_decl_map,
                 type_variable_names,
                 type_alias_map,
                 interfaces,
                 token_map,
-            )),
-        ),
+            );
+            if f.env.is_empty() {
+                (a.env, Call(Box::new(f.value), Box::new(a.value)))
+            } else {
+                let name = Name::get_unique();
+                let mut env = f.env;
+                let f_span = f.value.2.clone();
+                let f_type = f.value.1;
+                env.push(FlatMapEnv::Decl(name, f.value));
+                env.append(&mut a.env);
+                (
+                    env,
+                    Call(
+                        Box::new((
+                            Expr::Ident {
+                                name,
+                                ident_id: IdentId::new(),
+                            },
+                            f_type,
+                            f_span,
+                        )),
+                        Box::new(a.value),
+                    ),
+                )
+            }
+        }
         ast_step1::Expr::Do(es) => {
             let mut new_es = Vec::new();
             let mut es_span = 0..0;
@@ -541,10 +666,40 @@ fn expr(
                 );
             }
             new_es.reverse();
-            Do(new_es)
+            return WithFlatMapEnv {
+                value: (Do(new_es), TypeVariable::new(), span),
+                env: Vec::new(),
+            };
+        }
+        ast_step1::Expr::Question(e, question_span) => {
+            let e = expr(
+                *e,
+                data_decl_map,
+                type_variable_names,
+                type_alias_map,
+                interfaces,
+                token_map,
+            );
+            let mut env = e.env;
+            let name = Name::get_unique();
+            env.push(FlatMapEnv::FlatMap {
+                variable_name: name,
+                pre_calc: e.value,
+                question_span,
+            });
+            (
+                env,
+                Expr::Ident {
+                    name,
+                    ident_id: IdentId::new(),
+                },
+            )
         }
     };
-    (e, TypeVariable::new(), span)
+    WithFlatMapEnv {
+        value: (e, TypeVariable::new(), span),
+        env: flat_map_env,
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -579,7 +734,10 @@ fn add_expr_in_do(
                             TypeVariable::new(),
                             d_span.clone(),
                         ),
-                        d.value,
+                        catch_flat_map(WithFlatMapEnv {
+                            value: d.value.value,
+                            env: d.env,
+                        }),
                     ],
                     d_span,
                 )
@@ -588,39 +746,59 @@ fn add_expr_in_do(
                 let l = Expr::Lambda(vec![FnArm {
                     pattern: vec![(
                         PatternUnit::Binder(
-                            d.name,
-                            d.decl_id,
+                            d.value.name,
+                            d.value.decl_id,
                             TypeVariable::new(),
                         )
                         .into(),
-                        d.span,
+                        d.value.span,
                     )],
                     expr: (Expr::Do(es), TypeVariable::new(), es_span.clone()),
                 }]);
                 (
-                    vec![(
-                        Expr::Call(
-                            Box::new((l, TypeVariable::new(), d_span.clone())),
-                            Box::new(d.value),
+                    vec![catch_flat_map(WithFlatMapEnv {
+                        value: (
+                            Expr::Call(
+                                Box::new((
+                                    l,
+                                    TypeVariable::new(),
+                                    d_span.clone(),
+                                )),
+                                Box::new(d.value.value),
+                            ),
+                            TypeVariable::new(),
+                            d_span.clone(),
                         ),
-                        TypeVariable::new(),
-                        d_span.clone(),
-                    )],
+                        env: d.env,
+                    })],
                     merge_span(&es_span, &d_span),
                 )
             }
         }
         e => {
             let e_span = e.1.clone();
-            es.push(expr(
+            let e = expr(
                 e,
                 data_decl_map,
                 type_variable_names,
                 type_alias_map,
                 interfaces,
                 token_map,
-            ));
-            (es, merge_span(&es_span, &e_span))
+            );
+            es.push(e.value);
+            let span = merge_span(&es_span, &e_span);
+            if e.env.is_empty() {
+                (es, span)
+            } else {
+                es.reverse();
+                (
+                    vec![catch_flat_map(WithFlatMapEnv {
+                        value: (Expr::Do(es), TypeVariable::new(), es_span),
+                        env: e.env,
+                    })],
+                    span,
+                )
+            }
         }
     }
 }
@@ -639,14 +817,14 @@ fn fn_arm(
             .into_iter()
             .map(|(p, span)| (pattern(p, data_decl_map, token_map), span))
             .collect(),
-        expr: expr(
+        expr: catch_flat_map(expr(
             arm.expr,
             data_decl_map,
             type_variable_names,
             type_alias_map,
             interfaces,
             token_map,
-        ),
+        )),
     }
 }
 

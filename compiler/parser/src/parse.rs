@@ -28,7 +28,7 @@ pub enum OpSequenceUnit<T, U> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ExprSuffixOp {
     Apply(Expr),
-    Question,
+    Question(Span),
 }
 
 pub type Expr = Vec<OpSequenceUnit<(ExprUnit, Span), ExprSuffixOp>>;
@@ -326,6 +326,11 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                             ]
                         })
                         .or(apply)
+                        .or(just(Token::Question).map_with_span(|_, span| {
+                            vec![OpSequenceUnit::Apply(ExprSuffixOp::Question(
+                                span,
+                            ))]
+                        }))
                         .repeated()
                         .flatten(),
                 )
