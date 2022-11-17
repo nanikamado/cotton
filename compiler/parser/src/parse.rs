@@ -281,7 +281,10 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 .ignore_then(indented(lambda.clone().repeated().at_least(1)))
                 .map(ExprUnit::Case);
             let do_ = just(Token::Do)
-                .ignore_then(indented(expr.clone().repeated()))
+                .ignore_then(
+                    indented(expr.clone().repeated())
+                        .or(expr.clone().map(|e| vec![e])),
+                )
                 .map(ExprUnit::Do);
             let expr_unit = do_
                 .or(case)
