@@ -1397,10 +1397,11 @@ fn fmt_tuple(
             Single,
         )
     } else if op_precedence_map.get(head.to_string().as_str()).is_some() {
-        assert_eq!(tuple_rev.len(), 2);
+        debug_assert_eq!(tuple_rev.len(), 2);
         (
             tuple_rev
                 .iter()
+                .rev()
                 .map(|t| {
                     let (t, t_context) = fmt_type_with_env(
                         t,
