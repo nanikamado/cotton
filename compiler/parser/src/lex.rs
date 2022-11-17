@@ -167,26 +167,27 @@ fn lexer(
         .or(just(']'))
         .map(Token::Paren);
 
-    let op = filter::<_, _, Simple<char>>(|&c| {
-        (GeneralCategory::of(c).is_punctuation()
-            || GeneralCategory::of(c).is_symbol())
-            && c != '"'
-            && c != '('
-            && c != ')'
-            && c != '_'
-    })
-    .repeated()
-    .at_least(1)
-    .collect::<String>()
-    .map(|op| match op.as_str() {
-        "," => Token::Comma,
-        "=>" => Token::BArrow,
-        "|" => Token::Bar,
-        "=" => Token::Assign,
-        ":" => Token::Colon,
-        "?" => Token::Question,
-        _ => Token::Op(op, TokenId::new()),
-    });
+    let op = just(",")
+        .map(|_| Token::Comma)
+        .or(just("?").map(|_| Token::Question))
+        .or(filter::<_, _, Simple<char>>(|&c| {
+            (GeneralCategory::of(c).is_punctuation()
+                || GeneralCategory::of(c).is_symbol())
+                && c != '"'
+                && c != '('
+                && c != ')'
+                && c != '_'
+        })
+        .repeated()
+        .at_least(1)
+        .collect::<String>()
+        .map(|op| match op.as_str() {
+            "=>" => Token::BArrow,
+            "|" => Token::Bar,
+            "=" => Token::Assign,
+            ":" => Token::Colon,
+            _ => Token::Op(op, TokenId::new()),
+        }));
 
     let line_ws = filter(|c: &char| c.is_inline_whitespace());
 
