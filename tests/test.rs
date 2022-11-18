@@ -231,3 +231,8 @@ fn question_eval_order2() {
         .stdout("1\n2\n3\n4\n")
         .success();
 }
+
+#[test]
+fn simple_subtype_error_fail() {
+    test_test("simple_subtype_error_fail.cot").code(1);
+}

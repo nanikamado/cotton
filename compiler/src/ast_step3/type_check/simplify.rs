@@ -1014,7 +1014,7 @@ pub fn simplify_subtype_rel(
                     .collect(),
             )])
         }
-        (a @ Tuple(..), Union(b)) => {
+        (a @ (Tuple(..) | Const { .. }), Union(b)) => {
             let a: Type = a.into();
             let mut new_bs = Type::default();
             let mut updated = false;
