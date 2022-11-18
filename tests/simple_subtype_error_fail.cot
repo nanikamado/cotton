@@ -1,0 +1,14 @@
+(.) : A -> (A -> B) -> B forall { A, B } =
+    | a, f => f(a)
+
+infixl 10 .
+
+s : I64 | String = 1
+
+f : (String | ()) -> String =
+    | () => "()"
+    | s => s
+
+main : () -> () =
+    | () => do
+        s.f.println

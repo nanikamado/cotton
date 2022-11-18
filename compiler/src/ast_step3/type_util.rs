@@ -407,7 +407,7 @@ impl TypeUnit {
         }
     }
 
-    fn split_broad(
+    fn remove_disjoint_part(
         self,
         other: &Self,
     ) -> (Type, Type, Option<NotSubtypeReason>) {
@@ -420,12 +420,12 @@ impl TypeUnit {
                 (Type::default(), t.into(), None)
             }
             (TypeUnit::Fn(a1, a2), TypeUnit::Fn(_, b2)) => {
-                let (a2_out, a2_in, r) = a2.split_broad(b2);
+                let (a2_out, a2_in, r) = a2.remove_disjoint_part(b2);
                 let out: Type = TypeUnit::Fn(a1.clone(), a2_out).into();
                 (
                     out.clone(),
                     TypeUnit::Fn(a1, a2_in).into(),
-                    Some(NotSubtypeReason::NoIntersection {
+                    Some(NotSubtypeReason::Disjoint {
                         left: other.clone().into(),
                         right: out,
                         reasons: r.into_iter().collect(),
@@ -438,8 +438,8 @@ impl TypeUnit {
                 (Type::default(), TypeUnit::Const { id: id1 }.into(), None)
             }
             (TypeUnit::Tuple(a1, a2), TypeUnit::Tuple(b1, b2)) => {
-                let (a1_out, a1_in, r1) = a1.split_broad(b1);
-                let (a2_out, a2_in, r2) = a2.split_broad(b2);
+                let (a1_out, a1_in, r1) = a1.remove_disjoint_part(b1);
+                let (a2_out, a2_in, r2) = a2.remove_disjoint_part(b2);
                 let out = Type::default()
                     .union_unit(TypeUnit::Tuple(
                         a1_out,
@@ -452,7 +452,7 @@ impl TypeUnit {
                     if out.is_empty() {
                         None
                     } else {
-                        Some(NotSubtypeReason::NoIntersection {
+                        Some(NotSubtypeReason::Disjoint {
                             left: other.clone().into(),
                             right: out,
                             reasons: vec![r1, r2]
@@ -466,7 +466,7 @@ impl TypeUnit {
             (t, _) => (
                 t.clone().into(),
                 Type::default(),
-                Some(NotSubtypeReason::NoIntersection {
+                Some(NotSubtypeReason::Disjoint {
                     left: other.clone().into(),
                     right: t.into(),
                     reasons: Vec::new(),
@@ -683,7 +683,7 @@ impl Type {
         (out, in_)
     }
 
-    pub fn split_broad(
+    pub fn remove_disjoint_part(
         self,
         other: &Self,
     ) -> (Self, Self, Option<NotSubtypeReason>) {
@@ -693,7 +693,7 @@ impl Type {
         for t in other.iter() {
             let i;
             let r;
-            (out, i, r) = out.split_broad_unit(t);
+            (out, i, r) = out.remove_disjoint_part_unit(t);
             in_.union_in_place(i);
             if let Some(r) = r {
                 reasons.push(r);
@@ -705,7 +705,7 @@ impl Type {
             if other.len() == 1 {
                 reasons.into_iter().next()
             } else {
-                Some(NotSubtypeReason::NoIntersection {
+                Some(NotSubtypeReason::Disjoint {
                     left: out,
                     right: other.clone(),
                     reasons,
@@ -714,7 +714,7 @@ impl Type {
         )
     }
 
-    pub fn split_broad_unit(
+    pub fn remove_disjoint_part_unit(
         self,
         other: &TypeUnit,
     ) -> (Self, Self, Option<NotSubtypeReason>) {
@@ -723,7 +723,7 @@ impl Type {
         let mut reasons = Vec::new();
         let self_len = self.len();
         for t in self {
-            let (o, i, r) = unwrap_or_clone(t).split_broad(other);
+            let (o, i, r) = unwrap_or_clone(t).remove_disjoint_part(other);
             in_.union_in_place(i);
             out.union_in_place(o);
             if let Some(r) = r {
@@ -733,7 +733,7 @@ impl Type {
         let reason = if self_len == 1 {
             reasons.into_iter().next()
         } else {
-            Some(NotSubtypeReason::NoIntersection {
+            Some(NotSubtypeReason::Disjoint {
                 left: other.clone().into(),
                 right: out.clone(),
                 reasons,

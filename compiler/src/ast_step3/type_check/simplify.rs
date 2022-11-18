@@ -769,7 +769,7 @@ fn _simplify_type<T: TypeConstructor>(
         if try_eq_sub(map, &mut t) {
             return Ok((t, true));
         }
-        // log::trace!("t{{7}} = {}", t);
+        log::trace!("t{{10}} = {}", t);
         // let mut bounded_v = None;
         // for (a, b) in &t.subtype_relations {
         //     if let TypeMatchableRef::Variable(v) = b.matchable_ref() {
@@ -1014,7 +1014,7 @@ pub fn simplify_subtype_rel(
                     .collect(),
             )])
         }
-        (a @ Tuple(..), Union(b)) => {
+        (a @ (Tuple(..) | Const { .. }), Union(b)) => {
             let a: Type = a.into();
             let mut new_bs = Type::default();
             let mut updated = false;
@@ -1030,7 +1030,7 @@ pub fn simplify_subtype_rel(
                     return Ok(Vec::new());
                 }
                 let (b_out, b_in, reason) =
-                    Type::from((*b).clone()).split_broad(&a);
+                    Type::from((*b).clone()).remove_disjoint_part(&a);
                 new_bs.union_in_place(b_in.clone());
                 if !b_out.is_empty() {
                     updated = true;
