@@ -16,23 +16,30 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 type HoverMap = Vec<Vec<Option<Hover>>>;
 
+#[derive(Debug, PartialEq, Eq)]
+enum TokenCache {
+    Cached(SemanticTokens, HoverMap),
+    Changed,
+}
+
 #[derive(Debug)]
 struct Backend {
     client: Client,
-    tokens: DashMap<Url, (SemanticTokens, HoverMap)>,
+    tokens: DashMap<Url, TokenCache>,
 }
 
 const SUPPORTED_TYPES: &[SemanticTokenType] = &[
     SemanticTokenType::STRING,
     SemanticTokenType::NUMBER,
     SemanticTokenType::TYPE,
-    SemanticTokenType::STRUCT,
+    SemanticTokenType::new("constructor"),
     SemanticTokenType::INTERFACE,
     SemanticTokenType::FUNCTION,
     SemanticTokenType::VARIABLE,
     SemanticTokenType::KEYWORD,
     SemanticTokenType::COMMENT,
     SemanticTokenType::OPERATOR,
+    SemanticTokenType::new("constructorOperator"),
 ];
 
 static SUPPORTED_TYPE_MAP: Lazy<HashMap<&'static SemanticTokenType, u32>> =
@@ -100,34 +107,56 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let src = params.text_document.text;
-        if let Ok(Some(tokens)) =
-            tokio::task::spawn_blocking(move || semantic_tokens_from_src(&src))
-                .await
-        {
-            self.tokens.insert(params.text_document.uri, tokens);
-        }
+        self.client
+            .log_message(
+                MessageType::INFO,
+                &format!("opend {}.", params.text_document.uri),
+            )
+            .await;
     }
 
-    async fn did_change(&self, _params: DidChangeTextDocumentParams) {
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
         self.client
-            .log_message(MessageType::INFO, "file changed")
+            .log_message(
+                MessageType::INFO,
+                &format!("changed {}", params.text_document.uri),
+            )
             .await;
+        self.tokens
+            .insert(params.text_document.uri, TokenCache::Changed);
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
         self.client
-            .log_message(MessageType::INFO, "file saved")
+            .log_message(MessageType::INFO, "file saved.")
             .await;
-        let path = params.text_document.uri.path();
-        if let Ok(src) = fs::read_to_string(path) {
-            if let Ok(Some(tokens)) = tokio::task::spawn_blocking(move || {
-                semantic_tokens_from_src(&src)
-            })
-            .await
-            {
-                self.tokens.insert(params.text_document.uri, tokens);
+        if let Some(r) = self.tokens.get(&params.text_document.uri) {
+            self.client
+                .log_message(MessageType::INFO, "document found")
+                .await;
+            let changed = r.value() == &TokenCache::Changed;
+            drop(r);
+            if changed {
+                self.tokens.remove(&params.text_document.uri);
+                self.client
+                    .log_message(MessageType::INFO, "removed `changed`.")
+                    .await;
+                self.client.semantic_tokens_refresh().await.unwrap();
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        "requested `semantic_tokens_refresh`.",
+                    )
+                    .await;
+            } else {
+                self.client
+                    .log_message(MessageType::INFO, "already cached.")
+                    .await;
             }
+        } else {
+            self.client
+                .log_message(MessageType::INFO, "not cached yet.")
+                .await;
         }
     }
 
@@ -141,24 +170,47 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensParams,
     ) -> tower_lsp::jsonrpc::Result<Option<SemanticTokensResult>> {
+        self.client
+            .log_message(MessageType::INFO, "semantic tokens requested.")
+            .await;
         let uri = params.text_document.uri;
-        if let Some(r) = self.tokens.get(&uri) {
-            let tokens = r.value();
-            Ok(Some(tokens.0.clone().into()))
+        let cache = if let Some(r) = self.tokens.get(&uri) {
+            if let TokenCache::Cached(t, _) = r.value() {
+                Some(t.clone())
+            } else {
+                return Ok(None);
+            }
+        } else {
+            None
+        };
+        if let Some(cache) = cache {
+            Ok(Some(cache.into()))
         } else if let Ok(src) = fs::read_to_string(uri.path()) {
+            self.client
+                .log_message(MessageType::INFO, "compiling.")
+                .await;
             if let Ok(Some(tokens)) = tokio::task::spawn_blocking(move || {
                 semantic_tokens_from_src(&src)
             })
             .await
             {
                 let semantic_tokens = tokens.0.clone();
-                self.tokens.insert(uri, tokens);
+                self.tokens
+                    .insert(uri, TokenCache::Cached(tokens.0, tokens.1));
                 Ok(Some(semantic_tokens.into()))
             } else {
-                eprintln!("error");
+                self.client
+                    .log_message(
+                        MessageType::INFO,
+                        format!("could not compile {}.", uri),
+                    )
+                    .await;
                 Ok(None)
             }
         } else {
+            self.client
+                .log_message(MessageType::INFO, format!("{} not found.", uri))
+                .await;
             Ok(None)
         }
     }
@@ -170,11 +222,13 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
         let url = params.text_document_position_params.text_document.uri;
         if let Some(hover_map) = self.tokens.get(&url) {
-            Ok(hover_map
-                .value()
-                .1
-                .get(position.line as usize)
-                .and_then(|t| t.get(position.character as usize).cloned()?))
+            if let TokenCache::Cached(_, h) = hover_map.value() {
+                Ok(h.get(position.line as usize).and_then(|t| {
+                    t.get(position.character as usize).cloned()?
+                }))
+            } else {
+                Ok(None)
+            }
         } else {
             Ok(None)
         }
@@ -235,7 +289,7 @@ fn semantic_tokens_from_src(src: &str) -> Option<(SemanticTokens, HoverMap)> {
                             }
                             TokenKind::Type => SemanticTokenType::TYPE,
                             TokenKind::Constructor(_) => {
-                                SemanticTokenType::STRUCT
+                                SemanticTokenType::new("constructor")
                             }
                             TokenKind::Interface => {
                                 SemanticTokenType::INTERFACE
@@ -250,7 +304,14 @@ fn semantic_tokens_from_src(src: &str) -> Option<(SemanticTokens, HoverMap)> {
                     }
                 }
             }
-            Op(_, _) | Assign | Bar | BArrow | Colon | Question => {
+            Op(_, id) => {
+                if let Some(TokenKind::Constructor(_)) = token_map.get(id) {
+                    SemanticTokenType::new("constructorOperator")
+                } else {
+                    SemanticTokenType::OPERATOR
+                }
+            }
+            Assign | Bar | BArrow | Colon | Question => {
                 SemanticTokenType::OPERATOR
             }
             Paren(_) | OpenParenWithoutPad | Indent | Dedent | Comma => {
