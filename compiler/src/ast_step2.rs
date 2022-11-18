@@ -42,9 +42,10 @@ pub enum TypeId {
     FixedVariable(DeclId),
 }
 
-/// # Difference between `ast_step1::Ast` and `ast_step2::Ast`
+/// Difference between `ast_step1::Ast` and `ast_step2::Ast`:
 /// - The names of types and constructors are resolved.
 /// - Local variable declarations are converted into lambdas and function calls.
+/// - Question notations are desugared.
 #[derive(Debug, PartialEq)]
 pub struct Ast {
     pub variable_decl: Vec<VariableDecl>,
