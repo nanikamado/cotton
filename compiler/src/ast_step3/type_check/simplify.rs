@@ -1030,7 +1030,7 @@ pub fn simplify_subtype_rel(
                     return Ok(Vec::new());
                 }
                 let (b_out, b_in, reason) =
-                    Type::from((*b).clone()).split_broad(&a);
+                    Type::from((*b).clone()).remove_disjoint_part(&a);
                 new_bs.union_in_place(b_in.clone());
                 if !b_out.is_empty() {
                     updated = true;

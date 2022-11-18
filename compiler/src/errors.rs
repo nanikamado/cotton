@@ -113,7 +113,7 @@ pub enum NotSubtypeReason {
         right: Type,
         reasons: Vec<NotSubtypeReason>,
     },
-    NoIntersection {
+    Disjoint {
         left: Type,
         right: Type,
         reasons: Vec<NotSubtypeReason>,
@@ -142,7 +142,7 @@ impl Display for NotSubtypeReasonDisplay<'_> {
                 )?;
                 fmt_reasons(reasons, f, self.depth, self.op_precedence_map)
             }
-            NotSubtypeReason::NoIntersection {
+            NotSubtypeReason::Disjoint {
                 left,
                 right,
                 reasons,
