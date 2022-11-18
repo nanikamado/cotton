@@ -1,0 +1,13 @@
+trace : I64 -> I64 =
+    | a => do
+        println(i64_to_string(a?))
+        a
+
+flat_map : I64 -> (I64 -> I64) -> I64 =
+    | a, f => f(a)
+
+main : () -> () =
+    | () => do
+        do
+            trace(trace(1)? + trace(2)) + trace(4)?
+        ()

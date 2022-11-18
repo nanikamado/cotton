@@ -188,7 +188,46 @@ fn puts() {
 fn flat_map() {
     test_examples(
         "flat_map.cot",
-        "ok\n[1, 10001, 101, 10101, 2, \
+        "ok\n\
+        [2, 3, 4]\n\
+        [1, 10001, 101, 10101, 2, \
         10002, 102, 10102, 3, 10003, 103, 10103]\n",
     );
+}
+
+#[test]
+fn question() {
+    test_examples(
+        "question.cot",
+        &"101
+        |201
+        |301
+        |102
+        |202
+        |302
+        |103
+        |203
+        |303
+        |"
+        .strip_margin(),
+    );
+}
+
+#[test]
+fn question2() {
+    test_examples("question2.cot", "2025\n");
+}
+
+#[test]
+fn question_eval_order() {
+    test_test("question_eval_order.cot")
+        .stdout("1\n2\n3\n4\n")
+        .success();
+}
+
+#[test]
+fn question_eval_order2() {
+    test_test("question_eval_order2.cot")
+        .stdout("1\n2\n3\n4\n")
+        .success();
 }

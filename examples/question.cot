@@ -1,0 +1,13 @@
+(.) = | a, f => f(a)
+
+infixl 10 .
+
+flat_map : I64 -> (I64 -> ()) -> () =
+    | a, f => do
+        f(a)
+        f(a * 2)
+        f(a * 3)
+
+main : () -> () =
+    | () => do
+        (1? + 100?).i64_to_string.println

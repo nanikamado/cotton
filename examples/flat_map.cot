@@ -64,11 +64,21 @@ flat_map : F[A] -> (A -> F[B]) -> F[B] forall { F: Map & Flatten, A, B } =
 
 main : () -> () =
     | () => do
-        None.flat_map(| a => None)
-        Some("ok").flat_map(| a => None)
-        Some("ok").flat_map(| a => Some(a.puts))
-        (1 /\ 2 /\ 3 /\ Nil)
-            .flat_map(| a => a /\ (a + 100) /\ Nil)
-            .flat_map(| a => a /\ (a + 10000) /\ Nil)
-            .puts
+        do
+            a = None?
+            None
+        do
+            a = Some("ok")?
+            None
+        do
+            a = Some("ok")?
+            Some(a.puts)
+        (do
+            ((1 /\ 2 /\ 3 /\ Nil)? + 1) /\ Nil
+        ).puts
+        (do
+            a = (1 /\ 2 /\ 3 /\ Nil)?
+            a = (a /\ (a + 100) /\ Nil)?
+            a /\ (a + 10000) /\ Nil
+        ).puts
         ()
