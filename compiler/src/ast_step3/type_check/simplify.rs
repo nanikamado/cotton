@@ -769,7 +769,7 @@ fn _simplify_type<T: TypeConstructor>(
         if try_eq_sub(map, &mut t) {
             return Ok((t, true));
         }
-        // log::trace!("t{{7}} = {}", t);
+        log::trace!("t{{10}} = {}", t);
         // let mut bounded_v = None;
         // for (a, b) in &t.subtype_relations {
         //     if let TypeMatchableRef::Variable(v) = b.matchable_ref() {
