@@ -777,6 +777,8 @@ fn resolve_scc(
                     .filter(|v| !v.is_recursive_index())
                     .collect_vec();
                 if vs.is_empty() {
+                    debug_assert!(t.subtype_relations.is_empty());
+                    debug_assert!(t.variable_requirements.is_empty());
                     t.constructor
                 } else {
                     assert!(t.variable_requirements.is_empty());
