@@ -1148,7 +1148,7 @@ impl<'a> TypeAliasMap<'a> {
                     token_map,
                 );
                 token_map.insert(name.1, TokenMapEntry::TypeAlias);
-                for v in forall {
+                for v in forall.into_iter().rev() {
                     t = TypeUnit::TypeLevelFn(
                         t.replace_num(
                             v,
