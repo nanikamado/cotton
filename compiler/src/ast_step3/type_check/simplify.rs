@@ -194,6 +194,43 @@ impl TypeVariableMap {
                 self._insert_type(subtype, a_a.clone(), b_a.clone(), origin);
                 return;
             }
+            (Fn(a1, b1), Fn(a2, b2)) => {
+                self._insert_type(
+                    subtype,
+                    a1.clone(),
+                    a2.clone(),
+                    origin.clone(),
+                );
+                self._insert_type(subtype, b1.clone(), b2.clone(), origin);
+                return;
+            }
+            (_, TypeLevelApply { f, a }) => {
+                if let TypeMatchableRef::Variable(f) = f.matchable_ref() {
+                    let (replaced_key, u) =
+                        key.clone().replace_type_union_with_update_flag(
+                            a,
+                            &TypeUnit::Variable(TypeVariable::RecursiveIndex(
+                                0,
+                            )),
+                            0,
+                        );
+                    if u {
+                        self.insert(
+                            subtype,
+                            f,
+                            TypeUnit::TypeLevelFn(replaced_key).into(),
+                        );
+                        return;
+                    }
+                }
+                subtype.insert((
+                    key.clone(),
+                    value.clone(),
+                    origin.clone().unwrap(),
+                ));
+                subtype.insert((value, key, origin.unwrap()));
+                return;
+            }
             _ => {
                 subtype.insert((
                     key.clone(),
@@ -368,9 +405,13 @@ impl SubtypeRelations {
                             origin_a.clone(),
                             origin_b.clone(),
                             Some(&mut already_considered_relations),
-                        )
-                        .err()
-                        .unwrap();
+                        );
+                        let r = match r {
+                            Ok(r) => {
+                                panic!("{} < {}. ({:?})", origin_a, origin_b, r)
+                            }
+                            Err(r) => r,
+                        };
                         Err(CompileError::NotSubtypeOf {
                             sub_type: origin_a,
                             super_type: origin_b,
@@ -969,7 +1010,8 @@ pub fn simplify_subtype_rel(
             | Fn(_, _)
             | Union(_)
             | RecursiveAlias { .. }
-            | Const { .. }),
+            | Const { .. }
+            | TypeLevelApply { .. }),
         ) if already_considered_relations.is_some() => {
             let b: Type = b.into();
             if b.find_recursive_alias().is_some() {
@@ -1108,6 +1150,48 @@ pub fn simplify_subtype_rel(
             }) =>
         {
             Ok(Vec::new())
+        }
+        (TypeLevelApply { f: f1, a: a1 }, TypeLevelApply { f: f2, a: a2 }) => {
+            match (f1.matchable(), f2.matchable()) {
+                (Const { id: id1 }, Const { id: id2 }) => {
+                    if id1 == id2 {
+                        Ok(vec![(a1.clone(), a2.clone()), (a2, a1)])
+                    } else {
+                        Err(NotSubtypeReason::NotSubtype {
+                            left: Const { id: id1 }.into(),
+                            right: Const { id: id2 }.into(),
+                            reasons: vec![],
+                        })
+                    }
+                }
+                (f1, f2) => Ok(vec![(
+                    TypeLevelApply {
+                        f: f1.into(),
+                        a: a1,
+                    }
+                    .into(),
+                    TypeLevelApply {
+                        f: f2.into(),
+                        a: a2,
+                    }
+                    .into(),
+                )]),
+            }
+        }
+        (Tuple(h, t), TypeLevelApply { f, a }) => {
+            match (h.matchable(), f.matchable()) {
+                (Const { id: id1 }, Const { id: id2 }) if id1 != id2 => {
+                    Err(NotSubtypeReason::NotSubtype {
+                        left: Const { id: id1 }.into(),
+                        right: Const { id: id2 }.into(),
+                        reasons: vec![],
+                    })
+                }
+                (h, f) => Ok(vec![(
+                    Tuple(h.into(), t).into(),
+                    TypeLevelApply { f: f.into(), a }.into(),
+                )]),
+            }
         }
         (Variable(a), b)
             if Type::from(b.clone()).contains_variable(a)
@@ -1958,7 +2042,7 @@ impl Display for VariableRequirement {
 
 impl<T: TypeConstructor> Display for ast_step2::TypeWithEnv<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "{} forall", self.constructor)?;
+        writeln!(f, "{} forall {{", self.constructor)?;
         for (a, b, origin) in &self.subtype_relations {
             if a != &origin.left || b != &origin.right {
                 writeln!(
@@ -2003,7 +2087,7 @@ impl<T: TypeConstructor> Display for ast_step2::TypeWithEnv<T> {
                 ))
             )?;
         }
-        write!(f, "--")?;
+        write!(f, "}}")?;
         Ok(())
     }
 }
@@ -2109,7 +2193,7 @@ mod tests {
         };
         let mut map: TypeVariableMap = Default::default();
         let st = simplify_type(&mut map, t).unwrap();
-        assert_eq!(format!("{}", st), "I64 -> [{:String | :I64}] forall\n--");
+        assert_eq!(format!("{}", st), "I64 -> [{:String | :I64}] forall {\n}");
     }
 
     #[test]

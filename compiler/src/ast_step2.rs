@@ -464,12 +464,16 @@ fn variable_decl(
                     variable_requirements,
                     subtype_relations,
                 } => {
-                    fixed_t = TypeUnit::Restrictions {
-                        t,
-                        variable_requirements: Vec::new(),
-                        subtype_relations,
-                    }
-                    .into();
+                    fixed_t = if subtype_relations.is_empty() {
+                        t
+                    } else {
+                        TypeUnit::Restrictions {
+                            t,
+                            variable_requirements: Vec::new(),
+                            subtype_relations,
+                        }
+                        .into()
+                    };
                     variable_requirements
                 }
                 t => {

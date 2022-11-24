@@ -15,7 +15,8 @@ pub enum CompileError {
         reason: Vec<CompileError>,
     },
     ManyCandidates {
-        satisfied: Vec<String>,
+        satisfied: Vec<(Type, String)>,
+        span: Span,
     },
     NotSubtypeOf {
         sub_type: Type,
@@ -26,6 +27,7 @@ pub enum CompileError {
     InexhaustiveMatch {
         description: String,
     },
+    RecursionLimit,
 }
 
 impl CompileError {
@@ -57,13 +59,31 @@ impl CompileError {
                     Ok(())
                 }
             }
-            CompileError::ManyCandidates { satisfied } => write!(
-                w,
-                "There are {} candidates for one requirement: {}.\
-                Can not dicide which one to use.",
-                satisfied.len(),
-                satisfied.iter().format(", "),
-            ),
+            CompileError::ManyCandidates { satisfied, span } => {
+                log::debug!(
+                    "satisfied: {}",
+                    satisfied.iter().map(|(_, s)| s).format(", ")
+                );
+                let report =
+                    Report::build(ReportKind::Error, filename, span.start)
+                        .with_label(
+                            Label::new((filename, span.clone())).with_message(
+                                format!(
+                            "There are {} candidates for this variable.\n{}\
+                                    Could not dicide which one to use.",
+                            satisfied.len(),
+                            satisfied.iter().map(|(t, _)| t).format_with(
+                                "",
+                                |t, f| f(&format_args!(
+                                    "{}\n",
+                                    print_type(t, op_precedence_map)
+                                ))
+                            )
+                        ),
+                            ),
+                        );
+                report.finish().write((filename, Source::from(src)), w)
+            }
             CompileError::NotSubtypeOf {
                 sub_type,
                 super_type,
@@ -91,6 +111,9 @@ impl CompileError {
             }
             CompileError::InexhaustiveMatch { description } => {
                 write!(w, "{}", description)
+            }
+            CompileError::RecursionLimit => {
+                write!(w, "recursion of implicit variable reaced the limit.")
             }
         }
     }

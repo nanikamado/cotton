@@ -236,3 +236,8 @@ fn question_eval_order2() {
 fn simple_subtype_error_fail() {
     test_test("simple_subtype_error_fail.cot").code(1);
 }
+
+#[test]
+fn result_puts() {
+    test_examples("result_puts.cot", "Err(ok)\n");
+}
