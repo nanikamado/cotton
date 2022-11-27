@@ -71,6 +71,7 @@ pub enum Expr<'a> {
     Call(Box<ExprWithSpan<'a>>, Box<ExprWithSpan<'a>>),
     Do(Vec<ExprWithSpan<'a>>),
     Question(Box<ExprWithSpan<'a>>, Span),
+    TypeAnnotation(Box<ExprWithSpan<'a>>, Type<'a>, Forall<'a>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -199,7 +200,7 @@ pub trait ApplySuffixOp<'a> {
     ) -> Self;
 }
 
-impl<'a> ApplySuffixOp<'a> for (Expr<'a>, Span) {
+impl<'a> ApplySuffixOp<'a> for ExprWithSpan<'a> {
     type Op = ExprSuffixOp;
 
     fn apply_suffix_op(
@@ -209,11 +210,9 @@ impl<'a> ApplySuffixOp<'a> for (Expr<'a>, Span) {
         constructors: &FxHashSet<&str>,
     ) -> Self {
         match arg {
-            ExprSuffixOp::Apply(s) => self.add_argument(fold_op_sequence(
-                s,
-                op_precedence_map,
-                constructors,
-            )),
+            ExprSuffixOp::Apply(s) => {
+                self.add_argument(expr(s, op_precedence_map, constructors))
+            }
             ExprSuffixOp::Question(question_span) => {
                 let span = self.1.clone();
                 (Expr::Question(Box::new(self), question_span.clone()), span)
@@ -370,6 +369,25 @@ impl<'a> From<&'a parser::Forall> for Forall<'a> {
     }
 }
 
+fn expr<'a>(
+    e: &'a parser::Expr,
+    op_precedence_map: &OpPrecedenceMap,
+    constructors: &FxHashSet<&str>,
+) -> ExprWithSpan<'a> {
+    let value = fold_op_sequence(&e.0, op_precedence_map, constructors);
+    if let Some((annotation, forall)) = &e.1 {
+        let (t, _span) =
+            fold_op_sequence(annotation, op_precedence_map, constructors);
+        let span = value.1.clone();
+        (
+            Expr::TypeAnnotation(Box::new(value), t, forall.into()),
+            span,
+        )
+    } else {
+        value
+    }
+}
+
 fn variable_decl<'a>(
     v: &'a parser::VariableDecl,
     op_precedence_map: &OpPrecedenceMap,
@@ -382,7 +400,7 @@ fn variable_decl<'a>(
                 fold_op_sequence(s, op_precedence_map, constructors);
             (t, forall.into(), span)
         }),
-        value: fold_op_sequence(&v.expr, op_precedence_map, constructors),
+        value: expr(&v.expr, op_precedence_map, constructors),
         span: v.span.clone(),
     }
 }
@@ -647,28 +665,27 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::ExprUnit, &'a Span) {
         constructors: &FxHashSet<&str>,
     ) -> Self::T {
         use Expr::*;
-        let e = match &self.0 {
-            parser::ExprUnit::Case(arms) => Lambda(
-                arms.iter()
-                    .map(|a| fn_arm(a, op_precedence_map, constructors))
-                    .collect(),
-            ),
-            parser::ExprUnit::Int(a) => Number(a),
-            parser::ExprUnit::Str(a) => StrLiteral(a),
-            parser::ExprUnit::Ident((n, id)) => Ident((n, *id)),
-            parser::ExprUnit::VariableDecl(a) => Decl(Box::new(variable_decl(
-                a,
-                op_precedence_map,
-                constructors,
-            ))),
-            parser::ExprUnit::Paren(a) => {
-                fold_op_sequence(a, op_precedence_map, constructors).0
-            }
-            parser::ExprUnit::Do(es) => Do(es
-                .iter()
-                .map(|e| fold_op_sequence(e, op_precedence_map, constructors))
-                .collect()),
-        };
+        let e =
+            match &self.0 {
+                parser::ExprUnit::Case(arms) => Lambda(
+                    arms.iter()
+                        .map(|a| fn_arm(a, op_precedence_map, constructors))
+                        .collect(),
+                ),
+                parser::ExprUnit::Int(a) => Number(a),
+                parser::ExprUnit::Str(a) => StrLiteral(a),
+                parser::ExprUnit::Ident((n, id)) => Ident((n, *id)),
+                parser::ExprUnit::VariableDecl(a) => Decl(Box::new(
+                    variable_decl(a, op_precedence_map, constructors),
+                )),
+                parser::ExprUnit::Paren(a) => {
+                    expr(a, op_precedence_map, constructors).0
+                }
+                parser::ExprUnit::Do(es) => Do(es
+                    .iter()
+                    .map(|e| expr(e, op_precedence_map, constructors))
+                    .collect()),
+            };
         (e, self.1.clone())
     }
 }
@@ -684,7 +701,7 @@ fn fn_arm<'a>(
             .iter()
             .map(|s| fold_op_sequence(s, op_precedence_map, constructors))
             .collect(),
-        expr: fold_op_sequence(&a.expr, op_precedence_map, constructors),
+        expr: expr(&a.expr, op_precedence_map, constructors),
     }
 }
 

@@ -310,7 +310,7 @@ impl SubtypeRelations {
         t: TypeVariable,
         pattern_restrictions: &PatternRestrictions,
         variable_requirements: &[VariableRequirement],
-        fn_apply_dummies: &BTreeMap<Type, Type>,
+        fn_apply_dummies: &BTreeMap<Type, (Type, RelOrigin)>,
     ) -> Option<Type> {
         let t = map.find(t);
         if let TypeMatchableRef::Variable(v) = t.matchable_ref() {
@@ -332,7 +332,7 @@ impl SubtypeRelations {
         t: TypeVariable,
         pattern_restrictions: &PatternRestrictions,
         variable_requirements: &[VariableRequirement],
-        fn_apply_dummies: &BTreeMap<Type, Type>,
+        fn_apply_dummies: &BTreeMap<Type, (Type, RelOrigin)>,
     ) -> Option<Type> {
         let t = map.find(t);
         if let TypeMatchableRef::Variable(v) = t.matchable_ref() {
@@ -515,11 +515,6 @@ fn _simplify_type<T: TypeConstructor>(
         }
     }
     log::trace!("t{{2}} = {}", t);
-    let (t, updated) = replace_fn_apply_with_dummy_variable(t);
-    if updated {
-        return Ok((t, true));
-    }
-    log::trace!("t{{3}} = {}", t);
     let (mut t, updated) = simplify_dummies(t, map);
     if updated {
         return Ok((t, true));
@@ -1239,7 +1234,7 @@ fn possible_weakest(
     subtype_relation: &SubtypeRelations,
     variable_requirements: &[VariableRequirement],
     pattern_restrictions: &PatternRestrictions,
-    fn_apply_dummies: &BTreeMap<Type, Type>,
+    fn_apply_dummies: &BTreeMap<Type, (Type, RelOrigin)>,
 ) -> Option<Type> {
     if variable_requirements
         .iter()
@@ -1395,7 +1390,7 @@ fn possible_strongest(
     subtype_relation: &SubtypeRelations,
     pattern_restrictions: &PatternRestrictions,
     variable_requirements: &[VariableRequirement],
-    fn_apply_dummies: &BTreeMap<Type, Type>,
+    fn_apply_dummies: &BTreeMap<Type, (Type, RelOrigin)>,
 ) -> Option<Type> {
     let mut down = Vec::new();
     if variable_requirements
@@ -1534,7 +1529,9 @@ where
             fn_apply_dummies: self
                 .fn_apply_dummies
                 .into_iter()
-                .map(|(a, b)| (map.normalize_type(a), map.normalize_type(b)))
+                .map(|(a, (b, origin))| {
+                    (map.normalize_type(a), (map.normalize_type(b), origin))
+                })
                 .collect(),
         })
     }
@@ -1671,7 +1668,7 @@ fn simplify_dummies<T: TypeConstructor>(
     t.fn_apply_dummies = t
         .fn_apply_dummies
         .into_iter()
-        .flat_map(|(a, b)| match a.matchable() {
+        .flat_map(|(a, (b, origin))| match a.matchable() {
             TypeMatchable::TypeLevelApply { f, a } => match a.matchable() {
                 TypeMatchable::Variable(a)
                     if b.all_type_variables_vec() == vec![a] =>
@@ -1685,18 +1682,23 @@ fn simplify_dummies<T: TypeConstructor>(
                         &mut t.subtype_relations,
                         f,
                         TypeUnit::TypeLevelFn(b).into(),
-                        None,
+                        Some(origin),
                     );
                     updated = true;
                     None
                 }
                 a => Some((
                     TypeUnit::TypeLevelApply { f, a: a.into() }.into(),
-                    b,
+                    (b, origin),
                 )),
             },
             a => {
-                map.insert_type(&mut t.subtype_relations, a.into(), b, None);
+                map.insert_type(
+                    &mut t.subtype_relations,
+                    a.into(),
+                    b,
+                    Some(origin),
+                );
                 updated = true;
                 None
             }
@@ -1971,46 +1973,6 @@ fn try_eq_sub<T: TypeConstructor>(
     }
 }
 
-fn replace_fn_apply_with_dummy_variable<T: TypeConstructor>(
-    mut t: TypeWithEnv<T>,
-) -> (TypeWithEnv<T>, bool) {
-    let mut updated = false;
-    t.subtype_relations = t
-        .subtype_relations
-        .into_iter()
-        .map(|(a, b, origin)| {
-            let (a, u1) = replace_fn_apply(a, &mut t.fn_apply_dummies);
-            let (b, u2) = replace_fn_apply(b, &mut t.fn_apply_dummies);
-            updated |= u1 || u2;
-            (a, b, origin)
-        })
-        .collect();
-    (t, updated)
-}
-
-fn replace_fn_apply(
-    t: Type,
-    dummies: &mut BTreeMap<Type, Type>,
-) -> (Type, bool) {
-    match t.matchable_ref() {
-        TypeMatchableRef::TypeLevelApply { f, a: _ }
-            if matches!(f.matchable_ref(), TypeMatchableRef::Variable(_)) =>
-        {
-            (
-                if let Some(t) = dummies.get(&t) {
-                    t.clone()
-                } else {
-                    let new_t: Type = TypeUnit::new_variable().into();
-                    dummies.insert(t, new_t.clone());
-                    new_t
-                },
-                true,
-            )
-        }
-        _ => (t, false),
-    }
-}
-
 impl<T: TypeConstructor> TypeWithEnv<T> {
     fn type_variables_in_env_except_for_subtype_rel(
         &self,
@@ -2019,7 +1981,7 @@ impl<T: TypeConstructor> TypeWithEnv<T> {
         for req in &self.variable_requirements {
             s.extend(req.required_type.all_type_variables_vec())
         }
-        for t in self.fn_apply_dummies.values() {
+        for (t, _) in self.fn_apply_dummies.values() {
             s.extend(t.all_type_variables_vec())
         }
         s
@@ -2082,9 +2044,13 @@ impl<T: TypeConstructor> Display for ast_step2::TypeWithEnv<T> {
             write!(
                 f,
                 "{}",
-                self.fn_apply_dummies.iter().format_with("", |(a, b), f| f(
-                    &format_args!("{} = {},\n", a, b)
-                ))
+                self.fn_apply_dummies.iter().format_with(
+                    "",
+                    |(a, (b, origin)), f| f(&format_args!(
+                        "{} = {} ({:?}) (from {} = {}),\n",
+                        a, b, origin.span, origin.left, origin.right
+                    ))
+                )
             )?;
         }
         write!(f, "}}")?;

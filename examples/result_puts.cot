@@ -40,8 +40,10 @@ flat_map : F[A] -> (A -> F[B]) -> F[B] forall { F: Map & Flatten, A, B } =
 
 main : () -> () =
     | () => do
+        ((do
+            Ok(Ok("ok")? <> Ok("!")?)
+        ) : Result[String, String]).puts
         (do
-            a = Err("ok")?
-            Ok("error 3")
+            Ok(Ok("ok")? <> Err("!")?)
         ).puts
         ()

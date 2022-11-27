@@ -8,7 +8,7 @@ use crate::{
         decl_id::DeclId,
         ident_id::IdentId,
         name_id::Name,
-        types::{self, SingleTypeConstructor, TypeMatchable},
+        types::{self, unwrap_or_clone, SingleTypeConstructor, TypeMatchable},
         types::{Type, TypeUnit, TypeVariable},
         Ast, DataDecl, Expr, ExprWithTypeAndSpan, FnArm, Pattern,
         PatternRestrictions, PatternUnit, PatternUnitForRestriction, RelOrigin,
@@ -17,6 +17,7 @@ use crate::{
     ast_step4::VariableKind,
     errors::CompileError,
     intrinsics::{IntrinsicConstructor, IntrinsicType, IntrinsicVariable},
+    TypeMatchableRef,
 };
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
@@ -1078,6 +1079,24 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                         TypeUnit::Variable(b).into(),
                     );
                 }
+                let mut dummies = BTreeMap::default();
+                let constructor_before_replacement = cand_t.constructor.clone();
+                cand_t.constructor =
+                    replace_fn_apply(cand_t.constructor, &mut dummies);
+                for (a, b) in dummies {
+                    let i = t.fn_apply_dummies.insert(
+                        a,
+                        (
+                            b,
+                            RelOrigin {
+                                left: cand_t.constructor.clone(),
+                                right: constructor_before_replacement.clone(),
+                                span: req.span.clone(),
+                            },
+                        ),
+                    );
+                    debug_assert!(i.is_none());
+                }
                 map.insert_type(
                     &mut t.subtype_relations,
                     cand_t.constructor.clone(),
@@ -1147,6 +1166,63 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
             },
         )
         .partition_result()
+}
+
+fn replace_fn_apply(t: Type, dummies: &mut BTreeMap<Type, Type>) -> Type {
+    use TypeUnit::*;
+    fn replace_fn_apply_unit(
+        t: TypeUnit,
+        dummies: &mut BTreeMap<Type, Type>,
+    ) -> Type {
+        match t {
+            TypeLevelApply { f, a }
+                if matches!(
+                    f.matchable_ref(),
+                    TypeMatchableRef::Variable(TypeVariable::Normal(_))
+                ) =>
+            {
+                let a = replace_fn_apply(a, dummies);
+                let t = Type::from(TypeLevelApply { f, a });
+                if let Some(t) = dummies.get(&t) {
+                    t.clone()
+                } else {
+                    let new_t: Type = TypeUnit::new_variable().into();
+                    dummies.insert(t, new_t.clone());
+                    new_t
+                }
+            }
+            Fn(a, b) => {
+                Fn(replace_fn_apply(a, dummies), replace_fn_apply(b, dummies))
+                    .into()
+            }
+            RecursiveAlias { body } => RecursiveAlias { body }.into(),
+            TypeLevelFn(a) => TypeLevelFn(a).into(),
+            TypeLevelApply { f, a } => TypeLevelApply {
+                f: replace_fn_apply(f, dummies),
+                a: replace_fn_apply(a, dummies),
+            }
+            .into(),
+            Restrictions {
+                t,
+                variable_requirements,
+                subtype_relations,
+            } => Restrictions {
+                t: replace_fn_apply(t, dummies),
+                variable_requirements,
+                subtype_relations,
+            }
+            .into(),
+            a @ (Variable(_) | Const { .. }) => a.into(),
+            Tuple(a, b) => Tuple(
+                replace_fn_apply(a, dummies),
+                replace_fn_apply(b, dummies),
+            )
+            .into(),
+        }
+    }
+    t.into_iter()
+        .flat_map(|t| replace_fn_apply_unit(unwrap_or_clone(t), dummies))
+        .collect()
 }
 
 fn get_one_satisfied<T: Display>(
@@ -1469,6 +1545,20 @@ fn min_type_with_env(
                 resolved_idents,
                 types_of_decls,
             )
+        }
+        Expr::TypeAnnotation(e, annotation) => {
+            let mut t = min_type_with_env(e, subtype_relations, map);
+            t.0.subtype_relations.insert((
+                t.0.constructor.clone(),
+                annotation.clone(),
+                RelOrigin {
+                    left: t.0.constructor.clone(),
+                    right: annotation.clone(),
+                    span: span.clone(),
+                },
+            ));
+            t.0.constructor = annotation.clone();
+            t
         }
     }
 }

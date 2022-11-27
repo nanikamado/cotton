@@ -197,6 +197,9 @@ fn expr(
                 .map(|e| expr(e, resolved_idents, map))
                 .collect(),
         ),
+        ast_step2::Expr::TypeAnnotation(v, _) => {
+            return expr(*v, resolved_idents, map)
+        }
     };
     (e, lift_recursive_alias(map.find(t)))
 }

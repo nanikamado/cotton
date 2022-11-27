@@ -31,7 +31,10 @@ pub enum ExprSuffixOp {
     Question(Span),
 }
 
-pub type Expr = Vec<OpSequenceUnit<(ExprUnit, Span), ExprSuffixOp>>;
+pub type Expr = (
+    Vec<OpSequenceUnit<(ExprUnit, Span), ExprSuffixOp>>,
+    Option<(Type, Forall)>,
+);
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ExprUnit {
@@ -337,8 +340,9 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                         .repeated()
                         .flatten(),
                 )
-                .map(|(e, oes)| {
-                    [vec![OpSequenceUnit::Operand(e)], oes].concat()
+                .then(just(Token::Colon).ignore_then(type_.clone()).or_not())
+                .map(|((e, oes), t)| {
+                    ([vec![OpSequenceUnit::Operand(e)], oes].concat(), t)
                 })
         });
         ident_or_op

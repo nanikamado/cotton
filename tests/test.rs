@@ -239,5 +239,5 @@ fn simple_subtype_error_fail() {
 
 #[test]
 fn result_puts() {
-    test_examples("result_puts.cot", "Err(ok)\n");
+    test_examples("result_puts.cot", "Ok(ok!)\nErr(!)\n");
 }

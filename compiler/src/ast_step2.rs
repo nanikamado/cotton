@@ -116,7 +116,7 @@ where
     pub subtype_relations: SubtypeRelations,
     pub already_considered_relations: BTreeSet<(Type, Type)>,
     pub pattern_restrictions: PatternRestrictions,
-    pub fn_apply_dummies: BTreeMap<Type, Type>,
+    pub fn_apply_dummies: BTreeMap<Type, (Type, RelOrigin)>,
 }
 
 pub struct PrintTypeOfGlobalVariableForUser<'a> {
@@ -158,6 +158,7 @@ pub enum Expr<T> {
     Ident { name: Name, ident_id: IdentId },
     Call(Box<ExprWithTypeAndSpan<T>>, Box<ExprWithTypeAndSpan<T>>),
     Do(Vec<ExprWithTypeAndSpan<T>>),
+    TypeAnnotation(Box<ExprWithTypeAndSpan<T>>, Type),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -699,6 +700,26 @@ fn expr(
                     ident_id: IdentId::new(),
                 },
             )
+        }
+        ast_step1::Expr::TypeAnnotation(e, t, forall) => {
+            let e = expr(
+                *e,
+                data_decl_map,
+                type_variable_names,
+                type_alias_map,
+                interfaces,
+                token_map,
+            );
+            let t = type_to_type_with_forall(
+                t,
+                data_decl_map,
+                type_variable_names.clone(),
+                type_alias_map,
+                forall,
+                interfaces,
+                token_map,
+            );
+            (e.env, Expr::TypeAnnotation(Box::new(e.value), t))
         }
     };
     WithFlatMapEnv {
