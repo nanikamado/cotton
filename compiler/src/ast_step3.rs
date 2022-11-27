@@ -20,7 +20,7 @@ use crate::{
 };
 use fxhash::FxHashMap;
 
-/// # Difference between `ast_step2::Ast` and `ast_step3::Ast`
+/// Difference between `ast_step2::Ast` and `ast_step3::Ast`:
 /// - The names of variables are resolved.
 /// - Implicit parameters are converted to explicit parameters.
 #[derive(Debug, PartialEq)]

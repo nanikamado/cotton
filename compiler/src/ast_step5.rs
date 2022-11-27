@@ -8,6 +8,9 @@ use crate::{
 };
 use fxhash::FxHashMap;
 
+/// Difference between `ast_step4::Ast` and `ast_step5::Ast`:
+/// - Some global variables are replicated and types are upcasted
+/// so that the arguments and parameters become the same type.
 #[derive(Debug)]
 pub struct Ast {
     pub variable_decl: Vec<VariableDecl>,

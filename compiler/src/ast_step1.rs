@@ -8,7 +8,7 @@ use parser::{
 };
 use std::{collections::BTreeMap, fmt::Debug};
 
-/// # Difference between `parser::Ast` and `ast_step1::Ast`
+/// Difference between `parser::Ast` and `ast_step1::Ast`:
 /// - `OpSequence`s and `TypeOpSequence`s are converted to syntex trees
 /// based on `OperatorPrecedenceDecl`s.
 #[derive(Debug, PartialEq, Eq)]
