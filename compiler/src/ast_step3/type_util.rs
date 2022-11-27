@@ -561,6 +561,20 @@ impl TypeUnit {
             TypeUnit::Restrictions { .. } => true,
         }
     }
+
+    pub fn is_wrapped_by_const(&self) -> bool {
+        use TypeUnit::*;
+        match self {
+            Fn(_, _) | Tuple(_, _) | Const { .. } => true,
+            Variable(_) | Restrictions { .. } => false,
+            RecursiveAlias { body: a } | TypeLevelFn(a) => {
+                a.is_wrapped_by_const()
+            }
+            TypeLevelApply { f, a } => {
+                f.is_wrapped_by_const() && a.is_wrapped_by_const()
+            }
+        }
+    }
 }
 
 impl Type {
@@ -805,6 +819,10 @@ impl Type {
             | TypeMatchableRef::Variable(_)
             | TypeMatchableRef::Empty => false,
         }
+    }
+
+    pub fn is_wrapped_by_const(&self) -> bool {
+        self.iter().all(|t| t.is_wrapped_by_const())
     }
 }
 

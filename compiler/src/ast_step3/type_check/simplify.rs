@@ -960,6 +960,13 @@ pub fn simplify_subtype_rel(
                 reasons: vec![],
             })
         }
+        (_, Empty) if sub.is_wrapped_by_const() => {
+            Err(NotSubtypeReason::NotSubtype {
+                left: sub,
+                right: sup,
+                reasons: vec![],
+            })
+        }
         (Union(cs), b) => Ok(cs
             .into_iter()
             .map(|c| {
@@ -977,19 +984,16 @@ pub fn simplify_subtype_rel(
             })?
             .concat()),
         (Empty, _) => Ok(Vec::new()),
-        (
-            a @ (Tuple { .. } | Fn(_, _) | Const { .. }),
-            RecursiveAlias { body },
-        ) if already_considered_relations.is_some() => {
-            let a = Type::from(a);
-            if a.find_recursive_alias().is_some() {
-                already_considered_relations
-                    .as_deref_mut()
-                    .unwrap()
-                    .insert((sub.clone(), sup.clone()));
-            }
+        (_, RecursiveAlias { body })
+            if already_considered_relations.is_some()
+                && sub.is_wrapped_by_const() =>
+        {
+            already_considered_relations
+                .as_deref_mut()
+                .unwrap()
+                .insert((sub.clone(), sup.clone()));
             simplify_subtype_rel(
-                a,
+                sub.clone(),
                 unwrap_recursive_alias(body),
                 already_considered_relations,
             )
@@ -1009,15 +1013,13 @@ pub fn simplify_subtype_rel(
             | TypeLevelApply { .. }),
         ) if already_considered_relations.is_some() => {
             let b: Type = b.into();
-            if b.find_recursive_alias().is_some() {
-                already_considered_relations
-                    .as_deref_mut()
-                    .unwrap()
-                    .insert((
-                        RecursiveAlias { body: body.clone() }.into(),
-                        b.clone(),
-                    ));
-            }
+            already_considered_relations
+                .as_deref_mut()
+                .unwrap()
+                .insert((
+                    RecursiveAlias { body: body.clone() }.into(),
+                    b.clone(),
+                ));
             simplify_subtype_rel(
                 unwrap_recursive_alias(body),
                 b,
@@ -1051,13 +1053,12 @@ pub fn simplify_subtype_rel(
                     .collect(),
             )])
         }
-        (a @ (Tuple(..) | Const { .. }), Union(b)) => {
-            let a: Type = a.into();
+        (_, Union(b)) if sub.is_wrapped_by_const() => {
             let mut new_bs = Type::default();
             let mut updated = false;
             let mut reasons = Vec::new();
             for b in b.iter() {
-                if a.clone().is_subtype_of_with_rels(
+                if sub.clone().is_subtype_of_with_rels(
                     b.clone().into(),
                     already_considered_relations
                         .as_deref_mut()
@@ -1067,7 +1068,7 @@ pub fn simplify_subtype_rel(
                     return Ok(Vec::new());
                 }
                 let (b_out, b_in, reason) =
-                    Type::from((*b).clone()).remove_disjoint_part(&a);
+                    Type::from((*b).clone()).remove_disjoint_part(&sub);
                 new_bs.union_in_place(b_in.clone());
                 if !b_out.is_empty() {
                     updated = true;
@@ -1077,25 +1078,27 @@ pub fn simplify_subtype_rel(
                 }
             }
             if updated {
-                simplify_subtype_rel(a, new_bs, already_considered_relations)
-                    .map_err(|a| {
-                        reasons.push(a);
-                        NotSubtypeReason::NotSubtype {
-                            left: sub.clone(),
-                            right: sup,
-                            reasons,
-                        }
-                    })
+                simplify_subtype_rel(
+                    sub.clone(),
+                    new_bs,
+                    already_considered_relations,
+                )
+                .map_err(|a| {
+                    reasons.push(a);
+                    NotSubtypeReason::NotSubtype {
+                        left: sub.clone(),
+                        right: sup,
+                        reasons,
+                    }
+                })
             } else if already_considered_relations.is_some()
                 && b.iter()
                     .any(|u| matches!(&**u, TypeUnit::RecursiveAlias { .. }))
             {
-                if a.find_recursive_alias().is_some() {
-                    already_considered_relations
-                        .as_deref_mut()
-                        .unwrap()
-                        .insert((sub.clone(), sup.clone()));
-                }
+                already_considered_relations
+                    .as_deref_mut()
+                    .unwrap()
+                    .insert((sub.clone(), sup.clone()));
                 let b = b
                     .into_iter()
                     .flat_map(|u| match unwrap_or_clone(u) {
@@ -1105,14 +1108,18 @@ pub fn simplify_subtype_rel(
                         u => u.into(),
                     })
                     .collect();
-                simplify_subtype_rel(a, b, already_considered_relations)
-                    .map_err(|a| NotSubtypeReason::NotSubtype {
-                        left: sub,
-                        right: sup,
-                        reasons: vec![a],
-                    })
+                simplify_subtype_rel(
+                    sub.clone(),
+                    b,
+                    already_considered_relations,
+                )
+                .map_err(|a| NotSubtypeReason::NotSubtype {
+                    left: sub,
+                    right: sup,
+                    reasons: vec![a],
+                })
             } else {
-                match a.disjunctive() {
+                match sub.clone().disjunctive() {
                     Ok(a) => Ok(a
                         .into_iter()
                         .map(|a| {

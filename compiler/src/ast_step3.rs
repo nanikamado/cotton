@@ -186,7 +186,12 @@ fn expr(
         ast_step2::Expr::StrLiteral(a) => Expr::StrLiteral(a),
         ast_step2::Expr::Ident { name, ident_id } => {
             let resolved_item = resolved_idents[&ident_id].clone();
-            get_expr_from_resolved_ident(name, &resolved_item, map.find(t))
+            get_expr_from_resolved_ident(
+                name,
+                &resolved_item,
+                map.find(t),
+                resolved_idents,
+            )
         }
         ast_step2::Expr::Call(f, a) => Expr::Call(
             expr(*f, resolved_idents, map).into(),
@@ -208,6 +213,7 @@ fn get_expr_from_resolved_ident(
     name: Name,
     resolved_ident: &ResolvedIdent,
     t: Type,
+    resolved_idents: &FxHashMap<IdentId, ResolvedIdent>,
 ) -> Expr {
     let mut value = Expr::Ident {
         name,
@@ -230,8 +236,9 @@ fn get_expr_from_resolved_ident(
             Box::new((
                 get_expr_from_resolved_ident(
                     *name,
-                    resolved_ident,
+                    &resolved_idents[resolved_ident],
                     implicit_arg_t.clone(),
+                    resolved_idents,
                 ),
                 implicit_arg_t.clone(),
             )),

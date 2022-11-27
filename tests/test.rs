@@ -241,3 +241,8 @@ fn simple_subtype_error_fail() {
 fn result_puts() {
     test_examples("result_puts.cot", "Ok(ok!)\nErr(!)\n");
 }
+
+#[test]
+fn nexts() {
+    test_examples("nexts.cot", "D1\n");
+}
