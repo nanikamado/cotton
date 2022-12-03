@@ -198,15 +198,18 @@ mod type_type {
         ast_step2::{types::unwrap_or_clone, SubtypeRelations},
         ast_step3::simplify_subtype_rel,
     };
-    use std::{collections::BTreeSet, iter, rc::Rc, vec};
+    use smallvec::SmallVec;
+    use std::{collections::BTreeSet, iter, rc::Rc};
+
+    const VEC_SIZE: usize = 2;
 
     #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-    pub struct Type(Vec<Rc<TypeUnit>>);
+    pub struct Type(SmallVec<[Rc<TypeUnit>; VEC_SIZE]>);
 
     impl IntoIterator for Type {
         type Item = Rc<TypeUnit>;
 
-        type IntoIter = vec::IntoIter<Self::Item>;
+        type IntoIter = smallvec::IntoIter<[Rc<TypeUnit>; VEC_SIZE]>;
 
         fn into_iter(self) -> Self::IntoIter {
             self.0.into_iter()
@@ -300,7 +303,9 @@ mod type_type {
         fn push_tuple(&mut self, t: TypeUnit) {
             match t {
                 TypeUnit::Tuple(t_head, t_tail) => {
-                    let mut m = Vec::with_capacity(self.0.len());
+                    let mut m = SmallVec::<[Rc<TypeUnit>; 6]>::with_capacity(
+                        self.0.len(),
+                    );
                     let mut merged = false;
                     while let Some(u) = self.0.pop() {
                         match unwrap_or_clone(u) {
