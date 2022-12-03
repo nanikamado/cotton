@@ -198,11 +198,10 @@ mod type_type {
         ast_step2::{types::unwrap_or_clone, SubtypeRelations},
         ast_step3::simplify_subtype_rel,
     };
-    use parser::token_id::TokenId;
     use std::{collections::BTreeSet, iter, rc::Rc, vec};
 
     #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-    pub struct Type(Vec<Rc<TypeUnit>>, Option<TokenId>);
+    pub struct Type(Vec<Rc<TypeUnit>>);
 
     impl IntoIterator for Type {
         type Item = Rc<TypeUnit>;
@@ -378,20 +377,19 @@ mod type_type {
                         ))
                     })
                     .collect(),
-                self.1,
             )
         }
     }
 
     impl From<TypeUnit> for Type {
         fn from(t: TypeUnit) -> Self {
-            Type(iter::once(Rc::new(t)).collect(), None)
+            Type(iter::once(Rc::new(t)).collect())
         }
     }
 
     impl From<Rc<TypeUnit>> for Type {
         fn from(t: Rc<TypeUnit>) -> Self {
-            Type(iter::once(t).collect(), None)
+            Type(iter::once(t).collect())
         }
     }
 
