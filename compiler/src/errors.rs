@@ -15,7 +15,8 @@ pub enum CompileError {
         reason: Vec<CompileError>,
     },
     ManyCandidates {
-        satisfied: Vec<String>,
+        satisfied: Vec<(Type, String)>,
+        span: Span,
     },
     NotSubtypeOf {
         sub_type: Type,
@@ -26,11 +27,12 @@ pub enum CompileError {
     InexhaustiveMatch {
         description: String,
     },
+    RecursionLimit,
 }
 
 impl CompileError {
     pub fn write<W: Write>(
-        &self,
+        self,
         src: &str,
         w: &mut W,
         filename: &str,
@@ -41,7 +43,12 @@ impl CompileError {
                 if reason.is_empty() {
                     write!(w, "{} not found", name)
                 } else if reason.len() == 1 {
-                    reason[0].write(src, w, filename, op_precedence_map)
+                    reason.into_iter().next().unwrap().write(
+                        src,
+                        w,
+                        filename,
+                        op_precedence_map,
+                    )
                 } else {
                     writeln!(
                         w,
@@ -57,32 +64,47 @@ impl CompileError {
                     Ok(())
                 }
             }
-            CompileError::ManyCandidates { satisfied } => write!(
-                w,
-                "There are {} candidates for one requirement: {}.\
-                Can not dicide which one to use.",
-                satisfied.len(),
-                satisfied.iter().format(", "),
-            ),
+            CompileError::ManyCandidates { satisfied, span } => {
+                log::debug!(
+                    "satisfied: {}",
+                    satisfied.iter().map(|(_, s)| s).format(", ")
+                );
+                let report =
+                    Report::build(ReportKind::Error, filename, span.start)
+                        .with_label(Label::new((filename, span)).with_message(
+                            format!(
+                            "There are {} candidates for this variable.\n{}\
+                                    Could not dicide which one to use.",
+                            satisfied.len(),
+                            satisfied.iter().map(|(t, _)| t).format_with(
+                                "",
+                                |t, f| f(&format_args!(
+                                    "{}\n",
+                                    print_type(t, op_precedence_map)
+                                ))
+                            )
+                        ),
+                        ));
+                report.finish().write((filename, Source::from(src)), w)
+            }
             CompileError::NotSubtypeOf {
                 sub_type,
                 super_type,
                 reason,
                 span,
             } => {
+                log::debug!("{} is not subtype of {}", sub_type, super_type);
                 let report =
                     Report::build(ReportKind::Error, filename, span.start)
-                        .with_label(
-                            Label::new((filename, span.clone())).with_message(
-                                format!(
-                                    "expected `{}` but found `{}`.",
-                                    print_type(super_type, op_precedence_map),
-                                    print_type(sub_type, op_precedence_map),
-                                ),
+                        .with_label(Label::new((filename, span)).with_message(
+                            format!(
+                                "expected `{}` but found `{}`.",
+                                print_type(&super_type, op_precedence_map),
+                                print_type(&sub_type, op_precedence_map),
                             ),
-                        )
+                        ))
                         .with_message(NotSubtypeReasonDisplay {
-                            reason,
+                            reason: &reason,
                             depth: 0,
                             op_precedence_map,
                         });
@@ -91,6 +113,9 @@ impl CompileError {
             }
             CompileError::InexhaustiveMatch { description } => {
                 write!(w, "{}", description)
+            }
+            CompileError::RecursionLimit => {
+                write!(w, "recursion of implicit variable reaced the limit.")
             }
         }
     }
@@ -106,7 +131,7 @@ fn print_type(t: &Type, op_precedence_map: &OpPrecedenceMap) -> ColoredString {
     .bold()
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum NotSubtypeReason {
     NotSubtype {
         left: Type,
@@ -117,6 +142,10 @@ pub enum NotSubtypeReason {
         left: Type,
         right: Type,
         reasons: Vec<NotSubtypeReason>,
+    },
+    LoopLimit {
+        left: Type,
+        right: Type,
     },
 }
 
@@ -154,6 +183,15 @@ impl Display for NotSubtypeReasonDisplay<'_> {
                     print_type(right, self.op_precedence_map)
                 )?;
                 fmt_reasons(reasons, f, self.depth, self.op_precedence_map)
+            }
+            NotSubtypeReason::LoopLimit { left, right } => {
+                write!(
+                    f,
+                    "could not verify `{}` is subtype of `{}` \
+                    because of the loop count limit.",
+                    print_type(left, self.op_precedence_map),
+                    print_type(right, self.op_precedence_map)
+                )
             }
         }
     }

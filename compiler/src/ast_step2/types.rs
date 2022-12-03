@@ -355,7 +355,7 @@ mod type_type {
                     self.push_tuple(t1);
                 }
             } else {
-                self.insert_to_vec(other);
+                self.0.push(other);
             }
         }
 
@@ -465,6 +465,7 @@ mod type_type {
                     }
                 }
                 (TypeLevelFn(_), _) | (_, TypeLevelFn(_)) => panic!(),
+                (a, b) if a == b => (None, Some(a), None),
                 (a, b) => (Some(a), None, Some(b)),
             }
         }
@@ -1023,47 +1024,7 @@ impl Display for Type {
 
 impl std::fmt::Debug for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use TypeMatchableRef::*;
-        match self.matchable_ref() {
-            Fn(arg, rtn) => {
-                if let Fn(_, _) = arg.matchable_ref() {
-                    write!(f, "({:?}) -> {:?}", arg, rtn)
-                } else {
-                    write!(f, "{:?} -> {:?}", arg, rtn)
-                }
-            }
-            Union(a) => write!(
-                f,
-                "{{{}}}",
-                a.iter()
-                    .map(|t| {
-                        if let TypeUnit::Fn(_, _) = **t {
-                            format!("({:?})", t)
-                        } else {
-                            format!("{:?}", t)
-                        }
-                    })
-                    .join(" | ")
-            ),
-            Variable(n) => write!(f, "{}", n),
-            Empty => write!(f, "∅"),
-            RecursiveAlias { body } => {
-                write!(f, "rec[{:?}]", *body)
-            }
-            Const { id } => write!(f, ":{}", id),
-            Tuple(a, b) => write!(f, "({a:?}, {b:?})"),
-            TypeLevelFn(_f) => write!(f, "fn[{_f:?}]"),
-            TypeLevelApply { f: _f, a } => write!(f, "{_f:?}[{a:?}]"),
-            Restrictions {
-                t,
-                variable_requirements,
-                subtype_relations,
-            } => write!(
-                f,
-                "{t:?} where {{{subtype_relations:?}, {:?}}}",
-                variable_requirements.iter().format(",\n")
-            ),
-        }
+        write!(f, "{}", self)
     }
 }
 

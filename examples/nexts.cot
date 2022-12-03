@@ -1,0 +1,23 @@
+(.) = | a, f => f(a)
+
+infixl 10 .
+
+data D1
+data D2
+data D3
+data D4
+data D5
+
+next = | D1 => D2
+next = | D2 => D3
+next = | D3 => D4
+next = | D4 => D5
+next = | D5 => D1
+
+to_string = | D1 => "D1"
+to_string = | D2 => "D2"
+to_string = | D3 => "D3"
+to_string = | D4 => "D4"
+to_string = | D5 => "D5"
+
+main = | () => D1.next.next.next.next.next.to_string.println

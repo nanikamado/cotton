@@ -1,0 +1,19 @@
+data A /\ B forall { A, B }
+
+infixr 3 /\
+
+data D1
+data D2
+
+type List = () | A /\ List[A] forall { A }
+
+type PalindromePlus = L | (D1 /\ L) |
+    (D2 /\ L) | (D1 /\ PalindromePlus[D1 /\ L]) |
+    (D2 /\ PalindromePlus[D2 /\ L]) forall { L }
+
+type Palindrome = PalindromePlus[()]
+
+main : () -> () =
+    | () => do
+        (D1 /\ D2 /\ ()) : Palindrome
+        ()

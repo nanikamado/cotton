@@ -4,6 +4,10 @@ use log::LevelFilter;
 use std::{fs, process, str::FromStr};
 
 fn main() {
+    #[cfg(feature = "backtrace-on-stack-overflow")]
+    unsafe {
+        backtrace_on_stack_overflow::enable()
+    };
     let matches = command!()
         .arg(
             Arg::new("language-server")

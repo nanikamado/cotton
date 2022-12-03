@@ -236,3 +236,33 @@ fn question_eval_order2() {
 fn simple_subtype_error_fail() {
     test_test("simple_subtype_error_fail.cot").code(1);
 }
+
+#[test]
+fn result_puts() {
+    test_examples("result_puts.cot", "Ok(ok!)\nErr(!)\n");
+}
+
+#[test]
+fn nexts() {
+    test_examples("nexts.cot", "D1\n");
+}
+
+#[test]
+fn palindrome_type() {
+    test_examples("palindrome_type.cot", "");
+}
+
+#[test]
+fn palindrome_type_fail1() {
+    test_test("palindrome_type_fail1.cot").code(1);
+}
+
+#[test]
+fn palindrome_type_fail2() {
+    test_test("palindrome_type_fail2.cot").code(1);
+}
+
+#[test]
+fn error_handling() {
+    test_examples("error_handling.cot", "Err(Error1)\n");
+}

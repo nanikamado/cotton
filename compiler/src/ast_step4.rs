@@ -15,6 +15,9 @@ use std::{
 };
 use strum::IntoEnumIterator;
 
+/// Difference between `ast_step3::Ast` and `ast_step4::Ast`:
+/// - Types in `ast_step4::Ast` are used to determining runtime representations
+/// while the types in `ast_step3::Ast` are used for type checking and name resolving.
 #[derive(Debug)]
 pub struct Ast {
     pub variable_decl: Vec<VariableDecl<TypePointer>>,

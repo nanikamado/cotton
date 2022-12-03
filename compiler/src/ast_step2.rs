@@ -116,7 +116,7 @@ where
     pub subtype_relations: SubtypeRelations,
     pub already_considered_relations: BTreeSet<(Type, Type)>,
     pub pattern_restrictions: PatternRestrictions,
-    pub fn_apply_dummies: BTreeMap<Type, Type>,
+    pub fn_apply_dummies: BTreeMap<Type, (Type, RelOrigin)>,
 }
 
 pub struct PrintTypeOfGlobalVariableForUser<'a> {
@@ -158,6 +158,7 @@ pub enum Expr<T> {
     Ident { name: Name, ident_id: IdentId },
     Call(Box<ExprWithTypeAndSpan<T>>, Box<ExprWithTypeAndSpan<T>>),
     Do(Vec<ExprWithTypeAndSpan<T>>),
+    TypeAnnotation(Box<ExprWithTypeAndSpan<T>>, Type),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -464,12 +465,16 @@ fn variable_decl(
                     variable_requirements,
                     subtype_relations,
                 } => {
-                    fixed_t = TypeUnit::Restrictions {
-                        t,
-                        variable_requirements: Vec::new(),
-                        subtype_relations,
-                    }
-                    .into();
+                    fixed_t = if subtype_relations.is_empty() {
+                        t
+                    } else {
+                        TypeUnit::Restrictions {
+                            t,
+                            variable_requirements: Vec::new(),
+                            subtype_relations,
+                        }
+                        .into()
+                    };
                     variable_requirements
                 }
                 t => {
@@ -695,6 +700,26 @@ fn expr(
                     ident_id: IdentId::new(),
                 },
             )
+        }
+        ast_step1::Expr::TypeAnnotation(e, t, forall) => {
+            let e = expr(
+                *e,
+                data_decl_map,
+                type_variable_names,
+                type_alias_map,
+                interfaces,
+                token_map,
+            );
+            let t = type_to_type_with_forall(
+                t,
+                data_decl_map,
+                type_variable_names.clone(),
+                type_alias_map,
+                forall,
+                interfaces,
+                token_map,
+            );
+            (e.env, Expr::TypeAnnotation(Box::new(e.value), t))
         }
     };
     WithFlatMapEnv {
@@ -1148,7 +1173,7 @@ impl<'a> TypeAliasMap<'a> {
                     token_map,
                 );
                 token_map.insert(name.1, TokenMapEntry::TypeAlias);
-                for v in forall {
+                for v in forall.into_iter().rev() {
                     t = TypeUnit::TypeLevelFn(
                         t.replace_num(
                             v,
@@ -1383,6 +1408,7 @@ impl Display for PrintTypeOfLocalVariableForUser<'_> {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum OperatorContext {
     Single,
     Fn,
@@ -1524,15 +1550,14 @@ fn fmt_type_unit_with_env(
         TypeUnit::TypeLevelApply { f, a } => {
             let (f, f_context) =
                 fmt_type_with_env(f, op_precedence_map, type_variable_decls);
-            let (a, a_context) =
+            let (a, _) =
                 fmt_type_with_env(a, op_precedence_map, type_variable_decls);
-            let s = match (f_context, a_context) {
-                (Single, Single) => format!("{} {}", f, a),
-                (Single, _) => format!("{}, ({})", f, a),
-                (_, Single) => format!("({}) -> {}", f, a),
-                _ => format!("({}) -> ({})", f, a),
+            let s = if f_context == Single {
+                format!("{}[{}]", f, a)
+            } else {
+                format!("({})[{}]", f, a)
             };
-            (s, Fn)
+            (s, Single)
         }
         TypeUnit::Restrictions {
             t,

@@ -19,6 +19,7 @@ clap = { version = "3.2.22", features = ["cargo"] }
 compiler = { path = "compiler" }
 language_server = { path = "language_server", optional = true }
 log = "0.4.14"
+backtrace-on-stack-overflow = { version = "0.2.0", optional = true }
 
 [features]
 default = []
