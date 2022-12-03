@@ -440,11 +440,13 @@ pub fn simplify_type<T: TypeConstructor>(
     mut t: TypeWithEnv<T>,
 ) -> Result<TypeWithEnv<T>, CompileError> {
     let mut i = 0;
+    t = t.normalize_variables(map)?;
     loop {
         i += 1;
         let updated;
         let old_t = t.clone();
         (t, updated) = _simplify_type(map, t)?;
+        t = t.normalize(map)?;
         if !updated {
             debug_assert_eq!(
                 t.clone().normalize(map),
@@ -452,7 +454,7 @@ pub fn simplify_type<T: TypeConstructor>(
             );
             break;
         } else {
-            assert_ne!(old_t, t);
+            debug_assert_ne!(old_t, t);
             match i.cmp(&100) {
                 Ordering::Equal => {
                     log::error!("loop count is about to reach the limit.");
@@ -463,7 +465,6 @@ pub fn simplify_type<T: TypeConstructor>(
                     log::error!("loop count reached the limit.");
                     log::debug!("old_t = {old_t}");
                     log::debug!("t = {t}");
-                    assert_ne!(old_t, t);
                     break;
                 }
                 _ => (),
@@ -479,9 +480,6 @@ fn _simplify_type<T: TypeConstructor>(
 ) -> Result<(TypeWithEnv<T>, bool), CompileError> {
     let t_before_simplify = t.clone();
     log::debug!("t = {}", t);
-    // log::trace!("map = {}", map);
-    t = t.normalize(map)?;
-    log::trace!("t{{0.5}} = {}", t);
     for cov in mk_covariant_candidates(&t) {
         if !cov.is_recursive_index()
             && !mk_contravariant_candidates(&t).contains(&cov)
@@ -493,16 +491,12 @@ fn _simplify_type<T: TypeConstructor>(
                 &t.variable_requirements,
                 &t.fn_apply_dummies,
             ) {
-                if s.is_empty() {
-                    log::trace!("t{{0.5}} = {}", t);
-                }
                 map.insert(&mut t.subtype_relations, cov, s);
-                t = t.normalize(map)?;
                 return Ok((t, true));
             }
         }
     }
-    log::trace!("t{{1}} = {}", t);
+    log::trace!("t{{2}} = {}", t);
     for cont in mk_contravariant_candidates(&t) {
         if !cont.is_recursive_index()
             && !mk_covariant_candidates(&t).contains(&cont)
@@ -515,17 +509,16 @@ fn _simplify_type<T: TypeConstructor>(
                 &t.fn_apply_dummies,
             ) {
                 map.insert(&mut t.subtype_relations, cont, s);
-                t = t.normalize(map)?;
                 return Ok((t, true));
             }
         }
     }
-    log::trace!("t{{2}} = {}", t);
+    log::trace!("t{{3}} = {}", t);
     let (mut t, updated) = simplify_dummies(t, map);
     if updated {
         return Ok((t, true));
     }
-    log::trace!("t' = {}", t);
+    log::trace!("t{{4}} = {}", t);
     let type_variables_in_sub_rel: FxHashSet<TypeVariable> =
         t.subtype_relations.type_variables_in_sub_rel();
     for a in &type_variables_in_sub_rel {
@@ -547,18 +540,16 @@ fn _simplify_type<T: TypeConstructor>(
         match (st, we) {
             (Some(st), Some(we)) if st == we => {
                 if st.is_empty() {
-                    log::debug!("t'{{1}} = {t}");
+                    log::debug!("t{{5}} = {t}");
                 }
                 map.insert(&mut t.subtype_relations, *a, st);
-                t = t.normalize(map)?;
                 return Ok((t, true));
             }
             (Some(st), _) if !vs.contains(a) => {
                 if st.is_empty() {
-                    log::debug!("t'{{1}} = {t}");
+                    log::debug!("t{{6}} = {t}");
                 }
                 map.insert(&mut t.subtype_relations, *a, st);
-                t = t.normalize(map)?;
                 return Ok((t, true));
             }
             (_, Some(we)) if we.is_empty() => {
@@ -567,13 +558,12 @@ fn _simplify_type<T: TypeConstructor>(
                     *a,
                     TypeMatchable::Empty.into(),
                 );
-                t = t.normalize(map)?;
                 return Ok((t, true));
             }
             _ => (),
         }
     }
-    log::trace!("t'' = {}", t);
+    log::trace!("t{{7}} = {}", t);
     let v_in_env = t.type_variables_in_env_except_for_subtype_rel();
     let type_variables_in_sub_rel: HashBag<TypeVariable> =
         t.subtype_relations.type_variables_in_sub_rel();
@@ -587,11 +577,11 @@ fn _simplify_type<T: TypeConstructor>(
                 &t.fn_apply_dummies,
             ) {
                 map.insert(&mut t.subtype_relations, v, new_t);
-                t = t.normalize(map)?;
                 return Ok((t, true));
             }
         }
     }
+    log::trace!("t{{8}} = {}", t);
     for (i, (ts, patterns, _span)) in t.pattern_restrictions.iter().enumerate()
     {
         if patterns.len() == 1
@@ -612,7 +602,7 @@ fn _simplify_type<T: TypeConstructor>(
             return Ok((t, true));
         }
     }
-    log::trace!("t{{4}} = {}", t);
+    log::trace!("t{{9}} = {}", t);
     let mut updated = false;
     t.subtype_relations = t
         .subtype_relations
@@ -663,7 +653,7 @@ fn _simplify_type<T: TypeConstructor>(
     if updated {
         return Ok((t, true));
     }
-    log::trace!("t{{5}} = {}", t);
+    log::trace!("t{{10}} = {}", t);
     for (pattern_ts, pattern, span) in &t.pattern_restrictions {
         let subtype =
             apply_type_to_pattern(pattern_ts.clone(), pattern, span.clone())?;
@@ -676,7 +666,7 @@ fn _simplify_type<T: TypeConstructor>(
             }
         }
     }
-    log::trace!("t{{6}} = {}", t);
+    log::trace!("t{{11}} = {}", t);
     if t.variable_requirements.is_empty() {
         let c = t.constructor.clone();
         for v in t.constructor.all_type_variables() {
@@ -710,7 +700,7 @@ fn _simplify_type<T: TypeConstructor>(
                 }
             }
         }
-        log::trace!("t{{6}} = {}", t);
+        log::trace!("t{{12}} = {}", t);
         let contravariant_candidates = mk_contravariant_candidates(&t);
         t.pattern_restrictions =
             t.pattern_restrictions
@@ -755,7 +745,7 @@ fn _simplify_type<T: TypeConstructor>(
                 }
             }
         }
-        log::trace!("t{{9}} = {}", t);
+        log::trace!("t{{13}} = {}", t);
         let old_pattern_restrictions = t.pattern_restrictions;
         t.pattern_restrictions = Vec::new();
         let pattern_restrictions = old_pattern_restrictions
@@ -811,7 +801,7 @@ fn _simplify_type<T: TypeConstructor>(
         if try_eq_sub(map, &mut t) {
             return Ok((t, true));
         }
-        log::trace!("t{{10}} = {}", t);
+        log::trace!("t{{14}} = {}", t);
         // let mut bounded_v = None;
         // for (a, b) in &t.subtype_relations {
         //     if let TypeMatchableRef::Variable(v) = b.matchable_ref() {
@@ -831,7 +821,15 @@ fn _simplify_type<T: TypeConstructor>(
         //     return Some((t, true));
         // }
     }
+    log::trace!("t{{15}} = {}", t);
+    t = t.normalize(map)?;
+    if t != t_before_simplify {
+        return Ok((t, true));
+    }
     let updated = t != t_before_simplify;
+    if !updated {
+        log::trace!("no update");
+    }
     Ok((t, updated))
 }
 
@@ -1529,13 +1527,10 @@ impl<T> TypeWithEnv<T>
 where
     T: TypeConstructor,
 {
-    pub fn normalize(
-        mut self,
+    pub fn normalize_variables(
+        self,
         map: &mut TypeVariableMap,
     ) -> Result<Self, CompileError> {
-        self.subtype_relations = self
-            .subtype_relations
-            .normalize(map, &mut self.already_considered_relations)?;
         Ok(Self {
             constructor: self.constructor.map_type(|t| map.normalize_type(t)),
             variable_requirements: self
@@ -1577,6 +1572,17 @@ where
                 })
                 .collect(),
         })
+    }
+
+    pub fn normalize(
+        mut self,
+        map: &mut TypeVariableMap,
+    ) -> Result<Self, CompileError> {
+        self.subtype_relations = self
+            .subtype_relations
+            .normalize(map, &mut self.already_considered_relations)?;
+        self = self.normalize_variables(map)?;
+        Ok(self)
     }
 }
 

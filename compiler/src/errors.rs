@@ -93,6 +93,7 @@ impl CompileError {
                 reason,
                 span,
             } => {
+                log::debug!("{} is not subtype of {}", sub_type, super_type);
                 let report =
                     Report::build(ReportKind::Error, filename, span.start)
                         .with_label(Label::new((filename, span)).with_message(

@@ -1065,8 +1065,13 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                     t.variable_requirements
                         .extend(cand_t.variable_requirements.clone());
                 }
-                match simplify::simplify_type(&mut map, t) {
-                    Ok(mut type_of_improved_decl) => {
+                let t = if is_single_candidate {
+                    Ok(t)
+                } else {
+                    simplify::simplify_type(&mut map, t)
+                };
+                match t {
+                    Ok(mut t) => {
                         if req_recursion_count
                             == IMPLICIT_PARAMETER_RECURSION_LIMIT
                         {
@@ -1075,7 +1080,7 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                         if !is_single_candidate {
                             resolve_requirements_in_type_with_env(
                                 implicit_parameters_len,
-                                &mut type_of_improved_decl,
+                                &mut t,
                                 resolved_variable_map,
                                 req_recursion_count + 1,
                                 &mut map,
@@ -1084,7 +1089,7 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                         }
                         Ok(SatisfiedType {
                             id_of_satisfied_variable: variable_id,
-                            type_of_improved_decl,
+                            type_of_improved_decl: t,
                             implicit_args,
                             type_of_satisfied_variable: cand_t.constructor,
                             map,
@@ -1223,6 +1228,8 @@ fn resolve_requirements_in_type_with_env(
         *type_of_unresolved_decl = satisfied.type_of_improved_decl;
         resolve_num += satisfied.number_of_variable_requirements_added;
     }
+    *type_of_unresolved_decl =
+        simplify::simplify_type(map, type_of_unresolved_decl.clone())?;
     Ok(())
 }
 
