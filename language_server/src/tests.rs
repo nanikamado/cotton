@@ -37,13 +37,16 @@ fn red_black_tree_local_type() {
     {
         assert_eq!(
             c.value,
-            "```\nE | T[R, I64, (E | T[B, I64, \
-            rec[E | T[(R | B), I64, d0, d0]], \
-            rec[E | T[(R | B), I64, d0, d0]]]), \
-            (E | T[B, I64, rec[E | T[(R | B), I64, d0, d0]], \
-            rec[E | T[(R | B), I64, d0, d0]]])] | T[B, I64, \
-            rec[E | T[(R | B), I64, d0, d0]], rec[E | T[(R | B), \
-            I64, d0, d0]]]\n```"
+            "```\nE \
+            | T[R, I64, (E | T[B, I64, \
+            rec[fn[E | T[(R | B), d0, d1[d0], d1[d0]]]][I64], \
+            rec[fn[E | T[(R | B), d0, d1[d0], d1[d0]]]][I64]]), \
+            (E | T[B, I64, rec[fn[E | T[(R | B), d0, d1[d0], d1[d0]]]][I64], \
+            rec[fn[E | T[(R | B), d0, d1[d0], d1[d0]]]][I64]])] | \
+            T[B, I64, (E | T[(R | B), I64, \
+            rec[fn[E | T[(R | B), d0, d1[d0], d1[d0]]]][I64], \
+            rec[fn[E | T[(R | B), d0, d1[d0], d1[d0]]]][I64]]), \
+            rec[fn[E | T[(R | B), d0, d1[d0], d1[d0]]]][I64]]\n```"
         )
     } else {
         panic!()
@@ -53,8 +56,9 @@ fn red_black_tree_local_type() {
     {
         assert_eq!(
             c.value,
-            "```\nE | T[B, I64, rec[E | T[(R | B), I64, d0, d0]], \
-            rec[E | T[(R | B), I64, d0, d0]]]\n```"
+            "```\nE | T[B, I64, \
+            rec[fn[E | T[(R | B), d0, d1[d0], d1[d0]]]][I64], \
+            rec[fn[E | T[(R | B), d0, d1[d0], d1[d0]]]][I64]]\n```"
         )
     } else {
         panic!()

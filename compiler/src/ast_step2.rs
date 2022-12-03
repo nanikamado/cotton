@@ -1408,6 +1408,7 @@ impl Display for PrintTypeOfLocalVariableForUser<'_> {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum OperatorContext {
     Single,
     Fn,
@@ -1549,15 +1550,14 @@ fn fmt_type_unit_with_env(
         TypeUnit::TypeLevelApply { f, a } => {
             let (f, f_context) =
                 fmt_type_with_env(f, op_precedence_map, type_variable_decls);
-            let (a, a_context) =
+            let (a, _) =
                 fmt_type_with_env(a, op_precedence_map, type_variable_decls);
-            let s = match (f_context, a_context) {
-                (Single, Single) => format!("{} {}", f, a),
-                (Single, _) => format!("{}, ({})", f, a),
-                (_, Single) => format!("({}) -> {}", f, a),
-                _ => format!("({}) -> ({})", f, a),
+            let s = if f_context == Single {
+                format!("{}[{}]", f, a)
+            } else {
+                format!("({})[{}]", f, a)
             };
-            (s, Fn)
+            (s, Single)
         }
         TypeUnit::Restrictions {
             t,

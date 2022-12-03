@@ -32,7 +32,7 @@ pub enum CompileError {
 
 impl CompileError {
     pub fn write<W: Write>(
-        &self,
+        self,
         src: &str,
         w: &mut W,
         filename: &str,
@@ -43,7 +43,12 @@ impl CompileError {
                 if reason.is_empty() {
                     write!(w, "{} not found", name)
                 } else if reason.len() == 1 {
-                    reason[0].write(src, w, filename, op_precedence_map)
+                    reason.into_iter().next().unwrap().write(
+                        src,
+                        w,
+                        filename,
+                        op_precedence_map,
+                    )
                 } else {
                     writeln!(
                         w,
@@ -66,9 +71,8 @@ impl CompileError {
                 );
                 let report =
                     Report::build(ReportKind::Error, filename, span.start)
-                        .with_label(
-                            Label::new((filename, span.clone())).with_message(
-                                format!(
+                        .with_label(Label::new((filename, span)).with_message(
+                            format!(
                             "There are {} candidates for this variable.\n{}\
                                     Could not dicide which one to use.",
                             satisfied.len(),
@@ -80,8 +84,7 @@ impl CompileError {
                                 ))
                             )
                         ),
-                            ),
-                        );
+                        ));
                 report.finish().write((filename, Source::from(src)), w)
             }
             CompileError::NotSubtypeOf {
@@ -92,17 +95,15 @@ impl CompileError {
             } => {
                 let report =
                     Report::build(ReportKind::Error, filename, span.start)
-                        .with_label(
-                            Label::new((filename, span.clone())).with_message(
-                                format!(
-                                    "expected `{}` but found `{}`.",
-                                    print_type(super_type, op_precedence_map),
-                                    print_type(sub_type, op_precedence_map),
-                                ),
+                        .with_label(Label::new((filename, span)).with_message(
+                            format!(
+                                "expected `{}` but found `{}`.",
+                                print_type(&super_type, op_precedence_map),
+                                print_type(&sub_type, op_precedence_map),
                             ),
-                        )
+                        ))
                         .with_message(NotSubtypeReasonDisplay {
-                            reason,
+                            reason: &reason,
                             depth: 0,
                             op_precedence_map,
                         });
@@ -129,7 +130,7 @@ fn print_type(t: &Type, op_precedence_map: &OpPrecedenceMap) -> ColoredString {
     .bold()
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum NotSubtypeReason {
     NotSubtype {
         left: Type,
@@ -140,6 +141,10 @@ pub enum NotSubtypeReason {
         left: Type,
         right: Type,
         reasons: Vec<NotSubtypeReason>,
+    },
+    LoopLimit {
+        left: Type,
+        right: Type,
     },
 }
 
@@ -177,6 +182,15 @@ impl Display for NotSubtypeReasonDisplay<'_> {
                     print_type(right, self.op_precedence_map)
                 )?;
                 fmt_reasons(reasons, f, self.depth, self.op_precedence_map)
+            }
+            NotSubtypeReason::LoopLimit { left, right } => {
+                write!(
+                    f,
+                    "could not verify `{}` is subtype of `{}` \
+                    because of the loop count limit.",
+                    print_type(left, self.op_precedence_map),
+                    print_type(right, self.op_precedence_map)
+                )
             }
         }
     }

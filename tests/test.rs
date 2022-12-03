@@ -246,3 +246,18 @@ fn result_puts() {
 fn nexts() {
     test_examples("nexts.cot", "D1\n");
 }
+
+#[test]
+fn palindrome_type() {
+    test_examples("palindrome_type.cot", "");
+}
+
+#[test]
+fn palindrome_type_fail1() {
+    test_test("palindrome_type_fail1.cot").code(1);
+}
+
+#[test]
+fn palindrome_type_fail2() {
+    test_test("palindrome_type_fail2.cot").code(1);
+}

@@ -1,6 +1,8 @@
 mod simplify;
 
-pub use self::simplify::{simplify_subtype_rel, TypeVariableMap};
+pub use self::simplify::{
+    simplify_subtype_rel, unwrap_recursive_alias, TypeVariableMap,
+};
 use crate::{
     ast_step1::merge_span,
     ast_step2::{
@@ -471,19 +473,24 @@ impl Type {
 }
 
 impl PatternUnitForRestriction {
-    fn argument_tuple_from_arguments(ps: Vec<(Self, Span)>) -> (Self, Span) {
+    fn argument_tuple_from_arguments(
+        ps: Vec<(Self, Span)>,
+    ) -> (Self, Option<Span>) {
         let mut new_p = PatternUnitForRestriction::Const {
             id: TypeId::Intrinsic(IntrinsicType::Unit),
         };
-        let mut span = 0..0;
-        for (p, p_span) in ps.iter().rev() {
-            new_p = PatternUnitForRestriction::Tuple(
-                p.clone().into(),
-                new_p.into(),
-            );
-            span = merge_span(&span, p_span);
+        if let Some(mut span) = ps.get(0).map(|(_, span)| span.clone()) {
+            for (p, p_span) in ps.iter().rev() {
+                new_p = PatternUnitForRestriction::Tuple(
+                    p.clone().into(),
+                    new_p.into(),
+                );
+                span = merge_span(&span, p_span);
+            }
+            (new_p, Some(span))
+        } else {
+            (new_p, None)
         }
-        (new_p, span)
     }
 
     fn arguments_from_argument_tuple(self) -> Vec<Self> {
@@ -733,7 +740,9 @@ fn resolve_scc(
                     .filter(|v| !v.is_recursive_index())
                     .collect_vec();
                 if vs.is_empty() {
-                    debug_assert!(t.subtype_relations.is_empty());
+                    if !t.subtype_relations.is_empty() {
+                        panic!("remaining rels = {}", t.subtype_relations)
+                    }
                     debug_assert!(t.variable_requirements.is_empty());
                     t.constructor
                 } else {
@@ -1290,7 +1299,9 @@ fn min_type_with_env(
             let restrictions = restrictions
                 .into_iter()
                 .map(|r| {
-                    PatternUnitForRestriction::argument_tuple_from_arguments(r)
+                    let (r, span) =
+                    PatternUnitForRestriction::argument_tuple_from_arguments(r);
+                    (r, span.unwrap())
                 })
                 .collect();
             pattern_restrictions.push((

@@ -18,7 +18,7 @@ use parser::Span;
 use petgraph::{self, algo::tarjan_scc, graphmap::DiGraphMap};
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, BTreeSet},
     fmt::Display,
     hash::Hash,
     iter::Extend,
@@ -58,6 +58,11 @@ impl TypeVariableMap {
                 TypeUnit::Variable(v) => self.find(v),
                 TypeUnit::RecursiveAlias { body } => {
                     let body = self.normalize_type(body);
+                    debug_assert!(body.iter().all(|t| {
+                        **t != TypeUnit::Variable(TypeVariable::RecursiveIndex(
+                            0,
+                        ))
+                    }));
                     match body.matchable() {
                         TypeMatchable::RecursiveAlias { body } => {
                             TypeUnit::RecursiveAlias {
@@ -107,7 +112,7 @@ impl TypeVariableMap {
             .collect::<Type>()
             .into_iter()
             .collect();
-        let mut needless = HashSet::new();
+        let mut needless = FxHashSet::default();
         for (a, b) in tus.iter().tuple_combinations() {
             if let Ok(r) = simplify_subtype_rel(
                 a.clone().into(),
@@ -244,6 +249,7 @@ impl TypeVariableMap {
         if let Some(old) = self.0.get(&key) {
             log::error!("{key} is already pointing to {old}. ignored");
         } else {
+            log::debug!("{key} --> {value}");
             self.0.insert(key, value);
         }
     }
@@ -661,7 +667,7 @@ fn _simplify_type<T: TypeConstructor>(
     for (pattern_ts, pattern, span) in &t.pattern_restrictions {
         let subtype =
             apply_type_to_pattern(pattern_ts.clone(), pattern, span.clone())?;
-        if !subtype.0.is_empty() {
+        if !subtype.is_empty() {
             let mut t_normalized = t.clone();
             t_normalized.subtype_relations.extend(subtype);
             t_normalized = t_normalized.normalize(map)?;
@@ -740,7 +746,7 @@ fn _simplify_type<T: TypeConstructor>(
                 pattern,
                 span.clone(),
             )?;
-            if !subtype.0.is_empty() {
+            if !subtype.is_empty() {
                 let mut t_normalized = t.clone();
                 t_normalized.subtype_relations.extend(subtype);
                 t_normalized = t_normalized.normalize(map)?;
@@ -835,6 +841,9 @@ fn find_eq_types(subtype_rel: &SubtypeRelations) -> Vec<(TypeVariable, Type)> {
     let eq_types = tarjan_scc(&g);
     let mut r = Vec::new();
     for eqs in eq_types {
+        if eqs.len() <= 1 {
+            continue;
+        }
         let (eq_variable, eq_cons): (Vec<_>, Vec<_>) = eqs
             .into_iter()
             .map(|ts| {
@@ -881,289 +890,317 @@ type SubtypeRelationsVec = Vec<(Type, Type)>;
 pub fn simplify_subtype_rel(
     sub: Type,
     sup: Type,
-    mut already_considered_relations: Option<&mut BTreeSet<(Type, Type)>>,
+    already_considered_relations: Option<&mut BTreeSet<(Type, Type)>>,
 ) -> Result<SubtypeRelationsVec, NotSubtypeReason> {
-    let subsup = (sub, sup);
-    let c = already_considered_relations
-        .as_deref()
-        .map(|a| a.contains(&subsup))
-        .unwrap_or(false);
-    let (sub, sup) = subsup;
-    if c || sub == sup {
-        return Ok(Vec::new());
-    }
-    use TypeMatchable::*;
-    match (sub.clone().matchable(), sup.clone().matchable()) {
-        (Fn(a1, r1), Fn(a2, r2)) => {
-            let a = simplify_subtype_rel(
-                a2,
-                a1,
-                already_considered_relations.as_deref_mut(),
-            )
-            .map_err(|a| NotSubtypeReason::NotSubtype {
-                left: sub.clone(),
-                right: sup.clone(),
-                reasons: vec![a],
-            })?;
-            let r = simplify_subtype_rel(
-                r1,
-                r2,
-                already_considered_relations.as_deref_mut(),
-            )
-            .map_err(|a| NotSubtypeReason::NotSubtype {
+    pub fn simplify_subtype_rel_rec(
+        sub: Type,
+        sup: Type,
+        mut already_considered_relations: Option<&mut BTreeSet<(Type, Type)>>,
+        loop_limit: usize,
+    ) -> Result<SubtypeRelationsVec, NotSubtypeReason> {
+        if loop_limit == 0 {
+            return Err(NotSubtypeReason::LoopLimit {
                 left: sub,
                 right: sup,
-                reasons: vec![a],
-            })?;
-            Ok(merge_vec(a, r))
+            });
         }
-        (Tuple(a1, b1), Tuple(a2, b2)) => {
-            let mut r = simplify_subtype_rel(
-                a1,
-                a2,
-                already_considered_relations.as_deref_mut(),
-            )
-            .map_err(|a| NotSubtypeReason::NotSubtype {
-                left: sub.clone(),
-                right: sup.clone(),
-                reasons: vec![a],
-            })?;
-            r.append(
-                &mut simplify_subtype_rel(b1, b2, already_considered_relations)
-                    .map_err(|a| NotSubtypeReason::NotSubtype {
-                        left: sub,
-                        right: sup,
-                        reasons: vec![a],
-                    })?,
-            );
-            Ok(r)
+        let loop_limit = loop_limit - 1;
+        let subsup = (sub, sup);
+        let c = already_considered_relations
+            .as_deref()
+            .map(|a| a.contains(&subsup))
+            .unwrap_or(false);
+        let (sub, sup) = subsup;
+        if c || sub == sup {
+            return Ok(Vec::new());
         }
-        (Const { id: id1, .. }, Const { id: id2, .. }) => {
-            if id1 == id2 {
-                Ok(Vec::new())
-            } else {
-                Err(NotSubtypeReason::NotSubtype {
-                    left: sub,
-                    right: sup,
-                    reasons: vec![],
-                })
-            }
-        }
-        (Fn(_, _), Tuple { .. } | Const { .. })
-        | (Tuple { .. } | Const { .. }, Fn(_, _))
-        | (Tuple(..), Const { .. })
-        | (Const { .. }, Tuple(..))
-        | (Fn(_, _) | Tuple { .. } | Const { .. }, Empty) => {
-            Err(NotSubtypeReason::NotSubtype {
-                left: sub,
-                right: sup,
-                reasons: vec![],
-            })
-        }
-        (_, Empty) if sub.is_wrapped_by_const() => {
-            Err(NotSubtypeReason::NotSubtype {
-                left: sub,
-                right: sup,
-                reasons: vec![],
-            })
-        }
-        (Union(cs), b) => Ok(cs
-            .into_iter()
-            .map(|c| {
-                simplify_subtype_rel(
-                    c.into(),
-                    b.clone().into(),
-                    already_considered_relations.as_deref_mut(),
+        let add_reason = |reason| NotSubtypeReason::NotSubtype {
+            left: sub.clone(),
+            right: sup.clone(),
+            reasons: vec![reason],
+        };
+        let single_reason = NotSubtypeReason::NotSubtype {
+            left: sub.clone(),
+            right: sup.clone(),
+            reasons: Vec::new(),
+        };
+        if let Some(already_considered_relations) =
+            already_considered_relations.as_deref_mut()
+        {
+            use TypeMatchableRef::*;
+            if sub.is_recursive_fn_apply()
+                && !matches!(sup.matchable_ref(), Variable(_))
+            {
+                already_considered_relations.insert((sub.clone(), sup.clone()));
+                let (sub, _) = sub.clone().unwrap_recursive_fn_apply();
+                return simplify_subtype_rel_rec(
+                    sub,
+                    sup.clone(),
+                    Some(already_considered_relations),
+                    loop_limit,
                 )
-            })
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|a| NotSubtypeReason::NotSubtype {
-                left: sub,
-                right: sup,
-                reasons: vec![a],
-            })?
-            .concat()),
-        (Empty, _) => Ok(Vec::new()),
-        (_, RecursiveAlias { body })
-            if already_considered_relations.is_some()
-                && sub.is_wrapped_by_const() =>
-        {
-            already_considered_relations
-                .as_deref_mut()
-                .unwrap()
-                .insert((sub.clone(), sup.clone()));
-            simplify_subtype_rel(
-                sub.clone(),
-                unwrap_recursive_alias(body),
-                already_considered_relations,
-            )
-            .map_err(|a| NotSubtypeReason::NotSubtype {
-                left: sub,
-                right: sup,
-                reasons: vec![a],
-            })
-        }
-        (
-            RecursiveAlias { body },
-            b @ (Tuple { .. }
-            | Fn(_, _)
-            | Union(_)
-            | RecursiveAlias { .. }
-            | Const { .. }
-            | TypeLevelApply { .. }),
-        ) if already_considered_relations.is_some() => {
-            let b: Type = b.into();
-            already_considered_relations
-                .as_deref_mut()
-                .unwrap()
-                .insert((
-                    RecursiveAlias { body: body.clone() }.into(),
-                    b.clone(),
-                ));
-            simplify_subtype_rel(
-                unwrap_recursive_alias(body),
-                b,
-                already_considered_relations,
-            )
-            .map_err(|a| NotSubtypeReason::NotSubtype {
-                left: sub,
-                right: sup,
-                reasons: vec![a],
-            })
-        }
-        (Tuple(h, t), Union(b))
-            if b.iter().all(|u| {
-                if let TypeUnit::Tuple(u, _) = &**u {
-                    u == &h
-                } else {
-                    false
-                }
-            }) =>
-        {
-            Ok(vec![(
-                t,
-                b.into_iter()
-                    .flat_map(|u| {
-                        if let TypeUnit::Tuple(_, u) = unwrap_or_clone(u) {
-                            u
-                        } else {
-                            panic!()
-                        }
-                    })
-                    .collect(),
-            )])
-        }
-        (_, Union(b)) if sub.is_wrapped_by_const() => {
-            let mut new_bs = Type::default();
-            let mut updated = false;
-            let mut reasons = Vec::new();
-            for b in b.iter() {
-                if sub.clone().is_subtype_of_with_rels(
-                    b.clone().into(),
-                    already_considered_relations
-                        .as_deref_mut()
-                        .cloned()
-                        .as_mut(),
-                ) {
-                    return Ok(Vec::new());
-                }
-                let (b_out, b_in, reason) =
-                    Type::from((*b).clone()).remove_disjoint_part(&sub);
-                new_bs.union_in_place(b_in.clone());
-                if !b_out.is_empty() {
-                    updated = true;
-                    if let Some(reason) = reason {
-                        reasons.push(reason);
-                    }
-                }
-            }
-            if updated {
-                simplify_subtype_rel(
+                .map_err(add_reason);
+            } else if sup.is_recursive_fn_apply()
+                && !matches!(sub.matchable_ref(), Variable(_))
+            {
+                already_considered_relations.insert((sub.clone(), sup.clone()));
+                let (sup, _) = sup.clone().unwrap_recursive_fn_apply();
+                return simplify_subtype_rel_rec(
                     sub.clone(),
-                    new_bs,
-                    already_considered_relations,
+                    sup,
+                    Some(already_considered_relations),
+                    loop_limit,
                 )
-                .map_err(|a| {
-                    reasons.push(a);
-                    NotSubtypeReason::NotSubtype {
-                        left: sub.clone(),
-                        right: sup,
-                        reasons,
-                    }
+                .map_err(add_reason);
+            }
+        }
+        use TypeMatchable::*;
+        match (sub.clone().matchable(), sup.clone().matchable()) {
+            (Fn(a1, r1), Fn(a2, r2)) => {
+                let a = simplify_subtype_rel_rec(
+                    a2,
+                    a1,
+                    already_considered_relations.as_deref_mut(),
+                    loop_limit,
+                )
+                .map_err(add_reason)?;
+                let r = simplify_subtype_rel_rec(
+                    r1,
+                    r2,
+                    already_considered_relations.as_deref_mut(),
+                    loop_limit,
+                )
+                .map_err(add_reason)?;
+                Ok(merge_vec(a, r))
+            }
+            (Tuple(a1, b1), Tuple(a2, b2)) => {
+                let mut r = simplify_subtype_rel_rec(
+                    a1,
+                    a2,
+                    already_considered_relations.as_deref_mut(),
+                    loop_limit,
+                )
+                .map_err(add_reason)?;
+                r.append(
+                    &mut simplify_subtype_rel_rec(
+                        b1,
+                        b2,
+                        already_considered_relations,
+                        loop_limit,
+                    )
+                    .map_err(add_reason)?,
+                );
+                Ok(r)
+            }
+            (Const { id: id1, .. }, Const { id: id2, .. }) => {
+                if id1 == id2 {
+                    Ok(Vec::new())
+                } else {
+                    Err(single_reason)
+                }
+            }
+            (Fn(_, _), Tuple { .. } | Const { .. })
+            | (Tuple { .. } | Const { .. }, Fn(_, _))
+            | (Tuple(..), Const { .. })
+            | (Const { .. }, Tuple(..))
+            | (Fn(_, _) | Tuple { .. } | Const { .. }, Empty) => {
+                Err(single_reason)
+            }
+            (_, Empty) if sub.is_wrapped_by_const() => Err(single_reason),
+            // (Union(cs), b) if !matches!(b, Variable(_)) => Ok(cs
+            (Union(cs), b) => Ok(cs
+                .into_iter()
+                .map(|c| {
+                    simplify_subtype_rel_rec(
+                        c.into(),
+                        b.clone().into(),
+                        already_considered_relations.as_deref_mut(),
+                        loop_limit,
+                    )
                 })
-            } else if already_considered_relations.is_some()
-                && b.iter()
-                    .any(|u| matches!(&**u, TypeUnit::RecursiveAlias { .. }))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(add_reason)?
+                .concat()),
+            (Empty, _) => Ok(Vec::new()),
+            (Variable(_), RecursiveAlias { body })
+                if sub.clone().is_subtype_of(body.clone()) =>
+            {
+                Ok(Vec::new())
+            }
+            (_, RecursiveAlias { body })
+                if already_considered_relations.is_some()
+                    && sub.is_wrapped_by_const() =>
             {
                 already_considered_relations
                     .as_deref_mut()
                     .unwrap()
                     .insert((sub.clone(), sup.clone()));
-                let b = b
-                    .into_iter()
-                    .flat_map(|u| match unwrap_or_clone(u) {
-                        TypeUnit::RecursiveAlias { body } => {
-                            unwrap_recursive_alias(body)
-                        }
-                        u => u.into(),
-                    })
-                    .collect();
-                simplify_subtype_rel(
+                simplify_subtype_rel_rec(
                     sub.clone(),
+                    unwrap_recursive_alias(body),
+                    already_considered_relations,
+                    loop_limit,
+                )
+                .map_err(add_reason)
+            }
+            (
+                RecursiveAlias { body },
+                b @ (Tuple { .. }
+                | Fn(_, _)
+                | Union(_)
+                | RecursiveAlias { .. }
+                | Const { .. }
+                | TypeLevelApply { .. }),
+            ) if already_considered_relations.is_some() => {
+                let b: Type = b.into();
+                already_considered_relations
+                    .as_deref_mut()
+                    .unwrap()
+                    .insert((
+                        RecursiveAlias { body: body.clone() }.into(),
+                        b.clone(),
+                    ));
+                simplify_subtype_rel_rec(
+                    unwrap_recursive_alias(body),
                     b,
                     already_considered_relations,
+                    loop_limit,
                 )
-                .map_err(|a| NotSubtypeReason::NotSubtype {
-                    left: sub,
-                    right: sup,
-                    reasons: vec![a],
-                })
-            } else {
-                match sub.clone().disjunctive() {
-                    Ok(a) => Ok(a
-                        .into_iter()
-                        .map(|a| {
-                            simplify_subtype_rel(
-                                unwrap_or_clone(a).into(),
-                                b.clone(),
-                                already_considered_relations.as_deref_mut(),
-                            )
-                        })
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(|a| NotSubtypeReason::NotSubtype {
-                            left: sub,
-                            right: sup,
-                            reasons: vec![a],
-                        })?
-                        .concat()),
-                    Err(a) => Ok(vec![(a.into(), b)]),
-                }
+                .map_err(add_reason)
             }
-        }
-        (a, Union(u))
-            if u.iter().any(|b| {
-                Type::from(a.clone()).is_subtype_of_with_rels(
-                    b.clone().into(),
+            (Tuple(h, t), Union(b))
+                if b.iter().all(|u| {
+                    if let TypeUnit::Tuple(u, _) = &**u {
+                        u == &h
+                    } else {
+                        false
+                    }
+                }) =>
+            {
+                Ok(vec![(
+                    t,
+                    b.into_iter()
+                        .flat_map(|u| {
+                            if let TypeUnit::Tuple(_, u) = unwrap_or_clone(u) {
+                                u
+                            } else {
+                                panic!()
+                            }
+                        })
+                        .collect(),
+                )])
+            }
+            (_, Union(b)) if sub.is_wrapped_by_const() => {
+                let mut new_bs = Type::default();
+                let mut updated = false;
+                let mut reasons = Vec::new();
+                for b in b.iter() {
+                    let r = simplify_subtype_rel_rec(
+                        sub.clone(),
+                        b.clone().into(),
+                        already_considered_relations
+                            .as_deref_mut()
+                            .cloned()
+                            .as_mut(),
+                        loop_limit,
+                    );
+                    if r == Ok(Vec::new()) {
+                        return Ok(Vec::new());
+                    }
+                    let (b_out, b_in, reason) =
+                        Type::from((*b).clone()).remove_disjoint_part(&sub);
+                    new_bs.union_in_place(b_in.clone());
+                    if !b_out.is_empty() {
+                        updated = true;
+                        if let Some(reason) = reason {
+                            reasons.push(reason);
+                        }
+                    }
+                }
+                if updated {
+                    simplify_subtype_rel_rec(
+                        sub.clone(),
+                        new_bs,
+                        already_considered_relations,
+                        loop_limit,
+                    )
+                    .map_err(|a| {
+                        reasons.push(a);
+                        NotSubtypeReason::NotSubtype {
+                            left: sub.clone(),
+                            right: sup,
+                            reasons,
+                        }
+                    })
+                } else if already_considered_relations.is_some()
+                    && b.iter().any(|u| {
+                        matches!(&**u, TypeUnit::RecursiveAlias { .. })
+                    })
+                {
                     already_considered_relations
                         .as_deref_mut()
-                        .cloned()
-                        .as_mut(),
-                )
-            }) =>
-        {
-            Ok(Vec::new())
-        }
-        (TypeLevelApply { f: f1, a: a1 }, TypeLevelApply { f: f2, a: a2 }) => {
-            match (f1.matchable(), f2.matchable()) {
+                        .unwrap()
+                        .insert((sub.clone(), sup.clone()));
+                    let b = b
+                        .into_iter()
+                        .flat_map(|u| match unwrap_or_clone(u) {
+                            TypeUnit::RecursiveAlias { body } => {
+                                unwrap_recursive_alias(body)
+                            }
+                            u => u.into(),
+                        })
+                        .collect();
+                    simplify_subtype_rel_rec(
+                        sub.clone(),
+                        b,
+                        already_considered_relations,
+                        loop_limit,
+                    )
+                    .map_err(add_reason)
+                } else {
+                    match sub.clone().disjunctive() {
+                        Ok(a) => Ok(a
+                            .into_iter()
+                            .map(|a| {
+                                simplify_subtype_rel_rec(
+                                    unwrap_or_clone(a).into(),
+                                    b.clone(),
+                                    already_considered_relations.as_deref_mut(),
+                                    loop_limit,
+                                )
+                            })
+                            .collect::<Result<Vec<_>, _>>()
+                            .map_err(add_reason)?
+                            .concat()),
+                        Err(a) => Ok(vec![(a.into(), b)]),
+                    }
+                }
+            }
+            (a, Union(u))
+                if u.iter().any(|b| {
+                    simplify_subtype_rel_rec(
+                        Type::from(a.clone()),
+                        b.clone().into(),
+                        already_considered_relations.as_deref_mut(),
+                        loop_limit,
+                    ) == Ok(Vec::new())
+                }) =>
+            {
+                Ok(Vec::new())
+            }
+            (
+                TypeLevelApply { f: f1, a: a1 },
+                TypeLevelApply { f: f2, a: a2 },
+            ) => match (f1.matchable(), f2.matchable()) {
                 (Const { id: id1 }, Const { id: id2 }) => {
                     if id1 == id2 {
                         Ok(vec![(a1.clone(), a2.clone()), (a2, a1)])
                     } else {
-                        Err(NotSubtypeReason::NotSubtype {
+                        Err(add_reason(NotSubtypeReason::NotSubtype {
                             left: Const { id: id1 }.into(),
                             right: Const { id: id2 }.into(),
                             reasons: vec![],
-                        })
+                        }))
                     }
                 }
                 (f1, f2) => Ok(vec![(
@@ -1178,52 +1215,51 @@ pub fn simplify_subtype_rel(
                     }
                     .into(),
                 )]),
-            }
-        }
-        (Tuple(h, t), TypeLevelApply { f, a }) => {
-            match (h.matchable(), f.matchable()) {
-                (Const { id: id1 }, Const { id: id2 }) if id1 != id2 => {
-                    Err(NotSubtypeReason::NotSubtype {
-                        left: Const { id: id1 }.into(),
-                        right: Const { id: id2 }.into(),
-                        reasons: vec![],
-                    })
+            },
+            (Tuple(h, t), TypeLevelApply { f, a }) => {
+                match (h.matchable(), f.matchable()) {
+                    (Const { id: id1 }, Const { id: id2 }) if id1 != id2 => {
+                        Err(add_reason(NotSubtypeReason::NotSubtype {
+                            left: Const { id: id1 }.into(),
+                            right: Const { id: id2 }.into(),
+                            reasons: vec![],
+                        }))
+                    }
+                    (h, f) => Ok(vec![(
+                        Tuple(h.into(), t).into(),
+                        TypeLevelApply { f: f.into(), a }.into(),
+                    )]),
                 }
-                (h, f) => Ok(vec![(
-                    Tuple(h.into(), t).into(),
-                    TypeLevelApply { f: f.into(), a }.into(),
-                )]),
             }
+            (Variable(a), b)
+                if Type::from(b.clone()).contains_variable(a)
+                    && !a.is_recursive_index() =>
+            {
+                let b = Type::from(b).replace_num(
+                    a,
+                    &TypeUnit::Variable(TypeVariable::recursive_index_zero())
+                        .into(),
+                );
+                simplify_subtype_rel_rec(
+                    TypeUnit::Variable(a).into(),
+                    TypeUnit::RecursiveAlias { body: b }.into(),
+                    already_considered_relations,
+                    loop_limit,
+                )
+                .map_err(add_reason)
+            }
+            (sub, sup) => Ok(vec![(sub.into(), sup.into())]),
         }
-        (Variable(a), b)
-            if Type::from(b.clone()).contains_variable(a)
-                && !a.is_recursive_index() =>
-        {
-            let b = Type::from(b).replace_num(
-                a,
-                &TypeUnit::Variable(TypeVariable::recursive_index_zero())
-                    .into(),
-            );
-            simplify_subtype_rel(
-                TypeUnit::Variable(a).into(),
-                TypeUnit::RecursiveAlias { body: b }.into(),
-                already_considered_relations,
-            )
-            .map_err(|a| NotSubtypeReason::NotSubtype {
-                left: sub,
-                right: sup,
-                reasons: vec![a],
-            })
-        }
-        (sub, sup) => Ok(vec![(sub.into(), sup.into())]),
     }
+    const LOOP_LIMIT: usize = 80;
+    simplify_subtype_rel_rec(sub, sup, already_considered_relations, LOOP_LIMIT)
 }
 
 thread_local! {
     static MEMO: RwLock<FxHashMap<Type, Type>> = RwLock::new(Default::default());
 }
 
-fn unwrap_recursive_alias(body: Type) -> Type {
+pub fn unwrap_recursive_alias(body: Type) -> Type {
     if let Some(t) = MEMO.with(|m| m.read().unwrap().get(&body).cloned()) {
         t
     } else {
@@ -1676,29 +1712,38 @@ fn simplify_dummies<T: TypeConstructor>(
         .fn_apply_dummies
         .into_iter()
         .flat_map(|(a, (b, origin))| match a.matchable() {
-            TypeMatchable::TypeLevelApply { f, a } => match a.matchable() {
-                TypeMatchable::Variable(a)
-                    if b.all_type_variables_vec() == vec![a] =>
-                {
-                    let b = b.replace_num(
-                        a,
-                        &TypeUnit::Variable(TypeVariable::RecursiveIndex(0))
+            TypeMatchable::TypeLevelApply { f, a }
+                if !matches!(
+                    b.matchable_ref(),
+                    TypeMatchableRef::Variable(_)
+                ) =>
+            {
+                match a.matchable() {
+                    TypeMatchable::Variable(a)
+                        if b.all_type_variables_vec() == vec![a] =>
+                    {
+                        let b = b.replace_num(
+                            a,
+                            &TypeUnit::Variable(TypeVariable::RecursiveIndex(
+                                0,
+                            ))
                             .into(),
-                    );
-                    map.insert_type(
-                        &mut t.subtype_relations,
-                        f,
-                        TypeUnit::TypeLevelFn(b).into(),
-                        Some(origin),
-                    );
-                    updated = true;
-                    None
+                        );
+                        map.insert_type(
+                            &mut t.subtype_relations,
+                            f,
+                            TypeUnit::TypeLevelFn(b).into(),
+                            Some(origin),
+                        );
+                        updated = true;
+                        None
+                    }
+                    a => Some((
+                        TypeUnit::TypeLevelApply { f, a: a.into() }.into(),
+                        (b, origin),
+                    )),
                 }
-                a => Some((
-                    TypeUnit::TypeLevelApply { f, a: a.into() }.into(),
-                    (b, origin),
-                )),
-            },
+            }
             a => {
                 map.insert_type(
                     &mut t.subtype_relations,
@@ -2031,7 +2076,7 @@ impl<T: TypeConstructor> Display for ast_step2::TypeWithEnv<T> {
                 f,
                 "    ({}) = pat[{}] ({:?}),",
                 a.iter().map(|a| format!("{a}")).join(", "),
-                b.iter().map(|p| format!("({:?})", p)).join(" | "),
+                b.iter().map(|(p, _)| format!("({})", p)).join(" | "),
                 span
             )?;
         }
@@ -2111,6 +2156,7 @@ mod tests {
         },
         intrinsics::IntrinsicType,
     };
+    use itertools::Itertools;
     use stripmargin::StripMargin;
 
     #[test]
@@ -2228,7 +2274,7 @@ mod tests {
             .unfixed;
         if let TypeUnit::Tuple(h, _) = &**t1.iter().next().unwrap() {
             if let TypeMatchableRef::Const { id } = h.matchable_ref() {
-                let false_ =
+                let (false_, false_span) =
                     PatternUnitForRestriction::argument_tuple_from_arguments(
                         vec![(
                             PatternUnitForRestriction::Const {
@@ -2240,7 +2286,10 @@ mod tests {
                 let p = PatternUnitForRestriction::Tuple(
                     PatternUnitForRestriction::Const { id }.into(),
                     PatternUnitForRestriction::argument_tuple_from_arguments(
-                        vec![false_.clone(), false_],
+                        vec![
+                            (false_.clone(), false_span.clone().unwrap()),
+                            (false_.clone(), false_span.unwrap()),
+                        ],
                     )
                     .0
                     .into(),
@@ -2333,22 +2382,18 @@ mod tests {
             .into(),
         );
         let TypeDestructResult {
-            remained,
+            remained: _,
             matched,
             bind_matched: _,
             kind: _,
         } = destruct_type_by_pattern(t1, &p, 0..0);
         assert_eq!(
-            format!("{}", remained),
-            r#"{E | T[(), E, rec[{E | T[(), d0, d0]}]]}"#
-                .strip_margin()
-                .replace('\n', "")
-        );
-        assert_eq!(
             format!("{}", matched.unwrap()),
-            r#"T[(), T[(), rec[{E | T[(), d0, d0]}], rec[{E | T[(), d0, d0]}]], rec[{E | T[(), d0, d0]}]]"#
-                .strip_margin()
-                .replace('\n', "")
+            "T[(), T[\
+            (), \
+            rec[fn[{E | T[d0, d1[d0], d1[d0]]}]][()], \
+            rec[fn[{E | T[d0, d1[d0], d1[d0]]}]][()]\
+            ], rec[fn[{E | T[d0, d1[d0], d1[d0]]}]][()]]"
         )
     }
 
@@ -2372,7 +2417,10 @@ mod tests {
                         0..0,
                     ),
                 ]),
-            ],
+            ]
+            .into_iter()
+            .map(|(a, s)| (a, s.unwrap()))
+            .collect_vec(),
             0..0,
         );
         let subtype_rels = r.unwrap();
@@ -2422,18 +2470,25 @@ mod tests {
         let v2 = TypeVariable::new();
         let r = apply_type_to_pattern(
             Type::argument_tuple_from_arguments(vec![t1.clone(), t1]),
-            &vec![PatternUnitForRestriction::argument_tuple_from_arguments(
-                vec![
-                    (PatternUnitForRestriction::Const { id: b_id }, 0..0),
-                    (
-                        PatternUnitForRestriction::Binder(
-                            TypeUnit::Variable(v2).into(),
-                            DeclId::new(),
-                        ),
-                        0..0,
-                    ),
-                ],
-            )],
+            &vec![{
+                let (a, s) =
+                    PatternUnitForRestriction::argument_tuple_from_arguments(
+                        vec![
+                            (
+                                PatternUnitForRestriction::Const { id: b_id },
+                                0..0,
+                            ),
+                            (
+                                PatternUnitForRestriction::Binder(
+                                    TypeUnit::Variable(v2).into(),
+                                    DeclId::new(),
+                                ),
+                                0..0,
+                            ),
+                        ],
+                    );
+                (a, s.unwrap())
+            }],
             0..0,
         );
         assert!(r.is_err())
