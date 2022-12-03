@@ -261,3 +261,8 @@ fn palindrome_type_fail1() {
 fn palindrome_type_fail2() {
     test_test("palindrome_type_fail2.cot").code(1);
 }
+
+#[test]
+fn error_handling() {
+    test_examples("error_handling.cot", "Err(Error1)\n");
+}

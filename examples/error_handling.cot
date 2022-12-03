@@ -1,0 +1,62 @@
+(.) : A -> (A -> B) -> B forall {A, B} =
+    | a, f => f(a)
+
+infixl 10 .
+
+data Err(A) forall { A }
+data Ok(A) forall { A }
+
+type Result = Ok[A] | Err[B] forall { A, B }
+
+interface ToString where
+    to_string : Self -> String
+
+to_string : Result[A, E] -> String forall { A : ToString, E : ToString } =
+    | Ok(a) => "Ok(" <> a.to_string <> ")"
+    | Err(e) => "Err(" <> e.to_string <> ")"
+
+puts : A -> () forall { A : ToString } =
+    | a => a.to_string.println
+
+interface Map where
+    map : Self[A] -> (A -> B) -> Self[B] forall { A, B }
+
+map : Result[A, C] -> (A -> B) -> Result[B, C] forall { A, B, C } =
+    | Err(a), _ => Err(a)
+    | Ok(a), f => Ok(a.f)
+
+interface Flatten where
+    flatten : Self[Self[A]] -> Self[A] forall { A }
+
+flatten : Result[Result[A, E1], E2] -> Result[A, E1 | E2] forall { A, E1, E2 } =
+    | Ok(a) => a
+    | Err(a) => Err(a)
+
+flat_map : F[A] -> (A -> F[B]) -> F[B] forall { F: Map & Flatten, A, B } =
+    | x, f => x.map(f).flatten
+
+data Error1
+data Error2
+data Error3
+
+to_string : (Error1 | Error2 | Error3) -> String =
+    | Error1 => "Error1"
+    | Error2 => "Error2"
+    | Error3 => "Error3"
+to_string = | () => "()"
+
+may_fail_1 : () -> Result[(), Error1] = | () => Err(Error1)
+may_fail_2 : () -> Result[(), Error2] = | () => Err(Error2)
+may_fail_3 : () -> Result[(), Error3] = | () => Ok(())
+
+do_1_2_3 : () -> Result[(), Error1 | Error2 | Error3] =
+    | () => do
+        may_fail_1(())?
+        may_fail_2(())?
+        may_fail_3(())?
+        Ok(())
+
+main : () -> () =
+    | () => do
+        do_1_2_3(()).puts
+        ()
