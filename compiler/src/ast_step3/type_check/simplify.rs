@@ -160,6 +160,7 @@ impl TypeVariableMap {
         key: Type,
         value: Type,
         origin: Option<RelOrigin>,
+        log: bool,
     ) {
         if key == value {
             return;
@@ -195,8 +196,15 @@ impl TypeVariableMap {
                     a_f.clone(),
                     b_f.clone(),
                     origin.clone(),
+                    log,
                 );
-                self._insert_type(subtype, a_a.clone(), b_a.clone(), origin);
+                self._insert_type(
+                    subtype,
+                    a_a.clone(),
+                    b_a.clone(),
+                    origin,
+                    log,
+                );
                 return;
             }
             (Fn(a1, b1), Fn(a2, b2)) => {
@@ -205,8 +213,9 @@ impl TypeVariableMap {
                     a1.clone(),
                     a2.clone(),
                     origin.clone(),
+                    log,
                 );
-                self._insert_type(subtype, b1.clone(), b2.clone(), origin);
+                self._insert_type(subtype, b1.clone(), b2.clone(), origin, log);
                 return;
             }
             (_, TypeLevelApply { f, a }) => {
@@ -247,11 +256,43 @@ impl TypeVariableMap {
             }
         };
         if let Some(old) = self.0.get(&key) {
-            log::error!("{key} is already pointing to {old}. ignored");
+            if log {
+                log::error!("{key} is already pointing to {old}. ignored");
+            }
         } else {
-            log::debug!("{key} --> {value}");
+            if log {
+                log::debug!("{key} --> {value}");
+            }
             self.0.insert(key, value);
         }
+    }
+
+    fn insert_type_helper(
+        &mut self,
+        subtype: &mut SubtypeRelations,
+        k: Type,
+        v: Type,
+        origin: Option<RelOrigin>,
+        log: bool,
+    ) {
+        let key = self.normalize_type(k.clone());
+        let value = self.normalize_type(v.clone());
+        if log {
+            log::debug!(
+                "{k} {} ----> {v} {}",
+                if k == key {
+                    "".to_string()
+                } else {
+                    format!("({})", key)
+                },
+                if v == value {
+                    "".to_string()
+                } else {
+                    format!("({})", value)
+                }
+            );
+        }
+        self._insert_type(subtype, key, value, origin, log)
     }
 
     pub fn insert_type(
@@ -261,22 +302,17 @@ impl TypeVariableMap {
         v: Type,
         origin: Option<RelOrigin>,
     ) {
-        let key = self.normalize_type(k.clone());
-        let value = self.normalize_type(v.clone());
-        log::debug!(
-            "{k} {} ----> {v} {}",
-            if k == key {
-                "".to_string()
-            } else {
-                format!("({})", key)
-            },
-            if v == value {
-                "".to_string()
-            } else {
-                format!("({})", value)
-            }
-        );
-        self._insert_type(subtype, key, value, origin)
+        self.insert_type_helper(subtype, k, v, origin, true);
+    }
+
+    pub fn insert_type_withouth_log(
+        &mut self,
+        subtype: &mut SubtypeRelations,
+        k: Type,
+        v: Type,
+        origin: Option<RelOrigin>,
+    ) {
+        self.insert_type_helper(subtype, k, v, origin, false);
     }
 
     pub fn insert(
@@ -300,7 +336,7 @@ impl TypeVariableMap {
                 format!("({})", value)
             }
         );
-        self._insert_type(subtype, key, value, None)
+        self._insert_type(subtype, key, value, None, true)
     }
 }
 
@@ -2018,7 +2054,12 @@ fn try_eq_sub<T: TypeConstructor>(
     let mut m = TypeVariableMap::default();
     let mut subtype = SubtypeRelations::default();
     for (a, b, origin) in &t.subtype_relations {
-        m.insert_type(&mut subtype, a.clone(), b.clone(), Some(origin.clone()))
+        m.insert_type_withouth_log(
+            &mut subtype,
+            a.clone(),
+            b.clone(),
+            Some(origin.clone()),
+        );
     }
     if subtype.is_empty() {
         for (v, k) in m.0 {
