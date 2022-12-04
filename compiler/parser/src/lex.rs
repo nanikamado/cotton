@@ -69,6 +69,7 @@ where
         let mut indent_level = 0;
         let mut requires_indent = false;
         let mut ignored_indents = vec![0];
+        let mut last_span = 0..0;
         for ((indent, ident_span), mut line) in lines {
             if line.is_empty() {
                 continue;
@@ -92,7 +93,7 @@ where
                         } else {
                             dedent_level -= ignored_indents_h + 1;
                             tokens
-                                .push((dedent_tok.clone(), ident_span.clone()));
+                                .push((dedent_tok.clone(), last_span.clone()));
                         }
                     }
                 }
@@ -121,6 +122,7 @@ where
             if line[0].0 == Token::OpenParenWithoutPad {
                 line[0].0 = Token::Paren('(');
             }
+            last_span = line[0].1.clone();
             tokens.append(&mut line);
         }
         tokens.extend(
