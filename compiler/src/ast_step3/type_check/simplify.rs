@@ -476,7 +476,7 @@ pub fn simplify_type<T: TypeConstructor>(
     mut t: TypeWithEnv<T>,
 ) -> Result<TypeWithEnv<T>, CompileError> {
     let mut i = 0;
-    t = t.normalize_variables(map)?;
+    t = t.normalize(map)?;
     loop {
         i += 1;
         let updated;
@@ -512,10 +512,14 @@ pub fn simplify_type<T: TypeConstructor>(
 
 fn _simplify_type<T: TypeConstructor>(
     map: &mut TypeVariableMap,
-    mut t: TypeWithEnv<T>,
+    t: TypeWithEnv<T>,
 ) -> Result<(TypeWithEnv<T>, bool), CompileError> {
     let t_before_simplify = t.clone();
     log::debug!("t = {}", t);
+    let (mut t, updated) = simplify_dummies(t, map);
+    if updated {
+        return Ok((t, true));
+    }
     for cov in mk_covariant_candidates(&t) {
         if !cov.is_recursive_index()
             && !mk_contravariant_candidates(&t).contains(&cov)
@@ -550,11 +554,6 @@ fn _simplify_type<T: TypeConstructor>(
         }
     }
     log::trace!("t{{3}} = {}", t);
-    let (mut t, updated) = simplify_dummies(t, map);
-    if updated {
-        return Ok((t, true));
-    }
-    log::trace!("t{{4}} = {}", t);
     let type_variables_in_sub_rel: FxHashSet<TypeVariable> =
         t.subtype_relations.type_variables_in_sub_rel();
     for a in &type_variables_in_sub_rel {
@@ -1319,10 +1318,11 @@ fn possible_weakest(
     {
         return None;
     }
-    for a in fn_apply_dummies.keys() {
-        if a.all_type_variables().contains(&t) {
+    for (a, (v, _)) in fn_apply_dummies {
+        if a.contains_variable(t) {
             return None;
         }
+        debug_assert!(!v.contains_variable(t));
     }
     let mut up = FxHashSet::default();
     for (sub, sup) in subtype_relation
@@ -1476,10 +1476,11 @@ fn possible_strongest(
     {
         return None;
     }
-    for a in fn_apply_dummies.keys() {
-        if a.all_type_variables().contains(&t) {
+    for (a, (v, _)) in fn_apply_dummies {
+        if a.contains_variable(t) {
             return None;
         }
+        debug_assert!(!v.contains_variable(t));
     }
     for (sub, sup, _) in subtype_relation {
         if sub.contravariant_type_variables().contains(&t) {
