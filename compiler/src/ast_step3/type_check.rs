@@ -705,6 +705,10 @@ fn resolve_scc(
     )?;
     let variable_requirements = scc_type.variable_requirements;
     let subtype_relation = scc_type.subtype_relations.clone();
+    debug_assert!(
+        constructors.iter().all(|c| !c.has_annotation)
+            || subtype_relation.is_empty()
+    );
     Ok((
         resolved_idents,
         scc_type
