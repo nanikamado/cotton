@@ -160,6 +160,7 @@ impl TypeVariableMap {
         key: Type,
         value: Type,
         origin: Option<RelOrigin>,
+        log: bool,
     ) {
         if key == value {
             return;
@@ -195,8 +196,15 @@ impl TypeVariableMap {
                     a_f.clone(),
                     b_f.clone(),
                     origin.clone(),
+                    log,
                 );
-                self._insert_type(subtype, a_a.clone(), b_a.clone(), origin);
+                self._insert_type(
+                    subtype,
+                    a_a.clone(),
+                    b_a.clone(),
+                    origin,
+                    log,
+                );
                 return;
             }
             (Fn(a1, b1), Fn(a2, b2)) => {
@@ -205,8 +213,9 @@ impl TypeVariableMap {
                     a1.clone(),
                     a2.clone(),
                     origin.clone(),
+                    log,
                 );
-                self._insert_type(subtype, b1.clone(), b2.clone(), origin);
+                self._insert_type(subtype, b1.clone(), b2.clone(), origin, log);
                 return;
             }
             (_, TypeLevelApply { f, a }) => {
@@ -247,11 +256,43 @@ impl TypeVariableMap {
             }
         };
         if let Some(old) = self.0.get(&key) {
-            log::error!("{key} is already pointing to {old}. ignored");
+            if log {
+                log::error!("{key} is already pointing to {old}. ignored");
+            }
         } else {
-            log::debug!("{key} --> {value}");
+            if log {
+                log::debug!("{key} --> {value}");
+            }
             self.0.insert(key, value);
         }
+    }
+
+    fn insert_type_helper(
+        &mut self,
+        subtype: &mut SubtypeRelations,
+        k: Type,
+        v: Type,
+        origin: Option<RelOrigin>,
+        log: bool,
+    ) {
+        let key = self.normalize_type(k.clone());
+        let value = self.normalize_type(v.clone());
+        if log {
+            log::debug!(
+                "{k} {} ----> {v} {}",
+                if k == key {
+                    "".to_string()
+                } else {
+                    format!("({})", key)
+                },
+                if v == value {
+                    "".to_string()
+                } else {
+                    format!("({})", value)
+                }
+            );
+        }
+        self._insert_type(subtype, key, value, origin, log)
     }
 
     pub fn insert_type(
@@ -261,22 +302,17 @@ impl TypeVariableMap {
         v: Type,
         origin: Option<RelOrigin>,
     ) {
-        let key = self.normalize_type(k.clone());
-        let value = self.normalize_type(v.clone());
-        log::debug!(
-            "{k} {} ----> {v} {}",
-            if k == key {
-                "".to_string()
-            } else {
-                format!("({})", key)
-            },
-            if v == value {
-                "".to_string()
-            } else {
-                format!("({})", value)
-            }
-        );
-        self._insert_type(subtype, key, value, origin)
+        self.insert_type_helper(subtype, k, v, origin, true);
+    }
+
+    pub fn insert_type_withouth_log(
+        &mut self,
+        subtype: &mut SubtypeRelations,
+        k: Type,
+        v: Type,
+        origin: Option<RelOrigin>,
+    ) {
+        self.insert_type_helper(subtype, k, v, origin, false);
     }
 
     pub fn insert(
@@ -300,7 +336,7 @@ impl TypeVariableMap {
                 format!("({})", value)
             }
         );
-        self._insert_type(subtype, key, value, None)
+        self._insert_type(subtype, key, value, None, true)
     }
 }
 
@@ -440,7 +476,7 @@ pub fn simplify_type<T: TypeConstructor>(
     mut t: TypeWithEnv<T>,
 ) -> Result<TypeWithEnv<T>, CompileError> {
     let mut i = 0;
-    t = t.normalize_variables(map)?;
+    t = t.normalize(map)?;
     loop {
         i += 1;
         let updated;
@@ -476,10 +512,14 @@ pub fn simplify_type<T: TypeConstructor>(
 
 fn _simplify_type<T: TypeConstructor>(
     map: &mut TypeVariableMap,
-    mut t: TypeWithEnv<T>,
+    t: TypeWithEnv<T>,
 ) -> Result<(TypeWithEnv<T>, bool), CompileError> {
     let t_before_simplify = t.clone();
     log::debug!("t = {}", t);
+    let (mut t, updated) = simplify_dummies(t, map);
+    if updated {
+        return Ok((t, true));
+    }
     for cov in mk_covariant_candidates(&t) {
         if !cov.is_recursive_index()
             && !mk_contravariant_candidates(&t).contains(&cov)
@@ -514,11 +554,6 @@ fn _simplify_type<T: TypeConstructor>(
         }
     }
     log::trace!("t{{3}} = {}", t);
-    let (mut t, updated) = simplify_dummies(t, map);
-    if updated {
-        return Ok((t, true));
-    }
-    log::trace!("t{{4}} = {}", t);
     let type_variables_in_sub_rel: FxHashSet<TypeVariable> =
         t.subtype_relations.type_variables_in_sub_rel();
     for a in &type_variables_in_sub_rel {
@@ -1283,10 +1318,11 @@ fn possible_weakest(
     {
         return None;
     }
-    for a in fn_apply_dummies.keys() {
-        if a.all_type_variables().contains(&t) {
+    for (a, (v, _)) in fn_apply_dummies {
+        if a.contains_variable(t) {
             return None;
         }
+        debug_assert!(!v.contains_variable(t));
     }
     let mut up = FxHashSet::default();
     for (sub, sup) in subtype_relation
@@ -1440,10 +1476,11 @@ fn possible_strongest(
     {
         return None;
     }
-    for a in fn_apply_dummies.keys() {
-        if a.all_type_variables().contains(&t) {
+    for (a, (v, _)) in fn_apply_dummies {
+        if a.contains_variable(t) {
             return None;
         }
+        debug_assert!(!v.contains_variable(t));
     }
     for (sub, sup, _) in subtype_relation {
         if sub.contravariant_type_variables().contains(&t) {
@@ -2018,7 +2055,12 @@ fn try_eq_sub<T: TypeConstructor>(
     let mut m = TypeVariableMap::default();
     let mut subtype = SubtypeRelations::default();
     for (a, b, origin) in &t.subtype_relations {
-        m.insert_type(&mut subtype, a.clone(), b.clone(), Some(origin.clone()))
+        m.insert_type_withouth_log(
+            &mut subtype,
+            a.clone(),
+            b.clone(),
+            Some(origin.clone()),
+        );
     }
     if subtype.is_empty() {
         for (v, k) in m.0 {
