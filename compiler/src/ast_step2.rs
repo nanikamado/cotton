@@ -100,6 +100,7 @@ pub enum PatternUnitForRestriction {
         Box<PatternUnitForRestriction>,
     ),
     Binder(Type, DeclId),
+    TypeRestriction(Box<PatternUnitForRestriction>, Type),
 }
 
 pub type PatternForRestriction = Vec<(PatternUnitForRestriction, Span)>;
@@ -223,17 +224,14 @@ impl TokenMap {
     }
 }
 
-pub static TYPE_NAMES: Lazy<RwLock<FxHashMap<TypeId, Name>>> =
-    Lazy::new(|| {
-        RwLock::new(
-            INTRINSIC_TYPES
-                .iter()
-                .map(|(name, id)| {
-                    (TypeId::Intrinsic(*id), Name::from_str(name))
-                })
-                .collect(),
-        )
-    });
+static TYPE_NAMES: Lazy<RwLock<FxHashMap<TypeId, Name>>> = Lazy::new(|| {
+    RwLock::new(
+        INTRINSIC_TYPES
+            .iter()
+            .map(|(name, id)| (TypeId::Intrinsic(*id), Name::from_str(name)))
+            .collect(),
+    )
+});
 
 pub fn get_type_name(type_id: TypeId) -> Name {
     *TYPE_NAMES.read().unwrap().get(&type_id).unwrap()
@@ -841,7 +839,18 @@ fn fn_arm(
         pattern: arm
             .pattern
             .into_iter()
-            .map(|(p, span)| (pattern(p, data_decl_map, token_map), span))
+            .map(|(p, span)| {
+                (
+                    pattern(
+                        p,
+                        data_decl_map,
+                        token_map,
+                        type_alias_map,
+                        interfaces,
+                    ),
+                    span,
+                )
+            })
             .collect(),
         expr: catch_flat_map(expr(
             arm.expr,
@@ -888,6 +897,8 @@ fn pattern(
     p: ast_step1::Pattern,
     data_decl_map: &FxHashMap<Name, DeclId>,
     token_map: &mut TokenMap,
+    type_alias_map: &mut TypeAliasMap,
+    interfaces: &FxHashMap<Name, Vec<(Name, Type, TypeVariable)>>,
 ) -> Pattern<TypeVariable> {
     use PatternUnit::*;
     match p {
@@ -901,7 +912,15 @@ fn pattern(
                 id,
                 args: args
                     .into_iter()
-                    .map(|arg| pattern(arg, data_decl_map, token_map))
+                    .map(|arg| {
+                        pattern(
+                            arg,
+                            data_decl_map,
+                            token_map,
+                            type_alias_map,
+                            interfaces,
+                        )
+                    })
                     .collect(),
             }
         }
@@ -911,6 +930,25 @@ fn pattern(
             Binder(Name::from_str(name.0), decl_id, TypeVariable::new())
         }
         ast_step1::Pattern::Underscore => Underscore,
+        ast_step1::Pattern::TypeRestriction(p, t, forall) => {
+            let t = type_to_type_with_forall(
+                t,
+                data_decl_map,
+                Default::default(),
+                type_alias_map,
+                forall,
+                interfaces,
+                token_map,
+            );
+            let p = pattern(
+                *p,
+                data_decl_map,
+                token_map,
+                type_alias_map,
+                interfaces,
+            );
+            TypeRestriction(p, t)
+        }
     }
     .into()
 }
@@ -1279,6 +1317,9 @@ impl Display for PatternUnitForRestriction {
                 write!(f, ":{id}")
             }
             PatternUnitForRestriction::Tuple(a, b) => write!(f, "({a}, {b})"),
+            PatternUnitForRestriction::TypeRestriction(p, t) => {
+                write!(f, "({p} : {t})")
+            }
         }
     }
 }
@@ -1297,6 +1338,9 @@ impl PatternUnitForRestriction {
                 .into_iter()
                 .chain(b.covariant_type_variables())
                 .collect(),
+            PatternUnitForRestriction::TypeRestriction(p, _) => {
+                p.covariant_type_variables()
+            }
         }
     }
 
@@ -1313,6 +1357,9 @@ impl PatternUnitForRestriction {
                 .into_iter()
                 .chain(b.contravariant_type_variables())
                 .collect(),
+            PatternUnitForRestriction::TypeRestriction(p, _) => {
+                p.contravariant_type_variables()
+            }
         }
     }
 
@@ -1329,6 +1376,9 @@ impl PatternUnitForRestriction {
                 .into_iter()
                 .chain(b.all_type_variables_vec())
                 .collect(),
+            PatternUnitForRestriction::TypeRestriction(p, _) => {
+                p.all_type_variables_vec()
+            }
         }
     }
 
@@ -1349,6 +1399,9 @@ impl PatternUnitForRestriction {
                 .into_iter()
                 .chain(b.decl_type_map())
                 .collect(),
+            PatternUnitForRestriction::TypeRestriction(p, _) => {
+                p.decl_type_map()
+            }
         }
     }
 
@@ -1372,6 +1425,10 @@ impl PatternUnitForRestriction {
                 (Tuple(a.into(), b.into()), f)
             }
             Binder(t, decl_id) => (Binder(f(t), decl_id), f),
+            TypeRestriction(p, t) => {
+                let (p, mut f) = p.map_type_rec(f);
+                (TypeRestriction(Box::new(p), f(t)), f)
+            }
         }
     }
 }
@@ -1644,7 +1701,7 @@ fn fmt_tuple(
     }
 }
 
-fn collect_tuple_rev(tuple: &Type) -> Vec<Vec<&Type>> {
+pub fn collect_tuple_rev(tuple: &Type) -> Vec<Vec<&Type>> {
     tuple
         .iter()
         .flat_map(|tuple| match &**tuple {

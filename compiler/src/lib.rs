@@ -14,7 +14,6 @@ mod rust_backend;
 pub use ast_step1::OpPrecedenceMap;
 use ast_step2::name_id::Name;
 use ast_step2::types::{Type, TypeUnit};
-use ast_step2::TYPE_NAMES;
 pub use ast_step2::{
     types::TypeMatchableRef, PrintTypeOfGlobalVariableForUser,
     PrintTypeOfLocalVariableForUser,
@@ -98,8 +97,7 @@ pub fn run(
     if command == Command::PrintTypes {
         print_types::print(&ast);
     } else {
-        let type_names = TYPE_NAMES.read().unwrap();
-        let ast = ast_step4::Ast::from(ast, &type_names);
+        let ast = ast_step4::Ast::from(ast);
         let ast = ast_step5::Ast::from(ast);
         if command == Command::RunRust {
             rust_backend::run(ast);

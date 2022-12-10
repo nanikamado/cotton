@@ -242,6 +242,12 @@ impl VariableMemo {
                 PatternUnit::Str(a) => PatternUnit::Str(a),
                 PatternUnit::Binder(name, id) => PatternUnit::Binder(name, id),
                 PatternUnit::Underscore => PatternUnit::Underscore,
+                PatternUnit::TypeRestriction(p, t) => {
+                    PatternUnit::TypeRestriction(
+                        self.monomorphize_pattern(p, replace_map),
+                        t,
+                    )
+                }
             })
             .collect();
         (pattern, self.map.get_type_with_replace_map(t, replace_map))

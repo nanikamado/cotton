@@ -1,0 +1,16 @@
+(.) : a -> (a -> b) -> b forall {a, b} =
+    | a, f => f(a)
+
+infixl 10 .
+
+data D1
+data D2
+
+to_string : (D1 | D2) -> String =
+    | a : D1 => "D1"
+    | _ => "D2"
+
+main : () -> () =
+    | () => do
+        D1.to_string.println
+        D2.to_string.println

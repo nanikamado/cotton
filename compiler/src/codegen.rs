@@ -1,3 +1,6 @@
+mod type_restriction_pattern;
+
+use self::type_restriction_pattern::IS_INSTANCE_OF;
 use crate::{
     ast_step2::{decl_id::DeclId, name_id::Name},
     ast_step3::DataDecl,
@@ -13,7 +16,7 @@ use unic_ucd_category::GeneralCategory;
 
 pub fn codegen(ast: Ast) -> String {
     format!(
-        "let $$bool=a=>a?{}:{};{}{}{}{}{}${}$main({});}}",
+        "let $$bool=a=>a?{}:{};{}{IS_INSTANCE_OF}{}{}{}{}${}$main({});}}",
         PRIMITIVE_CONSTRUCTOR_DEF[&IntrinsicConstructor::True],
         PRIMITIVE_CONSTRUCTOR_DEF[&IntrinsicConstructor::False],
         r#"{
@@ -203,6 +206,18 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
                         ));
                         v
                     }
+                    TypeRestriction(p, t) => {
+                        let mut v = vec![format!(
+                            "is_instance_of({},{}, [])",
+                            n,
+                            t.type_to_js_obj().0
+                        )];
+                        v.append(&mut _condition(
+                            &[p.clone()],
+                            &[n.to_string()],
+                        ));
+                        v
+                    }
                     _ => Vec::new(),
                 }
             } else {
@@ -228,27 +243,30 @@ fn _bindings(
     pattern: &[Pattern],
     names: Vec<String>,
 ) -> Vec<(Name, String, DeclId, &Type)> {
+    fn _bindings_unit(
+        (p, t): &Pattern,
+        n: String,
+    ) -> Vec<(Name, String, DeclId, &Type)> {
+        if p.len() == 1 {
+            match &p[0] {
+                PatternUnit::Binder(a, id) => {
+                    vec![(*a, n, *id, t)]
+                }
+                PatternUnit::Constructor { args, .. } => _bindings(
+                    args,
+                    (0..args.len()).map(|i| format!("{}[{}]", n, i)).collect(),
+                ),
+                PatternUnit::TypeRestriction(p, _) => _bindings_unit(p, n),
+                _ => Vec::new(),
+            }
+        } else {
+            unimplemented!()
+        }
+    }
     pattern
         .iter()
         .zip(names)
-        .flat_map(|((p, t), n)| {
-            if p.len() == 1 {
-                match &p[0] {
-                    PatternUnit::Binder(a, id) => {
-                        vec![(*a, n, *id, t)]
-                    }
-                    PatternUnit::Constructor { args, .. } => _bindings(
-                        args,
-                        (0..args.len())
-                            .map(|i| format!("{}[{}]", n, i))
-                            .collect(),
-                    ),
-                    _ => Vec::new(),
-                }
-            } else {
-                unimplemented!()
-            }
-        })
+        .flat_map(|(p, n)| _bindings_unit(p, n))
         .collect()
 }
 

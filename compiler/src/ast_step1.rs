@@ -90,6 +90,7 @@ pub enum Pattern<'a> {
     },
     Binder(StrWithId<'a>),
     Underscore,
+    TypeRestriction(Box<Pattern<'a>>, Type<'a>, Forall<'a>),
 }
 
 #[derive(Debug, Clone)]
@@ -738,6 +739,15 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::PatternUnit, &'a Span) {
                 }
             }
             parser::PatternUnit::Underscore => Pattern::Underscore,
+            parser::PatternUnit::TypeRestriction(p, t, forall) => {
+                Pattern::TypeRestriction(
+                    Box::new(
+                        fold_op_sequence(p, op_precedence_map, constructors).0,
+                    ),
+                    fold_op_sequence(t, op_precedence_map, constructors).0,
+                    forall.into(),
+                )
+            }
         };
         (a, self.1.clone())
     }

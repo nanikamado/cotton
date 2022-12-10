@@ -451,6 +451,23 @@ impl Type {
         }
     }
 
+    pub fn arguments_from_argument_tuple_ref(&self) -> Vec<&Self> {
+        use TypeMatchableRef::*;
+        match self.matchable_ref() {
+            Tuple(a1, a2) => std::iter::once(a1)
+                .chain(a2.arguments_from_argument_tuple_ref())
+                .collect(),
+            Const { id, .. }
+                if id == TypeId::Intrinsic(IntrinsicType::Unit) =>
+            {
+                Vec::new()
+            }
+            t => {
+                panic!("expected AT or Unit but got {:?}", t)
+            }
+        }
+    }
+
     pub fn remove_parameters(mut self) -> (Self, Vec<TypeVariable>) {
         let mut parameters = Vec::new();
         let t = loop {
@@ -699,7 +716,6 @@ fn resolve_scc(
             },
             normal_map: resolved_variable_map,
         },
-        0,
         map,
         &mut resolved_idents,
     )?;
@@ -916,7 +932,6 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
     type_of_unresolved_decl: &TypeWithEnv<T>,
     resolved_variable_map: C,
     map: &TypeVariableMap,
-    req_recursion_count: usize,
     resolved_implicit_args: &mut Vec<(IdentId, ResolvedIdent)>,
 ) -> (Vec<SatisfiedType<TypeWithEnv<T>>>, Vec<CompileError>) {
     log::trace!("type_of_unresolved_decl:");
@@ -998,6 +1013,9 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                                         additional_candidates: req
                                             .additional_candidates
                                             .clone(),
+                                        req_recursion_count: req
+                                            .req_recursion_count
+                                            + 1,
                                     },
                                 );
                             }
@@ -1076,7 +1094,7 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                 };
                 match t {
                     Ok(mut t) => {
-                        if req_recursion_count
+                        if req.req_recursion_count
                             == IMPLICIT_PARAMETER_RECURSION_LIMIT
                         {
                             return Err(CompileError::RecursionLimit);
@@ -1086,7 +1104,6 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                                 implicit_parameters_len,
                                 &mut t,
                                 resolved_variable_map,
-                                req_recursion_count + 1,
                                 &mut map,
                                 resolved_implicit_args,
                             )?;
@@ -1204,7 +1221,6 @@ fn resolve_requirements_in_type_with_env(
     mut resolve_num: usize,
     type_of_unresolved_decl: &mut TypeWithEnv<impl TypeConstructor>,
     resolved_variable_map: impl CandidatesProvider,
-    req_recursion_count: usize,
     map: &mut TypeVariableMap,
     resolved_idents: &mut Vec<(IdentId, ResolvedIdent)>,
 ) -> Result<(), CompileError> {
@@ -1216,7 +1232,6 @@ fn resolve_requirements_in_type_with_env(
             type_of_unresolved_decl,
             resolved_variable_map,
             map,
-            req_recursion_count,
             resolved_idents,
         );
         let satisfied = get_one_satisfied(satisfied, es, req.name, req.span)?;
@@ -1359,6 +1374,7 @@ fn min_type_with_env(
                         local_env: Default::default(),
                         span: span.clone(),
                         additional_candidates: Default::default(),
+                        req_recursion_count: 0,
                     }],
                     subtype_relations: SubtypeRelations::default(),
                     pattern_restrictions: PatternRestrictions::default(),
@@ -1503,6 +1519,7 @@ pub struct VariableRequirement {
     pub span: Span,
     pub local_env: Vec<(Name, DeclId, Type)>,
     pub additional_candidates: BTreeMap<Name, Vec<Candidate>>,
+    pub req_recursion_count: usize,
 }
 
 struct ArmType {
@@ -1652,10 +1669,17 @@ fn pattern_unit_to_type(
                 ),
             )
         }
-        TypeRestriction(_p, _t) => {
-            // let (_, binds) = pattern_to_type(p);
-            // (t.clone(), binds)
-            unimplemented!()
+        TypeRestriction(p, t) => {
+            let (_, binds, (pattern_restriction, _span)) =
+                pattern_to_type(p, span);
+            (
+                t.clone(),
+                binds,
+                PatternUnitForRestriction::TypeRestriction(
+                    Box::new(pattern_restriction),
+                    t.clone(),
+                ),
+            )
         }
     }
 }
