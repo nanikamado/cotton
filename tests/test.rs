@@ -247,9 +247,82 @@ fn nexts() {
     test_examples("nexts.cot", "D1\n");
 }
 
+const PALINDROME: &str = &"[D1, D1, D1, D1, D1, D1] palindrome!
+[D1, D1, D1, D1, D1, D2]
+[D1, D1, D1, D1, D2, D1]
+[D1, D1, D1, D1, D2, D2]
+[D1, D1, D1, D2, D1, D1]
+[D1, D1, D1, D2, D1, D2]
+[D1, D1, D1, D2, D2, D1]
+[D1, D1, D1, D2, D2, D2]
+[D1, D1, D2, D1, D1, D1]
+[D1, D1, D2, D1, D1, D2]
+[D1, D1, D2, D1, D2, D1]
+[D1, D1, D2, D1, D2, D2]
+[D1, D1, D2, D2, D1, D1] palindrome!
+[D1, D1, D2, D2, D1, D2]
+[D1, D1, D2, D2, D2, D1]
+[D1, D1, D2, D2, D2, D2]
+[D1, D2, D1, D1, D1, D1]
+[D1, D2, D1, D1, D1, D2]
+[D1, D2, D1, D1, D2, D1] palindrome!
+[D1, D2, D1, D1, D2, D2]
+[D1, D2, D1, D2, D1, D1]
+[D1, D2, D1, D2, D1, D2]
+[D1, D2, D1, D2, D2, D1]
+[D1, D2, D1, D2, D2, D2]
+[D1, D2, D2, D1, D1, D1]
+[D1, D2, D2, D1, D1, D2]
+[D1, D2, D2, D1, D2, D1]
+[D1, D2, D2, D1, D2, D2]
+[D1, D2, D2, D2, D1, D1]
+[D1, D2, D2, D2, D1, D2]
+[D1, D2, D2, D2, D2, D1] palindrome!
+[D1, D2, D2, D2, D2, D2]
+[D2, D1, D1, D1, D1, D1]
+[D2, D1, D1, D1, D1, D2] palindrome!
+[D2, D1, D1, D1, D2, D1]
+[D2, D1, D1, D1, D2, D2]
+[D2, D1, D1, D2, D1, D1]
+[D2, D1, D1, D2, D1, D2]
+[D2, D1, D1, D2, D2, D1]
+[D2, D1, D1, D2, D2, D2]
+[D2, D1, D2, D1, D1, D1]
+[D2, D1, D2, D1, D1, D2]
+[D2, D1, D2, D1, D2, D1]
+[D2, D1, D2, D1, D2, D2]
+[D2, D1, D2, D2, D1, D1]
+[D2, D1, D2, D2, D1, D2] palindrome!
+[D2, D1, D2, D2, D2, D1]
+[D2, D1, D2, D2, D2, D2]
+[D2, D2, D1, D1, D1, D1]
+[D2, D2, D1, D1, D1, D2]
+[D2, D2, D1, D1, D2, D1]
+[D2, D2, D1, D1, D2, D2] palindrome!
+[D2, D2, D1, D2, D1, D1]
+[D2, D2, D1, D2, D1, D2]
+[D2, D2, D1, D2, D2, D1]
+[D2, D2, D1, D2, D2, D2]
+[D2, D2, D2, D1, D1, D1]
+[D2, D2, D2, D1, D1, D2]
+[D2, D2, D2, D1, D2, D1]
+[D2, D2, D2, D1, D2, D2]
+[D2, D2, D2, D2, D1, D1]
+[D2, D2, D2, D2, D1, D2]
+[D2, D2, D2, D2, D2, D1]
+[D2, D2, D2, D2, D2, D2] palindrome!
+";
+
 #[test]
 fn palindrome_type() {
-    test_examples("palindrome_type.cot", "");
+    test_examples("palindrome_type.cot", PALINDROME);
+}
+
+#[test]
+fn palindrome_type_with_annotation() {
+    test_test("palindrome_type_with_annotation.cot")
+        .stdout(PALINDROME)
+        .success();
 }
 
 #[test]
@@ -265,4 +338,19 @@ fn palindrome_type_fail2() {
 #[test]
 fn error_handling() {
     test_examples("error_handling.cot", "Err(Error1)\n");
+}
+
+#[test]
+fn inf_implicit_req_fail() {
+    test_test("inf_implicit_req_fail.cot").code(1);
+}
+
+#[test]
+fn type_pattern() {
+    test_examples("type_pattern.cot", "D1\nD2\n");
+}
+
+#[test]
+fn literal_pattern_fail() {
+    test_test("literal_pattern_fail.cot").code(1);
 }

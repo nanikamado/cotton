@@ -60,23 +60,13 @@ type PalindromePlus = L | (D1 /\ L) |
 
 type Palindrome = PalindromePlus[Nil]
 
-test : () -> () =
-    | () => do
-        Nil : Palindrome
-        (D1 /\ Nil) : Palindrome
-        (D1 /\ D1 /\ Nil) : Palindrome
-        (D1 /\ D2 /\ D1 /\ Nil) : Palindrome
-        (D1 /\ D2 /\ D2 /\ D1 /\ Nil) : Palindrome
-        (D1 /\ D2 /\ D2 /\ D2 /\ D1 /\ Nil) : Palindrome
-        (D1 /\ D2 /\ D2 /\ D2 /\ D1 /\ Nil) : Palindrome
-        ()
-
 main : () -> () =
     | () => do
         l = (D1 /\ D2 /\ Nil)
-        ls = (do (l? /\ l? /\ l? /\ l? /\ l? /\ l? /\ Nil) /\ Nil)
+        ls = ((do (l? /\ l? /\ l? /\ l? /\ l? /\ l? /\ Nil) /\ Nil) : List[List[D1 | D2]])
         ls.map(
             | l : Palindrome => (l.to_string <> " palindrome!").puts
             | l => l.puts
         )
         ()
+

@@ -404,7 +404,38 @@ impl TypeUnit {
         }
     }
 
-    fn remove_disjoint_part(
+    fn split_slow(self, other: &Self) -> (Type, Type) {
+        match (self, other) {
+            (TypeUnit::Fn(a1, a2), TypeUnit::Fn(b1, b2)) => {
+                if b1.clone().is_subtype_of(a1.clone()) {
+                    let (a2_out, a2_in) = a2.split_slow(b2);
+                    (
+                        TypeUnit::Fn(a1.clone(), a2_out).into(),
+                        TypeUnit::Fn(a1, a2_in).into(),
+                    )
+                } else {
+                    (TypeUnit::Fn(a1, a2).into(), Type::default())
+                }
+            }
+            (TypeUnit::Tuple(a1, a2), TypeUnit::Tuple(b1, b2)) => {
+                let (a1_out, a1_in) = a1.split_slow(b1);
+                let (a2_out, a2_in) = a2.split_slow(b2);
+                (
+                    Type::default()
+                        .union_unit(TypeUnit::Tuple(
+                            a1_out,
+                            a2_out.clone().union(a2_in.clone()),
+                        ))
+                        .union_unit(TypeUnit::Tuple(a1_in.clone(), a2_out)),
+                    TypeUnit::Tuple(a1_in, a2_in).into(),
+                )
+            }
+            (a, b) if a == *b => (Type::default(), a.into()),
+            (t, _) => (t.into(), Type::default()),
+        }
+    }
+
+    pub fn remove_disjoint_part(
         self,
         other: &Self,
     ) -> (Type, Type, Option<NotSubtypeReason>) {
@@ -642,6 +673,45 @@ impl TypeUnit {
             | TypeLevelApply { f: a, .. } => a.is_wrapped_by_const(),
         }
     }
+
+    pub fn is_recursive_fn_apply(&self) -> bool {
+        matches!(
+            self,
+            TypeUnit::TypeLevelApply { f, .. } if matches!(
+                f.matchable_ref(),
+                TypeMatchableRef::RecursiveAlias { .. }
+            )
+        )
+    }
+
+    pub fn unwrap_recursive_fn_apply(self) -> (Type, bool) {
+        match self {
+            TypeUnit::TypeLevelApply { f, a }
+                if matches!(
+                    f.matchable_ref(),
+                    TypeMatchableRef::RecursiveAlias { .. }
+                ) =>
+            {
+                (f.type_level_function_apply_strong(a), true)
+            }
+            t => (t.into(), false),
+        }
+    }
+
+    pub fn contains_recursion(&self) -> bool {
+        match self {
+            TypeUnit::Fn(a, b)
+            | TypeUnit::TypeLevelApply { f: a, a: b }
+            | TypeUnit::Tuple(a, b) => {
+                a.contains_recursion() || b.contains_recursion()
+            }
+            TypeUnit::Restrictions { t: a, .. } | TypeUnit::TypeLevelFn(a) => {
+                a.contains_recursion()
+            }
+            TypeUnit::RecursiveAlias { .. } => true,
+            TypeUnit::Const { .. } | TypeUnit::Variable(_) => false,
+        }
+    }
 }
 
 impl Type {
@@ -753,11 +823,37 @@ impl Type {
         (out, in_)
     }
 
+    pub fn split_slow(self, other: &Self) -> (Self, Self) {
+        let mut in_ = Type::default();
+        let mut out = self;
+        for t in other.iter() {
+            let i;
+            (out, i) = out.split_unit_slow(t);
+            in_.union_in_place(i);
+        }
+        (out, in_)
+    }
+
     pub fn split_unit(self, other: &TypeUnit) -> (Self, Self) {
         let mut in_ = Type::default();
         let mut out = Type::default();
         for t in self {
             let (o, i) = unwrap_or_clone(t).split(other);
+            in_.union_in_place(i);
+            out.union_in_place(o);
+        }
+        (out, in_)
+    }
+
+    pub fn split_unit_slow(self, other: &TypeUnit) -> (Self, Self) {
+        if !self.contains_recursion() && other.is_recursive_fn_apply() {
+            return self
+                .split_slow(&other.clone().unwrap_recursive_fn_apply().0);
+        }
+        let mut in_ = Type::default();
+        let mut out = Type::default();
+        for t in self {
+            let (o, i) = unwrap_or_clone(t).split_slow(other);
             in_.union_in_place(i);
             out.union_in_place(o);
         }
@@ -799,6 +895,11 @@ impl Type {
         self,
         other: &TypeUnit,
     ) -> (Self, Self, Option<NotSubtypeReason>) {
+        if !self.contains_recursion() && other.is_recursive_fn_apply() {
+            return self.remove_disjoint_part(
+                &Type::from(other.clone()).unwrap_recursive_fn_apply().0,
+            );
+        }
         let mut in_ = Type::default();
         let mut out = Type::default();
         let mut reasons = Vec::new();
@@ -915,6 +1016,10 @@ impl Type {
             }
             t => (t.into(), false),
         }
+    }
+
+    pub fn contains_recursion(&self) -> bool {
+        self.iter().any(|t| t.contains_recursion())
     }
 }
 

@@ -1,6 +1,8 @@
 pub use self::padded_type_map::{PaddedTypeMap, TypePointer};
 use crate::{
-    ast_step2::{self, decl_id::DeclId, name_id::Name, ConstructorId, TypeId},
+    ast_step2::{
+        self, decl_id::DeclId, name_id::Name, types, ConstructorId, TypeId,
+    },
     ast_step3::VariableId,
     ast_step3::{self, DataDecl},
     intrinsics::{IntrinsicConstructor, IntrinsicType, IntrinsicVariable},
@@ -78,6 +80,7 @@ pub enum PatternUnit<T> {
     },
     Binder(Name, DeclId),
     Underscore,
+    TypeRestriction(Pattern<T>, types::Type),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -149,30 +152,17 @@ impl TryFrom<LinkedType> for Type {
 }
 
 impl Ast {
-    pub fn from(
-        ast: ast_step3::Ast,
-        type_names: &FxHashMap<TypeId, Name>,
-    ) -> Self {
+    pub fn from(ast: ast_step3::Ast) -> Self {
         let mut memo = VariableMemo::new(ast.variable_decl, &ast.data_decl);
         for d in IntrinsicVariable::iter() {
             let p = memo.type_map.new_pointer();
-            unify_type_with_ast_sep2_type(
-                &d.to_type(),
-                p,
-                &mut memo.type_map,
-                type_names,
-            );
+            unify_type_with_ast_sep2_type(&d.to_type(), p, &mut memo.type_map);
             memo.intrinsic_variables
                 .insert(VariableId::IntrinsicVariable(d), p);
         }
         for d in IntrinsicConstructor::iter() {
             let p = memo.type_map.new_pointer();
-            unify_type_with_ast_sep2_type(
-                &d.to_type(),
-                p,
-                &mut memo.type_map,
-                type_names,
-            );
+            unify_type_with_ast_sep2_type(&d.to_type(), p, &mut memo.type_map);
             memo.intrinsic_variables
                 .insert(VariableId::IntrinsicConstructor(d), p);
         }
@@ -240,7 +230,7 @@ impl From<LinkedTypeUnit> for LinkedType {
 
 mod padded_type_map {
     use super::{LinkedType, LinkedTypeUnit, Type};
-    use crate::ast_step2::{name_id::Name, TypeId};
+    use crate::ast_step2::{get_type_name, name_id::Name, TypeId};
     use fxhash::{FxHashMap, FxHashSet};
     use itertools::Itertools;
     use std::{convert::TryInto, fmt::Display, iter, mem};
@@ -337,14 +327,19 @@ mod padded_type_map {
             &mut self,
             p: TypePointer,
             id: TypeId,
-            name: Name,
             args: Vec<TypePointer>,
         ) {
             let t = self.dereference_mut(p);
             let abs = if let Some(t) = t.normals.get(&id) {
                 t.args.iter().copied().zip(args).collect_vec()
             } else {
-                t.normals.insert(id, NormalType { name, args });
+                t.normals.insert(
+                    id,
+                    NormalType {
+                        name: get_type_name(id),
+                        args,
+                    },
+                );
                 return;
             };
             for (a, b) in abs {
@@ -639,7 +634,6 @@ impl<'b> VariableMemo<'b> {
                 self.type_map.insert_normal(
                     type_pointer,
                     TypeId::Intrinsic(IntrinsicType::I64),
-                    Name::from_str("I64"),
                     Vec::new(),
                 );
                 Expr::Number(a)
@@ -648,7 +642,6 @@ impl<'b> VariableMemo<'b> {
                 self.type_map.insert_normal(
                     type_pointer,
                     TypeId::Intrinsic(IntrinsicType::String),
-                    Name::from_str("String"),
                     Vec::new(),
                 );
                 Expr::StrLiteral(a)
@@ -683,7 +676,6 @@ impl<'b> VariableMemo<'b> {
                 };
                 let p = make_constructor_type(
                     field_len,
-                    name,
                     type_id,
                     &mut self.type_map,
                 );
@@ -816,7 +808,6 @@ impl<'b> VariableMemo<'b> {
                     self.type_map.insert_normal(
                         type_pointer,
                         TypeId::Intrinsic(IntrinsicType::I64),
-                        Name::from_str("I64"),
                         Vec::new(),
                     );
                     PatternUnit::I64(*a)
@@ -825,7 +816,6 @@ impl<'b> VariableMemo<'b> {
                     self.type_map.insert_normal(
                         type_pointer,
                         TypeId::Intrinsic(IntrinsicType::String),
-                        Name::from_str("String"),
                         Vec::new(),
                     );
                     PatternUnit::Str(*a)
@@ -845,7 +835,6 @@ impl<'b> VariableMemo<'b> {
                     self.type_map.insert_normal(
                         type_pointer,
                         (*id).into(),
-                        *name,
                         args.iter().map(|(_, p)| *p).collect(),
                     );
                     PatternUnit::Constructor {
@@ -859,7 +848,14 @@ impl<'b> VariableMemo<'b> {
                     PatternUnit::Binder(*name, *d)
                 }
                 Underscore => PatternUnit::Underscore,
-                TypeRestriction(_, _) => unimplemented!(),
+                TypeRestriction(p, t) => PatternUnit::TypeRestriction(
+                    self.unify_type_with_pattern(
+                        type_pointer,
+                        p,
+                        local_variables,
+                    ),
+                    t.clone(),
+                ),
             };
             (vec![pattern], type_pointer)
         }
@@ -868,7 +864,6 @@ impl<'b> VariableMemo<'b> {
 
 fn make_constructor_type(
     field_len: usize,
-    name: Name,
     id: TypeId,
     map: &mut PaddedTypeMap,
 ) -> TypePointer {
@@ -883,7 +878,7 @@ fn make_constructor_type(
         map.insert_function(f, p, f_old);
     }
     args.reverse();
-    map.insert_normal(r, id, name, args.clone());
+    map.insert_normal(r, id, args.clone());
     f
 }
 
@@ -926,23 +921,22 @@ fn unify_type_with_ast_sep2_type(
     t: &ast_step2::types::Type,
     p: TypePointer,
     map: &mut PaddedTypeMap,
-    type_names: &FxHashMap<TypeId, Name>,
 ) {
     for t in t.iter() {
         use ast_step2::types::TypeUnit::*;
         match &**t {
             Fn(a, b) => {
                 let (p_a, p_b) = map.get_fn(p);
-                unify_type_with_ast_sep2_type(a, p_a, map, type_names);
-                unify_type_with_ast_sep2_type(b, p_b, map, type_names);
+                unify_type_with_ast_sep2_type(a, p_a, map);
+                unify_type_with_ast_sep2_type(b, p_b, map);
             }
             Tuple(a, b) => {
                 let len = tuple_len(b);
                 let args = (0..len).map(|_| map.new_pointer()).collect_vec();
                 for a in a.iter() {
                     if let Const { id } = &**a {
-                        unify_type_with_tuple(b, &args, map, type_names);
-                        map.insert_normal(p, *id, type_names[id], args.clone());
+                        unify_type_with_tuple(b, &args, map);
+                        map.insert_normal(p, *id, args.clone());
                     } else {
                         panic!()
                     }
@@ -964,7 +958,6 @@ fn unify_type_with_tuple(
     t: &ast_step2::types::Type,
     ps: &[TypePointer],
     map: &mut PaddedTypeMap,
-    type_names: &FxHashMap<TypeId, Name>,
 ) {
     for t in t.iter() {
         match &**t {
@@ -974,8 +967,8 @@ fn unify_type_with_tuple(
                 debug_assert!(ps.is_empty());
             }
             ast_step2::types::TypeUnit::Tuple(h, t) => {
-                unify_type_with_ast_sep2_type(h, ps[0], map, type_names);
-                unify_type_with_tuple(t, &ps[1..], map, type_names);
+                unify_type_with_ast_sep2_type(h, ps[0], map);
+                unify_type_with_tuple(t, &ps[1..], map);
             }
             _ => panic!(),
         }
