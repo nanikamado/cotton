@@ -540,6 +540,22 @@ impl TypeUnit {
             }
             (TypeUnit::Tuple(a1, a2), TypeUnit::Tuple(b1, b2)) => {
                 let (a1_out, a1_in, r1) = a1.remove_disjoint_part(b1);
+                if a1_in.is_empty() {
+                    let out = Type::from(TypeUnit::Tuple(a1_out, a2));
+                    return (
+                        out.clone(),
+                        Type::default(),
+                        if out.is_empty() {
+                            None
+                        } else {
+                            Some(NotSubtypeReason::Disjoint {
+                                left: other.clone().into(),
+                                right: out,
+                                reasons: r1.into_iter().collect(),
+                            })
+                        },
+                    );
+                }
                 let (a2_out, a2_in, r2) = a2.remove_disjoint_part(b2);
                 let out = Type::default()
                     .union_unit(TypeUnit::Tuple(
