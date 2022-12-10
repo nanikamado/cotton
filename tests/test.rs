@@ -351,6 +351,11 @@ fn type_pattern() {
 }
 
 #[test]
+fn type_pattern_primitive() {
+    test_examples("type_pattern_primitive.cot", "2\n1 one\n");
+}
+
+#[test]
 fn literal_pattern_fail() {
     test_test("literal_pattern_fail.cot").code(1);
 }

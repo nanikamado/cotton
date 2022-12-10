@@ -15,6 +15,8 @@ pub const IS_INSTANCE_OF: &str = r#"const util = require('util');
     let is_instance_of_unit = (v, t, call_stack) => {
       if (t.type == "normal") {
         return (
+          t[0] == 'I64' && typeof v == 'number' ||
+          t[0] == 'String' && typeof v == 'string' ||
           t[0] == v.name &&
           [...t[1].keys()].every((i) =>
             is_instance_of(v[i], t[1][i], call_stack)
