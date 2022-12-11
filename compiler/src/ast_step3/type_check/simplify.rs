@@ -425,6 +425,27 @@ impl SubtypeRelations {
         }
     }
 
+    pub fn normalize_with_unwrapping(
+        mut self,
+        map: &mut TypeVariableMap,
+        already_considered_relations: &mut BTreeSet<(Type, Type)>,
+    ) -> Result<Self, CompileError> {
+        self = self.normalize_subtype_rel_with_unwrapping(
+            map,
+            already_considered_relations,
+        )?;
+        let eqs = find_eq_types(&self);
+        let eqs_is_empty = eqs.is_empty();
+        for (from, to) in eqs {
+            map.insert(&mut self, from, to);
+        }
+        if eqs_is_empty {
+            Ok(self)
+        } else {
+            self.normalize_with_unwrapping(map, already_considered_relations)
+        }
+    }
+
     fn normalize_subtype_rel(
         mut self,
         map: &mut TypeVariableMap,
@@ -438,7 +459,7 @@ impl SubtypeRelations {
                 match simplify_subtype_rel(
                     a,
                     b,
-                    Some(already_considered_relations),
+                    Some(&mut already_considered_relations.clone()),
                 ) {
                     Ok(r) => Ok(r
                         .into_iter()
@@ -448,7 +469,57 @@ impl SubtypeRelations {
                             Default::default();
                         let origin_a = map.normalize_type(origin.left);
                         let origin_b = map.normalize_type(origin.right);
-                        let r = simplify_subtype_rel(
+                        let r = simplify_subtype_rel_with_unwrapping(
+                            origin_a.clone(),
+                            origin_b.clone(),
+                            Some(&mut already_considered_relations),
+                        );
+                        let r = match r {
+                            Ok(r) => {
+                                panic!("{} < {}. ({:?})", origin_a, origin_b, r)
+                            }
+                            Err(r) => r,
+                        };
+                        Err(CompileError::NotSubtypeOf {
+                            sub_type: origin_a,
+                            super_type: origin_b,
+                            reason: r,
+                            span: origin.span,
+                        })
+                    }
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect();
+        Ok(self)
+    }
+
+    fn normalize_subtype_rel_with_unwrapping(
+        mut self,
+        map: &mut TypeVariableMap,
+        already_considered_relations: &mut BTreeSet<(Type, Type)>,
+    ) -> Result<Self, CompileError> {
+        self = self
+            .into_iter()
+            .map(|(a, b, origin)| {
+                let a = map.normalize_type(a);
+                let b = map.normalize_type(b);
+                match simplify_subtype_rel_with_unwrapping(
+                    a,
+                    b,
+                    Some(&mut already_considered_relations.clone()),
+                ) {
+                    Ok(r) => Ok(r
+                        .into_iter()
+                        .map(move |(a, b)| (a, b, origin.clone()))),
+                    Err(_) => {
+                        let mut already_considered_relations =
+                            Default::default();
+                        let origin_a = map.normalize_type(origin.left);
+                        let origin_b = map.normalize_type(origin.right);
+                        let r = simplify_subtype_rel_with_unwrapping(
                             origin_a.clone(),
                             origin_b.clone(),
                             Some(&mut already_considered_relations),
@@ -557,6 +628,10 @@ fn _simplify_type<T: TypeConstructor>(
                 return Ok((t, true));
             }
         }
+    }
+    let new_t = t.clone().normalize_with_unwrapping(map)?;
+    if new_t != t {
+        return Ok((new_t, true));
     }
     log::trace!("t{{3}} = {}", t);
     let type_variables_in_sub_rel: FxHashSet<TypeVariable> =
@@ -966,36 +1041,6 @@ pub fn simplify_subtype_rel(
             right: sup.clone(),
             reasons: Vec::new(),
         };
-        if let Some(already_considered_relations) =
-            already_considered_relations.as_deref_mut()
-        {
-            use TypeMatchableRef::*;
-            if sub.is_recursive_fn_apply()
-                && !matches!(sup.matchable_ref(), Variable(_))
-            {
-                already_considered_relations.insert((sub.clone(), sup.clone()));
-                let (sub, _) = sub.clone().unwrap_recursive_fn_apply();
-                return simplify_subtype_rel_rec(
-                    sub,
-                    sup.clone(),
-                    Some(already_considered_relations),
-                    loop_limit - 1,
-                )
-                .map_err(add_reason);
-            } else if sup.is_recursive_fn_apply()
-                && !matches!(sub.matchable_ref(), Variable(_))
-            {
-                already_considered_relations.insert((sub.clone(), sup.clone()));
-                let (sup, _) = sup.clone().unwrap_recursive_fn_apply();
-                return simplify_subtype_rel_rec(
-                    sub.clone(),
-                    sup,
-                    Some(already_considered_relations),
-                    loop_limit - 1,
-                )
-                .map_err(add_reason);
-            }
-        }
         use TypeMatchable::*;
         match (sub.clone().matchable(), sup.clone().matchable()) {
             (Fn(a1, r1), Fn(a2, r2)) => {
@@ -1056,7 +1101,10 @@ pub fn simplify_subtype_rel(
                     simplify_subtype_rel_rec(
                         c.into(),
                         b.clone().into(),
-                        already_considered_relations.as_deref_mut(),
+                        already_considered_relations
+                            .as_deref()
+                            .cloned()
+                            .as_mut(),
                         loop_limit,
                     )
                 })
@@ -1068,47 +1116,6 @@ pub fn simplify_subtype_rel(
                 if sub.clone().is_subtype_of(body.clone()) =>
             {
                 Ok(Vec::new())
-            }
-            (_, RecursiveAlias { body })
-                if already_considered_relations.is_some()
-                    && sub.is_wrapped_by_const() =>
-            {
-                already_considered_relations
-                    .as_deref_mut()
-                    .unwrap()
-                    .insert((sub.clone(), sup.clone()));
-                simplify_subtype_rel_rec(
-                    sub.clone(),
-                    unwrap_recursive_alias(body),
-                    already_considered_relations,
-                    loop_limit - 1,
-                )
-                .map_err(add_reason)
-            }
-            (
-                RecursiveAlias { body },
-                b @ (Tuple { .. }
-                | Fn(_, _)
-                | Union(_)
-                | RecursiveAlias { .. }
-                | Const { .. }
-                | TypeLevelApply { .. }),
-            ) if already_considered_relations.is_some() => {
-                let b: Type = b.into();
-                already_considered_relations
-                    .as_deref_mut()
-                    .unwrap()
-                    .insert((
-                        RecursiveAlias { body: body.clone() }.into(),
-                        b.clone(),
-                    ));
-                simplify_subtype_rel_rec(
-                    unwrap_recursive_alias(body),
-                    b,
-                    already_considered_relations,
-                    loop_limit - 1,
-                )
-                .map_err(add_reason)
             }
             (Tuple(h, t), Union(b))
                 if b.iter().all(|u| {
@@ -1174,31 +1181,6 @@ pub fn simplify_subtype_rel(
                             reasons,
                         }
                     })
-                } else if already_considered_relations.is_some()
-                    && b.iter().any(|u| {
-                        matches!(&**u, TypeUnit::RecursiveAlias { .. })
-                    })
-                {
-                    already_considered_relations
-                        .as_deref_mut()
-                        .unwrap()
-                        .insert((sub.clone(), sup.clone()));
-                    let b = b
-                        .into_iter()
-                        .flat_map(|u| match unwrap_or_clone(u) {
-                            TypeUnit::RecursiveAlias { body } => {
-                                unwrap_recursive_alias(body)
-                            }
-                            u => u.into(),
-                        })
-                        .collect();
-                    simplify_subtype_rel_rec(
-                        sub.clone(),
-                        b,
-                        already_considered_relations,
-                        loop_limit - 1,
-                    )
-                    .map_err(add_reason)
                 } else {
                     match sub.clone().disjunctive() {
                         Ok(a) => Ok(a
@@ -1295,6 +1277,232 @@ pub fn simplify_subtype_rel(
     }
     const LOOP_LIMIT: usize = 8;
     simplify_subtype_rel_rec(sub, sup, already_considered_relations, LOOP_LIMIT)
+}
+
+pub fn simplify_subtype_rel_with_unwrapping(
+    sub: Type,
+    sup: Type,
+    already_considered_relations: Option<&mut BTreeSet<(Type, Type)>>,
+) -> Result<SubtypeRelationsVec, NotSubtypeReason> {
+    pub fn simplify_subtype_rel_rec(
+        sub: Type,
+        sup: Type,
+        mut already_considered_relations: Option<&mut BTreeSet<(Type, Type)>>,
+        loop_limit: usize,
+    ) -> Result<SubtypeRelationsVec, NotSubtypeReason> {
+        let r = simplify_subtype_rel(
+            sub.clone(),
+            sup.clone(),
+            already_considered_relations.as_deref_mut(),
+        )?;
+        if r != [(sub.clone(), sup.clone())] {
+            return Ok(r
+                .into_iter()
+                .map(|(sub, sup)| {
+                    simplify_subtype_rel_rec(
+                        sub,
+                        sup,
+                        already_considered_relations
+                            .as_deref()
+                            .cloned()
+                            .as_mut(),
+                        loop_limit,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .flatten()
+                .collect());
+        }
+        if loop_limit == 0 {
+            return Err(NotSubtypeReason::LoopLimit {
+                left: sub,
+                right: sup,
+            });
+        }
+        let subsup = (sub, sup);
+        let c = already_considered_relations
+            .as_deref()
+            .map(|a| a.contains(&subsup))
+            .unwrap_or(false);
+        let (sub, sup) = subsup;
+        if c || sub == sup {
+            return Ok(Vec::new());
+        }
+        let add_reason = |reason| NotSubtypeReason::NotSubtype {
+            left: sub.clone(),
+            right: sup.clone(),
+            reasons: vec![reason],
+        };
+        if let Some(already_considered_relations) =
+            already_considered_relations.as_deref_mut()
+        {
+            use TypeMatchableRef::*;
+            if sub.is_recursive_fn_apply()
+                && !matches!(sup.matchable_ref(), Variable(_))
+            {
+                already_considered_relations.insert((sub.clone(), sup.clone()));
+                let (sub, _) = sub.clone().unwrap_recursive_fn_apply();
+                return simplify_subtype_rel_rec(
+                    sub,
+                    sup.clone(),
+                    Some(already_considered_relations),
+                    loop_limit - 1,
+                )
+                .map_err(add_reason);
+            } else if sup.is_recursive_fn_apply()
+                && !matches!(sub.matchable_ref(), Variable(_))
+            {
+                already_considered_relations.insert((sub.clone(), sup.clone()));
+                let (sup, _) = sup.clone().unwrap_recursive_fn_apply();
+                return simplify_subtype_rel_rec(
+                    sub.clone(),
+                    sup,
+                    Some(already_considered_relations),
+                    loop_limit - 1,
+                )
+                .map_err(add_reason);
+            }
+        }
+        use TypeMatchable::*;
+        match (sub.clone().matchable(), sup.clone().matchable()) {
+            (_, RecursiveAlias { body })
+                if already_considered_relations.is_some()
+                    && sub.is_wrapped_by_const() =>
+            {
+                already_considered_relations
+                    .as_deref_mut()
+                    .unwrap()
+                    .insert((sub.clone(), sup.clone()));
+                simplify_subtype_rel_rec(
+                    sub.clone(),
+                    unwrap_recursive_alias(body),
+                    already_considered_relations,
+                    loop_limit - 1,
+                )
+                .map_err(add_reason)
+            }
+            (
+                RecursiveAlias { body },
+                b @ (Tuple { .. }
+                | Fn(_, _)
+                | Union(_)
+                | RecursiveAlias { .. }
+                | Const { .. }
+                | TypeLevelApply { .. }),
+            ) if already_considered_relations.is_some() => {
+                let b: Type = b.into();
+                already_considered_relations
+                    .as_deref_mut()
+                    .unwrap()
+                    .insert((
+                        RecursiveAlias { body: body.clone() }.into(),
+                        b.clone(),
+                    ));
+                simplify_subtype_rel_rec(
+                    unwrap_recursive_alias(body),
+                    b,
+                    already_considered_relations,
+                    loop_limit - 1,
+                )
+                .map_err(add_reason)
+            }
+            (_, Union(b)) if sub.is_wrapped_by_const() => {
+                let mut new_bs = Type::default();
+                let mut updated = false;
+                let mut reasons = Vec::new();
+                for b in b.iter() {
+                    let r = simplify_subtype_rel_rec(
+                        sub.clone(),
+                        b.clone().into(),
+                        already_considered_relations
+                            .as_deref_mut()
+                            .cloned()
+                            .as_mut(),
+                        loop_limit,
+                    );
+                    if r == Ok(Vec::new()) {
+                        return Ok(Vec::new());
+                    }
+                    let (b_out, b_in, reason) =
+                        Type::from((*b).clone()).remove_disjoint_part(&sub);
+                    new_bs.union_in_place(b_in.clone());
+                    if !b_out.is_empty() {
+                        updated = true;
+                        if let Some(reason) = reason {
+                            reasons.push(reason);
+                        }
+                    }
+                }
+                if updated {
+                    simplify_subtype_rel_rec(
+                        sub.clone(),
+                        new_bs,
+                        already_considered_relations,
+                        loop_limit,
+                    )
+                    .map_err(|a| {
+                        reasons.push(a);
+                        NotSubtypeReason::NotSubtype {
+                            left: sub.clone(),
+                            right: sup,
+                            reasons,
+                        }
+                    })
+                } else if already_considered_relations.is_some()
+                    && b.iter().any(|u| {
+                        matches!(&**u, TypeUnit::RecursiveAlias { .. })
+                    })
+                {
+                    already_considered_relations
+                        .as_deref_mut()
+                        .unwrap()
+                        .insert((sub.clone(), sup.clone()));
+                    let b = b
+                        .into_iter()
+                        .flat_map(|u| match unwrap_or_clone(u) {
+                            TypeUnit::RecursiveAlias { body } => {
+                                unwrap_recursive_alias(body)
+                            }
+                            u => u.into(),
+                        })
+                        .collect();
+                    simplify_subtype_rel_rec(
+                        sub.clone(),
+                        b,
+                        already_considered_relations,
+                        loop_limit - 1,
+                    )
+                    .map_err(add_reason)
+                } else {
+                    match sub.clone().disjunctive() {
+                        Ok(a) => Ok(a
+                            .into_iter()
+                            .map(|a| {
+                                simplify_subtype_rel_rec(
+                                    unwrap_or_clone(a).into(),
+                                    b.clone(),
+                                    already_considered_relations.as_deref_mut(),
+                                    loop_limit,
+                                )
+                            })
+                            .collect::<Result<Vec<_>, _>>()
+                            .map_err(add_reason)?
+                            .concat()),
+                        Err(a) => Ok(vec![(a.into(), b)]),
+                    }
+                }
+            }
+            (sub, sup) => Ok(vec![(sub.into(), sup.into())]),
+        }
+    }
+    const LOOP_LIMIT: usize = 8;
+    simplify_subtype_rel_rec(
+        sub,
+        sup,
+        already_considered_relations.cloned().as_mut(),
+        LOOP_LIMIT,
+    )
 }
 
 thread_local! {
@@ -1628,6 +1836,19 @@ where
         self.subtype_relations = self
             .subtype_relations
             .normalize(map, &mut self.already_considered_relations)?;
+        self = self.normalize_variables(map)?;
+        Ok(self)
+    }
+
+    pub fn normalize_with_unwrapping(
+        mut self,
+        map: &mut TypeVariableMap,
+    ) -> Result<Self, CompileError> {
+        self.subtype_relations =
+            self.subtype_relations.normalize_with_unwrapping(
+                map,
+                &mut self.already_considered_relations,
+            )?;
         self = self.normalize_variables(map)?;
         Ok(self)
     }
