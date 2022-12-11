@@ -71,6 +71,14 @@ test : () -> () =
         (D1 /\ D2 /\ D2 /\ D2 /\ D1 /\ Nil) : Palindrome
         ()
 
+make_palindrome_rec : List[D1 | D2] -> A -> PalindromePlus[A] forall { A } =
+    | D1 /\ t, l => D1 /\ make_palindrome_rec(t, D1 /\ l)
+    | D2 /\ t, l => D2 /\ make_palindrome_rec(t, D2 /\ l)
+    | Nil, l => l
+
+make_palindrome  : List[D1 | D2] -> Palindrome =
+    | l => l.make_palindrome_rec(Nil)
+
 main : () -> () =
     | () => do
         l = (D1 /\ D2 /\ Nil)
