@@ -247,7 +247,7 @@ fn nexts() {
     test_examples("nexts.cot", "D1\n");
 }
 
-const PALINDROME: &str = &"[D1, D1, D1, D1, D1, D1] palindrome!
+const PALINDROME: &str = "[D1, D1, D1, D1, D1, D1] palindrome!
 [D1, D1, D1, D1, D1, D2]
 [D1, D1, D1, D1, D2, D1]
 [D1, D1, D1, D1, D2, D2]
