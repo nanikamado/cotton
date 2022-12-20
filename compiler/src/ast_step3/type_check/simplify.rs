@@ -1094,7 +1094,6 @@ pub fn simplify_subtype_rel(
                 Err(single_reason)
             }
             (_, Empty) if sub.is_wrapped_by_const() => Err(single_reason),
-            // (Union(cs), b) if !matches!(b, Variable(_)) => Ok(cs
             (Union(cs), b) => Ok(cs
                 .into_iter()
                 .map(|c| {
@@ -1176,7 +1175,7 @@ pub fn simplify_subtype_rel(
                     .map_err(|a| {
                         reasons.push(a);
                         NotSubtypeReason::NotSubtype {
-                            left: sub.clone(),
+                            left: sub,
                             right: sup,
                             reasons,
                         }
@@ -1310,9 +1309,7 @@ pub fn simplify_subtype_rel_with_unwrapping(
                     )
                 })
                 .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .flatten()
-                .collect());
+                .concat());
         }
         if loop_limit == 0 {
             return Err(NotSubtypeReason::LoopLimit {
