@@ -303,6 +303,7 @@ impl<'a> Ast<'a> {
                 }
                 parser::Decl::TypeAlias(a) => aliases.push(a),
                 parser::Decl::Interface(a) => interfaces.push(a),
+                parser::Decl::Module { .. } => unimplemented!(),
             }
         }
         let op_precedence_map = OpPrecedenceMap::new(precedence_map);
@@ -675,7 +676,10 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::ExprUnit, &'a Span) {
                 ),
                 parser::ExprUnit::Int(a) => Number(a),
                 parser::ExprUnit::Str(a) => StrLiteral(a),
-                parser::ExprUnit::Ident((n, id)) => Ident((n, *id)),
+                parser::ExprUnit::Ident {
+                    name: (n, id),
+                    path: _,
+                } => Ident((n, *id)),
                 parser::ExprUnit::VariableDecl(a) => Decl(Box::new(
                     variable_decl(a, op_precedence_map, constructors),
                 )),

@@ -27,9 +27,11 @@ pub enum Token {
     Bar,
     BArrow,
     Colon,
+    ColonColon,
     Type,
     Interface,
     Where,
+    Mod,
     Question,
 }
 
@@ -148,6 +150,7 @@ fn lexer(
         "type" => Token::Type,
         "interface" => Token::Interface,
         "where" => Token::Where,
+        "mod" => Token::Mod,
         _ => Token::Ident(i, TokenId::new()),
     });
 
@@ -187,6 +190,7 @@ fn lexer(
             "=>" => Token::BArrow,
             "|" => Token::Bar,
             "=" => Token::Assign,
+            "::" => Token::ColonColon,
             ":" => Token::Colon,
             _ => Token::Op(op, TokenId::new()),
         }));
