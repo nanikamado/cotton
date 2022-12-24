@@ -2487,8 +2487,8 @@ mod tests {
         dot : a -> (a -> b) -> b forall {a, b} = ()
         "#;
         let ast = parser::parse(src);
-        let (ast, _) = ast_step1::Ast::from(&ast);
-        let (ast, _) = ast_step2::Ast::from(ast);
+        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
+        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
         let (req_t, _) = ast
             .variable_decl
             .iter()
@@ -2542,8 +2542,8 @@ mod tests {
             (e /\ f /\ True) forall {a,b,c,d,e,f} = ()
         "#;
         let ast = parser::parse(src);
-        let (ast, _) = ast_step1::Ast::from(&ast);
-        let (ast, _) = ast_step2::Ast::from(ast);
+        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
+        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
         let t1 = ast
             .variable_decl
             .iter()
@@ -2576,8 +2576,8 @@ mod tests {
         test1 : ((True | False) /\ (True | False)) = ()
         "#;
         let ast = parser::parse(src);
-        let (ast, _) = ast_step1::Ast::from(&ast);
-        let (ast, _) = ast_step2::Ast::from(ast);
+        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
+        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
         let t1 = ast
             .variable_decl
             .iter()
@@ -2643,8 +2643,8 @@ mod tests {
         test1 : Tree[()] = ()
         "#;
         let ast = parser::parse(src);
-        let (ast, _) = ast_step1::Ast::from(&ast);
-        let (ast, _) = ast_step2::Ast::from(ast);
+        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
+        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
         let t_id = ast
             .data_decl
             .iter()
@@ -2764,8 +2764,8 @@ mod tests {
         test1 : A = A
         "#;
         let ast = parser::parse(src);
-        let (ast, _) = ast_step1::Ast::from(&ast);
-        let (ast, _) = ast_step2::Ast::from(ast);
+        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
+        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
         let b_id = ast
             .data_decl
             .iter()

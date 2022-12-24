@@ -28,6 +28,10 @@ pub enum CompileError {
         description: String,
     },
     RecursionLimit,
+    InaccessibleName {
+        path: Name,
+        span: Span,
+    },
 }
 
 impl CompileError {
@@ -41,7 +45,7 @@ impl CompileError {
         match self {
             CompileError::NoSuitableVariable { name, reason } => {
                 if reason.is_empty() {
-                    write!(w, "{} not found", name)
+                    writeln!(w, "{} not found", name)
                 } else if reason.len() == 1 {
                     reason.into_iter().next().unwrap().write(
                         src,
@@ -112,10 +116,26 @@ impl CompileError {
                 Ok(())
             }
             CompileError::InexhaustiveMatch { description } => {
-                write!(w, "{}", description)
+                writeln!(w, "{}", description)
             }
             CompileError::RecursionLimit => {
-                write!(w, "recursion of implicit variable reaced the limit.")
+                writeln!(w, "recursion of implicit variable reaced the limit.")
+            }
+            CompileError::InaccessibleName { path, span } => {
+                let report =
+                    Report::build(ReportKind::Error, filename, span.start)
+                        .with_label(
+                            Label::new((filename, span)).with_message(format!(
+                                "`{:?}` is private",
+                                path
+                            )),
+                        )
+                        .with_message(format!(
+                            "`{:?}` exists but is inaccessible from outside.",
+                            path
+                        ));
+                report.finish().write((filename, Source::from(src)), w)?;
+                Ok(())
             }
         }
     }

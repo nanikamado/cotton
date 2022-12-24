@@ -16,6 +16,7 @@ pub struct VariableDecl {
     pub type_annotation: Option<(Type, Forall)>,
     pub expr: Expr,
     pub span: Span,
+    pub is_public: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -368,19 +369,23 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                     ([vec![OpSequenceUnit::Operand(e)], oes].concat(), t)
                 })
         });
-        ident_or_op
-            .clone()
+        just(Token::Pub)
+            .or_not()
+            .then(ident_or_op.clone())
             .then(just(Token::Colon).ignore_then(type_.clone()).or_not())
             .then_ignore(just(Token::Assign))
             .then(expr)
-            .map_with_span(|((name, type_annotation), expr), span| {
-                VariableDecl {
-                    name,
-                    type_annotation,
-                    expr,
-                    span,
-                }
-            })
+            .map_with_span(
+                |(((pub_or_not, name), type_annotation), expr), span| {
+                    VariableDecl {
+                        name,
+                        type_annotation,
+                        expr,
+                        span,
+                        is_public: pub_or_not.is_some(),
+                    }
+                },
+            )
     });
     let op_precedence_decl = just(Token::Infixl)
         .map(|_| Associativity::Left)

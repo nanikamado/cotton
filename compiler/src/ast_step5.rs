@@ -21,8 +21,8 @@ pub struct Ast {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Lambda(Vec<FnArm>),
-    Number(Name),
-    StrLiteral(Name),
+    Number(String),
+    StrLiteral(String),
     Ident {
         name: Name,
         variable_id: VariableId,

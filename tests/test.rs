@@ -364,3 +364,13 @@ fn literal_pattern_fail() {
 fn modules() {
     test_examples("modules.cot", "4\n");
 }
+
+#[test]
+fn modules2() {
+    test_test("modules2.cot").stdout("4\n").success();
+}
+
+#[test]
+fn modules_fail() {
+    test_test("modules_fail.cot").code(1);
+}

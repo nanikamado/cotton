@@ -2,10 +2,10 @@ mod type_check;
 pub mod type_util;
 
 pub use self::type_check::{
-    simplify_subtype_rel, GlobalVariableType, LocalVariableType,
+    simplify_subtype_rel, GlobalVariableType, LocalVariableType, ResolvedIdent,
     TypeVariableMap, VariableId, VariableRequirement,
 };
-use self::type_check::{type_check, ResolvedIdent, TypeCheckResult};
+use self::type_check::{type_check, TypeCheckResult};
 use crate::{
     ast_step2::{
         self,
@@ -44,8 +44,8 @@ pub type ExprWithType = (Expr, Type);
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Lambda(Vec<FnArm>),
-    Number(Name),
-    StrLiteral(Name),
+    Number(String),
+    StrLiteral(String),
     Ident {
         name: Name,
         variable_id: VariableId,

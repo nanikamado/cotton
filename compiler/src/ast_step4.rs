@@ -49,8 +49,8 @@ pub enum VariableKind {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr<T = Type> {
     Lambda(Vec<FnArm<T>>),
-    Number(Name),
-    StrLiteral(Name),
+    Number(String),
+    StrLiteral(String),
     Ident {
         name: Name,
         variable_id: VariableId,

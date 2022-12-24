@@ -12,13 +12,15 @@ mod run_js;
 mod rust_backend;
 
 pub use ast_step1::OpPrecedenceMap;
-use ast_step2::name_id::Name;
 use ast_step2::types::{Type, TypeUnit};
+use ast_step2::{ident_id::IdentId, name_id::Name, TokenMap};
 pub use ast_step2::{
     types::TypeMatchableRef, PrintTypeOfGlobalVariableForUser,
     PrintTypeOfLocalVariableForUser,
 };
-use ast_step3::{GlobalVariableType, LocalVariableType, VariableId};
+use ast_step3::{
+    GlobalVariableType, LocalVariableType, ResolvedIdent, VariableId,
+};
 use codegen::codegen;
 use errors::CompileError;
 pub use fxhash::FxHashMap;
@@ -79,11 +81,9 @@ pub fn run(
     }
     let (tokens, src_len) = lex(source);
     let ast = parser::parse::parse(tokens, source, src_len);
-    let (ast, op_precedence_map) = ast_step1::Ast::from(&ast);
-    let (ast, _token_map) = ast_step2::Ast::from(ast);
-    let (ast, _resolved_idents) = match ast_step3::Ast::from(ast) {
-        Ok((ast, resolved_idents)) => (ast, resolved_idents),
-        Err(e) => {
+    let (ast, op_precedence_map, mut token_map) = ast_step1::Ast::from(&ast);
+    let (ast, _resolved_idents) = to_step_3(ast, &mut token_map)
+        .unwrap_or_else(|e| {
             e.write(
                 source,
                 &mut std::io::stderr(),
@@ -92,8 +92,7 @@ pub fn run(
             )
             .unwrap();
             process::exit(1)
-        }
-    };
+        });
     if command == Command::PrintTypes {
         print_types::print(&ast);
     } else {
@@ -114,6 +113,14 @@ pub fn run(
     }
 }
 
+fn to_step_3(
+    ast: ast_step1::Ast,
+    token_map: &mut TokenMap,
+) -> Result<(ast_step3::Ast, FxHashMap<IdentId, ResolvedIdent>), CompileError> {
+    let ast = ast_step2::Ast::from(ast, token_map)?;
+    ast_step3::Ast::from(ast)
+}
+
 pub enum TokenKind {
     GlobalVariable(VariableId, Option<GlobalVariableType>),
     LocalVariable(VariableId, Option<(Type, FxHashMap<TypeUnit, Name>)>),
@@ -131,8 +138,8 @@ pub struct TokenMapWithEnv<'a> {
 pub fn get_token_map(
     ast: &parser::Ast,
 ) -> Result<TokenMapWithEnv, CompileError> {
-    let (ast, op_precedence_map) = ast_step1::Ast::from(ast);
-    let (ast, token_map) = ast_step2::Ast::from(ast);
+    let (ast, op_precedence_map, mut token_map) = ast_step1::Ast::from(ast);
+    let ast = ast_step2::Ast::from(ast, &mut token_map)?;
     let (ast, resolved_idents) = ast_step3::Ast::from(ast)?;
     let token_map = token_map
         .0

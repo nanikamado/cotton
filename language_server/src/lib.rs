@@ -318,7 +318,7 @@ fn semantic_tokens_from_src(src: &str) -> Option<(SemanticTokens, HoverMap)> {
                 continue
             }
             Case | Do | Forall | Infixl | Infixr | Data | Type | Interface
-            | Mod | Where => SemanticTokenType::KEYWORD,
+            | Mod | Where | Pub => SemanticTokenType::KEYWORD,
         };
         let l = char_to_utf16_map[range.start].0;
         let s = char_to_utf16_map[range.start].1;
