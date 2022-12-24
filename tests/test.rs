@@ -359,3 +359,8 @@ fn type_pattern_primitive() {
 fn literal_pattern_fail() {
     test_test("literal_pattern_fail.cot").code(1);
 }
+
+#[test]
+fn modules() {
+    test_examples("modules.cot", "4\n");
+}

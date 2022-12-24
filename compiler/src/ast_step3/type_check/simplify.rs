@@ -2492,7 +2492,7 @@ mod tests {
         let (req_t, _) = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str("test"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "test"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2502,7 +2502,7 @@ mod tests {
         let (dot, _) = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str("dot"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "dot"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2547,7 +2547,7 @@ mod tests {
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str("test1"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2556,7 +2556,7 @@ mod tests {
         let (t2, _) = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str("test2"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "test2"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2581,7 +2581,7 @@ mod tests {
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str("test1"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2648,14 +2648,14 @@ mod tests {
         let t_id = ast
             .data_decl
             .iter()
-            .find(|d| d.name == Name::from_str("T"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "T"))
             .unwrap()
             .decl_id;
         let t_id = TypeId::DeclId(t_id);
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str("test1"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2769,14 +2769,14 @@ mod tests {
         let b_id = ast
             .data_decl
             .iter()
-            .find(|d| d.name == Name::from_str("B"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "B"))
             .unwrap()
             .decl_id;
         let b_id = TypeId::DeclId(b_id);
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str("test1"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
             .unwrap()
             .type_annotation
             .as_ref()

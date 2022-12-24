@@ -71,8 +71,8 @@ pub type Pattern<T = Type> = (Vec<PatternUnit<T>>, T);
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PatternUnit<T> {
-    I64(Name),
-    Str(Name),
+    I64(String),
+    Str(String),
     Constructor {
         name: Name,
         id: ConstructorId,
@@ -810,7 +810,7 @@ impl<'b> VariableMemo<'b> {
                         TypeId::Intrinsic(IntrinsicType::I64),
                         Vec::new(),
                     );
-                    PatternUnit::I64(*a)
+                    PatternUnit::I64(a.clone())
                 }
                 Str(a) => {
                     self.type_map.insert_normal(
@@ -818,7 +818,7 @@ impl<'b> VariableMemo<'b> {
                         TypeId::Intrinsic(IntrinsicType::String),
                         Vec::new(),
                     );
-                    PatternUnit::Str(*a)
+                    PatternUnit::Str(a.clone())
                 }
                 Constructor { name, id, args } => {
                     let args = args

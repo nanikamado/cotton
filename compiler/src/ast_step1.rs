@@ -17,6 +17,7 @@ pub struct Ast<'a> {
     pub data_decl: Vec<DataDecl<'a>>,
     pub type_alias_decl: Vec<TypeAliasDecl<'a>>,
     pub interface_decl: Vec<InterfaceDecl<'a>>,
+    pub modules: Vec<(StrWithId<'a>, Ast<'a>)>,
 }
 
 type StrWithId<'a> = (&'a str, Option<TokenId>);
@@ -66,7 +67,10 @@ pub enum Expr<'a> {
     Lambda(Vec<FnArm<'a>>),
     Number(&'a str),
     StrLiteral(&'a str),
-    Ident(StrWithId<'a>),
+    Ident {
+        name: StrWithId<'a>,
+        path: Vec<StrWithId<'a>>,
+    },
     Decl(Box<VariableDecl<'a>>),
     Call(Box<ExprWithSpan<'a>>, Box<ExprWithSpan<'a>>),
     Do(Vec<ExprWithSpan<'a>>),
@@ -152,8 +156,11 @@ impl<'a> AddArgument for (Type<'a>, Span) {
 }
 
 impl<'a> IdentFromStr<'a> for Expr<'a> {
-    fn ident_from_str(s: StrWithId<'a>) -> Self {
-        Self::Ident(s)
+    fn ident_from_str(name: StrWithId<'a>) -> Self {
+        Self::Ident {
+            name,
+            path: Vec::new(),
+        }
     }
 }
 
@@ -279,6 +286,7 @@ impl<'a> Ast<'a> {
         let mut interfaces = Vec::new();
         let mut constructors: FxHashSet<&str> =
             INTRINSIC_CONSTRUCTORS.keys().map(|s| s.as_str()).collect();
+        let mut modules = Vec::new();
         for d in &ast.decls {
             match d {
                 parser::Decl::Variable(a) => vs.push(a),
@@ -303,7 +311,9 @@ impl<'a> Ast<'a> {
                 }
                 parser::Decl::TypeAlias(a) => aliases.push(a),
                 parser::Decl::Interface(a) => interfaces.push(a),
-                parser::Decl::Module { .. } => unimplemented!(),
+                parser::Decl::Module { name, ast } => {
+                    modules.push(((name.0.as_str(), name.1), Ast::from(ast).0));
+                }
             }
         }
         let op_precedence_map = OpPrecedenceMap::new(precedence_map);
@@ -350,6 +360,7 @@ impl<'a> Ast<'a> {
                         .collect(),
                 })
                 .collect(),
+            modules,
         };
         (ast, op_precedence_map)
     }
@@ -678,8 +689,14 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::ExprUnit, &'a Span) {
                 parser::ExprUnit::Str(a) => StrLiteral(a),
                 parser::ExprUnit::Ident {
                     name: (n, id),
-                    path: _,
-                } => Ident((n, *id)),
+                    path,
+                } => Ident {
+                    name: (n, *id),
+                    path: path
+                        .iter()
+                        .map(|(name, t)| (name.as_str(), *t))
+                        .collect(),
+                },
                 parser::ExprUnit::VariableDecl(a) => Decl(Box::new(
                     variable_decl(a, op_precedence_map, constructors),
                 )),

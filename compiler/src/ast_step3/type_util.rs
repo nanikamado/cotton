@@ -747,7 +747,7 @@ impl Type {
             args: Default::default(),
         };
         type_to_type(
-            t,
+            &t,
             &Default::default(),
             &Default::default(),
             &mut Default::default(),
@@ -1097,7 +1097,7 @@ mod tests {
         let t = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str("test1"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
             .unwrap()
             .type_annotation
             .clone()
