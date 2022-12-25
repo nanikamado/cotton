@@ -2,7 +2,7 @@ mod type_restriction_pattern;
 
 use self::type_restriction_pattern::IS_INSTANCE_OF;
 use crate::{
-    ast_step2::{decl_id::DeclId, name_id::Name},
+    ast_step1::{decl_id::DeclId, name_id::Name},
     ast_step3::DataDecl,
     ast_step4::{Pattern, PatternUnit, Type},
     ast_step5::{Ast, Expr, ExprWithType, FnArm, VariableDecl},

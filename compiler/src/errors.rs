@@ -1,6 +1,6 @@
 use crate::{
-    ast_step2::{name_id::Name, types::Type},
-    OpPrecedenceMap, PrintTypeOfLocalVariableForUser,
+    ast_step1::name_id::Name, ast_step2::types::Type, OpPrecedenceMap,
+    PrintTypeOfLocalVariableForUser,
 };
 use ariadne::{Label, Report, ReportKind, Source};
 use colored::{ColoredString, Colorize};

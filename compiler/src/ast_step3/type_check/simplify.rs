@@ -1,13 +1,13 @@
 use crate::{
+    ast_step1::decl_id::DeclId,
     ast_step2::{
         self,
-        decl_id::DeclId,
         types::{
-            merge_vec, unwrap_or_clone, Type, TypeMatchable, TypeMatchableRef,
-            TypeUnit, TypeVariable,
+            merge_vec, unwrap_or_clone, Type, TypeConstructor, TypeMatchable,
+            TypeMatchableRef, TypeUnit, TypeVariable,
         },
         PatternForRestriction, PatternRestrictions, PatternUnitForRestriction,
-        RelOrigin, SubtypeRelations, TypeConstructor, TypeWithEnv,
+        RelOrigin, SubtypeRelations, TypeWithEnv,
     },
     errors::{CompileError, NotSubtypeReason},
 };
@@ -2456,10 +2456,9 @@ impl Display for TypeVariableMap {
 mod tests {
     use super::destruct_type_by_pattern;
     use crate::{
-        ast_step1, ast_step2,
+        ast_step1::{self, decl_id::DeclId, name_id::Name},
+        ast_step2,
         ast_step2::{
-            decl_id::DeclId,
-            name_id::Name,
             types::{
                 Type, TypeMatchable, TypeMatchableRef, TypeUnit, TypeVariable,
             },

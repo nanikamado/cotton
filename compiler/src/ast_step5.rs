@@ -1,10 +1,7 @@
 use crate::{
-    ast_step2::{decl_id::DeclId, name_id::Name},
-    ast_step3::{DataDecl, VariableId},
-    ast_step4::{
-        self, PaddedTypeMap, Pattern, PatternUnit, Type, TypePointer,
-        VariableKind,
-    },
+    ast_step1::{decl_id::DeclId, name_id::Name},
+    ast_step3::{DataDecl, VariableId, VariableKind},
+    ast_step4::{self, PaddedTypeMap, Pattern, PatternUnit, Type, TypePointer},
 };
 use fxhash::FxHashMap;
 

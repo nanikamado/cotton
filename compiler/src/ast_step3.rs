@@ -7,15 +7,12 @@ pub use self::type_check::{
 };
 use self::type_check::{type_check, TypeCheckResult};
 use crate::{
+    ast_step1::{decl_id::DeclId, ident_id::IdentId, name_id::Name},
     ast_step2::{
         self,
-        decl_id::DeclId,
-        ident_id::IdentId,
-        name_id::Name,
-        types::{Type, TypeUnit, TypeVariable},
-        Pattern, PatternUnit, TypeConstructor,
+        types::{Type, TypeConstructor, TypeUnit, TypeVariable},
+        Pattern, PatternUnit,
     },
-    ast_step4::VariableKind,
     errors::CompileError,
 };
 use fxhash::FxHashMap;
@@ -37,6 +34,15 @@ pub struct VariableDecl {
     pub name: Name,
     pub value: ExprWithType,
     pub decl_id: DeclId,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash, Copy)]
+pub enum VariableKind {
+    Local,
+    Global,
+    Constructor,
+    Intrinsic,
+    IntrinsicConstructor,
 }
 
 pub type ExprWithType = (Expr, Type);

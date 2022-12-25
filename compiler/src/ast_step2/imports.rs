@@ -1,6 +1,7 @@
-use super::name_id::Name;
 use fxhash::FxHashMap;
 use std::iter::{empty, once};
+
+use crate::ast_step1::name_id::Name;
 
 #[derive(Debug, Eq, PartialEq, Default)]
 struct TrueNames {

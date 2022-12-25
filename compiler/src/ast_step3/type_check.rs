@@ -4,20 +4,19 @@ pub use self::simplify::{
     simplify_subtype_rel, unwrap_recursive_alias, TypeVariableMap,
 };
 use crate::{
-    ast_step1::merge_span,
+    ast_step1::{
+        decl_id::DeclId, ident_id::IdentId, merge_span, name_id::Name,
+    },
     ast_step2::{
         self,
-        decl_id::DeclId,
-        ident_id::IdentId,
         imports::Imports,
-        name_id::Name,
         types::{self, unwrap_or_clone, SingleTypeConstructor, TypeMatchable},
         types::{Type, TypeUnit, TypeVariable},
         Ast, DataDecl, Expr, ExprWithTypeAndSpan, FnArm, Pattern,
         PatternRestrictions, PatternUnit, PatternUnitForRestriction, RelOrigin,
         SubtypeRelations, TypeId, TypeWithEnv,
     },
-    ast_step4::VariableKind,
+    ast_step3::VariableKind,
     errors::CompileError,
     intrinsics::{IntrinsicConstructor, IntrinsicType, IntrinsicVariable},
     TypeMatchableRef,

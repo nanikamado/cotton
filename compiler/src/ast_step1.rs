@@ -1,7 +1,14 @@
-use crate::{
-    ast_step2::{decl_id::DeclId, name_id::Name, TokenMap, TokenMapEntry},
-    intrinsics::{INTRINSIC_CONSTRUCTORS, OP_PRECEDENCE},
+pub mod decl_id;
+pub mod ident_id;
+pub mod name_id;
+pub mod token_map;
+
+use self::{
+    decl_id::DeclId,
+    name_id::Name,
+    token_map::{TokenMap, TokenMapEntry},
 };
+use crate::intrinsics::{INTRINSIC_CONSTRUCTORS, OP_PRECEDENCE};
 use fxhash::{FxHashMap, FxHashSet};
 use index_list::{Index, IndexList};
 use itertools::Itertools;
