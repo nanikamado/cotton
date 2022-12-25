@@ -102,6 +102,7 @@ pub struct DataDecl {
     pub name: StringWithId,
     pub fields: Vec<StringWithId>,
     pub type_variables: Forall,
+    pub is_public: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -123,7 +124,11 @@ pub enum Decl {
     Data(DataDecl),
     TypeAlias(TypeAliasDecl),
     Interface(InterfaceDecl),
-    Module { name: StringWithId, ast: Ast },
+    Module {
+        name: StringWithId,
+        ast: Ast,
+        is_public: bool,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -414,16 +419,26 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
             name,
             fields: args.unwrap_or_default(),
             type_variables: forall.unwrap_or_default(),
+            is_public: false,
         });
     let data_decl_infix = ident.then(op).then(ident).then(forall.or_not()).map(
         |(((ident1, name), ident2), forall)| DataDecl {
             name,
             fields: vec![ident1, ident2],
             type_variables: forall.unwrap_or_default(),
+            is_public: false,
         },
     );
-    let data_decl =
-        just(Token::Data).ignore_then(data_decl_infix.or(data_decl_normal));
+    let data_decl = just(Token::Pub)
+        .or_not()
+        .then_ignore(just(Token::Data))
+        .then(data_decl_infix.or(data_decl_normal))
+        .map(|(pub_or_not, d)| {
+            Decl::Data(DataDecl {
+                is_public: pub_or_not.is_some(),
+                ..d
+            })
+        });
     let type_alias_decl = just(Token::Type)
         .ignore_then(ident)
         .then_ignore(just(Token::Assign))
@@ -447,17 +462,20 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
             })
         });
     recursive(|decl| {
-        let mod_ = just(Token::Mod)
-            .ignore_then(ident)
+        let mod_ = just(Token::Pub)
+            .or_not()
+            .then_ignore(just(Token::Mod))
+            .then(ident)
             .then(indented(decl.repeated()))
-            .map(|(name, decls)| Decl::Module {
+            .map(|((pub_or_not, name), decls)| Decl::Module {
                 name,
                 ast: Ast { decls },
+                is_public: pub_or_not.is_some(),
             });
         choice((
             variable_decl.map(Decl::Variable),
             op_precedence_decl.map(Decl::OpPrecedence),
-            data_decl.map(Decl::Data),
+            data_decl,
             type_alias_decl,
             interface_decl,
             mod_,

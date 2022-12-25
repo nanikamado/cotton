@@ -27,7 +27,7 @@ pub struct Ast<'a> {
     pub data_decl: Vec<DataDecl<'a>>,
     pub type_alias_decl: Vec<TypeAliasDecl<'a>>,
     pub interface_decl: Vec<InterfaceDecl<'a>>,
-    pub modules: Vec<(Name, Ast<'a>)>,
+    pub modules: Vec<Module<'a>>,
 }
 
 type StrWithId<'a> = (&'a str, Option<TokenId>);
@@ -59,6 +59,7 @@ pub struct DataDecl<'a> {
     pub fields: Vec<StrWithId<'a>>,
     pub type_variables: Forall<'a>,
     pub decl_id: DeclId,
+    pub is_public: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -119,6 +120,13 @@ where
     Operand(T),
     Operator(StrWithId<'a>, Associativity, i32, Span),
     Apply(&'a <T as ApplySuffixOp<'a>>::Op),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Module<'a> {
+    pub name: Name,
+    pub ast: Ast<'a>,
+    pub is_public: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -297,6 +305,7 @@ impl<'a> Ast<'a> {
                             .collect(),
                         type_variables: (&a.type_variables).into(),
                         decl_id,
+                        is_public: a.is_public,
                     });
                     constructors.insert(&a.name.0);
                 }
@@ -309,9 +318,17 @@ impl<'a> Ast<'a> {
                 }
                 parser::Decl::TypeAlias(a) => aliases.push(a),
                 parser::Decl::Interface(a) => interfaces.push(a),
-                parser::Decl::Module { name, ast } => {
+                parser::Decl::Module {
+                    name,
+                    ast,
+                    is_public,
+                } => {
                     let name = Name::from_str(module_path, &name.0);
-                    modules.push((name, Ast::from_rec(ast, name, token_map).0));
+                    modules.push(Module {
+                        name,
+                        ast: Ast::from_rec(ast, name, token_map).0,
+                        is_public: *is_public,
+                    });
                 }
             }
         }

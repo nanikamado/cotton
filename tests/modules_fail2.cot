@@ -1,5 +1,5 @@
 mod aaa {
-    pub mod bbb {
+    mod bbb {
         pub f : I64 -> I64 =
             | a => a + a
     }

@@ -294,7 +294,7 @@ fn collect_data_and_type_alias_decls<'a>(
                 token_map.insert(*id, TokenMapEntry::Interface);
             }
         }
-        imports.add_true_name(d.name, true);
+        imports.add_true_name(d.name, d.is_public);
         DataDecl {
             name: d.name,
             fields: d
@@ -325,12 +325,11 @@ fn collect_data_and_type_alias_decls<'a>(
             Name::from_str_intrinsic(v.to_str()),
         );
     }
-    for (name, m) in &ast.modules {
-        // TODO: fix
-        imports.add_true_name(*name, true);
+    for m in &ast.modules {
+        imports.add_true_name(m.name, m.is_public);
         collect_data_and_type_alias_decls(
-            m,
-            *name,
+            &m.ast,
+            m.name,
             token_map,
             data_decls,
             type_alias_map,
@@ -375,8 +374,8 @@ fn collect_interface_decls(
                     .collect(),
             )
         }));
-    for (_, m) in &ast.modules {
-        collect_interface_decls(m, module_path, env);
+    for m in &ast.modules {
+        collect_interface_decls(&m.ast, module_path, env);
     }
 }
 
@@ -425,8 +424,8 @@ fn collect_decls(
             })
             .collect::<Result<Vec<_>, CompileError>>()?,
     );
-    for (name, m) in ast.modules {
-        collect_decls(m, name, variable_decls, env)?;
+    for m in ast.modules {
+        collect_decls(m.ast, m.name, variable_decls, env)?;
     }
     Ok(())
 }
