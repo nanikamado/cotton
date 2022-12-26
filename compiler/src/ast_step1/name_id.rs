@@ -30,8 +30,17 @@ impl Name {
         NAME_MAP.write().unwrap().get_unique_name()
     }
 
-    fn is_root(self) -> bool {
+    pub fn is_root(self) -> bool {
         self.0 == 0
+    }
+
+    pub fn split(self) -> Option<(Name, String)> {
+        if self.is_root() {
+            None
+        } else {
+            let n = NAME_MAP.read().unwrap();
+            Some(n.from_name.get(&self).unwrap().clone())
+        }
     }
 }
 
@@ -55,14 +64,10 @@ impl Display for Name {
 
 impl Debug for Name {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.is_root() {
-            write!(f, "root")
+        if let Some((path, name)) = self.split() {
+            write!(f, "{:?}::{}", path, name)
         } else {
-            let s = {
-                let n = NAME_MAP.read().unwrap();
-                n.from_name.get(self).unwrap().clone()
-            };
-            write!(f, "{:?}::{}", s.0, s.1)
+            write!(f, "root")
         }
     }
 }

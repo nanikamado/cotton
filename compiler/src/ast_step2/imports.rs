@@ -1,7 +1,11 @@
 use fxhash::FxHashMap;
 use std::iter::{empty, once};
+use strum::IntoEnumIterator;
 
-use crate::ast_step1::name_id::Name;
+use crate::{
+    ast_step1::name_id::Name,
+    intrinsics::{IntrinsicConstructor, IntrinsicVariable},
+};
 
 #[derive(Debug, Eq, PartialEq, Default)]
 struct TrueNames {
@@ -10,7 +14,7 @@ struct TrueNames {
     is_public: bool,
 }
 
-#[derive(Debug, Eq, PartialEq, Default)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct Imports(FxHashMap<Name, TrueNames>);
 
 impl Imports {
@@ -26,6 +30,10 @@ impl Imports {
 
     pub fn is_public(&self, name: Name) -> bool {
         self.0.get(&name).unwrap().is_public
+    }
+
+    pub fn exists(&self, name: Name) -> bool {
+        self.0.contains_key(&name)
     }
 
     pub fn get_all_candidates(
@@ -45,5 +53,18 @@ impl Imports {
         } else {
             Box::new(empty())
         }
+    }
+}
+
+impl Default for Imports {
+    fn default() -> Self {
+        let mut imports = Imports(Default::default());
+        for v in IntrinsicVariable::iter() {
+            imports.add_true_name(Name::from_str_intrinsic(v.to_str()), true);
+        }
+        for v in IntrinsicConstructor::iter() {
+            imports.add_true_name(Name::from_str_intrinsic(v.to_str()), true);
+        }
+        imports
     }
 }

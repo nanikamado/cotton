@@ -32,7 +32,7 @@ pub enum CompileError {
         path: Name,
         span: Span,
     },
-    TypeNotFound {
+    NotFound {
         path: Name,
         span: Span,
     },
@@ -72,12 +72,15 @@ impl CompileError {
                     Ok(())
                 }
             }
-            CompileError::TypeNotFound { path, span } => {
+            CompileError::NotFound { path, span } => {
                 let report =
                     Report::build(ReportKind::Error, filename, span.start)
-                        .with_label(Label::new((filename, span)).with_message(
-                            format!("cannot find type `{:?}`", path),
-                        ))
+                        .with_label(
+                            Label::new((filename, span)).with_message(format!(
+                                "cannot find `{:?}`",
+                                path
+                            )),
+                        )
                         .with_message("not found in this scope");
                 report.finish().write((filename, Source::from(src)), w)?;
                 Ok(())

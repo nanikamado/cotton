@@ -215,12 +215,6 @@ impl Ast {
         let mut variable_decls = Vec::new();
         let mut interface_decls = Default::default();
         let mut imports = Imports::default();
-        for v in IntrinsicVariable::iter() {
-            imports.add_true_name(Name::from_str_intrinsic(v.to_str()), true);
-        }
-        for v in IntrinsicConstructor::iter() {
-            imports.add_true_name(Name::from_str_intrinsic(v.to_str()), true);
-        }
         collect_data_and_type_alias_decls(
             &ast,
             module_path,
@@ -860,6 +854,16 @@ fn fn_arm(
 }
 
 impl Name {
+    fn is_same_as_or_ancestor_of(self, path: Name) -> bool {
+        if self.is_root() || self == path {
+            true
+        } else if let Some((path, _)) = path.split() {
+            self.is_same_as_or_ancestor_of(path)
+        } else {
+            false
+        }
+    }
+
     fn from_path(
         base: Name,
         path: &[(&str, Option<TokenId>)],
@@ -867,10 +871,20 @@ impl Name {
         imports: &Imports,
         span: Span,
     ) -> Result<Self, CompileError> {
-        let mut path_name = base;
+        let (path, mut path_name) = if !path.is_empty() && path[0].0 == "pkg" {
+            (&path[1..], Name::root_module())
+        } else {
+            (path, base)
+        };
         for (p, _) in path {
             let p = Name::from_str(path_name, p);
-            if base != path_name && !imports.is_public(p) {
+            if !imports.exists(p) {
+                return Err(CompileError::NotFound { path: p, span });
+            }
+            if !imports.is_public(p)
+                && !path_name.is_same_as_or_ancestor_of(base)
+            {
+                eprintln!("base = {base:?}, path_name = {path_name:?}");
                 return Err(CompileError::InaccessibleName { path: p, span });
             }
             let m = imports.get_all_candidates(p).collect_vec();
@@ -878,7 +892,11 @@ impl Name {
             path_name = m[0];
         }
         let name = Name::from_str(path_name, name.0);
-        if !path.is_empty() && !imports.is_public(name) {
+        if imports.exists(name)
+            && !imports.is_public(name)
+            && !path_name.is_same_as_or_ancestor_of(base)
+        {
+            eprintln!("path_name = {path_name:?}, base = {base:?}");
             return Err(CompileError::InaccessibleName { path: name, span });
         }
         Ok(name)
@@ -897,7 +915,7 @@ impl TypeId {
         {
             Ok(TypeId::Intrinsic(*i))
         } else {
-            Err(CompileError::TypeNotFound { path: name, span })
+            Err(CompileError::NotFound { path: name, span })
         }
     }
 }
