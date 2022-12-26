@@ -1615,8 +1615,8 @@ fn transpose<T>(v: Vec<Vec<T>>) -> Vec<Vec<T>> {
 impl From<&PatternUnitForRestriction> for Type {
     fn from(p: &PatternUnitForRestriction) -> Self {
         match p {
-            PatternUnitForRestriction::I64 => Type::from_str("I64"),
-            PatternUnitForRestriction::Str => Type::from_str("Str"),
+            PatternUnitForRestriction::I64 => Type::intrinsic_from_str("I64"),
+            PatternUnitForRestriction::Str => Type::intrinsic_from_str("Str"),
             PatternUnitForRestriction::Binder(t, _decl_id) => t.clone(),
             PatternUnitForRestriction::Const { id, .. } => {
                 TypeUnit::Const { id: *id }.into()
@@ -2509,8 +2509,10 @@ mod tests {
             .unfixed
             .remove_parameters();
         let t = TypeWithEnv {
-            constructor: Type::from_str("I64")
-                .arrow(Type::from_str("I64").union(Type::from_str("String"))),
+            constructor: Type::intrinsic_from_str("I64").arrow(
+                Type::intrinsic_from_str("I64")
+                    .union(Type::intrinsic_from_str("String")),
+            ),
             subtype_relations: vec![(
                 dot.clone(),
                 req_t.clone(),
@@ -2714,7 +2716,7 @@ mod tests {
     #[test]
     fn apply_type_to_pattern_0() {
         let v1 = TypeUnit::new_variable();
-        let t1 = Type::from_str("I64").union(v1.clone().into());
+        let t1 = Type::intrinsic_from_str("I64").union(v1.clone().into());
         let v2 = TypeVariable::new();
         let r = apply_type_to_pattern(
             Type::argument_tuple_from_arguments(vec![t1]),

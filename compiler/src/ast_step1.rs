@@ -50,6 +50,8 @@ pub struct VariableDecl<'a> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Type<'a> {
     pub name: StrWithId<'a>,
+    pub path: Vec<StrWithId<'a>>,
+    pub span: Span,
     pub args: Vec<Type<'a>>,
 }
 
@@ -165,6 +167,8 @@ impl<'a> IdentFromStr<'a> for Type<'a> {
         Self {
             name: s,
             args: Vec::new(),
+            path: Vec::new(),
+            span: 0..0, // TODO: not correct
         }
     }
 }
@@ -572,10 +576,18 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::TypeUnit, &'a Span) {
 
     fn convert(self, env: &mut Env) -> Self::T {
         match self.0 {
-            parser::TypeUnit::Ident((name, id)) => (
+            parser::TypeUnit::Ident {
+                path,
+                name: (name, id),
+            } => (
                 Type {
                     name: (name, *id),
                     args: Vec::new(),
+                    path: path
+                        .iter()
+                        .map(|(name, id)| (name.as_str(), *id))
+                        .collect(),
+                    span: self.1.clone(),
                 },
                 self.1.clone(),
             ),

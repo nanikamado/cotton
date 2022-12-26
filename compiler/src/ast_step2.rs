@@ -19,6 +19,7 @@ use crate::intrinsics::{
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
+use parser::token_id::TokenId;
 use parser::Span;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
@@ -193,7 +194,7 @@ static TYPE_NAMES: Lazy<RwLock<FxHashMap<TypeId, Name>>> = Lazy::new(|| {
         INTRINSIC_TYPES
             .iter()
             .map(|(name, id)| {
-                (TypeId::Intrinsic(*id), Name::from_str_type(name))
+                (TypeId::Intrinsic(*id), Name::from_str_intrinsic(name))
             })
             .collect(),
     )
@@ -247,7 +248,7 @@ impl Ast {
                 imports: &mut imports,
                 data_decl_map: &data_decl_map,
             },
-        );
+        )?;
         collect_decls(
             ast,
             module_path,
@@ -342,41 +343,52 @@ fn collect_interface_decls(
     ast: &ast_step1::Ast,
     module_path: ModulePath,
     env: &mut Env<'_, '_>,
-) {
-    env.interface_decls
-        .extend(ast.interface_decl.iter().map(|i| {
-            env.token_map.insert(i.name.1, TokenMapEntry::Interface);
-            (
-                Name::from_str(module_path, i.name.0),
-                i.variables
-                    .iter()
-                    .map(|(name, t, forall)| {
-                        let self_ = TypeVariable::new();
-                        let t = type_to_type_with_forall(
-                            t.clone(),
-                            env.data_decl_map,
-                            std::iter::once((
-                                Name::from_str(module_path, "Self"),
-                                self_,
-                            ))
-                            .collect(),
-                            env.type_alias_map,
-                            forall.clone(),
-                            &Default::default(),
-                            env.token_map,
-                        );
-                        env.token_map.insert(
-                            name.1,
-                            TokenMapEntry::VariableDeclInInterface(t.clone()),
-                        );
-                        (Name::from_str(module_path, name.0), t, self_)
-                    })
-                    .collect(),
-            )
-        }));
+) -> Result<(), CompileError> {
+    env.interface_decls.extend(
+        ast.interface_decl
+            .iter()
+            .map(|i| {
+                env.token_map.insert(i.name.1, TokenMapEntry::Interface);
+                Ok((
+                    Name::from_str(module_path, i.name.0),
+                    i.variables
+                        .iter()
+                        .map(|(name, t, forall)| {
+                            let self_ = TypeVariable::new();
+                            let t = type_to_type_with_forall(
+                                t.clone(),
+                                module_path,
+                                std::iter::once((
+                                    Name::from_str(module_path, "Self"),
+                                    self_,
+                                ))
+                                .collect(),
+                                forall.clone(),
+                                &mut Env {
+                                    interface_decls: &mut Default::default(),
+                                    token_map: env.token_map,
+                                    type_alias_map: env.type_alias_map,
+                                    imports: env.imports,
+                                    data_decl_map: env.data_decl_map,
+                                },
+                            )?;
+                            env.token_map.insert(
+                                name.1,
+                                TokenMapEntry::VariableDeclInInterface(
+                                    t.clone(),
+                                ),
+                            );
+                            Ok((Name::from_str(module_path, name.0), t, self_))
+                        })
+                        .try_collect()?,
+                ))
+            })
+            .try_collect::<_, Vec<_>, _>()?,
+    );
     for m in &ast.modules {
-        collect_interface_decls(&m.ast, module_path, env);
+        collect_interface_decls(&m.ast, module_path, env)?;
     }
+    Ok(())
 }
 
 struct Env<'a, 'b> {
@@ -471,67 +483,68 @@ fn variable_decl(
 ) -> Result<WithFlatMapEnv<VariableDecl>, CompileError> {
     let expr = expr(v.value, module_path, type_variable_names, env)?;
     let d = VariableDecl {
-        type_annotation: v.type_annotation.map(|(t, forall, span)| {
-            let implicit_type_parameters: Vec<_> = forall
-                .type_variables
-                .iter()
-                .map(|(name, _)| Name::from_str(module_path, name.0))
-                .collect();
-            let t = type_to_type_with_forall(
-                t,
-                env.data_decl_map,
-                type_variable_names.clone(),
-                env.type_alias_map,
-                forall,
-                env.interface_decls,
-                env.token_map,
-            );
-            let mut fixed_parameter_names = FxHashMap::default();
-            let (mut fixed_t, parameters) = t.clone().remove_parameters();
-            for (p, name) in parameters
-                .into_iter()
-                .zip_eq(implicit_type_parameters.iter())
-            {
-                let new_const = TypeUnit::Const {
-                    id: TypeId::FixedVariable(DeclId::new()),
-                };
-                fixed_t = fixed_t.replace_num(p, &new_const.clone().into());
-                fixed_parameter_names.insert(new_const, *name);
-            }
-            let variable_requirements = match fixed_t.matchable() {
-                TypeMatchable::Restrictions {
+        type_annotation: v
+            .type_annotation
+            .map(|(t, forall, span)| {
+                let implicit_type_parameters: Vec<_> = forall
+                    .type_variables
+                    .iter()
+                    .map(|(name, _)| Name::from_str(module_path, name.0))
+                    .collect();
+                let t = type_to_type_with_forall(
                     t,
-                    variable_requirements,
-                    subtype_relations,
-                } => {
-                    fixed_t = if subtype_relations.is_empty() {
-                        t
-                    } else {
-                        TypeUnit::Restrictions {
-                            t,
-                            variable_requirements: Vec::new(),
-                            subtype_relations,
-                        }
-                        .into()
-                    };
-                    variable_requirements
-                }
-                t => {
-                    fixed_t = t.into();
-                    Vec::new()
-                }
-            };
-            Annotation {
-                unfixed: t,
-                fixed: fixed_t,
-                implicit_parameters: variable_requirements
+                    module_path,
+                    type_variable_names.clone(),
+                    forall,
+                    env,
+                )?;
+                let mut fixed_parameter_names = FxHashMap::default();
+                let (mut fixed_t, parameters) = t.clone().remove_parameters();
+                for (p, name) in parameters
                     .into_iter()
-                    .map(|(name, t)| (name, t, DeclId::new()))
-                    .collect(),
-                fixed_parameter_names,
-                span,
-            }
-        }),
+                    .zip_eq(implicit_type_parameters.iter())
+                {
+                    let new_const = TypeUnit::Const {
+                        id: TypeId::FixedVariable(DeclId::new()),
+                    };
+                    fixed_t = fixed_t.replace_num(p, &new_const.clone().into());
+                    fixed_parameter_names.insert(new_const, *name);
+                }
+                let variable_requirements = match fixed_t.matchable() {
+                    TypeMatchable::Restrictions {
+                        t,
+                        variable_requirements,
+                        subtype_relations,
+                    } => {
+                        fixed_t = if subtype_relations.is_empty() {
+                            t
+                        } else {
+                            TypeUnit::Restrictions {
+                                t,
+                                variable_requirements: Vec::new(),
+                                subtype_relations,
+                            }
+                            .into()
+                        };
+                        variable_requirements
+                    }
+                    t => {
+                        fixed_t = t.into();
+                        Vec::new()
+                    }
+                };
+                Ok(Annotation {
+                    unfixed: t,
+                    fixed: fixed_t,
+                    implicit_parameters: variable_requirements
+                        .into_iter()
+                        .map(|(name, t)| (name, t, DeclId::new()))
+                        .collect(),
+                    fixed_parameter_names,
+                    span,
+                })
+            })
+            .transpose()?,
         value: expr.value,
         decl_id: v.decl_id,
         span: v.span,
@@ -638,28 +651,15 @@ fn expr(
             (Vec::new(), StrLiteral(s.to_string()))
         }
         ast_step1::Expr::Ident { name, path } => {
-            let mut path_name = module_path;
-            for (p, _) in &path {
-                let p = Name::from_str(path_name, p);
-                if module_path != path_name && !env.imports.is_public(p) {
-                    return Err(CompileError::InaccessibleName {
-                        path: p,
-                        span,
-                    });
-                }
-                let m = env.imports.get_all_candidates(p).collect_vec();
-                debug_assert_eq!(m.len(), 1);
-                path_name = m[0];
-            }
             let ident_id = IdentId::new();
             env.token_map.insert(name.1, TokenMapEntry::Ident(ident_id));
-            let name = Name::from_str(path_name, name.0);
-            if !path.is_empty() && !env.imports.is_public(name) {
-                return Err(CompileError::InaccessibleName {
-                    path: name,
-                    span,
-                });
-            }
+            let name = Name::from_path(
+                module_path,
+                &path,
+                name,
+                env.imports,
+                span.clone(),
+            )?;
             (Vec::new(), Ident { name, ident_id })
         }
         ast_step1::Expr::Decl(_) => {
@@ -733,13 +733,11 @@ fn expr(
             let e = expr(*e, module_path, type_variable_names, env)?;
             let t = type_to_type_with_forall(
                 t,
-                env.data_decl_map,
+                module_path,
                 type_variable_names.clone(),
-                env.type_alias_map,
                 forall,
-                env.interface_decls,
-                env.token_map,
-            );
+                env,
+            )?;
             (e.env, Expr::TypeAnnotation(Box::new(e.value), t))
         }
     };
@@ -852,8 +850,8 @@ fn fn_arm(
         pattern: arm
             .pattern
             .into_iter()
-            .map(|(p, span)| (pattern(p, module_path, env), span))
-            .collect(),
+            .map(|(p, span)| Ok((pattern(p, module_path, env)?, span)))
+            .try_collect()?,
         expr: catch_flat_map(
             expr(arm.expr, module_path, type_variable_names, env)?,
             module_path,
@@ -861,15 +859,45 @@ fn fn_arm(
     })
 }
 
+impl Name {
+    fn from_path(
+        base: Name,
+        path: &[(&str, Option<TokenId>)],
+        name: (&str, Option<TokenId>),
+        imports: &Imports,
+        span: Span,
+    ) -> Result<Self, CompileError> {
+        let mut path_name = base;
+        for (p, _) in path {
+            let p = Name::from_str(path_name, p);
+            if base != path_name && !imports.is_public(p) {
+                return Err(CompileError::InaccessibleName { path: p, span });
+            }
+            let m = imports.get_all_candidates(p).collect_vec();
+            debug_assert_eq!(m.len(), 1);
+            path_name = m[0];
+        }
+        let name = Name::from_str(path_name, name.0);
+        if !path.is_empty() && !imports.is_public(name) {
+            return Err(CompileError::InaccessibleName { path: name, span });
+        }
+        Ok(name)
+    }
+}
+
 impl TypeId {
-    fn get(name: Name, data_decl_map: &FxHashMap<Name, DeclId>) -> TypeId {
+    fn get(
+        name: Name,
+        span: Span,
+        data_decl_map: &FxHashMap<Name, DeclId>,
+    ) -> Result<TypeId, CompileError> {
         if let Some(id) = data_decl_map.get(&name) {
-            TypeId::DeclId(*id)
+            Ok(TypeId::DeclId(*id))
         } else if let Some(i) = INTRINSIC_TYPES.get(&name.to_string().as_str())
         {
-            TypeId::Intrinsic(*i)
+            Ok(TypeId::Intrinsic(*i))
         } else {
-            panic!("{:?} not fould", name)
+            Err(CompileError::TypeNotFound { path: name, span })
         }
     }
 }
@@ -895,24 +923,24 @@ fn pattern(
     p: ast_step1::Pattern,
     module_path: ModulePath,
     env: &mut Env<'_, '_>,
-) -> Pattern<TypeVariable> {
+) -> Result<Pattern<TypeVariable>, CompileError> {
     use PatternUnit::*;
-    match p {
+    Ok(match p {
         ast_step1::Pattern::Number(n) => I64(n.parse().unwrap()),
         ast_step1::Pattern::StrLiteral(s) => Str(s.to_string()),
         ast_step1::Pattern::Constructor { name, args } => {
             let id = ConstructorId::get(
-                Name::from_str_type(name.0),
+                Name::from_str(module_path, name.0),
                 env.data_decl_map,
             );
             env.token_map.insert(name.1, TokenMapEntry::Constructor(id));
             Constructor {
-                name: Name::from_str_type(name.0),
+                name: Name::from_str(module_path, name.0),
                 id,
                 args: args
                     .into_iter()
                     .map(|arg| pattern(arg, module_path, env))
-                    .collect(),
+                    .try_collect()?,
             }
         }
         ast_step1::Pattern::Binder(name) => {
@@ -928,102 +956,99 @@ fn pattern(
         ast_step1::Pattern::TypeRestriction(p, t, forall) => {
             let t = type_to_type_with_forall(
                 t,
-                env.data_decl_map,
+                module_path,
                 Default::default(),
-                env.type_alias_map,
                 forall,
-                env.interface_decls,
-                env.token_map,
-            );
-            let p = pattern(*p, module_path, env);
+                env,
+            )?;
+            let p = pattern(*p, module_path, env)?;
             TypeRestriction(p, t)
         }
     }
-    .into()
+    .into())
 }
 
 fn type_to_type(
     t: &ast_step1::Type,
-    data_decl_map: &FxHashMap<Name, DeclId>,
+    module_path: ModulePath,
     type_variable_names: &FxHashMap<Name, TypeVariable>,
-    type_alias_map: &mut TypeAliasMap,
     search_type: SearchMode,
-    token_map: &mut TokenMap,
-) -> Type {
+    env: &mut Env<'_, '_>,
+) -> Result<Type, CompileError> {
     match t.name.0 {
-        "|" => t
+        "|" => Ok(t
             .args
             .iter()
-            .flat_map(|a| {
+            .map(|a| {
                 type_to_type(
                     a,
-                    data_decl_map,
+                    module_path,
                     type_variable_names,
-                    type_alias_map,
                     search_type,
-                    token_map,
+                    env,
                 )
             })
-            .collect(),
-        "->" => TypeUnit::Fn(
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten()
+            .collect()),
+        "->" => Ok(TypeUnit::Fn(
             type_to_type(
                 &t.args[0],
-                data_decl_map,
+                module_path,
                 type_variable_names,
-                type_alias_map,
                 search_type,
-                token_map,
-            ),
+                env,
+            )?,
             type_to_type(
                 &t.args[1],
-                data_decl_map,
+                module_path,
                 type_variable_names,
-                type_alias_map,
                 search_type,
-                token_map,
-            ),
+                env,
+            )?,
         )
-        .into(),
+        .into()),
         _ => {
-            if let Some(n) =
-                type_variable_names.get(&Name::from_str_type(t.name.0))
-            {
-                token_map.insert(t.name.1, TokenMapEntry::TypeVariable);
+            if let Some(n) = type_variable_names.get(&Name::from_path(
+                module_path,
+                &t.path,
+                t.name,
+                env.imports,
+                t.span.clone(),
+            )?) {
+                env.token_map.insert(t.name.1, TokenMapEntry::TypeVariable);
                 let mut new_t = Type::from(TypeUnit::Variable(*n));
                 for a in &t.args {
                     new_t = new_t.type_level_function_apply(type_to_type(
                         a,
-                        data_decl_map,
+                        module_path,
                         type_variable_names,
-                        type_alias_map,
                         search_type,
-                        token_map,
-                    ));
+                        env,
+                    )?);
                 }
-                new_t
-            } else if let Some(mut unaliased) = type_alias_map.get(
-                (Name::from_str_type(t.name.0), t.name.1),
-                data_decl_map,
+                Ok(new_t)
+            } else if let Some(mut unaliased) = env.get_type_from_alias(
+                (Name::from_str(module_path, t.name.0), t.name.1),
                 type_variable_names,
                 if search_type == SearchMode::Normal {
                     SearchMode::Alias
                 } else {
                     SearchMode::AliasSub
                 },
-                token_map,
-            ) {
+            )? {
                 for a in &t.args {
                     unaliased =
                         unaliased.type_level_function_apply(type_to_type(
                             a,
-                            data_decl_map,
+                            module_path,
                             type_variable_names,
-                            type_alias_map,
                             search_type,
-                            token_map,
-                        ));
+                            env,
+                        )?);
                 }
-                unaliased
+                Ok(unaliased)
             } else {
                 let mut tuple = Type::label_from_str("()");
                 for a in t
@@ -1032,21 +1057,31 @@ fn type_to_type(
                     .map(|a| {
                         type_to_type(
                             a,
-                            data_decl_map,
+                            module_path,
                             type_variable_names,
-                            type_alias_map,
                             search_type,
-                            token_map,
+                            env,
                         )
                     })
+                    .try_collect::<_, Vec<_>, _>()?
+                    .into_iter()
                     .rev()
                 {
                     tuple = TypeUnit::Tuple(a, tuple).into();
                 }
-                let id =
-                    TypeId::get(Name::from_str_type(t.name.0), data_decl_map);
-                token_map.insert(t.name.1, TokenMapEntry::TypeId(id));
-                TypeUnit::Tuple(TypeUnit::Const { id }.into(), tuple).into()
+                let id = TypeId::get(
+                    Name::from_path(
+                        module_path,
+                        &t.path,
+                        t.name,
+                        env.imports,
+                        t.span.clone(),
+                    )?,
+                    t.span.clone(),
+                    env.data_decl_map,
+                )?;
+                env.token_map.insert(t.name.1, TokenMapEntry::TypeId(id));
+                Ok(TypeUnit::Tuple(TypeUnit::Const { id }.into(), tuple).into())
             }
         }
     }
@@ -1054,21 +1089,21 @@ fn type_to_type(
 
 fn type_to_type_with_forall(
     t: ast_step1::Type,
-    data_decl_map: &FxHashMap<Name, DeclId>,
+    module_path: ModulePath,
     mut type_variable_names: FxHashMap<Name, TypeVariable>,
-    type_alias_map: &mut TypeAliasMap,
     forall: ast_step1::Forall,
-    interfaces: &FxHashMap<Name, Vec<(Name, Type, TypeVariable)>>,
-    token_map: &mut TokenMap,
-) -> Type {
+    env: &mut Env<'_, '_>,
+) -> Result<Type, CompileError> {
     let mut variable_requirements = Vec::new();
     let mut type_parameters = Vec::new();
     for (s, interface_names) in forall.type_variables {
-        token_map.insert(s.1, TokenMapEntry::TypeVariable);
+        env.token_map.insert(s.1, TokenMapEntry::TypeVariable);
         let v = TypeVariable::new();
         for name in interface_names {
-            token_map.insert(name.1, TokenMapEntry::Interface);
-            for (name, t, self_) in &interfaces[&Name::from_str_type(name.0)] {
+            env.token_map.insert(name.1, TokenMapEntry::Interface);
+            for (name, t, self_) in
+                &env.interface_decls[&Name::from_str(module_path, name.0)]
+            {
                 variable_requirements.push((
                     *name,
                     t.clone()
@@ -1077,16 +1112,15 @@ fn type_to_type_with_forall(
             }
         }
         type_parameters.push(v);
-        type_variable_names.insert(Name::from_str_type(s.0), v);
+        type_variable_names.insert(Name::from_str(module_path, s.0), v);
     }
     let mut t = type_to_type(
         &t,
-        data_decl_map,
+        module_path,
         &type_variable_names,
-        type_alias_map,
         SearchMode::Normal,
-        token_map,
-    );
+        env,
+    )?;
     if !variable_requirements.is_empty() {
         t = TypeUnit::Restrictions {
             t,
@@ -1102,7 +1136,7 @@ fn type_to_type_with_forall(
         );
         t = TypeUnit::TypeLevelFn(t).into();
     }
-    t
+    Ok(t)
 }
 
 impl std::fmt::Display for ConstructorId {

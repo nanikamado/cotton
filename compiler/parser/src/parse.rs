@@ -53,7 +53,10 @@ pub enum ExprUnit {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum TypeUnit {
-    Ident(StringWithId),
+    Ident {
+        name: StringWithId,
+        path: Vec<StringWithId>,
+    },
     Paren(Type),
 }
 
@@ -164,6 +167,10 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         just(Token::Paren('(')).or(just(Token::OpenParenWithoutPad));
     let ident_or_op =
         ident.or(op.delimited_by(open_paren.clone(), just(Token::Paren(')'))));
+    let ident_with_path = ident
+        .then_ignore(just(Token::ColonColon))
+        .repeated()
+        .then(ident_or_op.clone());
     let forall = just(Token::Forall)
         .ignore_then(indented(
             ident
@@ -182,10 +189,13 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 .collect(),
         });
     let type_ = recursive(|type_| {
-        let type_unit = ident.map(TypeUnit::Ident).or(type_
+        let type_unit = ident_with_path
             .clone()
-            .delimited_by(open_paren.clone(), just(Token::Paren(')')))
-            .map(TypeUnit::Paren));
+            .map(|(path, name)| TypeUnit::Ident { name, path })
+            .or(type_
+                .clone()
+                .delimited_by(open_paren.clone(), just(Token::Paren(')')))
+                .map(TypeUnit::Paren));
         let apply = type_
             .separated_by(just(Token::Comma))
             .at_least(1)
@@ -321,10 +331,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 .or(int.map(ExprUnit::Int))
                 .or(str.map(ExprUnit::Str))
                 .or(variable_decl.map(ExprUnit::VariableDecl))
-                .or(ident
-                    .then_ignore(just(Token::ColonColon))
-                    .repeated()
-                    .then(ident_or_op.clone())
+                .or(ident_with_path
                     .map(|(path, name)| ExprUnit::Ident { path, name }))
                 .or(lambda.map(|a| ExprUnit::Case(vec![a])))
                 .or(expr

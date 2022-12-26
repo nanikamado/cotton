@@ -1,16 +1,16 @@
 use super::{
     types::{Type, TypeUnit, TypeVariable},
-    ModulePath,
+    Env, ModulePath,
 };
 use crate::{
     ast_step1::{
         self,
-        decl_id::DeclId,
         name_id::Name,
         token_map::{TokenMap, TokenMapEntry},
         TypeAliasDecl,
     },
     ast_step2::{type_to_type, types::TypeConstructor},
+    errors::CompileError,
 };
 use fxhash::FxHashMap;
 use itertools::Itertools;
@@ -23,15 +23,15 @@ enum AliasComputation {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct TypeAliasMap<'a>(
-    FxHashMap<
-        Name,
-        (
-            (ast_step1::Type<'a>, ast_step1::Forall<'a>),
-            AliasComputation,
-        ),
-    >,
-);
+pub struct TypeAliasMap<'a>(FxHashMap<Name, AliasEntry<'a>>);
+
+#[derive(Debug, Clone)]
+struct AliasEntry<'a> {
+    type_: ast_step1::Type<'a>,
+    type_variables: ast_step1::Forall<'a>,
+    alias_computation: AliasComputation,
+    base_path: Name,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SearchMode {
@@ -40,27 +40,26 @@ pub enum SearchMode {
     AliasSub,
 }
 
-impl<'a> TypeAliasMap<'a> {
-    pub fn get(
+impl<'a> Env<'a, '_> {
+    pub fn get_type_from_alias(
         &mut self,
         name: (Name, Option<TokenId>),
-        data_decl_map: &FxHashMap<Name, DeclId>,
         type_variable_names: &FxHashMap<Name, TypeVariable>,
         search_type: SearchMode,
-        token_map: &mut TokenMap,
-    ) -> Option<Type> {
-        debug_assert_ne!(search_type, SearchMode::Normal);
+    ) -> Result<Option<Type>, CompileError> {
         if let Some(t) = type_variable_names.get(&name.0) {
-            token_map.insert(name.1, TokenMapEntry::TypeAlias);
-            return Some(TypeUnit::Variable(*t).into());
+            self.token_map.insert(name.1, TokenMapEntry::TypeAlias);
+            return Ok(Some(TypeUnit::Variable(*t).into()));
         }
-        let alias = self.0.get(&name.0)?;
-        Some(match (alias, search_type) {
-            ((_, AliasComputation::Unaliased(t)), SearchMode::Alias) => {
-                token_map.insert(name.1, TokenMapEntry::TypeAlias);
-                t.clone()
+        let Some(alias) = self.type_alias_map.0.get(&name.0).cloned() else {
+            return Ok(None);
+        };
+        Ok(match (alias.alias_computation, search_type) {
+            (AliasComputation::Unaliased(t), SearchMode::Alias) => {
+                self.token_map.insert(name.1, TokenMapEntry::TypeAlias);
+                Some(t)
             }
-            ((t, _), _) => {
+            (_, _) => {
                 let mut type_variable_names: FxHashMap<Name, TypeVariable> =
                     type_variable_names
                         .clone()
@@ -69,39 +68,45 @@ impl<'a> TypeAliasMap<'a> {
                             (
                                 s,
                                 v.increment_recursive_index(
-                                    1 + t.1.type_variables.len() as i32,
+                                    1 + alias
+                                        .type_variables
+                                        .type_variables
+                                        .len()
+                                        as i32,
                                 ),
                             )
                         })
                         .collect();
                 type_variable_names.insert(
                     name.0,
-                    TypeVariable::RecursiveIndex(t.1.type_variables.len()),
+                    TypeVariable::RecursiveIndex(
+                        alias.type_variables.type_variables.len(),
+                    ),
                 );
-                let forall = t
-                    .1
-                    .clone()
+                let forall = alias
                     .type_variables
-                    .into_iter()
+                    .type_variables
+                    .iter()
                     .map(|(s, interfaces)| {
                         let v = TypeVariable::new();
-                        token_map.insert(s.1, TokenMapEntry::TypeVariable);
+                        self.token_map.insert(s.1, TokenMapEntry::TypeVariable);
                         for (_, id) in interfaces {
-                            token_map.insert(id, TokenMapEntry::Interface);
+                            self.token_map
+                                .insert(*id, TokenMapEntry::Interface);
                         }
-                        type_variable_names.insert(Name::from_str_type(s.0), v);
+                        type_variable_names
+                            .insert(Name::from_str(alias.base_path, s.0), v);
                         v
                     })
                     .collect_vec();
                 let mut t = type_to_type(
-                    &t.0.clone(),
-                    data_decl_map,
+                    &alias.type_,
+                    alias.base_path,
                     &type_variable_names,
-                    self,
                     search_type,
-                    token_map,
-                );
-                token_map.insert(name.1, TokenMapEntry::TypeAlias);
+                    self,
+                )?;
+                self.token_map.insert(name.1, TokenMapEntry::TypeAlias);
                 for v in forall.into_iter().rev() {
                     t = TypeUnit::TypeLevelFn(
                         t.replace_num(
@@ -121,14 +126,20 @@ impl<'a> TypeAliasMap<'a> {
                     t.increment_recursive_index(0, -1)
                 };
                 if search_type == SearchMode::Alias {
-                    self.0.get_mut(&name.0).unwrap().1 =
+                    self.type_alias_map
+                        .0
+                        .get_mut(&name.0)
+                        .unwrap()
+                        .alias_computation =
                         AliasComputation::Unaliased(t.clone());
                 }
-                t
+                Some(t)
             }
         })
     }
+}
 
+impl<'a> TypeAliasMap<'a> {
     pub fn add_decls(
         &mut self,
         type_alias_decls: &[TypeAliasDecl<'a>],
@@ -139,7 +150,12 @@ impl<'a> TypeAliasMap<'a> {
             token_map.insert(a.name.1, TokenMapEntry::TypeAlias);
             (
                 Name::from_str(module_path, a.name.0),
-                (a.body.clone(), AliasComputation::NotUnaliased),
+                AliasEntry {
+                    type_: a.body.0.clone(),
+                    type_variables: a.body.1.clone(),
+                    alias_computation: AliasComputation::NotUnaliased,
+                    base_path: module_path,
+                },
             )
         }));
     }

@@ -1368,12 +1368,12 @@ fn min_type_with_env(
             )
         }
         Expr::Number(_) => {
-            let t = Type::from_str("I64");
+            let t = Type::intrinsic_from_str("I64");
             map.insert(subtype_relations, *type_variable, t.clone());
             (t.into(), Default::default(), Default::default())
         }
         Expr::StrLiteral(_) => {
-            let t = Type::from_str("String");
+            let t = Type::intrinsic_from_str("String");
             map.insert(subtype_relations, *type_variable, t.clone());
             (t.into(), Default::default(), Default::default())
         }
@@ -1626,12 +1626,12 @@ fn pattern_unit_to_type(
     use PatternUnit::*;
     match p {
         I64(_) => (
-            Type::from_str("I64"),
+            Type::intrinsic_from_str("I64"),
             Default::default(),
             PatternUnitForRestriction::I64,
         ),
         Str(_) => (
-            Type::from_str("String"),
+            Type::intrinsic_from_str("String"),
             Default::default(),
             PatternUnitForRestriction::Str,
         ),

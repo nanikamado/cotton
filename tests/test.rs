@@ -379,3 +379,8 @@ fn modules_fail() {
 fn modules_fail2() {
     test_test("modules_fail2.cot").code(1);
 }
+
+#[test]
+fn modules_fail3() {
+    test_test("modules_fail3.cot").code(1);
+}

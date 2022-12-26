@@ -1,13 +1,13 @@
 pub use self::type_type::Type;
 pub use self::type_unit::TypeUnit;
 pub use self::type_unit::TypeVariable;
-use super::type_to_type;
 use super::SubtypeRelations;
 use super::TypeWithEnv;
-use crate::ast_step1::{self, name_id::Name};
+use crate::ast_step1::name_id::Name;
 use crate::ast_step2::TypeId;
 use crate::ast_step3::simplify_subtype_rel;
 use crate::intrinsics::IntrinsicType;
+use crate::intrinsics::INTRINSIC_TYPES;
 use fxhash::FxHashSet;
 use itertools::Itertools;
 use std::collections::BTreeSet;
@@ -594,19 +594,18 @@ impl Type {
         r.map(|v| v.is_empty()).unwrap_or(false)
     }
 
-    pub fn from_str(t: &'static str) -> Self {
-        let t = ast_step1::Type {
-            name: (t, None),
-            args: Default::default(),
-        };
-        type_to_type(
-            &t,
-            &Default::default(),
-            &Default::default(),
-            &mut Default::default(),
-            crate::ast_step2::SearchMode::Normal,
-            &mut Default::default(),
+    pub fn intrinsic_from_str(t: &'static str) -> Self {
+        TypeUnit::Tuple(
+            TypeUnit::Const {
+                id: TypeId::Intrinsic(INTRINSIC_TYPES[t]),
+            }
+            .into(),
+            TypeUnit::Const {
+                id: TypeId::Intrinsic(INTRINSIC_TYPES["()"]),
+            }
+            .into(),
         )
+        .into()
     }
 }
 

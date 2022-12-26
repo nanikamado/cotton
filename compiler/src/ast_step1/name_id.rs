@@ -21,13 +21,6 @@ impl Name {
         NAME_MAP.write().unwrap().get_name_id(path, name)
     }
 
-    pub fn from_str_type(name: &str) -> Self {
-        NAME_MAP
-            .write()
-            .unwrap()
-            .get_name_id(Name::root_module(), name)
-    }
-
     pub fn from_str_intrinsic(name: &str) -> Self {
         let a = Name::from_str(Self::root_module(), "intrinsic");
         NAME_MAP.write().unwrap().get_name_id(a, name)
