@@ -1,5 +1,4 @@
 mod ast_step1;
-#[macro_use]
 mod ast_step2;
 mod ast_step3;
 mod ast_step4;
