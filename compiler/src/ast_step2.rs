@@ -968,7 +968,7 @@ impl ConstructorId {
         {
             ConstructorId::Intrinsic(*i)
         } else {
-            panic!("{:?} not fould", name)
+            panic!("{:?} not found", name)
         }
     }
 }

@@ -310,7 +310,7 @@ impl TypeVariableMap {
         self.insert_type_helper(subtype, k, v, origin, true);
     }
 
-    pub fn insert_type_withouth_log(
+    pub fn insert_type_without_log(
         &mut self,
         subtype: &mut SubtypeRelations,
         k: Type,
@@ -2322,7 +2322,7 @@ fn try_eq_sub<T: TypeConstructor>(
     let mut m = TypeVariableMap::default();
     let mut subtype = SubtypeRelations::default();
     for (a, b, origin) in &t.subtype_relations {
-        m.insert_type_withouth_log(
+        m.insert_type_without_log(
             &mut subtype,
             a.clone(),
             b.clone(),

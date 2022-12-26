@@ -95,7 +95,7 @@ impl CompileError {
                         .with_label(Label::new((filename, span)).with_message(
                             format!(
                             "There are {} candidates for this variable.\n{}\
-                                    Could not dicide which one to use.",
+                                    Could not decide which one to use.",
                             satisfied.len(),
                             satisfied.iter().map(|(t, _)| t).format_with(
                                 "",
@@ -136,7 +136,7 @@ impl CompileError {
                 writeln!(w, "{}", description)
             }
             CompileError::RecursionLimit => {
-                writeln!(w, "recursion of implicit variable reaced the limit.")
+                writeln!(w, "recursion of implicit variable reached the limit.")
             }
             CompileError::InaccessibleName { path, span } => {
                 let report =

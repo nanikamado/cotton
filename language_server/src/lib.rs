@@ -110,7 +110,7 @@ impl LanguageServer for Backend {
         self.client
             .log_message(
                 MessageType::INFO,
-                &format!("opend {}.", params.text_document.uri),
+                &format!("opened {}.", params.text_document.uri),
             )
             .await;
     }

@@ -342,21 +342,21 @@ fn resolve_names(
     for t in toplevels {
         toplevel_graph.add_node(t);
     }
-    let mut toplevle_map: FxHashMap<Name, Vec<NodeIndex>> =
+    let mut toplevel_map: FxHashMap<Name, Vec<NodeIndex>> =
         FxHashMap::default();
     for (i, t) in toplevel_graph.node_references() {
-        toplevle_map.entry(t.name).or_default().push(i);
+        toplevel_map.entry(t.name).or_default().push(i);
     }
     let edges = toplevel_graph
         .node_references()
-        .flat_map(|(from, from_toplevle)| {
-            from_toplevle
+        .flat_map(|(from, from_toplevel)| {
+            from_toplevel
                 .type_with_env
                 .variable_requirements
                 .iter()
                 .flat_map(|req| {
                     imports.get_all_candidates(req.name).flat_map(|name| {
-                        toplevle_map
+                        toplevel_map
                             .get(&name)
                             .unwrap_or_else(|| panic!("{:?} not found", name))
                     })
@@ -660,7 +660,7 @@ fn resolve_scc(
     imports: &Imports,
     map: &mut TypeVariableMap,
 ) -> Result<(Resolved, Vec<Type>, SubtypeRelations), CompileError> {
-    // Merge the declarations in a scc to treate them as if they are one declaration,
+    // Merge the declarations in a scc to treat them as if they are one declaration,
     let mut resolved_idents = Vec::new();
     let mut name_vec = Vec::new();
     let mut variable_requirements = Vec::new();

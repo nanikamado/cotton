@@ -19,7 +19,7 @@ use parser::{
 use std::{collections::BTreeMap, fmt::Debug};
 
 /// Difference between `parser::Ast` and `ast_step1::Ast`:
-/// - `OpSequence`s and `TypeOpSequence`s are converted to syntex trees
+/// - `OpSequence`s and `TypeOpSequence`s are converted to syntax trees
 /// based on `OperatorPrecedenceDecl`s.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Ast<'a> {
@@ -528,7 +528,7 @@ where
                 _ => panic!(),
             }
         }
-        None => panic!("specified index is not varid."),
+        None => panic!("specified index is not valid."),
         Some(OpSequenceUnit::Operand(a)) => {
             panic!("specified position is a operand {:?}", a)
         }
