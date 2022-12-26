@@ -222,7 +222,7 @@ impl Ast {
             &mut data_decls,
             &mut type_alias_map,
             &mut imports,
-        );
+        )?;
         let data_decl_map =
             data_decls.iter().map(|d| (d.name, d.decl_id)).collect();
         {
@@ -243,7 +243,7 @@ impl Ast {
                 data_decl_map: &data_decl_map,
             },
         )?;
-        collect_decls(
+        collect_variable_decls(
             ast,
             module_path,
             &mut variable_decls,
@@ -276,7 +276,7 @@ fn collect_data_and_type_alias_decls<'a>(
     data_decls: &mut Vec<DataDecl>,
     type_alias_map: &mut TypeAliasMap<'a>,
     imports: &mut Imports,
-) {
+) -> Result<(), CompileError> {
     for d in &ast.variable_decl {
         imports.add_true_name(d.name, d.is_public);
     }
@@ -309,16 +309,31 @@ fn collect_data_and_type_alias_decls<'a>(
     }));
     type_alias_map.add_decls(&ast.type_alias_decl, token_map, module_path);
     for v in IntrinsicVariable::iter() {
-        imports.insert_name_alias(
-            Name::from_str(module_path, v.to_str()),
-            Name::from_str_intrinsic(v.to_str()),
-        );
+        imports
+            .insert_name_alias(
+                Name::from_str(module_path, v.to_str()),
+                Name::from_str_intrinsic(v.to_str()),
+                None,
+            )
+            .unwrap();
     }
     for v in IntrinsicConstructor::iter() {
-        imports.insert_name_alias(
-            Name::from_str(module_path, v.to_str()),
-            Name::from_str_intrinsic(v.to_str()),
-        );
+        imports
+            .insert_name_alias(
+                Name::from_str(module_path, v.to_str()),
+                Name::from_str_intrinsic(v.to_str()),
+                None,
+            )
+            .unwrap();
+    }
+    for (name, _) in INTRINSIC_TYPES.iter() {
+        imports
+            .insert_name_alias(
+                Name::from_str(module_path, name),
+                Name::from_str_intrinsic(name),
+                None,
+            )
+            .unwrap();
     }
     for m in &ast.modules {
         imports.add_true_name(m.name, m.is_public);
@@ -329,8 +344,26 @@ fn collect_data_and_type_alias_decls<'a>(
             data_decls,
             type_alias_map,
             imports,
-        )
+        )?
     }
+    for u in &ast.use_decls {
+        let name = Name::from_str(module_path, u.name.0);
+        if u.is_public {
+            imports.set_public(name);
+        }
+        imports.insert_name_alias(
+            name,
+            Name::from_path(
+                module_path,
+                &u.path,
+                u.name,
+                imports,
+                u.span.clone(),
+            )?,
+            Some(u.span.clone()),
+        )?
+    }
+    Ok(())
 }
 
 fn collect_interface_decls(
@@ -393,7 +426,7 @@ struct Env<'a, 'b> {
     data_decl_map: &'a FxHashMap<Name, DeclId>,
 }
 
-fn collect_decls(
+fn collect_variable_decls(
     ast: ast_step1::Ast,
     module_path: ModulePath,
     variable_decls: &mut Vec<VariableDecl>,
@@ -431,7 +464,7 @@ fn collect_decls(
             .collect::<Result<Vec<_>, CompileError>>()?,
     );
     for m in ast.modules {
-        collect_decls(m.ast, m.name, variable_decls, env)?;
+        collect_variable_decls(m.ast, m.name, variable_decls, env)?;
     }
     Ok(())
 }
@@ -884,7 +917,6 @@ impl Name {
             if !imports.is_public(p)
                 && !path_name.is_same_as_or_ancestor_of(base)
             {
-                eprintln!("base = {base:?}, path_name = {path_name:?}");
                 return Err(CompileError::InaccessibleName { path: p, span });
             }
             let m = imports.get_all_candidates(p).collect_vec();
@@ -896,7 +928,6 @@ impl Name {
             && !imports.is_public(name)
             && !path_name.is_same_as_or_ancestor_of(base)
         {
-            eprintln!("path_name = {path_name:?}, base = {base:?}");
             return Err(CompileError::InaccessibleName { path: name, span });
         }
         Ok(name)
@@ -907,9 +938,14 @@ impl TypeId {
     fn get(
         name: Name,
         span: Span,
-        data_decl_map: &FxHashMap<Name, DeclId>,
+        env: &mut Env<'_, '_>,
     ) -> Result<TypeId, CompileError> {
-        if let Some(id) = data_decl_map.get(&name) {
+        let names = env.imports.get_all_candidates(name).collect_vec();
+        if names.is_empty() {
+            return Err(CompileError::NotFound { path: name, span });
+        }
+        let name = names[0];
+        if let Some(id) = env.data_decl_map.get(&name) {
             Ok(TypeId::DeclId(*id))
         } else if let Some(i) = INTRINSIC_TYPES.get(&name.to_string().as_str())
         {
@@ -1096,7 +1132,7 @@ fn type_to_type(
                         t.span.clone(),
                     )?,
                     t.span.clone(),
-                    env.data_decl_map,
+                    env,
                 )?;
                 env.token_map.insert(t.name.1, TokenMapEntry::TypeId(id));
                 Ok(TypeUnit::Tuple(TypeUnit::Const { id }.into(), tuple).into())

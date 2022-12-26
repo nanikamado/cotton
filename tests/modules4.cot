@@ -1,0 +1,16 @@
+mod aaa {
+    pub data D1
+
+    pub mod bbb {
+        use pkg::aaa::D1
+        pub to_string : D1 -> String = | _ => pkg::double("D1")
+    }
+}
+
+use aaa::bbb::to_string
+
+double : String -> String =
+    | a => a <> a
+
+main : () -> () =
+    | () => println(to_string(aaa::D1))

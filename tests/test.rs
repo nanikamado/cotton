@@ -376,6 +376,11 @@ fn modules3() {
 }
 
 #[test]
+fn modules4() {
+    test_test("modules4.cot").stdout("D1D1\n").success();
+}
+
+#[test]
 fn modules_fail() {
     test_test("modules_fail.cot").code(1);
 }
@@ -392,5 +397,5 @@ fn modules_fail3() {
 
 #[test]
 fn modules_fail4() {
-    test_test("modules_fail3.cot").code(1);
+    test_test("modules_fail4.cot").code(1);
 }

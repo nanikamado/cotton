@@ -132,6 +132,12 @@ pub enum Decl {
         ast: Ast,
         is_public: bool,
     },
+    Use {
+        path: Vec<StringWithId>,
+        name: StringWithId,
+        span: Span,
+        is_public: bool,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -332,6 +338,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 .or(str.map(ExprUnit::Str))
                 .or(variable_decl.map(ExprUnit::VariableDecl))
                 .or(ident_with_path
+                    .clone()
                     .map(|(path, name)| ExprUnit::Ident { path, name }))
                 .or(lambda.map(|a| ExprUnit::Case(vec![a])))
                 .or(expr
@@ -468,6 +475,16 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                     .collect(),
             })
         });
+    let use_decl = just(Token::Pub)
+        .or_not()
+        .then_ignore(just(Token::Use))
+        .then(ident_with_path)
+        .map_with_span(|(pub_or_not, (path, name)), span| Decl::Use {
+            path,
+            name,
+            span,
+            is_public: pub_or_not.is_some(),
+        });
     recursive(|decl| {
         let mod_ = just(Token::Pub)
             .or_not()
@@ -486,6 +503,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
             type_alias_decl,
             interface_decl,
             mod_,
+            use_decl,
         ))
     })
     .repeated()

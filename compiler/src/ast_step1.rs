@@ -28,6 +28,7 @@ pub struct Ast<'a> {
     pub type_alias_decl: Vec<TypeAliasDecl<'a>>,
     pub interface_decl: Vec<InterfaceDecl<'a>>,
     pub modules: Vec<Module<'a>>,
+    pub use_decls: Vec<UseDecl<'a>>,
 }
 
 type StrWithId<'a> = (&'a str, Option<TokenId>);
@@ -129,6 +130,14 @@ pub struct Module<'a> {
     pub name: Name,
     pub ast: Ast<'a>,
     pub is_public: bool,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct UseDecl<'a> {
+    pub is_public: bool,
+    pub name: StrWithId<'a>,
+    pub path: Vec<StrWithId<'a>>,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -287,6 +296,7 @@ impl<'a> Ast<'a> {
     ) -> (Self, OpPrecedenceMap<'a>) {
         let mut vs = Vec::new();
         let mut ds = Vec::new();
+        let mut use_decls = Vec::new();
         let mut aliases = Vec::new();
         let mut precedence_map = OP_PRECEDENCE.clone();
         let mut interfaces = Vec::new();
@@ -334,6 +344,17 @@ impl<'a> Ast<'a> {
                         is_public: *is_public,
                     });
                 }
+                parser::Decl::Use {
+                    path,
+                    name,
+                    span,
+                    is_public,
+                } => use_decls.push(UseDecl {
+                    is_public: *is_public,
+                    name: (name.0.as_str(), name.1),
+                    path: path.iter().map(|(a, b)| (a.as_str(), *b)).collect(),
+                    span: span.clone(),
+                }),
             }
         }
         let op_precedence_map = OpPrecedenceMap::new(precedence_map);
@@ -399,6 +420,7 @@ impl<'a> Ast<'a> {
                 })
                 .collect(),
             modules,
+            use_decls,
         };
         (ast, op_precedence_map)
     }

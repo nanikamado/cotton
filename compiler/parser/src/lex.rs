@@ -34,6 +34,7 @@ pub enum Token {
     Mod,
     Question,
     Pub,
+    Use,
 }
 
 trait RequiresIndet {
@@ -153,6 +154,7 @@ fn lexer(
         "where" => Token::Where,
         "mod" => Token::Mod,
         "pub" => Token::Pub,
+        "use" => Token::Use,
         _ => Token::Ident(i, TokenId::new()),
     });
 
