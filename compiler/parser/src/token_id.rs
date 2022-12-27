@@ -1,4 +1,5 @@
-use std::{cell::Cell, fmt::Display};
+use std::cell::Cell;
+use std::fmt::Display;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TokenId(u32);

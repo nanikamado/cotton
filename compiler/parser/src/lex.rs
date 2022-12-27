@@ -1,8 +1,6 @@
 use crate::token_id::TokenId;
-use chumsky::{
-    prelude::*,
-    text::{newline, Character},
-};
+use chumsky::prelude::*;
+use chumsky::text::{newline, Character};
 use std::iter;
 use unic_ucd_category::GeneralCategory;
 

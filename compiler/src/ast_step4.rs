@@ -1,20 +1,19 @@
 mod padded_type_map;
 
 pub use self::padded_type_map::{PaddedTypeMap, TypePointer};
-use crate::{
-    ast_step1::{decl_id::DeclId, name_id::Name},
-    ast_step2::{self, types, ConstructorId, TypeId},
-    ast_step3::{self, DataDecl, VariableId, VariableKind},
-    intrinsics::{IntrinsicConstructor, IntrinsicType, IntrinsicVariable},
+use crate::ast_step1::decl_id::DeclId;
+use crate::ast_step1::name_id::Name;
+use crate::ast_step2::{self, types, ConstructorId, TypeId};
+use crate::ast_step3::{self, DataDecl, VariableId, VariableKind};
+use crate::intrinsics::{
+    IntrinsicConstructor, IntrinsicType, IntrinsicVariable,
 };
 use fxhash::FxHashMap;
 use itertools::Itertools;
-use std::{
-    collections::BTreeSet,
-    convert::{TryFrom, TryInto},
-    fmt::Display,
-    iter,
-};
+use std::collections::BTreeSet;
+use std::convert::{TryFrom, TryInto};
+use std::fmt::Display;
+use std::iter;
 use strum::IntoEnumIterator;
 
 /// Difference between `ast_step3::Ast` and `ast_step4::Ast`:

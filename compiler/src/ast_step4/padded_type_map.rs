@@ -1,11 +1,11 @@
 use super::{LinkedType, LinkedTypeUnit, Type};
-use crate::{
-    ast_step1::name_id::Name,
-    ast_step2::{get_type_name, TypeId},
-};
+use crate::ast_step1::name_id::Name;
+use crate::ast_step2::{get_type_name, TypeId};
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
-use std::{convert::TryInto, fmt::Display, iter, mem};
+use std::convert::TryInto;
+use std::fmt::Display;
+use std::{iter, mem};
 
 #[derive(Debug, PartialEq, Clone, Eq, PartialOrd, Ord, Copy, Hash)]
 pub struct TypePointer(usize);

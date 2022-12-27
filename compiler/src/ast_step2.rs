@@ -6,10 +6,11 @@ pub mod types;
 use self::imports::Imports;
 use self::type_alias_map::{SearchMode, TypeAliasMap};
 use self::types::{Type, TypeMatchable, TypeUnit, TypeVariable};
+use crate::ast_step1::decl_id::DeclId;
+use crate::ast_step1::ident_id::IdentId;
+use crate::ast_step1::name_id::Name;
 use crate::ast_step1::token_map::{TokenMap, TokenMapEntry};
-use crate::ast_step1::{
-    self, decl_id::DeclId, ident_id::IdentId, merge_span, name_id::Name,
-};
+use crate::ast_step1::{self, merge_span};
 use crate::ast_step3::VariableRequirement;
 use crate::errors::CompileError;
 use crate::intrinsics::{

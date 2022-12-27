@@ -1,7 +1,5 @@
-use assert_cmd::{
-    assert::Assert,
-    prelude::{CommandCargoExt, OutputAssertExt},
-};
+use assert_cmd::assert::Assert;
+use assert_cmd::prelude::{CommandCargoExt, OutputAssertExt};
 use itertools::Itertools;
 use std::process::Command;
 use stripmargin::StripMargin;

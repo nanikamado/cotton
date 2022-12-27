@@ -1,9 +1,8 @@
-use crate::{
-    lex::{Span, Token},
-    token_id::TokenId,
-};
+use crate::lex::{Span, Token};
+use crate::token_id::TokenId;
 use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
-use chumsky::{prelude::*, Error, Stream};
+use chumsky::prelude::*;
+use chumsky::{Error, Stream};
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Forall {

@@ -1,10 +1,6 @@
-use crate::{
-    ast_step2::{
-        collect_tuple_rev,
-        types::{self, merge_vec, TypeVariable},
-    },
-    codegen::convert_name,
-};
+use crate::ast_step2::collect_tuple_rev;
+use crate::ast_step2::types::{self, merge_vec, TypeVariable};
+use crate::codegen::convert_name;
 use itertools::Itertools;
 
 pub const IS_INSTANCE_OF: &str = r#"const util = require('util');

@@ -1,13 +1,10 @@
 pub use self::type_type::Type;
-pub use self::type_unit::TypeUnit;
-pub use self::type_unit::TypeVariable;
-use super::SubtypeRelations;
-use super::TypeWithEnv;
+pub use self::type_unit::{TypeUnit, TypeVariable};
+use super::{SubtypeRelations, TypeWithEnv};
 use crate::ast_step1::name_id::Name;
 use crate::ast_step2::TypeId;
 use crate::ast_step3::simplify_subtype_rel;
-use crate::intrinsics::IntrinsicType;
-use crate::intrinsics::INTRINSIC_TYPES;
+use crate::intrinsics::{IntrinsicType, INTRINSIC_TYPES};
 use fxhash::FxHashSet;
 use itertools::Itertools;
 use std::collections::BTreeSet;
@@ -66,14 +63,10 @@ pub enum TypeMatchableRef<'b> {
 
 mod type_unit {
     use super::Type;
-    use crate::{
-        ast_step1::name_id::Name,
-        ast_step2::{SubtypeRelations, TypeId},
-    };
-    use std::{
-        cell::Cell,
-        fmt::{Debug, Display},
-    };
+    use crate::ast_step1::name_id::Name;
+    use crate::ast_step2::{SubtypeRelations, TypeId};
+    use std::cell::Cell;
+    use std::fmt::{Debug, Display};
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct TypeVariableInner(usize);
@@ -198,12 +191,13 @@ mod type_unit {
 
 mod type_type {
     use super::{TypeMatchable, TypeMatchableRef, TypeUnit};
-    use crate::{
-        ast_step2::{types::unwrap_or_clone, SubtypeRelations},
-        ast_step3::simplify_subtype_rel,
-    };
+    use crate::ast_step2::types::unwrap_or_clone;
+    use crate::ast_step2::SubtypeRelations;
+    use crate::ast_step3::simplify_subtype_rel;
     use smallvec::SmallVec;
-    use std::{collections::BTreeSet, iter, rc::Rc};
+    use std::collections::BTreeSet;
+    use std::iter;
+    use std::rc::Rc;
 
     const VEC_SIZE: usize = 2;
 

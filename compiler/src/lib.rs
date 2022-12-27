@@ -9,9 +9,10 @@ mod intrinsics;
 mod run_js;
 mod rust_backend;
 
+use ast_step1::ident_id::IdentId;
+use ast_step1::name_id::Name;
 use ast_step1::token_map::{TokenMap, TokenMapEntry};
 pub use ast_step1::OpPrecedenceMap;
-use ast_step1::{ident_id::IdentId, name_id::Name};
 pub use ast_step2::type_display::{
     PrintTypeOfGlobalVariableForUser, PrintTypeOfLocalVariableForUser,
 };
@@ -23,15 +24,14 @@ use ast_step3::{
 use codegen::codegen;
 use errors::CompileError;
 pub use fxhash::FxHashMap;
+pub use parser::parse::{parse, parse_result};
 pub use parser::token_id::TokenId;
-pub use parser::{lex, parse::parse, parse::parse_result, Token};
+pub use parser::{lex, Token};
 use simplelog::{
     self, ColorChoice, ConfigBuilder, LevelFilter, TermLogger, TerminalMode,
 };
-use std::{
-    io::ErrorKind,
-    process::{self, exit, Stdio},
-};
+use std::io::ErrorKind;
+use std::process::{self, exit, Stdio};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Command {

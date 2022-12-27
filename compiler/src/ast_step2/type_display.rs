@@ -1,11 +1,8 @@
-use super::{
-    collect_tuple_rev,
-    types::{Type, TypeUnit, TypeVariable},
-    TypeId,
-};
-use crate::{
-    ast_step1::name_id::Name, ast_step3::GlobalVariableType, OpPrecedenceMap,
-};
+use super::types::{Type, TypeUnit, TypeVariable};
+use super::{collect_tuple_rev, TypeId};
+use crate::ast_step1::name_id::Name;
+use crate::ast_step3::GlobalVariableType;
+use crate::OpPrecedenceMap;
 use fxhash::FxHashMap;
 use itertools::Itertools;
 use std::fmt::Display;

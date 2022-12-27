@@ -1,32 +1,28 @@
-use crate::{
-    ast_step1::decl_id::DeclId,
-    ast_step2::{
-        self,
-        types::{
-            merge_vec, unwrap_or_clone, Type, TypeConstructor, TypeMatchable,
-            TypeMatchableRef, TypeUnit, TypeVariable,
-        },
-        PatternForRestriction, PatternRestrictions, PatternUnitForRestriction,
-        RelOrigin, SubtypeRelations, TypeWithEnv,
-    },
-    errors::{CompileError, NotSubtypeReason},
+use super::VariableRequirement;
+use crate::ast_step1::decl_id::DeclId;
+use crate::ast_step2::types::{
+    merge_vec, unwrap_or_clone, Type, TypeConstructor, TypeMatchable,
+    TypeMatchableRef, TypeUnit, TypeVariable,
 };
+use crate::ast_step2::{
+    self, PatternForRestriction, PatternRestrictions,
+    PatternUnitForRestriction, RelOrigin, SubtypeRelations, TypeWithEnv,
+};
+use crate::errors::{CompileError, NotSubtypeReason};
 use fxhash::{FxHashMap, FxHashSet};
 use hashbag::HashBag;
 use itertools::Itertools;
 use parser::Span;
-use petgraph::{self, algo::tarjan_scc, graphmap::DiGraphMap};
-use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, BTreeSet},
-    fmt::Display,
-    hash::Hash,
-    iter::Extend,
-    vec,
-};
+use petgraph::algo::tarjan_scc;
+use petgraph::graphmap::DiGraphMap;
+use petgraph::{self};
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Display;
+use std::hash::Hash;
+use std::iter::Extend;
+use std::vec;
 use tracing_mutex::stdsync::TracingRwLock as RwLock;
-
-use super::VariableRequirement;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct TypeVariableMap(BTreeMap<TypeVariable, Type>);
@@ -2455,21 +2451,21 @@ impl Display for TypeVariableMap {
 #[cfg(test)]
 mod tests {
     use super::destruct_type_by_pattern;
-    use crate::{
-        ast_step1::{self, decl_id::DeclId, name_id::Name},
-        ast_step2,
-        ast_step2::{
-            types::{
-                Type, TypeMatchable, TypeMatchableRef, TypeUnit, TypeVariable,
-            },
-            PatternUnitForRestriction, RelOrigin, TypeId, TypeWithEnv,
-        },
-        ast_step3::type_check::simplify::{
-            apply_type_to_pattern, simplify_subtype_rel, simplify_type,
-            TypeDestructResult, TypeVariableMap,
-        },
-        intrinsics::IntrinsicType,
+    use crate::ast_step1::decl_id::DeclId;
+    use crate::ast_step1::name_id::Name;
+    use crate::ast_step1::{self};
+    use crate::ast_step2;
+    use crate::ast_step2::types::{
+        Type, TypeMatchable, TypeMatchableRef, TypeUnit, TypeVariable,
     };
+    use crate::ast_step2::{
+        PatternUnitForRestriction, RelOrigin, TypeId, TypeWithEnv,
+    };
+    use crate::ast_step3::type_check::simplify::{
+        apply_type_to_pattern, simplify_subtype_rel, simplify_type,
+        TypeDestructResult, TypeVariableMap,
+    };
+    use crate::intrinsics::IntrinsicType;
     use itertools::Itertools;
     use stripmargin::StripMargin;
 

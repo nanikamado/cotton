@@ -3,31 +3,36 @@ mod simplify;
 pub use self::simplify::{
     simplify_subtype_rel, unwrap_recursive_alias, TypeVariableMap,
 };
-use crate::{
-    ast_step1::{
-        decl_id::DeclId, ident_id::IdentId, merge_span, name_id::Name,
-    },
-    ast_step2::{
-        self,
-        imports::Imports,
-        types::{self, unwrap_or_clone, SingleTypeConstructor, TypeMatchable},
-        types::{Type, TypeUnit, TypeVariable},
-        Ast, DataDecl, Expr, ExprWithTypeAndSpan, FnArm, Pattern,
-        PatternRestrictions, PatternUnit, PatternUnitForRestriction, RelOrigin,
-        SubtypeRelations, TypeId, TypeWithEnv,
-    },
-    ast_step3::VariableKind,
-    errors::CompileError,
-    intrinsics::{IntrinsicConstructor, IntrinsicType, IntrinsicVariable},
-    TypeMatchableRef,
+use crate::ast_step1::decl_id::DeclId;
+use crate::ast_step1::ident_id::IdentId;
+use crate::ast_step1::merge_span;
+use crate::ast_step1::name_id::Name;
+use crate::ast_step2::imports::Imports;
+use crate::ast_step2::types::{
+    self, unwrap_or_clone, SingleTypeConstructor, Type, TypeMatchable,
+    TypeUnit, TypeVariable,
 };
+use crate::ast_step2::{
+    self, Ast, DataDecl, Expr, ExprWithTypeAndSpan, FnArm, Pattern,
+    PatternRestrictions, PatternUnit, PatternUnitForRestriction, RelOrigin,
+    SubtypeRelations, TypeId, TypeWithEnv,
+};
+use crate::ast_step3::VariableKind;
+use crate::errors::CompileError;
+use crate::intrinsics::{
+    IntrinsicConstructor, IntrinsicType, IntrinsicVariable,
+};
+use crate::TypeMatchableRef;
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use parser::Span;
-use petgraph::{
-    algo::kosaraju_scc, graph::NodeIndex, visit::IntoNodeReferences, Graph,
-};
-use std::{cmp::Reverse, collections::BTreeMap, fmt::Display};
+use petgraph::algo::kosaraju_scc;
+use petgraph::graph::NodeIndex;
+use petgraph::visit::IntoNodeReferences;
+use petgraph::Graph;
+use std::cmp::Reverse;
+use std::collections::BTreeMap;
+use std::fmt::Display;
 use strum::IntoEnumIterator;
 use types::TypeConstructor;
 

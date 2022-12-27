@@ -1,5 +1,7 @@
-use crate::ast_step1::{decl_id::DeclId, ident_id::IdentId};
-use crate::ast_step2::{types::Type, ConstructorId, TypeId};
+use crate::ast_step1::decl_id::DeclId;
+use crate::ast_step1::ident_id::IdentId;
+use crate::ast_step2::types::Type;
+use crate::ast_step2::{ConstructorId, TypeId};
 use fxhash::FxHashMap;
 use parser::token_id::TokenId;
 

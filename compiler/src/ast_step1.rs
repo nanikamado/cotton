@@ -3,20 +3,20 @@ pub mod ident_id;
 pub mod name_id;
 pub mod token_map;
 
-use self::{
-    decl_id::DeclId,
-    name_id::Name,
-    token_map::{TokenMap, TokenMapEntry},
-};
+use self::decl_id::DeclId;
+use self::name_id::Name;
+use self::token_map::{TokenMap, TokenMapEntry};
 use crate::intrinsics::{INTRINSIC_CONSTRUCTORS, OP_PRECEDENCE};
 use fxhash::{FxHashMap, FxHashSet};
 use index_list::{Index, IndexList};
 use itertools::Itertools;
+use parser::token_id::TokenId;
 use parser::{
-    self, token_id::TokenId, Associativity, ExprSuffixOp, OpPrecedenceDecl,
-    PatternApply, Span, TypeApply,
+    self, Associativity, ExprSuffixOp, OpPrecedenceDecl, PatternApply, Span,
+    TypeApply,
 };
-use std::{collections::BTreeMap, fmt::Debug};
+use std::collections::BTreeMap;
+use std::fmt::Debug;
 
 /// Difference between `parser::Ast` and `ast_step1::Ast`:
 /// - `OpSequence`s and `TypeOpSequence`s are converted to syntax trees

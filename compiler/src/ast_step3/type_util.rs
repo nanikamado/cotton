@@ -1,15 +1,11 @@
-use crate::{
-    ast_step2::{
-        types::{
-            merge_vec, unwrap_or_clone, Type, TypeConstructor, TypeMatchable,
-            TypeMatchableRef, TypeUnit, TypeVariable,
-        },
-        RelOrigin, SubtypeRelations, TypeId, TypeWithEnv,
-    },
-    ast_step3::type_check::unwrap_recursive_alias,
-    errors::NotSubtypeReason,
-    intrinsics::INTRINSIC_TYPES,
+use crate::ast_step2::types::{
+    merge_vec, unwrap_or_clone, Type, TypeConstructor, TypeMatchable,
+    TypeMatchableRef, TypeUnit, TypeVariable,
 };
+use crate::ast_step2::{RelOrigin, SubtypeRelations, TypeId, TypeWithEnv};
+use crate::ast_step3::type_check::unwrap_recursive_alias;
+use crate::errors::NotSubtypeReason;
+use crate::intrinsics::INTRINSIC_TYPES;
 use std::rc::Rc;
 
 impl TypeUnit {
@@ -1051,10 +1047,9 @@ impl TypeWithEnv {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        ast_step1::{self, name_id::Name},
-        ast_step2,
-    };
+    use crate::ast_step1::name_id::Name;
+    use crate::ast_step1::{self};
+    use crate::ast_step2;
 
     #[test]
     fn conjunctive_0() {

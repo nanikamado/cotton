@@ -1,7 +1,7 @@
-use crate::{
-    ast_step1::name_id::Name,
-    errors::CompileError,
-    intrinsics::{IntrinsicConstructor, IntrinsicVariable, INTRINSIC_TYPES},
+use crate::ast_step1::name_id::Name;
+use crate::errors::CompileError;
+use crate::intrinsics::{
+    IntrinsicConstructor, IntrinsicVariable, INTRINSIC_TYPES,
 };
 use fxhash::{FxHashMap, FxHashSet};
 use parser::Span;

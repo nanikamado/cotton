@@ -1,12 +1,12 @@
-use crate::{
-    ast_step1::name_id::Name, ast_step2::types::Type, OpPrecedenceMap,
-    PrintTypeOfLocalVariableForUser,
-};
+use crate::ast_step1::name_id::Name;
+use crate::ast_step2::types::Type;
+use crate::{OpPrecedenceMap, PrintTypeOfLocalVariableForUser};
 use ariadne::{Label, Report, ReportKind, Source};
 use colored::{ColoredString, Colorize};
 use itertools::Itertools;
 use parser::Span;
-use std::{fmt::Display, io::Write};
+use std::fmt::Display;
+use std::io::Write;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CompileError {

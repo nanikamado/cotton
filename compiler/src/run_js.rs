@@ -1,7 +1,5 @@
-use std::{
-    io::Write,
-    process::{self, Stdio},
-};
+use std::io::Write;
+use std::process::{self, Stdio};
 
 pub fn run(js: &str) {
     let mut child = process::Command::new("node")

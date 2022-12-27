@@ -1,7 +1,8 @@
 use clap::{command, Arg, ArgAction, ArgGroup};
 use compiler::{run, Command};
 use log::LevelFilter;
-use std::{fs, process, str::FromStr};
+use std::str::FromStr;
+use std::{fs, process};
 
 fn main() {
     #[cfg(feature = "backtrace-on-stack-overflow")]

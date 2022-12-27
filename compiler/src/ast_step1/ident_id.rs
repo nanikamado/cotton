@@ -1,4 +1,5 @@
-use std::{fmt::Display, sync::Mutex};
+use std::fmt::Display;
+use std::sync::Mutex;
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct IdentId(u32);

@@ -1,17 +1,11 @@
-use super::{
-    types::{Type, TypeUnit, TypeVariable},
-    Env, ModulePath,
-};
-use crate::{
-    ast_step1::{
-        self,
-        name_id::Name,
-        token_map::{TokenMap, TokenMapEntry},
-        TypeAliasDecl,
-    },
-    ast_step2::{type_to_type, types::TypeConstructor},
-    errors::CompileError,
-};
+use super::types::{Type, TypeUnit, TypeVariable};
+use super::{Env, ModulePath};
+use crate::ast_step1::name_id::Name;
+use crate::ast_step1::token_map::{TokenMap, TokenMapEntry};
+use crate::ast_step1::{self, TypeAliasDecl};
+use crate::ast_step2::type_to_type;
+use crate::ast_step2::types::TypeConstructor;
+use crate::errors::CompileError;
 use fxhash::FxHashMap;
 use itertools::Itertools;
 use parser::token_id::TokenId;

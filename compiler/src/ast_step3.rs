@@ -6,15 +6,12 @@ pub use self::type_check::{
     TypeVariableMap, VariableId, VariableRequirement,
 };
 use self::type_check::{type_check, TypeCheckResult};
-use crate::{
-    ast_step1::{decl_id::DeclId, ident_id::IdentId, name_id::Name},
-    ast_step2::{
-        self,
-        types::{Type, TypeConstructor, TypeUnit, TypeVariable},
-        Pattern, PatternUnit,
-    },
-    errors::CompileError,
-};
+use crate::ast_step1::decl_id::DeclId;
+use crate::ast_step1::ident_id::IdentId;
+use crate::ast_step1::name_id::Name;
+use crate::ast_step2::types::{Type, TypeConstructor, TypeUnit, TypeVariable};
+use crate::ast_step2::{self, Pattern, PatternUnit};
+use crate::errors::CompileError;
 use fxhash::FxHashMap;
 
 /// Difference between `ast_step2::Ast` and `ast_step3::Ast`:

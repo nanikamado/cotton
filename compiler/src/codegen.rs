@@ -1,13 +1,12 @@
 mod type_restriction_pattern;
 
 use self::type_restriction_pattern::IS_INSTANCE_OF;
-use crate::{
-    ast_step1::{decl_id::DeclId, name_id::Name},
-    ast_step3::DataDecl,
-    ast_step4::{Pattern, PatternUnit, Type},
-    ast_step5::{Ast, Expr, ExprWithType, FnArm, VariableDecl},
-    intrinsics::{IntrinsicConstructor, IntrinsicVariable},
-};
+use crate::ast_step1::decl_id::DeclId;
+use crate::ast_step1::name_id::Name;
+use crate::ast_step3::DataDecl;
+use crate::ast_step4::{Pattern, PatternUnit, Type};
+use crate::ast_step5::{Ast, Expr, ExprWithType, FnArm, VariableDecl};
+use crate::intrinsics::{IntrinsicConstructor, IntrinsicVariable};
 use fxhash::FxHashMap;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
