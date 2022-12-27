@@ -126,6 +126,7 @@ pub enum TokenKind {
     Constructor(Option<GlobalVariableType>),
     Type,
     Interface,
+    KeyWord,
     VariableDeclInInterface(GlobalVariableType),
 }
 
@@ -231,6 +232,7 @@ pub fn get_token_map(
                     }
                 },
                 TokenMapEntry::Interface => TokenKind::Interface,
+                TokenMapEntry::KeyWord => TokenKind::KeyWord,
             };
             (id, t)
         })

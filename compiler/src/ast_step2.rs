@@ -358,6 +358,7 @@ fn collect_data_and_type_alias_decls<'a>(
                 &u.path,
                 u.name,
                 imports,
+                token_map,
                 u.span.clone(),
             )?,
             Some(u.span.clone()),
@@ -685,6 +686,7 @@ fn expr(
                 &path,
                 name,
                 env.imports,
+                env.token_map,
                 span.clone(),
             )?;
             (Vec::new(), Ident { name, ident_id })
@@ -902,9 +904,11 @@ impl Name {
         path: &[(&str, Option<TokenId>)],
         name: (&str, Option<TokenId>),
         imports: &Imports,
+        token_map: &mut TokenMap,
         span: Span,
     ) -> Result<Self, CompileError> {
         let (path, mut path_name) = if !path.is_empty() && path[0].0 == "pkg" {
+            token_map.insert(path[0].1, TokenMapEntry::KeyWord);
             (&path[1..], Name::root_module())
         } else {
             (path, base)
@@ -1069,6 +1073,7 @@ fn type_to_type(
                 &t.path,
                 t.name,
                 env.imports,
+                env.token_map,
                 t.span.clone(),
             )?) {
                 env.token_map.insert(t.name.1, TokenMapEntry::TypeVariable);
@@ -1129,6 +1134,7 @@ fn type_to_type(
                         &t.path,
                         t.name,
                         env.imports,
+                        env.token_map,
                         t.span.clone(),
                     )?,
                     t.span.clone(),

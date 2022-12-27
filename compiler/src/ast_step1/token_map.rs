@@ -13,6 +13,7 @@ pub enum TokenMapEntry {
     Constructor(ConstructorId),
     TypeVariable,
     Interface,
+    KeyWord,
     VariableDeclInInterface(Type),
 }
 

@@ -294,6 +294,7 @@ fn semantic_tokens_from_src(src: &str) -> Option<(SemanticTokens, HoverMap)> {
                             TokenKind::Interface => {
                                 SemanticTokenType::INTERFACE
                             }
+                            TokenKind::KeyWord => SemanticTokenType::KEYWORD,
                         },
                         _ => {
                             eprintln!(
