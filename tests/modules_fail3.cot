@@ -1,0 +1,8 @@
+mod aaa {
+    pub data D1
+
+    pub to_string : D1 -> String = | _ => "D1"
+}
+
+main : () -> () =
+    | () => println(aaa::to_string(D1))

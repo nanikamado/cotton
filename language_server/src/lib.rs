@@ -110,7 +110,7 @@ impl LanguageServer for Backend {
         self.client
             .log_message(
                 MessageType::INFO,
-                &format!("opend {}.", params.text_document.uri),
+                &format!("opened {}.", params.text_document.uri),
             )
             .await;
     }
@@ -294,6 +294,7 @@ fn semantic_tokens_from_src(src: &str) -> Option<(SemanticTokens, HoverMap)> {
                             TokenKind::Interface => {
                                 SemanticTokenType::INTERFACE
                             }
+                            TokenKind::KeyWord => SemanticTokenType::KEYWORD,
                         },
                         _ => {
                             eprintln!(
@@ -311,14 +312,14 @@ fn semantic_tokens_from_src(src: &str) -> Option<(SemanticTokens, HoverMap)> {
                     SemanticTokenType::OPERATOR
                 }
             }
-            Assign | Bar | BArrow | Colon | Question => {
+            Assign | Bar | BArrow | Colon | ColonColon | Question => {
                 SemanticTokenType::OPERATOR
             }
             Paren(_) | OpenParenWithoutPad | Indent | Dedent | Comma => {
                 continue
             }
             Case | Do | Forall | Infixl | Infixr | Data | Type | Interface
-            | Where => SemanticTokenType::KEYWORD,
+            | Mod | Where | Pub | Use => SemanticTokenType::KEYWORD,
         };
         let l = char_to_utf16_map[range.start].0;
         let s = char_to_utf16_map[range.start].1;

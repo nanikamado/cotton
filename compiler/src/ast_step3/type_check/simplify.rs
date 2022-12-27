@@ -1,13 +1,13 @@
 use crate::{
+    ast_step1::decl_id::DeclId,
     ast_step2::{
         self,
-        decl_id::DeclId,
         types::{
-            merge_vec, unwrap_or_clone, Type, TypeMatchable, TypeMatchableRef,
-            TypeUnit, TypeVariable,
+            merge_vec, unwrap_or_clone, Type, TypeConstructor, TypeMatchable,
+            TypeMatchableRef, TypeUnit, TypeVariable,
         },
         PatternForRestriction, PatternRestrictions, PatternUnitForRestriction,
-        RelOrigin, SubtypeRelations, TypeConstructor, TypeWithEnv,
+        RelOrigin, SubtypeRelations, TypeWithEnv,
     },
     errors::{CompileError, NotSubtypeReason},
 };
@@ -310,7 +310,7 @@ impl TypeVariableMap {
         self.insert_type_helper(subtype, k, v, origin, true);
     }
 
-    pub fn insert_type_withouth_log(
+    pub fn insert_type_without_log(
         &mut self,
         subtype: &mut SubtypeRelations,
         k: Type,
@@ -1615,8 +1615,8 @@ fn transpose<T>(v: Vec<Vec<T>>) -> Vec<Vec<T>> {
 impl From<&PatternUnitForRestriction> for Type {
     fn from(p: &PatternUnitForRestriction) -> Self {
         match p {
-            PatternUnitForRestriction::I64 => Type::from_str("I64"),
-            PatternUnitForRestriction::Str => Type::from_str("Str"),
+            PatternUnitForRestriction::I64 => Type::intrinsic_from_str("I64"),
+            PatternUnitForRestriction::Str => Type::intrinsic_from_str("Str"),
             PatternUnitForRestriction::Binder(t, _decl_id) => t.clone(),
             PatternUnitForRestriction::Const { id, .. } => {
                 TypeUnit::Const { id: *id }.into()
@@ -2322,7 +2322,7 @@ fn try_eq_sub<T: TypeConstructor>(
     let mut m = TypeVariableMap::default();
     let mut subtype = SubtypeRelations::default();
     for (a, b, origin) in &t.subtype_relations {
-        m.insert_type_withouth_log(
+        m.insert_type_without_log(
             &mut subtype,
             a.clone(),
             b.clone(),
@@ -2456,10 +2456,9 @@ impl Display for TypeVariableMap {
 mod tests {
     use super::destruct_type_by_pattern;
     use crate::{
-        ast_step1, ast_step2,
+        ast_step1::{self, decl_id::DeclId, name_id::Name},
+        ast_step2,
         ast_step2::{
-            decl_id::DeclId,
-            name_id::Name,
             types::{
                 Type, TypeMatchable, TypeMatchableRef, TypeUnit, TypeVariable,
             },
@@ -2487,12 +2486,12 @@ mod tests {
         dot : a -> (a -> b) -> b forall {a, b} = ()
         "#;
         let ast = parser::parse(src);
-        let (ast, _) = ast_step1::Ast::from(&ast);
-        let (ast, _) = ast_step2::Ast::from(ast);
+        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
+        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
         let (req_t, _) = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str("test"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "test"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2502,7 +2501,7 @@ mod tests {
         let (dot, _) = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str("dot"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "dot"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2510,8 +2509,10 @@ mod tests {
             .unfixed
             .remove_parameters();
         let t = TypeWithEnv {
-            constructor: Type::from_str("I64")
-                .arrow(Type::from_str("I64").union(Type::from_str("String"))),
+            constructor: Type::intrinsic_from_str("I64").arrow(
+                Type::intrinsic_from_str("I64")
+                    .union(Type::intrinsic_from_str("String")),
+            ),
             subtype_relations: vec![(
                 dot.clone(),
                 req_t.clone(),
@@ -2542,12 +2543,12 @@ mod tests {
             (e /\ f /\ True) forall {a,b,c,d,e,f} = ()
         "#;
         let ast = parser::parse(src);
-        let (ast, _) = ast_step1::Ast::from(&ast);
-        let (ast, _) = ast_step2::Ast::from(ast);
+        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
+        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str("test1"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2556,7 +2557,7 @@ mod tests {
         let (t2, _) = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str("test2"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "test2"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2576,12 +2577,12 @@ mod tests {
         test1 : ((True | False) /\ (True | False)) = ()
         "#;
         let ast = parser::parse(src);
-        let (ast, _) = ast_step1::Ast::from(&ast);
-        let (ast, _) = ast_step2::Ast::from(ast);
+        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
+        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str("test1"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2643,19 +2644,19 @@ mod tests {
         test1 : Tree[()] = ()
         "#;
         let ast = parser::parse(src);
-        let (ast, _) = ast_step1::Ast::from(&ast);
-        let (ast, _) = ast_step2::Ast::from(ast);
+        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
+        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
         let t_id = ast
             .data_decl
             .iter()
-            .find(|d| d.name == Name::from_str("T"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "T"))
             .unwrap()
             .decl_id;
         let t_id = TypeId::DeclId(t_id);
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str("test1"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2715,7 +2716,7 @@ mod tests {
     #[test]
     fn apply_type_to_pattern_0() {
         let v1 = TypeUnit::new_variable();
-        let t1 = Type::from_str("I64").union(v1.clone().into());
+        let t1 = Type::intrinsic_from_str("I64").union(v1.clone().into());
         let v2 = TypeVariable::new();
         let r = apply_type_to_pattern(
             Type::argument_tuple_from_arguments(vec![t1]),
@@ -2764,19 +2765,19 @@ mod tests {
         test1 : A = A
         "#;
         let ast = parser::parse(src);
-        let (ast, _) = ast_step1::Ast::from(&ast);
-        let (ast, _) = ast_step2::Ast::from(ast);
+        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
+        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
         let b_id = ast
             .data_decl
             .iter()
-            .find(|d| d.name == Name::from_str("B"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "B"))
             .unwrap()
             .decl_id;
         let b_id = TypeId::DeclId(b_id);
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str("test1"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
             .unwrap()
             .type_annotation
             .as_ref()

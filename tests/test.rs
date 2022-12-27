@@ -97,7 +97,7 @@ fn prime2() {
 }
 
 #[test]
-fn mutal_recursive_type_alias() {
+fn mutual_recursive_type_alias() {
     test_examples("mutual_recursive_type_alias.cot", "2\n2\n");
 }
 
@@ -358,4 +358,44 @@ fn type_pattern_primitive() {
 #[test]
 fn literal_pattern_fail() {
     test_test("literal_pattern_fail.cot").code(1);
+}
+
+#[test]
+fn modules() {
+    test_examples("modules.cot", "4\n");
+}
+
+#[test]
+fn modules2() {
+    test_test("modules2.cot").stdout("4\n").success();
+}
+
+#[test]
+fn modules3() {
+    test_test("modules3.cot").stdout("D1\n").success();
+}
+
+#[test]
+fn modules4() {
+    test_test("modules4.cot").stdout("D1D1\n").success();
+}
+
+#[test]
+fn modules_fail() {
+    test_test("modules_fail.cot").code(1);
+}
+
+#[test]
+fn modules_fail2() {
+    test_test("modules_fail2.cot").code(1);
+}
+
+#[test]
+fn modules_fail3() {
+    test_test("modules_fail3.cot").code(1);
+}
+
+#[test]
+fn modules_fail4() {
+    test_test("modules_fail4.cot").code(1);
 }

@@ -1,6 +1,6 @@
 use crate::{
-    ast_step2::{name_id::Name, types::Type},
-    OpPrecedenceMap, PrintTypeOfLocalVariableForUser,
+    ast_step1::name_id::Name, ast_step2::types::Type, OpPrecedenceMap,
+    PrintTypeOfLocalVariableForUser,
 };
 use ariadne::{Label, Report, ReportKind, Source};
 use colored::{ColoredString, Colorize};
@@ -28,6 +28,14 @@ pub enum CompileError {
         description: String,
     },
     RecursionLimit,
+    InaccessibleName {
+        path: Name,
+        span: Span,
+    },
+    NotFound {
+        path: Name,
+        span: Span,
+    },
 }
 
 impl CompileError {
@@ -41,7 +49,7 @@ impl CompileError {
         match self {
             CompileError::NoSuitableVariable { name, reason } => {
                 if reason.is_empty() {
-                    write!(w, "{} not found", name)
+                    writeln!(w, "{} not found", name)
                 } else if reason.len() == 1 {
                     reason.into_iter().next().unwrap().write(
                         src,
@@ -64,6 +72,19 @@ impl CompileError {
                     Ok(())
                 }
             }
+            CompileError::NotFound { path, span } => {
+                let report =
+                    Report::build(ReportKind::Error, filename, span.start)
+                        .with_label(
+                            Label::new((filename, span)).with_message(format!(
+                                "cannot find `{:?}`",
+                                path
+                            )),
+                        )
+                        .with_message("not found in this scope");
+                report.finish().write((filename, Source::from(src)), w)?;
+                Ok(())
+            }
             CompileError::ManyCandidates { satisfied, span } => {
                 log::debug!(
                     "satisfied: {}",
@@ -74,7 +95,7 @@ impl CompileError {
                         .with_label(Label::new((filename, span)).with_message(
                             format!(
                             "There are {} candidates for this variable.\n{}\
-                                    Could not dicide which one to use.",
+                                    Could not decide which one to use.",
                             satisfied.len(),
                             satisfied.iter().map(|(t, _)| t).format_with(
                                 "",
@@ -112,10 +133,26 @@ impl CompileError {
                 Ok(())
             }
             CompileError::InexhaustiveMatch { description } => {
-                write!(w, "{}", description)
+                writeln!(w, "{}", description)
             }
             CompileError::RecursionLimit => {
-                write!(w, "recursion of implicit variable reaced the limit.")
+                writeln!(w, "recursion of implicit variable reached the limit.")
+            }
+            CompileError::InaccessibleName { path, span } => {
+                let report =
+                    Report::build(ReportKind::Error, filename, span.start)
+                        .with_label(
+                            Label::new((filename, span)).with_message(format!(
+                                "`{:?}` is private",
+                                path
+                            )),
+                        )
+                        .with_message(format!(
+                            "`{:?}` exists but is inaccessible from outside.",
+                            path
+                        ));
+                report.finish().write((filename, Source::from(src)), w)?;
+                Ok(())
             }
         }
     }

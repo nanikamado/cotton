@@ -2,20 +2,17 @@ mod type_check;
 pub mod type_util;
 
 pub use self::type_check::{
-    simplify_subtype_rel, GlobalVariableType, LocalVariableType,
+    simplify_subtype_rel, GlobalVariableType, LocalVariableType, ResolvedIdent,
     TypeVariableMap, VariableId, VariableRequirement,
 };
-use self::type_check::{type_check, ResolvedIdent, TypeCheckResult};
+use self::type_check::{type_check, TypeCheckResult};
 use crate::{
+    ast_step1::{decl_id::DeclId, ident_id::IdentId, name_id::Name},
     ast_step2::{
         self,
-        decl_id::DeclId,
-        ident_id::IdentId,
-        name_id::Name,
-        types::{Type, TypeUnit, TypeVariable},
-        Pattern, PatternUnit, TypeConstructor,
+        types::{Type, TypeConstructor, TypeUnit, TypeVariable},
+        Pattern, PatternUnit,
     },
-    ast_step4::VariableKind,
     errors::CompileError,
 };
 use fxhash::FxHashMap;
@@ -39,13 +36,22 @@ pub struct VariableDecl {
     pub decl_id: DeclId,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash, Copy)]
+pub enum VariableKind {
+    Local,
+    Global,
+    Constructor,
+    Intrinsic,
+    IntrinsicConstructor,
+}
+
 pub type ExprWithType = (Expr, Type);
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr {
     Lambda(Vec<FnArm>),
-    Number(Name),
-    StrLiteral(Name),
+    Number(String),
+    StrLiteral(String),
     Ident {
         name: Name,
         variable_id: VariableId,

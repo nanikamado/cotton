@@ -4,19 +4,19 @@ pub use self::simplify::{
     simplify_subtype_rel, unwrap_recursive_alias, TypeVariableMap,
 };
 use crate::{
-    ast_step1::merge_span,
+    ast_step1::{
+        decl_id::DeclId, ident_id::IdentId, merge_span, name_id::Name,
+    },
     ast_step2::{
         self,
-        decl_id::DeclId,
-        ident_id::IdentId,
-        name_id::Name,
+        imports::Imports,
         types::{self, unwrap_or_clone, SingleTypeConstructor, TypeMatchable},
         types::{Type, TypeUnit, TypeVariable},
         Ast, DataDecl, Expr, ExprWithTypeAndSpan, FnArm, Pattern,
         PatternRestrictions, PatternUnit, PatternUnitForRestriction, RelOrigin,
         SubtypeRelations, TypeId, TypeWithEnv,
     },
-    ast_step4::VariableKind,
+    ast_step3::VariableKind,
     errors::CompileError,
     intrinsics::{IntrinsicConstructor, IntrinsicType, IntrinsicVariable},
     TypeMatchableRef,
@@ -79,7 +79,7 @@ pub fn type_check(ast: &Ast) -> Result<TypeCheckResult, CompileError> {
             type_annotation: None,
             resolved_idents: Default::default(),
             decl_id: VariableId::IntrinsicVariable(v),
-            name: Name::from_str(v.to_str()),
+            name: Name::from_str_intrinsic(v.to_str()),
             variable_kind: VariableKind::Intrinsic,
             fixed_parameters: Default::default(),
         });
@@ -90,7 +90,7 @@ pub fn type_check(ast: &Ast) -> Result<TypeCheckResult, CompileError> {
             type_annotation: None,
             resolved_idents: Default::default(),
             decl_id: VariableId::IntrinsicConstructor(v),
-            name: Name::from_str(v.to_str()),
+            name: Name::from_str_intrinsic(v.to_str()),
             variable_kind: VariableKind::IntrinsicConstructor,
             fixed_parameters: Default::default(),
         });
@@ -192,7 +192,8 @@ pub fn type_check(ast: &Ast) -> Result<TypeCheckResult, CompileError> {
             log::debug!("not face: {}", top.type_with_env);
         }
     }
-    let (mut resolved_names, types, _rel) = resolve_names(toplevels, &mut map)?;
+    let (mut resolved_names, types, _rel) =
+        resolve_names(toplevels, &ast.imports, &mut map)?;
     // TODO: check _rel
     for (ident_id, ResolvedIdent { variable_id, .. }) in
         resolved_names.iter().sorted_unstable()
@@ -334,28 +335,31 @@ type TypesOfGlobalDeclsVec = Vec<(VariableId, GlobalVariableType)>;
 
 fn resolve_names(
     toplevels: Vec<Toplevel>,
+    imports: &Imports,
     map: &mut TypeVariableMap,
 ) -> Result<(Resolved, TypesOfGlobalDeclsVec, SubtypeRelations), CompileError> {
     let mut toplevel_graph = Graph::<Toplevel, ()>::new();
     for t in toplevels {
         toplevel_graph.add_node(t);
     }
-    let mut toplevle_map: FxHashMap<Name, Vec<NodeIndex>> =
+    let mut toplevel_map: FxHashMap<Name, Vec<NodeIndex>> =
         FxHashMap::default();
     for (i, t) in toplevel_graph.node_references() {
-        toplevle_map.entry(t.name).or_default().push(i);
+        toplevel_map.entry(t.name).or_default().push(i);
     }
     let edges = toplevel_graph
         .node_references()
-        .flat_map(|(from, from_toplevle)| {
-            from_toplevle
+        .flat_map(|(from, from_toplevel)| {
+            from_toplevel
                 .type_with_env
                 .variable_requirements
                 .iter()
                 .flat_map(|req| {
-                    toplevle_map
-                        .get(&req.name)
-                        .unwrap_or_else(|| panic!("{} not found", req.name))
+                    imports.get_all_candidates(req.name).flat_map(|name| {
+                        toplevel_map
+                            .get(&name)
+                            .unwrap_or_else(|| panic!("{:?} not found", name))
+                    })
                 })
                 .map(move |to| (*to, from))
         })
@@ -375,6 +379,7 @@ fn resolve_names(
         let mut resolved = resolve_scc(
             unresolved_variables.clone(),
             &resolved_variable_map,
+            imports,
             map,
         )?;
         resolved_idents.append(&mut resolved.0);
@@ -652,9 +657,10 @@ impl TypeConstructor for SccTypeConstructor {
 fn resolve_scc(
     scc: Vec<Toplevel>,
     resolved_variable_map: &FxHashMap<Name, Vec<Toplevel>>,
+    imports: &Imports,
     map: &mut TypeVariableMap,
 ) -> Result<(Resolved, Vec<Type>, SubtypeRelations), CompileError> {
-    // Merge the declarations in a scc to treate them as if they are one declaration,
+    // Merge the declarations in a scc to treat them as if they are one declaration,
     let mut resolved_idents = Vec::new();
     let mut name_vec = Vec::new();
     let mut variable_requirements = Vec::new();
@@ -683,6 +689,7 @@ fn resolve_scc(
             req.span.start,
             &req.additional_candidates,
             resolved_variable_map,
+            imports,
         ))
     });
     let mut scc_type = TypeWithEnv {
@@ -718,6 +725,7 @@ fn resolve_scc(
         },
         map,
         &mut resolved_idents,
+        imports,
     )?;
     let variable_requirements = scc_type.variable_requirements;
     let subtype_relation = scc_type.subtype_relations.clone();
@@ -808,10 +816,11 @@ fn difficulty_of_resolving<C: CandidatesProvider>(
     span_start: usize,
     additional_candidates: &BTreeMap<Name, Vec<Candidate>>,
     resolved_variable_map: C,
+    imports: &Imports,
 ) -> Difficulty {
     Difficulty {
         multiple_candidates: (resolved_variable_map
-            .get_candidates(req_name)
+            .get_candidates(req_name, imports)
             .count()
             + additional_candidates
                 .get(&req_name)
@@ -847,16 +856,16 @@ struct SatisfiedType<T> {
 
 trait CandidatesProvider: Copy {
     type T: Iterator<Item = Candidate>;
-    fn get_candidates(self, req_name: Name) -> Self::T;
+    fn get_candidates(self, req_name: Name, imports: &Imports) -> Self::T;
 }
 
 impl CandidatesProvider for &FxHashMap<Name, Vec<Toplevel>> {
     type T = std::vec::IntoIter<Candidate>;
 
-    fn get_candidates(self, req_name: Name) -> Self::T {
-        self.get(&req_name)
-            .into_iter()
-            .flatten()
+    fn get_candidates(self, req_name: Name, imports: &Imports) -> Self::T {
+        imports
+            .get_all_candidates(req_name)
+            .flat_map(|name| self.get(&name).into_iter().flatten())
             .cloned()
             .map(|t| {
                 let type_ = if let Some(annotation) = t.type_annotation {
@@ -886,11 +895,10 @@ impl<'b, F: FnMut(usize) -> Candidate + Copy> CandidatesProvider
 {
     type T = std::iter::Map<std::vec::IntoIter<usize>, F>;
 
-    fn get_candidates(self, req_name: Name) -> Self::T {
-        self.scc_map
-            .get(&req_name)
-            .iter()
-            .copied()
+    fn get_candidates(self, req_name: Name, imports: &Imports) -> Self::T {
+        imports
+            .get_all_candidates(req_name)
+            .flat_map(|name| self.scc_map.get(&name))
             .flatten()
             .copied()
             .collect_vec()
@@ -920,10 +928,11 @@ impl<'b, F: FnMut(usize) -> Candidate + Copy> CandidatesProvider
         std::iter::Map<std::vec::IntoIter<usize>, F>,
     >;
 
-    fn get_candidates(self, req_name: Name) -> Self::T {
-        self.normal_map
-            .get_candidates(req_name)
-            .chain(self.candidates_provider_with_fn.get_candidates(req_name))
+    fn get_candidates(self, req_name: Name, imports: &Imports) -> Self::T {
+        self.normal_map.get_candidates(req_name, imports).chain(
+            self.candidates_provider_with_fn
+                .get_candidates(req_name, imports),
+        )
     }
 }
 
@@ -933,12 +942,13 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
     resolved_variable_map: C,
     map: &TypeVariableMap,
     resolved_implicit_args: &mut Vec<(IdentId, ResolvedIdent)>,
+    imports: &Imports,
 ) -> (Vec<SatisfiedType<TypeWithEnv<T>>>, Vec<CompileError>) {
     log::trace!("type_of_unresolved_decl:");
     log::trace!("{}", type_of_unresolved_decl);
     log::trace!("required_type : {}", req.required_type);
     let candidates = resolved_variable_map
-        .get_candidates(req.name)
+        .get_candidates(req.name, imports)
         .chain(
             req.additional_candidates
                 .get(&req.name)
@@ -1072,6 +1082,7 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                             req.span.start,
                             &req.additional_candidates,
                             resolved_variable_map,
+                            imports,
                         );
                         let i = t.variable_requirements.partition_point(|r| {
                             difficulty_of_resolving(
@@ -1079,6 +1090,7 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                                 r.span.start,
                                 &r.additional_candidates,
                                 resolved_variable_map,
+                                imports,
                             ) > diff
                         });
                         t.variable_requirements.insert(i, req.clone());
@@ -1106,6 +1118,7 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                                 resolved_variable_map,
                                 &mut map,
                                 resolved_implicit_args,
+                                imports,
                             )?;
                         }
                         Ok(SatisfiedType {
@@ -1223,6 +1236,7 @@ fn resolve_requirements_in_type_with_env(
     resolved_variable_map: impl CandidatesProvider,
     map: &mut TypeVariableMap,
     resolved_idents: &mut Vec<(IdentId, ResolvedIdent)>,
+    imports: &Imports,
 ) -> Result<(), CompileError> {
     while resolve_num > 0 {
         resolve_num -= 1;
@@ -1233,6 +1247,7 @@ fn resolve_requirements_in_type_with_env(
             resolved_variable_map,
             map,
             resolved_idents,
+            imports,
         );
         let satisfied = get_one_satisfied(satisfied, es, req.name, req.span)?;
         resolved_idents.push((
@@ -1353,16 +1368,16 @@ fn min_type_with_env(
             )
         }
         Expr::Number(_) => {
-            let t = Type::from_str("I64");
+            let t = Type::intrinsic_from_str("I64");
             map.insert(subtype_relations, *type_variable, t.clone());
             (t.into(), Default::default(), Default::default())
         }
         Expr::StrLiteral(_) => {
-            let t = Type::from_str("String");
+            let t = Type::intrinsic_from_str("String");
             map.insert(subtype_relations, *type_variable, t.clone());
             (t.into(), Default::default(), Default::default())
         }
-        Expr::Ident { name, ident_id, .. } => {
+        Expr::Ident { name, ident_id } => {
             let t: Type = TypeUnit::Variable(*type_variable).into();
             (
                 ast_step2::TypeWithEnv {
@@ -1611,12 +1626,12 @@ fn pattern_unit_to_type(
     use PatternUnit::*;
     match p {
         I64(_) => (
-            Type::from_str("I64"),
+            Type::intrinsic_from_str("I64"),
             Default::default(),
             PatternUnitForRestriction::I64,
         ),
         Str(_) => (
-            Type::from_str("String"),
+            Type::intrinsic_from_str("String"),
             Default::default(),
             PatternUnitForRestriction::Str,
         ),

@@ -1,12 +1,13 @@
 pub use self::type_type::Type;
 pub use self::type_unit::TypeUnit;
 pub use self::type_unit::TypeVariable;
-use super::name_id::Name;
 use super::SubtypeRelations;
 use super::TypeWithEnv;
+use crate::ast_step1::name_id::Name;
 use crate::ast_step2::TypeId;
 use crate::ast_step3::simplify_subtype_rel;
 use crate::intrinsics::IntrinsicType;
+use crate::intrinsics::INTRINSIC_TYPES;
 use fxhash::FxHashSet;
 use itertools::Itertools;
 use std::collections::BTreeSet;
@@ -65,7 +66,10 @@ pub enum TypeMatchableRef<'b> {
 
 mod type_unit {
     use super::Type;
-    use crate::ast_step2::{name_id::Name, SubtypeRelations, TypeId};
+    use crate::{
+        ast_step1::name_id::Name,
+        ast_step2::{SubtypeRelations, TypeId},
+    };
     use std::{
         cell::Cell,
         fmt::{Debug, Display},
@@ -588,6 +592,20 @@ impl Type {
     ) -> bool {
         let r = simplify_subtype_rel(self, other, already_considered_relations);
         r.map(|v| v.is_empty()).unwrap_or(false)
+    }
+
+    pub fn intrinsic_from_str(t: &'static str) -> Self {
+        TypeUnit::Tuple(
+            TypeUnit::Const {
+                id: TypeId::Intrinsic(INTRINSIC_TYPES[t]),
+            }
+            .into(),
+            TypeUnit::Const {
+                id: TypeId::Intrinsic(INTRINSIC_TYPES["()"]),
+            }
+            .into(),
+        )
+        .into()
     }
 }
 

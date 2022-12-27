@@ -1,0 +1,7 @@
+mod aaa {
+    pub f : I64 -> I64 =
+        | a => a + a
+}
+
+main : () -> () =
+    | () => println(i64_to_string(aaa::f(2)))

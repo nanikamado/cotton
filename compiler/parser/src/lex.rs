@@ -27,17 +27,21 @@ pub enum Token {
     Bar,
     BArrow,
     Colon,
+    ColonColon,
     Type,
     Interface,
     Where,
+    Mod,
     Question,
+    Pub,
+    Use,
 }
 
-trait RequiresIndet {
+trait RequiresIndent {
     fn requires_indent(&self) -> bool;
 }
 
-impl RequiresIndet for (Token, Span) {
+impl RequiresIndent for (Token, Span) {
     fn requires_indent(&self) -> bool {
         use Token::*;
         matches!(self, (Do | Forall | Where, _))
@@ -99,16 +103,16 @@ where
                 }
                 std::cmp::Ordering::Equal => (),
                 std::cmp::Ordering::Greater => {
-                    let requrires_ident_case = line[0].0 == Token::Bar;
+                    let requirers_ident_case = line[0].0 == Token::Bar;
                     if requires_indent
-                        && requrires_ident_case
+                        && requirers_ident_case
                         && indent_level_delta >= 2
                     {
                         tokens.push((indent_tok.clone(), ident_span.clone()));
                         tokens.push((indent_tok.clone(), ident_span.clone()));
                         ignored_indents.push(indent_level_delta);
                         ignored_indents.push(indent_level_delta - 2);
-                    } else if requires_indent || requrires_ident_case {
+                    } else if requires_indent || requirers_ident_case {
                         tokens.push((indent_tok.clone(), ident_span.clone()));
                         ignored_indents.push(indent_level_delta - 1);
                     } else {
@@ -148,6 +152,9 @@ fn lexer(
         "type" => Token::Type,
         "interface" => Token::Interface,
         "where" => Token::Where,
+        "mod" => Token::Mod,
+        "pub" => Token::Pub,
+        "use" => Token::Use,
         _ => Token::Ident(i, TokenId::new()),
     });
 
@@ -187,6 +194,7 @@ fn lexer(
             "=>" => Token::BArrow,
             "|" => Token::Bar,
             "=" => Token::Assign,
+            "::" => Token::ColonColon,
             ":" => Token::Colon,
             _ => Token::Op(op, TokenId::new()),
         }));

@@ -1,12 +1,10 @@
 use crate::{
-    ast_step1,
     ast_step2::{
-        type_to_type,
         types::{
-            merge_vec, unwrap_or_clone, Type, TypeMatchable, TypeMatchableRef,
-            TypeUnit, TypeVariable,
+            merge_vec, unwrap_or_clone, Type, TypeConstructor, TypeMatchable,
+            TypeMatchableRef, TypeUnit, TypeVariable,
         },
-        RelOrigin, SubtypeRelations, TypeConstructor, TypeId, TypeWithEnv,
+        RelOrigin, SubtypeRelations, TypeId, TypeWithEnv,
     },
     ast_step3::type_check::unwrap_recursive_alias,
     errors::NotSubtypeReason,
@@ -731,31 +729,6 @@ impl TypeUnit {
 }
 
 impl Type {
-    // pub fn is_singleton(&self) -> bool {
-    //     use TypeMatchableRef::*;
-    //     match self.matchable_ref() {
-    //         Fn(a, b) => a.is_singleton() && b.is_singleton(),
-    //         Tuple(a, b) => a.is_singleton() && b.is_singleton(),
-    //         Const { .. } => true,
-    //         _ => false,
-    //     }
-    // }
-
-    pub fn from_str(t: &'static str) -> Self {
-        let t = ast_step1::Type {
-            name: (t, None),
-            args: Default::default(),
-        };
-        type_to_type(
-            t,
-            &Default::default(),
-            &Default::default(),
-            &mut Default::default(),
-            crate::ast_step2::SearchMode::Normal,
-            &mut Default::default(),
-        )
-    }
-
     pub fn label_from_str(t: &'static str) -> Self {
         Type::from(TypeUnit::Const {
             id: TypeId::Intrinsic(INTRINSIC_TYPES[t]),
@@ -1079,8 +1052,8 @@ impl TypeWithEnv {
 #[cfg(test)]
 mod tests {
     use crate::{
-        ast_step1,
-        ast_step2::{self, name_id::Name},
+        ast_step1::{self, name_id::Name},
+        ast_step2,
     };
 
     #[test]
@@ -1092,12 +1065,12 @@ mod tests {
         test1 : (False /\ False) | (False /\ True) | (True /\ False) | (True /\ True) = ()
         "#;
         let ast = parser::parse(src);
-        let (ast, _) = ast_step1::Ast::from(&ast);
-        let (ast, _) = ast_step2::Ast::from(ast);
+        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
+        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
         let t = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str("test1"))
+            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
             .unwrap()
             .type_annotation
             .clone()
