@@ -293,15 +293,14 @@ impl<'a> Ast<'a> {
         ast: &'a parser::Ast,
         module_path: Name,
         token_map: &mut TokenMap,
-    ) -> (Self, OpPrecedenceMap<'a>) {
+        constructors: &mut FxHashSet<&'a str>,
+        op_precedence_map: &mut OpPrecedenceMap<'a>,
+    ) -> Self {
         let mut vs = Vec::new();
         let mut ds = Vec::new();
         let mut use_decls = Vec::new();
         let mut aliases = Vec::new();
-        let mut precedence_map = OP_PRECEDENCE.clone();
         let mut interfaces = Vec::new();
-        let mut constructors: FxHashSet<&str> =
-            INTRINSIC_CONSTRUCTORS.keys().map(|s| s.as_str()).collect();
         let mut modules = Vec::new();
         for d in &ast.decls {
             match d {
@@ -321,14 +320,15 @@ impl<'a> Ast<'a> {
                         decl_id,
                         is_public: a.is_public,
                     });
-                    constructors.insert(&a.name.0);
                 }
                 parser::Decl::OpPrecedence(OpPrecedenceDecl {
                     name,
                     associativity,
                     precedence,
                 }) => {
-                    precedence_map.insert(name, (*associativity, *precedence));
+                    op_precedence_map
+                        .0
+                        .insert(name, (*associativity, *precedence));
                 }
                 parser::Decl::TypeAlias(a) => aliases.push(a),
                 parser::Decl::Interface(a) => interfaces.push(a),
@@ -337,12 +337,11 @@ impl<'a> Ast<'a> {
                     ast,
                     is_public,
                 } => {
-                    let name = Name::from_str(module_path, &name.0);
-                    modules.push(Module {
-                        name,
-                        ast: Ast::from_rec(ast, name, token_map).0,
-                        is_public: *is_public,
-                    });
+                    modules.push((
+                        Name::from_str(module_path, &name.0),
+                        ast,
+                        is_public,
+                    ));
                 }
                 parser::Decl::Use {
                     path,
@@ -357,16 +356,30 @@ impl<'a> Ast<'a> {
                 }),
             }
         }
-        let op_precedence_map = OpPrecedenceMap::new(precedence_map);
-        let ast = Ast {
+        let modules = modules
+            .into_iter()
+            .map(|(name, ast, is_public)| Module {
+                name,
+                ast: Ast::from_rec(
+                    ast,
+                    name,
+                    token_map,
+                    constructors,
+                    op_precedence_map,
+                ),
+                is_public: *is_public,
+            })
+            .collect();
+
+        Ast {
             variable_decl: vs
                 .into_iter()
                 .map(|v| {
                     variable_decl(
                         v,
                         &mut Env {
-                            op_precedence_map: &op_precedence_map,
-                            constructors: &constructors,
+                            op_precedence_map,
+                            constructors,
                             module_path,
                             token_map,
                         },
@@ -382,8 +395,8 @@ impl<'a> Ast<'a> {
                         fold_op_sequence(
                             &a.body.0,
                             &mut Env {
-                                op_precedence_map: &op_precedence_map,
-                                constructors: &constructors,
+                                op_precedence_map,
+                                constructors,
                                 module_path,
                                 token_map,
                             },
@@ -406,8 +419,8 @@ impl<'a> Ast<'a> {
                                 fold_op_sequence(
                                     t,
                                     &mut Env {
-                                        op_precedence_map: &op_precedence_map,
-                                        constructors: &constructors,
+                                        op_precedence_map,
+                                        constructors,
                                         module_path,
                                         token_map,
                                     },
@@ -421,14 +434,41 @@ impl<'a> Ast<'a> {
                 .collect(),
             modules,
             use_decls,
-        };
-        (ast, op_precedence_map)
+        }
+    }
+
+    fn collect_constructors(
+        ast: &'a parser::Ast,
+        constructors: &mut FxHashSet<&'a str>,
+    ) {
+        for d in &ast.decls {
+            match d {
+                parser::Decl::Data(d) => {
+                    constructors.insert(&d.name.0);
+                }
+                parser::Decl::Module { ast, .. } => {
+                    Self::collect_constructors(ast, constructors)
+                }
+                parser::Decl::Use { .. } => (), // TODO: use Name instead of &str
+                _ => (),
+            }
+        }
     }
 
     pub fn from(ast: &'a parser::Ast) -> (Self, OpPrecedenceMap<'a>, TokenMap) {
         let mut token_map = TokenMap::default();
-        let (a, b) = Self::from_rec(ast, Name::root_module(), &mut token_map);
-        (a, b, token_map)
+        let mut constructors =
+            INTRINSIC_CONSTRUCTORS.keys().map(|s| s.as_str()).collect();
+        Self::collect_constructors(ast, &mut constructors);
+        let mut precedence_map = OpPrecedenceMap(OP_PRECEDENCE.clone());
+        let a = Self::from_rec(
+            ast,
+            Name::root(),
+            &mut token_map,
+            &mut constructors,
+            &mut precedence_map,
+        );
+        (a, precedence_map, token_map)
     }
 }
 

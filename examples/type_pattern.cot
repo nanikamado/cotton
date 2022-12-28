@@ -1,6 +1,3 @@
-(.) : a -> (a -> b) -> b forall {a, b} =
-    | a, f => f(a)
-
 infixl 10 .
 
 data D1

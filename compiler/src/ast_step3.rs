@@ -143,7 +143,7 @@ fn variable_decl(
                 );
                 value = Expr::Lambda(vec![FnArm {
                     pattern: vec![vec![PatternUnit::Binder(
-                        name,
+                        Name::from_str(d.name.split().unwrap().0, &name),
                         decl_id,
                         t.clone(),
                     )]],

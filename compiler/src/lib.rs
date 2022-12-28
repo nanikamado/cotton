@@ -80,6 +80,7 @@ pub fn run(
     }
     let (tokens, src_len) = lex(source);
     let ast = parser::parse::parse(tokens, source, src_len);
+    let ast = combine_with_prelude(ast);
     let (ast, op_precedence_map, mut token_map) = ast_step1::Ast::from(&ast);
     let (ast, _resolved_idents) = to_step_3(ast, &mut token_map)
         .unwrap_or_else(|e| {
@@ -118,6 +119,26 @@ fn to_step_3(
 ) -> Result<(ast_step3::Ast, FxHashMap<IdentId, ResolvedIdent>), CompileError> {
     let ast = ast_step2::Ast::from(ast, token_map)?;
     ast_step3::Ast::from(ast)
+}
+
+pub fn combine_with_prelude(ast: parser::Ast) -> parser::Ast {
+    let source = include_str!("../../library/prelude.cot");
+    let (tokens, src_len) = parser::lex(source);
+    let prelude_ast = parser::parse::parse(tokens, source, src_len);
+    parser::Ast {
+        decls: vec![
+            parser::Decl::Module {
+                name: ("pkgroot".to_string(), None),
+                ast,
+                is_public: false,
+            },
+            parser::Decl::Module {
+                name: ("prelude".to_string(), None),
+                ast: prelude_ast,
+                is_public: false,
+            },
+        ],
+    }
 }
 
 pub enum TokenKind {

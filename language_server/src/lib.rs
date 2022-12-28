@@ -2,9 +2,9 @@
 mod tests;
 
 use compiler::{
-    FxHashMap, OpPrecedenceMap, PrintTypeOfGlobalVariableForUser,
-    PrintTypeOfLocalVariableForUser, Token, TokenId, TokenKind,
-    TokenMapWithEnv,
+    combine_with_prelude, FxHashMap, OpPrecedenceMap,
+    PrintTypeOfGlobalVariableForUser, PrintTypeOfLocalVariableForUser, Token,
+    TokenId, TokenKind, TokenMapWithEnv,
 };
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
@@ -249,6 +249,7 @@ fn semantic_tokens_from_src(src: &str) -> Option<(SemanticTokens, HoverMap)> {
     let (char_to_utf16_map, utf16_to_char_map) = make_map(src);
     let (ts, src_len) = compiler::lex(src);
     let ast = compiler::parse_result(ts.clone(), src_len).ok()?;
+    let ast = combine_with_prelude(ast);
     let TokenMapWithEnv {
         token_map,
         op_precedence_map,

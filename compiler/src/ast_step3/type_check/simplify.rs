@@ -15,7 +15,6 @@ use itertools::Itertools;
 use parser::Span;
 use petgraph::algo::tarjan_scc;
 use petgraph::graphmap::DiGraphMap;
-use petgraph::{self};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
@@ -2453,8 +2452,6 @@ mod tests {
     use super::destruct_type_by_pattern;
     use crate::ast_step1::decl_id::DeclId;
     use crate::ast_step1::name_id::Name;
-    use crate::ast_step1::{self};
-    use crate::ast_step2;
     use crate::ast_step2::types::{
         Type, TypeMatchable, TypeMatchableRef, TypeUnit, TypeVariable,
     };
@@ -2466,6 +2463,7 @@ mod tests {
         TypeDestructResult, TypeVariableMap,
     };
     use crate::intrinsics::IntrinsicType;
+    use crate::{ast_step1, ast_step2, combine_with_prelude};
     use itertools::Itertools;
     use stripmargin::StripMargin;
 
@@ -2481,13 +2479,13 @@ mod tests {
         = ()
         dot : a -> (a -> b) -> b forall {a, b} = ()
         "#;
-        let ast = parser::parse(src);
+        let ast = combine_with_prelude(parser::parse(src));
         let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
         let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
         let (req_t, _) = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "test"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2497,7 +2495,7 @@ mod tests {
         let (dot, _) = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "dot"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "dot"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2538,13 +2536,13 @@ mod tests {
             (c /\ True /\ d) |
             (e /\ f /\ True) forall {a,b,c,d,e,f} = ()
         "#;
-        let ast = parser::parse(src);
+        let ast = combine_with_prelude(parser::parse(src));
         let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
         let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2553,7 +2551,7 @@ mod tests {
         let (t2, _) = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "test2"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test2"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2572,13 +2570,13 @@ mod tests {
             | () => ()
         test1 : ((True | False) /\ (True | False)) = ()
         "#;
-        let ast = parser::parse(src);
+        let ast = combine_with_prelude(parser::parse(src));
         let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
         let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2639,20 +2637,20 @@ mod tests {
         type Tree = E | T[A, Tree[A], Tree[A]] forall { A }
         test1 : Tree[()] = ()
         "#;
-        let ast = parser::parse(src);
+        let ast = combine_with_prelude(parser::parse(src));
         let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
         let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
         let t_id = ast
             .data_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "T"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "T"))
             .unwrap()
             .decl_id;
         let t_id = TypeId::DeclId(t_id);
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2760,20 +2758,20 @@ mod tests {
         data B
         test1 : A = A
         "#;
-        let ast = parser::parse(src);
+        let ast = combine_with_prelude(parser::parse(src));
         let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
         let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
         let b_id = ast
             .data_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "B"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "B"))
             .unwrap()
             .decl_id;
         let b_id = TypeId::DeclId(b_id);
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test1"))
             .unwrap()
             .type_annotation
             .as_ref()

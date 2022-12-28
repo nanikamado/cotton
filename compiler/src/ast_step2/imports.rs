@@ -16,18 +16,31 @@ struct TrueNames {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub struct Imports(FxHashMap<Name, TrueNames>);
+pub struct Imports {
+    name_map: FxHashMap<Name, TrueNames>,
+    public_names_of_each_module: FxHashMap<Name, Vec<Name>>,
+}
 
 impl Imports {
-    pub fn add_true_name(&mut self, true_name: Name, is_public: bool) {
-        let a = self.0.entry(true_name).or_default();
+    pub fn add_true_name(&mut self, name: Name, is_public: bool) {
+        let a = self.name_map.entry(name).or_default();
         a.is_true_name = true;
         a.is_public = is_public;
+        if is_public {
+            self.public_names_of_each_module
+                .entry(name.split().unwrap().0)
+                .or_default()
+                .push(name);
+        }
     }
 
     pub fn set_public(&mut self, name: Name) {
-        let a = self.0.entry(name).or_default();
+        let a = self.name_map.entry(name).or_default();
         a.is_public = true;
+        self.public_names_of_each_module
+            .entry(name.split().unwrap().0)
+            .or_default()
+            .push(name);
     }
 
     pub fn insert_name_alias(
@@ -42,7 +55,7 @@ impl Imports {
                 span: to_span.unwrap(),
             })
         } else {
-            self.0.entry(from).or_default().true_names.push(to);
+            self.name_map.entry(from).or_default().true_names.push(to);
             Ok(())
         }
     }
@@ -50,7 +63,7 @@ impl Imports {
     fn reachable(&self, from: Name, to: Name) -> bool {
         from == to
             || self
-                .0
+                .name_map
                 .get(&from)
                 .map(|t| {
                     t.true_names.iter().any(|from| self.reachable(*from, to))
@@ -59,18 +72,18 @@ impl Imports {
     }
 
     pub fn is_public(&self, name: Name) -> bool {
-        self.0.get(&name).unwrap().is_public
+        self.name_map.get(&name).unwrap().is_public
     }
 
     pub fn exists(&self, name: Name) -> bool {
-        self.0.contains_key(&name)
+        self.name_map.contains_key(&name)
     }
 
     fn get_all_candidates_rec(
         &self,
         name: Name,
     ) -> Box<dyn Iterator<Item = Name> + '_> {
-        if let Some(names) = self.0.get(&name) {
+        if let Some(names) = self.name_map.get(&name) {
             let ns = names
                 .true_names
                 .iter()
@@ -90,11 +103,18 @@ impl Imports {
             .collect::<FxHashSet<_>>()
             .into_iter()
     }
+
+    pub fn public_names_in_module(&mut self, module: Name) -> &Vec<Name> {
+        self.public_names_of_each_module.entry(module).or_default()
+    }
 }
 
 impl Default for Imports {
     fn default() -> Self {
-        let mut imports = Imports(Default::default());
+        let mut imports = Imports {
+            name_map: Default::default(),
+            public_names_of_each_module: Default::default(),
+        };
         for v in IntrinsicVariable::iter() {
             imports.add_true_name(Name::from_str_intrinsic(v.to_str()), true);
         }

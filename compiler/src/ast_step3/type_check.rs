@@ -148,7 +148,9 @@ pub fn type_check(ast: &Ast) -> Result<TypeCheckResult, CompileError> {
             .into_iter()
             .map(|mut req| {
                 for (name, t, decl_id) in &vs {
-                    req.additional_candidates.entry(*name).or_default().push(
+                    let name =
+                        Name::from_str(req.name.split().unwrap().0, name);
+                    req.additional_candidates.entry(name).or_default().push(
                         Candidate {
                             type_: (*t).clone().into(),
                             variable_id: VariableId::Decl(*decl_id),
@@ -988,6 +990,10 @@ fn find_satisfied_types<T: TypeConstructor, C: CandidatesProvider>(
                         for (interface_v_name, interface_v_t) in
                             variable_requirements
                         {
+                            let interface_v_name = Name::from_str(
+                                req.name.split().unwrap().0,
+                                &interface_v_name,
+                            );
                             let arg = IdentId::new();
                             implicit_args.push((
                                 interface_v_name,

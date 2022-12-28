@@ -134,7 +134,7 @@ pub struct VariableDecl {
 pub struct Annotation {
     pub unfixed: Type,
     pub fixed: Type,
-    pub implicit_parameters: Vec<(Name, Type, DeclId)>,
+    pub implicit_parameters: Vec<(String, Type, DeclId)>,
     pub fixed_parameter_names: FxHashMap<TypeUnit, Name>,
     pub span: Span,
 }
@@ -210,55 +210,26 @@ impl Ast {
         ast: ast_step1::Ast,
         token_map: &mut TokenMap,
     ) -> Result<Self, CompileError> {
-        let module_path = Name::root_module();
-        let mut data_decls = Vec::new();
-        let mut type_alias_map = TypeAliasMap::default();
-        let mut variable_decls = Vec::new();
-        let mut interface_decls = Default::default();
         let mut imports = Imports::default();
-        collect_data_and_type_alias_decls(
-            &ast,
-            module_path,
+        let mut data_decls = Vec::new();
+        let mut variable_decls = Vec::new();
+        let mut env = Env {
             token_map,
-            &mut data_decls,
-            &mut type_alias_map,
-            &mut imports,
-        )?;
-        let data_decl_map =
-            data_decls.iter().map(|d| (d.name, d.decl_id)).collect();
-        {
-            TYPE_NAMES.write().unwrap().extend(
-                data_decls
-                    .iter()
-                    .map(|d| (TypeId::DeclId(d.decl_id), d.name)),
-            );
-        }
-        collect_interface_decls(
-            &ast,
-            module_path,
-            &mut Env {
-                token_map,
-                type_alias_map: &mut type_alias_map,
-                interface_decls: &mut interface_decls,
-                imports: &mut imports,
-                data_decl_map: &data_decl_map,
-            },
-        )?;
-        collect_variable_decls(
+            type_alias_map: &mut TypeAliasMap::default(),
+            interface_decls: &mut Default::default(),
+            imports: &mut imports,
+            data_decl_map: &mut FxHashMap::default(),
+        };
+        collect_decls(
             ast,
-            module_path,
+            Name::root(),
+            &mut env,
             &mut variable_decls,
-            &mut Env {
-                token_map,
-                type_alias_map: &mut type_alias_map,
-                interface_decls: &mut interface_decls,
-                imports: &mut imports,
-                data_decl_map: &data_decl_map,
-            },
+            &mut data_decls,
         )?;
         let entry_point = variable_decls
             .iter()
-            .find(|d| d.name == Name::from_str(module_path, "main"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "main"))
             .unwrap_or_else(|| panic!("entry point not found"))
             .decl_id;
         Ok(Self {
@@ -268,6 +239,35 @@ impl Ast {
             entry_point,
         })
     }
+}
+
+fn collect_decls<'a>(
+    ast: ast_step1::Ast<'a>,
+    module_path: ModulePath,
+    env: &mut Env<'_, 'a>,
+    variable_decls: &mut Vec<VariableDecl>,
+    data_decls: &mut Vec<DataDecl>,
+) -> Result<(), CompileError> {
+    collect_data_and_type_alias_decls(
+        &ast,
+        module_path,
+        env.token_map,
+        data_decls,
+        env.type_alias_map,
+        env.imports,
+    )?;
+    env.data_decl_map
+        .extend(data_decls.iter().map(|d| (d.name, d.decl_id)));
+    {
+        TYPE_NAMES.write().unwrap().extend(
+            data_decls
+                .iter()
+                .map(|d| (TypeId::DeclId(d.decl_id), d.name)),
+        );
+    }
+    collect_interface_decls(&ast, module_path, env)?;
+    collect_variable_decls(ast, module_path, variable_decls, env)?;
+    Ok(())
 }
 
 fn collect_data_and_type_alias_decls<'a>(
@@ -309,33 +309,6 @@ fn collect_data_and_type_alias_decls<'a>(
         }
     }));
     type_alias_map.add_decls(&ast.type_alias_decl, token_map, module_path);
-    for v in IntrinsicVariable::iter() {
-        imports
-            .insert_name_alias(
-                Name::from_str(module_path, v.to_str()),
-                Name::from_str_intrinsic(v.to_str()),
-                None,
-            )
-            .unwrap();
-    }
-    for v in IntrinsicConstructor::iter() {
-        imports
-            .insert_name_alias(
-                Name::from_str(module_path, v.to_str()),
-                Name::from_str_intrinsic(v.to_str()),
-                None,
-            )
-            .unwrap();
-    }
-    for (name, _) in INTRINSIC_TYPES.iter() {
-        imports
-            .insert_name_alias(
-                Name::from_str(module_path, name),
-                Name::from_str_intrinsic(name),
-                None,
-            )
-            .unwrap();
-    }
     for m in &ast.modules {
         imports.add_true_name(m.name, m.is_public);
         collect_data_and_type_alias_decls(
@@ -373,6 +346,52 @@ fn collect_interface_decls(
     module_path: ModulePath,
     env: &mut Env<'_, '_>,
 ) -> Result<(), CompileError> {
+    if module_path != Name::root() {
+        for v in IntrinsicVariable::iter() {
+            env.imports
+                .insert_name_alias(
+                    Name::from_str(module_path, v.to_str()),
+                    Name::from_str_intrinsic(v.to_str()),
+                    None,
+                )
+                .unwrap();
+        }
+        for v in IntrinsicConstructor::iter() {
+            env.imports
+                .insert_name_alias(
+                    Name::from_str(module_path, v.to_str()),
+                    Name::from_str_intrinsic(v.to_str()),
+                    None,
+                )
+                .unwrap();
+        }
+        for (name, _) in INTRINSIC_TYPES.iter() {
+            env.imports
+                .insert_name_alias(
+                    Name::from_str(module_path, name),
+                    Name::from_str_intrinsic(name),
+                    None,
+                )
+                .unwrap();
+        }
+    }
+    if module_path != Name::prelude() {
+        for n in env
+            .imports
+            .public_names_in_module(Name::prelude())
+            .iter()
+            .copied()
+            .collect_vec()
+        {
+            env.imports
+                .insert_name_alias(
+                    Name::from_str(module_path, &n.split().unwrap().1),
+                    n,
+                    None,
+                )
+                .unwrap();
+        }
+    }
     env.interface_decls.extend(
         ast.interface_decl
             .iter()
@@ -407,7 +426,7 @@ fn collect_interface_decls(
                                     t.clone(),
                                 ),
                             );
-                            Ok((Name::from_str(module_path, name.0), t, self_))
+                            Ok((name.0.to_string(), t, self_))
                         })
                         .try_collect()?,
                 ))
@@ -415,7 +434,7 @@ fn collect_interface_decls(
             .try_collect::<_, Vec<_>, _>()?,
     );
     for m in &ast.modules {
-        collect_interface_decls(&m.ast, module_path, env)?;
+        collect_interface_decls(&m.ast, m.name, env)?;
     }
     Ok(())
 }
@@ -423,9 +442,9 @@ fn collect_interface_decls(
 struct Env<'a, 'b> {
     token_map: &'a mut TokenMap,
     type_alias_map: &'a mut TypeAliasMap<'b>,
-    interface_decls: &'a mut FxHashMap<Name, Vec<(Name, Type, TypeVariable)>>,
+    interface_decls: &'a mut FxHashMap<Name, Vec<(String, Type, TypeVariable)>>,
     imports: &'a mut Imports,
-    data_decl_map: &'a FxHashMap<Name, DeclId>,
+    data_decl_map: &'a mut FxHashMap<Name, DeclId>,
 }
 
 fn collect_variable_decls(
@@ -910,7 +929,7 @@ impl Name {
     ) -> Result<Self, CompileError> {
         let (path, mut path_name) = if !path.is_empty() && path[0].0 == "pkg" {
             token_map.insert(path[0].1, TokenMapEntry::KeyWord);
-            (&path[1..], Name::root_module())
+            (&path[1..], Name::pkg_root())
         } else {
             (path, base)
         };
@@ -988,10 +1007,28 @@ fn pattern(
         ast_step1::Pattern::Number(n) => I64(n.parse().unwrap()),
         ast_step1::Pattern::StrLiteral(s) => Str(s.to_string()),
         ast_step1::Pattern::Constructor { name, args } => {
-            let id = ConstructorId::get(
-                Name::from_str(module_path, name.0),
-                env.data_decl_map,
-            );
+            let n = env
+                .imports
+                .get_all_candidates(Name::from_path(
+                    module_path,
+                    &[],
+                    name,
+                    env.imports,
+                    env.token_map,
+                    0..0,
+                )?)
+                .collect_vec();
+            if n.is_empty() {
+                panic!("{} not found", name.0);
+            } else if n.len() == 2 {
+                panic!(
+                    "there are {} candidates for {}. \
+                Multiple dispatching on pattern is not implemented.",
+                    n.len(),
+                    name.0
+                );
+            }
+            let id = ConstructorId::get(n[0], env.data_decl_map);
             env.token_map.insert(name.1, TokenMapEntry::Constructor(id));
             Constructor {
                 name: Name::from_str(module_path, name.0),
@@ -1166,7 +1203,7 @@ fn type_to_type_with_forall(
                 &env.interface_decls[&Name::from_str(module_path, name.0)]
             {
                 variable_requirements.push((
-                    *name,
+                    name.clone(),
                     t.clone()
                         .replace_num(*self_, &TypeUnit::Variable(v).into()),
                 ))

@@ -1,9 +1,4 @@
-(.) : A -> (A -> B) -> B forall {A, B} =
-    | a, f => f(a)
-
 infixl 10 .
-
-data A /\ B forall { A, B }
 
 infixr 3 /\
 

@@ -1,10 +1,4 @@
-(.)
-= | a, f => f(a)
-
 infixl 10 .
-
-data A /\ B forall { A, B }
-
 infixl 3 /\
 
 data A .. B forall { A, B }

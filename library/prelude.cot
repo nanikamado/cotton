@@ -1,0 +1,63 @@
+pub (.) : A -> (A -> B) -> B forall {A, B} =
+    | a, f => f(a)
+
+infixl 10 .
+
+pub data None
+pub data Some(A) forall { A }
+
+type Option = None | Some[A] forall { A }
+
+pub data Nil
+pub data A /\ B forall { A, B }
+
+infixr 5 /\
+
+type List = Nil | A /\ List[A] forall { A }
+
+pub to_string : I64 -> String = i64_to_string
+pub to_string : String -> String = | a => a
+
+interface ToString where
+    to_string : Self -> String
+
+list_to_string_rec : List[A] -> String forall { A : ToString } =
+    | Nil => ""
+    | h /\ t => ", " <> h.to_string <> t.list_to_string_rec
+
+pub to_string : List[A] -> String forall { A : ToString } =
+    | Nil => "[]"
+    | h /\ t => "[" <> h.to_string <> t.list_to_string_rec <> "]"
+
+pub puts : A -> () forall { A : ToString } =
+    | a => a.to_string.println
+
+interface Map where
+    map : Self[A] -> (A -> B) -> Self[B] forall { A, B }
+
+pub map : List[A] -> (A -> B) -> List[B] forall { A, B } =
+    | Nil, _ => Nil
+    | h /\ t, f => h.f /\ t.map(f)
+
+pub map : Option[A] -> (A -> B) -> Option[B] forall { A, B } =
+    | None, _ => None
+    | Some(a), f => Some(a.f)
+
+interface Flatten where
+    flatten : Self[Self[A]] -> Self[A] forall { A }
+
+pub append : List[A] -> List[A] -> List[A] forall { A } =
+    | Nil, ys => ys
+    | h /\ t, ys => h /\ t.append(ys)
+
+pub flatten : Option[Option[A]] -> Option[A] forall { A } =
+    | None => None
+    | Some(None) => None
+    | Some(Some(a)) => Some(a)
+
+pub flatten : List[List[A]] -> List[A] forall { A } =
+    | Nil => Nil
+    | h /\ t => h.append(t.flatten)
+
+pub flat_map : F[A] -> (A -> F[B]) -> F[B] forall { F: Map & Flatten, A, B } =
+    | x, f => x.map(f).flatten

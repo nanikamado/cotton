@@ -1,26 +1,23 @@
 interface ToString where
     to_string : Self -> String
 
-(.) : A -> (A -> B) -> B forall {A, B} =
-    | a, f => f(a)
-
 infixl 10 .
 
-data Nil
-data A /\ B forall { A, B }
+data LocalNil
+data A /=\ B forall { A, B }
 
-infixr 5 /\
+infixr 5 /=\
 
-type List = Nil | A /\ List[A] forall { A }
+type List = LocalNil | A /=\ List[A] forall { A }
 
 list_to_string_rec : List[A] -> String forall { A : ToString } =
-    | Nil => ""
-    | h /\ t => ", " <> h.to_string <> t.list_to_string_rec
+    | LocalNil => ""
+    | h /=\ t => ", " <> h.to_string <> t.list_to_string_rec
 
 to_string : List[A] -> String forall { A : ToString } =
-    | Nil => "[]"
-    | h /\ t => "[" <> h.to_string <> t.list_to_string_rec <> "]"
+    | LocalNil => "[]"
+    | h /=\ t => "[" <> h.to_string <> t.list_to_string_rec <> "]"
 
 main = | () => do
-    ((() /\ Nil) /\ Nil).to_string
+    ((() /=\ LocalNil) /=\ LocalNil).to_string
     ()
