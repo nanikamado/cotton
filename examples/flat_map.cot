@@ -1,10 +1,5 @@
 infixl 10 .
-
-type Option = None | Some[A] forall { A }
-
 infixr 5 /\
-
-type List = Nil | A /\ List[A] forall { A }
 
 interface ToString where
     to_string : Self -> String

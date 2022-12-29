@@ -1052,7 +1052,7 @@ mod tests {
 
     #[test]
     fn conjunctive_0() {
-        let src = r#"data A /\ B forall { A, B }
+        let src = r#"
         infixl 3 /\
         main : () -> () =
             | () => ()

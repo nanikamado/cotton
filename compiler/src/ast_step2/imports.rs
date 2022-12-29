@@ -4,6 +4,7 @@ use crate::intrinsics::{
     IntrinsicConstructor, IntrinsicVariable, INTRINSIC_TYPES,
 };
 use fxhash::{FxHashMap, FxHashSet};
+use itertools::Itertools;
 use parser::Span;
 use std::iter::{empty, once};
 use strum::IntoEnumIterator;
@@ -104,9 +105,28 @@ impl Imports {
             .into_iter()
     }
 
+    pub fn get_one_candidate(
+        &self,
+        name: Name,
+    ) -> Result<Name, ErrorGetOneCandidate> {
+        let ns = self.get_all_candidates(name).collect_vec();
+        if ns.is_empty() {
+            Err(ErrorGetOneCandidate::NotFound)
+        } else if ns.len() >= 2 {
+            Err(ErrorGetOneCandidate::Multiple(ns.len()))
+        } else {
+            Ok(ns[0])
+        }
+    }
+
     pub fn public_names_in_module(&mut self, module: Name) -> &Vec<Name> {
         self.public_names_of_each_module.entry(module).or_default()
     }
+}
+
+pub enum ErrorGetOneCandidate {
+    NotFound,
+    Multiple(usize),
 }
 
 impl Default for Imports {

@@ -111,6 +111,7 @@ pub struct DataDecl {
 pub struct TypeAliasDecl {
     pub name: StringWithId,
     pub body: (Type, Forall),
+    pub is_public: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -452,11 +453,19 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 ..d
             })
         });
-    let type_alias_decl = just(Token::Type)
-        .ignore_then(ident)
+    let type_alias_decl = just(Token::Pub)
+        .or_not()
+        .then_ignore(just(Token::Type))
+        .then(ident)
         .then_ignore(just(Token::Assign))
         .then(type_.clone())
-        .map(|(name, body)| Decl::TypeAlias(TypeAliasDecl { name, body }));
+        .map(|((pub_or_not, name), body)| {
+            Decl::TypeAlias(TypeAliasDecl {
+                name,
+                body,
+                is_public: pub_or_not.is_some(),
+            })
+        });
     let interface_decl = ident
         .delimited_by(just(Token::Interface), just(Token::Where))
         .then(indented(

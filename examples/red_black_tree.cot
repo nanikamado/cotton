@@ -1,5 +1,4 @@
 infixl 10 .
-
 infixl 3 /\
 
 data E
@@ -12,8 +11,6 @@ type Color = R | B
 
 type RBTree = E | T[Color, A, RBTree[A], RBTree[A]] forall { A }
 type NonEmptyRBTree = T[Color, A, RBTree[A], RBTree[A]] forall { A }
-
-type Bool = True | False
 
 insert : RBTree[I64] -> I64 -> NonEmptyRBTree[I64] =
     | t, x => t.insert_rec(x).

@@ -1,3 +1,4 @@
+use super::imports::Imports;
 use super::types::{Type, TypeUnit, TypeVariable};
 use super::{Env, ModulePath};
 use crate::ast_step1::name_id::Name;
@@ -139,11 +140,14 @@ impl<'a> TypeAliasMap<'a> {
         type_alias_decls: &[TypeAliasDecl<'a>],
         token_map: &mut TokenMap,
         module_path: ModulePath,
+        imports: &mut Imports,
     ) {
         self.0.extend(type_alias_decls.iter().map(|a| {
             token_map.insert(a.name.1, TokenMapEntry::TypeAlias);
+            let name = Name::from_str(module_path, a.name.0);
+            imports.add_true_name(name, a.is_public);
             (
-                Name::from_str(module_path, a.name.0),
+                name,
                 AliasEntry {
                     type_: a.body.0.clone(),
                     type_variables: a.body.1.clone(),

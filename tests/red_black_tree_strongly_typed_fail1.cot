@@ -8,7 +8,6 @@ data R
 data B
 
 type Color = R | B
-type Bool = True | False
 
 type NonEmptyRBTree = T[B, A, Node[A], Node[A]] forall { A }
 type RBTree = E | NonEmptyRBTree[A] forall { A }

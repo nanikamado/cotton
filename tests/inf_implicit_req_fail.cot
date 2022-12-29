@@ -8,9 +8,9 @@ data A /=\ B forall { A, B }
 
 infixr 5 /=\
 
-type List = LocalNil | A /=\ List[A] forall { A }
+type LocalList = LocalNil | A /=\ List[A] forall { A }
 
-list_to_string_rec : List[A] -> String forall { A : ToString } =
+list_to_string_rec : LocalList[A] -> String forall { A : ToString } =
     | LocalNil => ""
     | h /=\ t => ", " <> h.to_string <> t.list_to_string_rec
 

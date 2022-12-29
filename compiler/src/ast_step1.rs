@@ -69,6 +69,7 @@ pub struct DataDecl<'a> {
 pub struct TypeAliasDecl<'a> {
     pub name: StrWithId<'a>,
     pub body: (Type<'a>, Forall<'a>),
+    pub is_public: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -404,6 +405,7 @@ impl<'a> Ast<'a> {
                         .0,
                         (&a.body.1).into(),
                     ),
+                    is_public: a.is_public,
                 })
                 .collect(),
             interface_decl: interfaces

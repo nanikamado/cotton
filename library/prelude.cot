@@ -6,14 +6,14 @@ infixl 10 .
 pub data None
 pub data Some(A) forall { A }
 
-type Option = None | Some[A] forall { A }
+pub type Option = None | Some[A] forall { A }
 
 pub data Nil
 pub data A /\ B forall { A, B }
 
 infixr 5 /\
 
-type List = Nil | A /\ List[A] forall { A }
+pub type List = Nil | A /\ List[A] forall { A }
 
 pub to_string : I64 -> String = i64_to_string
 pub to_string : String -> String = | a => a
@@ -61,3 +61,5 @@ pub flatten : List[List[A]] -> List[A] forall { A } =
 
 pub flat_map : F[A] -> (A -> F[B]) -> F[B] forall { F: Map & Flatten, A, B } =
     | x, f => x.map(f).flatten
+
+pub type Bool = True | False

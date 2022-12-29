@@ -2469,7 +2469,7 @@ mod tests {
 
     #[test]
     fn simplify1() {
-        let src = r#"data A /\ B forall { A, B }
+        let src = r#"
         infixl 3 /\
         main : () -> ()
         = | () => ()
@@ -2527,7 +2527,7 @@ mod tests {
 
     #[test]
     fn simplify3() {
-        let src = r#"data A /\ B forall { A, B }
+        let src = r#"
         infixl 3 /\
         main : () -> () =
             | () => ()
@@ -2564,7 +2564,7 @@ mod tests {
 
     #[test]
     fn destruct_type_0() {
-        let src = r#"data A /\ B forall { A, B }
+        let src = r#"
         infixl 3 /\
         main : () -> () =
             | () => ()

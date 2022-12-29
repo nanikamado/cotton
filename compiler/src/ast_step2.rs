@@ -3,7 +3,7 @@ mod type_alias_map;
 pub mod type_display;
 pub mod types;
 
-use self::imports::Imports;
+use self::imports::{ErrorGetOneCandidate, Imports};
 use self::type_alias_map::{SearchMode, TypeAliasMap};
 use self::types::{Type, TypeMatchable, TypeUnit, TypeVariable};
 use crate::ast_step1::decl_id::DeclId;
@@ -308,7 +308,12 @@ fn collect_data_and_type_alias_decls<'a>(
                 .collect(),
         }
     }));
-    type_alias_map.add_decls(&ast.type_alias_decl, token_map, module_path);
+    type_alias_map.add_decls(
+        &ast.type_alias_decl,
+        token_map,
+        module_path,
+        imports,
+    );
     for m in &ast.modules {
         imports.add_true_name(m.name, m.is_public);
         collect_data_and_type_alias_decls(
@@ -966,6 +971,7 @@ impl TypeId {
     ) -> Result<TypeId, CompileError> {
         let names = env.imports.get_all_candidates(name).collect_vec();
         if names.is_empty() {
+            dbg!();
             return Err(CompileError::NotFound { path: name, span });
         }
         let name = names[0];
@@ -975,6 +981,7 @@ impl TypeId {
         {
             Ok(TypeId::Intrinsic(*i))
         } else {
+            dbg!();
             Err(CompileError::NotFound { path: name, span })
         }
     }
@@ -1126,15 +1133,38 @@ fn type_to_type(
                     )?);
                 }
                 Ok(new_t)
-            } else if let Some(mut unaliased) = env.get_type_from_alias(
-                (Name::from_str(module_path, t.name.0), t.name.1),
-                type_variable_names,
-                if search_type == SearchMode::Normal {
-                    SearchMode::Alias
-                } else {
-                    SearchMode::AliasSub
-                },
-            )? {
+            } else if let Some(mut unaliased) = {
+                let n = Name::from_path(
+                    module_path,
+                    &t.path,
+                    t.name,
+                    env.imports,
+                    env.token_map,
+                    t.span.clone(),
+                )?;
+                let n = match env.imports.get_one_candidate(n) {
+                    Ok(n) => Ok(n),
+                    Err(ErrorGetOneCandidate::NotFound) => {
+                        dbg!();
+                        Err(CompileError::NotFound {
+                            path: n,
+                            span: t.span.clone(),
+                        })
+                    }
+                    Err(ErrorGetOneCandidate::Multiple(len)) => {
+                        panic!("there are {} candidates for {}", len, n);
+                    }
+                }?;
+                env.get_type_from_alias(
+                    (n, t.name.1),
+                    type_variable_names,
+                    if search_type == SearchMode::Normal {
+                        SearchMode::Alias
+                    } else {
+                        SearchMode::AliasSub
+                    },
+                )?
+            } {
                 for a in &t.args {
                     unaliased =
                         unaliased.type_level_function_apply(type_to_type(
