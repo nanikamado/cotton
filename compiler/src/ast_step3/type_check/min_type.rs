@@ -190,7 +190,10 @@ fn min_type_with_env_rec(
                 TypeWithEnv {
                     constructor: t.clone(),
                     variable_requirements: vec![VariableRequirement {
-                        name: name.clone(),
+                        name: name
+                            .iter()
+                            .map(|(a, b, c)| (a.to_string(), b.clone(), *c))
+                            .collect(),
                         module_path,
                         required_type: t,
                         ident: *ident_id,

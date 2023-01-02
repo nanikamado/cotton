@@ -45,8 +45,8 @@ pub enum TypeId {
 /// - Local variable declarations are converted into lambdas and function calls.
 /// - Question notations are desugared.
 #[derive(Debug, PartialEq)]
-pub struct Ast {
-    pub variable_decl: Vec<VariableDecl>,
+pub struct Ast<'a> {
+    pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl>,
     pub imports: Imports,
     pub entry_point: DeclId,
@@ -121,10 +121,10 @@ where
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct VariableDecl {
+pub struct VariableDecl<'a> {
     pub name: Name,
     pub type_annotation: Option<Annotation>,
-    pub value: ExprWithTypeAndSpan<TypeVariable>,
+    pub value: ExprWithTypeAndSpan<'a, TypeVariable>,
     pub decl_id: DeclId,
     pub span: Span,
 }
@@ -138,30 +138,33 @@ pub struct Annotation {
     pub span: Span,
 }
 
-pub type ExprWithTypeAndSpan<T> = (Expr<T>, T, Span);
+pub type ExprWithTypeAndSpan<'a, T> = (Expr<'a, T>, T, Span);
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Expr<T> {
-    Lambda(Vec<FnArm<T>>),
+pub enum Expr<'a, T> {
+    Lambda(Vec<FnArm<'a, T>>),
     Number(String),
     StrLiteral(String),
     Ident {
-        name: Vec<(String, Option<Span>, Option<TokenId>)>,
+        name: Vec<(&'a str, Option<Span>, Option<TokenId>)>,
         ident_id: IdentId,
     },
     ResolvedIdent {
         decl_id: DeclId,
         type_: TypeVariable,
     },
-    Call(Box<ExprWithTypeAndSpan<T>>, Box<ExprWithTypeAndSpan<T>>),
-    Do(Vec<ExprWithTypeAndSpan<T>>),
-    TypeAnnotation(Box<ExprWithTypeAndSpan<T>>, Type),
+    Call(
+        Box<ExprWithTypeAndSpan<'a, T>>,
+        Box<ExprWithTypeAndSpan<'a, T>>,
+    ),
+    Do(Vec<ExprWithTypeAndSpan<'a, T>>),
+    TypeAnnotation(Box<ExprWithTypeAndSpan<'a, T>>, Type),
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct FnArm<T> {
+pub struct FnArm<'a, T> {
     pub pattern: Vec<(Pattern<T>, Span)>,
-    pub expr: ExprWithTypeAndSpan<T>,
+    pub expr: ExprWithTypeAndSpan<'a, T>,
 }
 
 /// Represents a multi-case pattern which matches if any of the `PatternUnit` in it matches.
@@ -184,19 +187,19 @@ pub enum PatternUnit<T> {
 }
 
 #[derive(Debug)]
-enum FlatMapEnv {
+enum FlatMapEnv<'a> {
     FlatMap {
         decl_id: DeclId,
         type_of_decl: TypeVariable,
-        pre_calc: ExprWithTypeAndSpan<TypeVariable>,
+        pre_calc: ExprWithTypeAndSpan<'a, TypeVariable>,
         question_span: Span,
     },
-    Decl(DeclId, ExprWithTypeAndSpan<TypeVariable>),
+    Decl(DeclId, ExprWithTypeAndSpan<'a, TypeVariable>),
 }
 
-struct WithFlatMapEnv<Value = ExprWithTypeAndSpan<TypeVariable>> {
+struct WithFlatMapEnv<'a, Value = ExprWithTypeAndSpan<'a, TypeVariable>> {
     value: Value,
-    env: Vec<FlatMapEnv>,
+    env: Vec<FlatMapEnv<'a>>,
 }
 
 static TYPE_NAMES: Lazy<RwLock<FxHashMap<TypeId, Name>>> = Lazy::new(|| {
@@ -214,9 +217,9 @@ pub fn get_type_name(type_id: TypeId) -> Name {
     *TYPE_NAMES.read().unwrap().get(&type_id).unwrap()
 }
 
-impl Ast {
+impl<'a> Ast<'a> {
     pub fn from(
-        ast: ast_step1::Ast,
+        ast: ast_step1::Ast<'a>,
         token_map: &mut TokenMap,
         mut imports: Imports,
     ) -> Result<Self, CompileError> {
@@ -254,7 +257,7 @@ fn collect_decls<'a>(
     ast: ast_step1::Ast<'a>,
     module_path: ModulePath,
     env: &mut Env<'_, 'a>,
-    variable_decls: &mut Vec<VariableDecl>,
+    variable_decls: &mut Vec<VariableDecl<'a>>,
     data_decls: &mut Vec<DataDecl>,
 ) -> Result<(), CompileError> {
     collect_data_and_type_alias_decls(
@@ -337,10 +340,10 @@ fn collect_data_and_type_alias_decls<'a>(
     Ok(())
 }
 
-fn collect_interface_decls(
-    ast: &ast_step1::Ast,
+fn collect_interface_decls<'a>(
+    ast: &ast_step1::Ast<'a>,
     module_path: ModulePath,
-    env: &mut Env<'_, '_>,
+    env: &mut Env<'a, '_>,
 ) -> Result<(), CompileError> {
     env.interface_decls.extend(
         ast.interface_decl
@@ -376,7 +379,7 @@ fn collect_interface_decls(
                                     t.clone(),
                                 ),
                             );
-                            Ok((name.0.to_string(), t, self_))
+                            Ok((name.0, t, self_))
                         })
                         .try_collect()?,
                 ))
@@ -392,21 +395,22 @@ fn collect_interface_decls(
 struct Env<'a, 'b> {
     token_map: &'a mut TokenMap,
     type_alias_map: &'a mut TypeAliasMap<'b>,
-    interface_decls: &'a mut FxHashMap<Name, Vec<(String, Type, TypeVariable)>>,
+    interface_decls:
+        &'a mut FxHashMap<Name, Vec<(&'a str, Type, TypeVariable)>>,
     imports: &'a mut Imports,
     data_decl_map: &'a mut FxHashMap<Name, DeclId>,
 }
 
-fn collect_variable_decls(
-    ast: ast_step1::Ast,
+fn collect_variable_decls<'a>(
+    ast: ast_step1::Ast<'a>,
     module_path: ModulePath,
-    variable_decls: &mut Vec<VariableDecl>,
+    variable_decls: &mut Vec<VariableDecl<'a>>,
     env: &mut Env<'_, '_>,
 ) -> Result<(), CompileError> {
     variable_decls.extend(
         ast.variable_decl
             .into_iter()
-            .map(|d| -> Result<VariableDecl, CompileError> {
+            .map(|d| -> Result<VariableDecl<'a>, CompileError> {
                 let WithFlatMapEnv {
                     value:
                         VariableDecl {
@@ -470,12 +474,12 @@ impl<T> From<PatternUnit<T>> for Pattern<T> {
     }
 }
 
-fn variable_decl(
-    v: ast_step1::VariableDecl,
+fn variable_decl<'a>(
+    v: ast_step1::VariableDecl<'a>,
     module_path: ModulePath,
     env: &mut Env<'_, '_>,
     type_variable_names: &FxHashMap<Name, TypeVariable>,
-) -> Result<WithFlatMapEnv<VariableDecl>, CompileError> {
+) -> Result<WithFlatMapEnv<'a, VariableDecl<'a>>, CompileError> {
     let expr = expr(v.value, module_path, type_variable_names, env)?;
     let d = VariableDecl {
         type_annotation: v
@@ -579,11 +583,7 @@ fn catch_flat_map(
                             Expr::Call(
                                 Box::new((
                                     Expr::Ident {
-                                        name: vec![(
-                                            "flat_map".to_string(),
-                                            None,
-                                            None,
-                                        )],
+                                        name: vec![("flat_map", None, None)],
                                         ident_id: IdentId::new(),
                                     },
                                     TypeVariable::new(),
@@ -622,12 +622,12 @@ fn catch_flat_map(
     Ok(expr)
 }
 
-fn expr(
-    e: ast_step1::ExprWithSpan,
+fn expr<'a>(
+    e: ast_step1::ExprWithSpan<'a>,
     module_path: ModulePath,
     type_variable_names: &FxHashMap<Name, TypeVariable>,
     env: &mut Env<'_, '_>,
-) -> Result<WithFlatMapEnv, CompileError> {
+) -> Result<WithFlatMapEnv<'a>, CompileError> {
     use Expr::*;
     let span = e.1;
     let (flat_map_env, e) = match e.0 {
@@ -652,10 +652,7 @@ fn expr(
             (
                 Vec::new(),
                 Ident {
-                    name: path
-                        .into_iter()
-                        .map(|(a, b, c)| (a.to_string(), b, c))
-                        .collect(),
+                    name: path,
                     ident_id,
                 },
             )
@@ -747,14 +744,14 @@ fn expr(
     })
 }
 
-fn add_expr_in_do(
-    e: ast_step1::ExprWithSpan,
+fn add_expr_in_do<'a>(
+    e: ast_step1::ExprWithSpan<'a>,
     module_path: ModulePath,
-    mut es: Vec<ExprWithTypeAndSpan<TypeVariable>>,
+    mut es: Vec<ExprWithTypeAndSpan<'a, TypeVariable>>,
     es_span: Span,
     type_variable_names: &FxHashMap<Name, TypeVariable>,
     env: &mut Env<'_, '_>,
-) -> Result<(Vec<ExprWithTypeAndSpan<TypeVariable>>, Span), CompileError> {
+) -> Result<(Vec<ExprWithTypeAndSpan<'a, TypeVariable>>, Span), CompileError> {
     match e {
         (ast_step1::Expr::Decl(d), d_span) => {
             let d = variable_decl(*d, module_path, env, type_variable_names)?;
@@ -763,7 +760,7 @@ fn add_expr_in_do(
                     vec![
                         (
                             Expr::Ident {
-                                name: vec![("()".to_string(), None, None)],
+                                name: vec![("()", None, None)],
                                 ident_id: IdentId::new(),
                             },
                             TypeVariable::new(),
@@ -831,12 +828,12 @@ fn add_expr_in_do(
     }
 }
 
-fn fn_arm(
-    arm: ast_step1::FnArm,
+fn fn_arm<'a>(
+    arm: ast_step1::FnArm<'a>,
     module_path: ModulePath,
     type_variable_names: &FxHashMap<Name, TypeVariable>,
     env: &mut Env<'_, '_>,
-) -> Result<FnArm<TypeVariable>, CompileError> {
+) -> Result<FnArm<'a, TypeVariable>, CompileError> {
     Ok(FnArm {
         pattern: arm
             .pattern
@@ -1104,7 +1101,7 @@ fn type_to_type_with_forall(
                 &env.interface_decls[&Name::from_str(module_path, name.0)]
             {
                 variable_requirements.push((
-                    name.clone(),
+                    *name,
                     t.clone()
                         .replace_num(*self_, &TypeUnit::Variable(v).into()),
                 ))
@@ -1123,7 +1120,10 @@ fn type_to_type_with_forall(
     if !variable_requirements.is_empty() {
         t = TypeUnit::Restrictions {
             t,
-            variable_requirements,
+            variable_requirements: variable_requirements
+                .into_iter()
+                .map(|(name, t)| (name.to_string(), t))
+                .collect(),
             subtype_relations: Default::default(),
         }
         .into();
