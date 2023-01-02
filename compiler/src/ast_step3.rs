@@ -9,6 +9,7 @@ use self::type_check::{type_check, TypeCheckResult};
 use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::ident_id::IdentId;
 use crate::ast_step1::name_id::Name;
+use crate::ast_step1::token_map::TokenMap;
 use crate::ast_step2::types::{Type, TypeConstructor, TypeUnit, TypeVariable};
 use crate::ast_step2::{self, Pattern, PatternUnit};
 use crate::errors::CompileError;
@@ -50,7 +51,7 @@ pub enum Expr {
     Number(String),
     StrLiteral(String),
     Ident {
-        name: Name,
+        name: String,
         variable_id: VariableId,
         variable_kind: VariableKind,
     },
@@ -73,14 +74,15 @@ pub struct DataDecl {
 
 impl Ast {
     pub fn from(
-        ast: ast_step2::Ast,
+        mut ast: ast_step2::Ast,
+        token_map: &mut TokenMap,
     ) -> Result<(Self, FxHashMap<IdentId, ResolvedIdent>), CompileError> {
         let TypeCheckResult {
             resolved_idents,
             global_variable_types,
             mut local_variable_types,
             type_variable_map: mut map,
-        } = type_check(&ast)?;
+        } = type_check(&mut ast, token_map)?;
         let (variable_decl, entry_point) = variable_decl(
             ast.variable_decl,
             ast.entry_point,
@@ -143,7 +145,7 @@ fn variable_decl(
                 );
                 value = Expr::Lambda(vec![FnArm {
                     pattern: vec![vec![PatternUnit::Binder(
-                        Name::from_str(d.name.split().unwrap().0, &name),
+                        name,
                         decl_id,
                         t.clone(),
                     )]],
@@ -190,12 +192,17 @@ fn expr(
         ast_step2::Expr::Ident { name, ident_id } => {
             let resolved_item = resolved_idents[&ident_id].clone();
             get_expr_from_resolved_ident(
-                name,
+                name.last().unwrap().0.clone(),
                 &resolved_item,
                 map.find(t),
                 resolved_idents,
             )
         }
+        ast_step2::Expr::ResolvedIdent { decl_id, .. } => Expr::Ident {
+            name: "unique".to_string(),
+            variable_id: VariableId::Decl(decl_id),
+            variable_kind: VariableKind::Local,
+        },
         ast_step2::Expr::Call(f, a) => Expr::Call(
             expr(*f, resolved_idents, map).into(),
             expr(*a, resolved_idents, map).into(),
@@ -213,7 +220,7 @@ fn expr(
 }
 
 fn get_expr_from_resolved_ident(
-    name: Name,
+    name: String,
     resolved_ident: &ResolvedIdent,
     t: Type,
     resolved_idents: &FxHashMap<IdentId, ResolvedIdent>,
@@ -238,7 +245,7 @@ fn get_expr_from_resolved_ident(
             Box::new((value, fn_t)),
             Box::new((
                 get_expr_from_resolved_ident(
-                    *name,
+                    name.to_string(),
                     &resolved_idents[resolved_ident],
                     implicit_arg_t.clone(),
                     resolved_idents,
@@ -296,6 +303,9 @@ fn normalize_types_in_pattern_unit(
     match pattern {
         PatternUnit::Binder(name, ident_id, t) => {
             PatternUnit::Binder(name, ident_id, map.find(t))
+        }
+        PatternUnit::ResolvedBinder(decl_id, t) => {
+            PatternUnit::Binder("unique".to_string(), decl_id, map.find(t))
         }
         PatternUnit::I64(a) => PatternUnit::I64(a),
         PatternUnit::Str(a) => PatternUnit::Str(a),

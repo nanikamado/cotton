@@ -1,4 +1,4 @@
-pub (.) : A -> (A -> B) -> B forall {A, B} =
+pub (.) : A -> (A -> B) -> B forall { A, B } =
     | a, f => f(a)
 
 infixl 10 .

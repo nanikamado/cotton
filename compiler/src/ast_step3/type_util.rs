@@ -1059,8 +1059,9 @@ mod tests {
         test1 : (False /\ False) | (False /\ True) | (True /\ False) | (True /\ True) = ()
         "#;
         let ast = combine_with_prelude(parser::parse(src));
-        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
-        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
+        let (ast, _, mut token_map, imports) =
+            ast_step1::Ast::from(&ast).unwrap();
+        let ast = ast_step2::Ast::from(ast, &mut token_map, imports).unwrap();
         let t = ast
             .variable_decl
             .iter()

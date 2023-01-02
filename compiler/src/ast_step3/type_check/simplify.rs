@@ -2354,7 +2354,7 @@ impl Display for VariableRequirement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "  {:<3}  ?{} : {} , env = ",
+            "  {:<3}  ?{:?} : {} , env = ",
             self.ident, self.name, self.required_type
         )?;
         for (name, _, _) in &self.local_env {
@@ -2480,8 +2480,9 @@ mod tests {
         dot : a -> (a -> b) -> b forall {a, b} = ()
         "#;
         let ast = combine_with_prelude(parser::parse(src));
-        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
-        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
+        let (ast, _, mut token_map, imports) =
+            ast_step1::Ast::from(&ast).unwrap();
+        let ast = ast_step2::Ast::from(ast, &mut token_map, imports).unwrap();
         let (req_t, _) = ast
             .variable_decl
             .iter()
@@ -2537,8 +2538,9 @@ mod tests {
             (e /\ f /\ True) forall {a,b,c,d,e,f} = ()
         "#;
         let ast = combine_with_prelude(parser::parse(src));
-        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
-        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
+        let (ast, _, mut token_map, imports) =
+            ast_step1::Ast::from(&ast).unwrap();
+        let ast = ast_step2::Ast::from(ast, &mut token_map, imports).unwrap();
         let t1 = ast
             .variable_decl
             .iter()
@@ -2571,8 +2573,9 @@ mod tests {
         test1 : ((True | False) /\ (True | False)) = ()
         "#;
         let ast = combine_with_prelude(parser::parse(src));
-        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
-        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
+        let (ast, _, mut token_map, imports) =
+            ast_step1::Ast::from(&ast).unwrap();
+        let ast = ast_step2::Ast::from(ast, &mut token_map, imports).unwrap();
         let t1 = ast
             .variable_decl
             .iter()
@@ -2638,8 +2641,9 @@ mod tests {
         test1 : Tree[()] = ()
         "#;
         let ast = combine_with_prelude(parser::parse(src));
-        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
-        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
+        let (ast, _, mut token_map, imports) =
+            ast_step1::Ast::from(&ast).unwrap();
+        let ast = ast_step2::Ast::from(ast, &mut token_map, imports).unwrap();
         let t_id = ast
             .data_decl
             .iter()
@@ -2759,8 +2763,9 @@ mod tests {
         test1 : A = A
         "#;
         let ast = combine_with_prelude(parser::parse(src));
-        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
-        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
+        let (ast, _, mut token_map, imports) =
+            ast_step1::Ast::from(&ast).unwrap();
+        let ast = ast_step2::Ast::from(ast, &mut token_map, imports).unwrap();
         let b_id = ast
             .data_decl
             .iter()

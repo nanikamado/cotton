@@ -25,6 +25,10 @@ impl Name {
         Name::from_str(Self::root(), "prelude")
     }
 
+    pub fn intrinsic() -> Self {
+        Name::from_str(Self::root(), "intrinsic")
+    }
+
     pub fn from_str(path: Self, name: &str) -> Self {
         NAME_MAP.write().unwrap().get_name_id(path, name)
     }

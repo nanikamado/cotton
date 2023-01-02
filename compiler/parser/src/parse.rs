@@ -40,10 +40,7 @@ pub type Expr = (
 pub enum ExprUnit {
     Int(String),
     Str(String),
-    Ident {
-        path: Vec<StringWithId>,
-        name: StringWithId,
-    },
+    Ident { path: Vec<StringWithId> },
     Case(Vec<FnArm>),
     Paren(Expr),
     Do(Vec<Expr>),
@@ -52,24 +49,21 @@ pub enum ExprUnit {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum TypeUnit {
-    Ident {
-        name: StringWithId,
-        path: Vec<StringWithId>,
-    },
+    Ident { path: Vec<StringWithId> },
     Paren(Type),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct TypeApply(pub Type);
 
-pub type StringWithId = (String, Option<TokenId>);
+pub type StringWithId = (String, Option<Span>, Option<TokenId>);
 pub type Type = Vec<OpSequenceUnit<(TypeUnit, Span), TypeApply>>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PatternUnit {
     Int(String),
     Str(String),
-    Ident(StringWithId, Vec<Pattern>),
+    Ident(Vec<StringWithId>, Vec<Pattern>),
     Underscore,
     TypeRestriction(Box<Pattern>, Type, Forall),
 }
@@ -133,9 +127,7 @@ pub enum Decl {
         is_public: bool,
     },
     Use {
-        path: Vec<StringWithId>,
-        name: StringWithId,
-        span: Span,
+        path: Vec<(String, Option<Span>, Option<TokenId>)>,
         is_public: bool,
     },
 }
@@ -161,8 +153,10 @@ fn indented<'a, O: 'a + Clone, E: 'a + Error<Token> + Clone>(
 fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
     let int = select! { Token::Int(i) => i };
     let str = select! { Token::Str(s) => s };
-    let op = select! { Token::Op(s, id) => (s, Some(id)) };
-    let ident = select! { Token::Ident(ident, id) => (ident, Some(id)) };
+    let op = (select! { Token::Op(s, id) => (s, Some(id)) })
+        .map_with_span(|(i, id), s| (i, Some(s), id));
+    let ident = (select! { Token::Ident(ident, id) => (ident, Some(id)) })
+        .map_with_span(|(i, id), s| (i, Some(s), id));
     let underscore =
         select! { Token::Ident(ident, id) if ident == "_" => (ident, id) };
     let and = select! { Token::Op(ident, id) if ident == "&" => (ident, id) };
@@ -176,7 +170,11 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
     let ident_with_path = ident
         .then_ignore(just(Token::ColonColon))
         .repeated()
-        .then(ident_or_op.clone());
+        .then(ident_or_op.clone())
+        .map(|(mut path, name)| {
+            path.push(name);
+            path
+        });
     let forall = just(Token::Forall)
         .ignore_then(indented(
             ident
@@ -197,7 +195,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
     let type_ = recursive(|type_| {
         let type_unit = ident_with_path
             .clone()
-            .map(|(path, name)| TypeUnit::Ident { name, path })
+            .map(|path| TypeUnit::Ident { path })
             .or(type_
                 .clone()
                 .delimited_by(open_paren.clone(), just(Token::Paren(')')))
@@ -216,13 +214,16 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
             .clone()
             .map_with_span(|t, s: Span| (t, s))
             .then(
-                op.map_with_span(|(s, id), span: Span| (s, id, span))
+                op.map(|(s, span, id)| (s, id, span.unwrap()))
                     .or(just(Token::Bar)
                         .map_with_span(|_, span| ("|".to_string(), None, span)))
                     .then(type_unit.clone())
                     .map_with_span(|((o, o_token, o_span), e), span: Span| {
                         vec![
-                            OpSequenceUnit::Op((o, o_token), o_span),
+                            OpSequenceUnit::Op(
+                                (o, Some(o_span.clone()), o_token),
+                                o_span,
+                            ),
                             OpSequenceUnit::Operand((e, span)),
                         ]
                     })
@@ -243,7 +244,8 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         )
     });
     let pattern = recursive(|pattern| {
-        let constructor_pattern = ident
+        let constructor_pattern = ident_with_path
+            .clone()
             .then(
                 pattern
                     .separated_by(just(Token::Comma))
@@ -339,7 +341,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 .or(variable_decl.map(ExprUnit::VariableDecl))
                 .or(ident_with_path
                     .clone()
-                    .map(|(path, name)| ExprUnit::Ident { path, name }))
+                    .map(|path| ExprUnit::Ident { path }))
                 .or(lambda.map(|a| ExprUnit::Case(vec![a])))
                 .or(expr
                     .clone()
@@ -411,10 +413,12 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         .or(just(Token::Infixr).map(|_| Associativity::Right))
         .then(int)
         .then(op)
-        .map(|((associativity, i), (name, _token_id))| OpPrecedenceDecl {
-            name,
-            associativity,
-            precedence: i.parse().unwrap(),
+        .map(|((associativity, i), (name, _span, _token_id))| {
+            OpPrecedenceDecl {
+                name,
+                associativity,
+                precedence: i.parse().unwrap(),
+            }
         });
     let data_decl_normal = ident
         .then(
@@ -487,10 +491,8 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         .or_not()
         .then_ignore(just(Token::Use))
         .then(ident_with_path)
-        .map_with_span(|(pub_or_not, (path, name)), span| Decl::Use {
+        .map(|(pub_or_not, path)| Decl::Use {
             path,
-            name,
-            span,
             is_public: pub_or_not.is_some(),
         });
     recursive(|decl| {

@@ -1,5 +1,4 @@
 infixl 10 .
-infixl 5 >
 infixl 3 /\
 
 data E

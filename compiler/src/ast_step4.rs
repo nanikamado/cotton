@@ -42,12 +42,12 @@ pub enum Expr<T = Type> {
     Number(String),
     StrLiteral(String),
     Ident {
-        name: Name,
+        name: String,
         variable_id: VariableId,
         variable_kind: VariableKind,
     },
     GlobalVariable {
-        name: Name,
+        name: String,
         decl_id: DeclId,
         replace_map: FxHashMap<TypePointer, TypePointer>,
     },
@@ -68,7 +68,7 @@ pub enum PatternUnit<T> {
         id: ConstructorId,
         args: Vec<Pattern<T>>,
     },
-    Binder(Name, DeclId),
+    Binder(String, DeclId),
     Underscore,
     TypeRestriction(Pattern<T>, types::Type),
 }
@@ -511,7 +511,11 @@ impl<'b> VariableMemo<'b> {
                 }
                 Binder(name, d, _) => {
                     local_variables.insert(VariableId::Decl(*d), type_pointer);
-                    PatternUnit::Binder(*name, *d)
+                    PatternUnit::Binder(name.to_string(), *d)
+                }
+                ResolvedBinder(d, _) => {
+                    local_variables.insert(VariableId::Decl(*d), type_pointer);
+                    PatternUnit::Binder("unique".to_string(), *d)
                 }
                 Underscore => PatternUnit::Underscore,
                 TypeRestriction(p, t) => PatternUnit::TypeRestriction(

@@ -11,7 +11,7 @@ use std::io::Write;
 #[derive(Debug, PartialEq, Eq)]
 pub enum CompileError {
     NoSuitableVariable {
-        name: Name,
+        name: String,
         reason: Vec<CompileError>,
     },
     ManyCandidates {

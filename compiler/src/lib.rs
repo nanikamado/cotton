@@ -13,6 +13,7 @@ use ast_step1::ident_id::IdentId;
 use ast_step1::name_id::Name;
 use ast_step1::token_map::{TokenMap, TokenMapEntry};
 pub use ast_step1::OpPrecedenceMap;
+use ast_step2::imports::Imports;
 pub use ast_step2::type_display::{
     PrintTypeOfGlobalVariableForUser, PrintTypeOfLocalVariableForUser,
 };
@@ -81,8 +82,18 @@ pub fn run(
     let (tokens, src_len) = lex(source);
     let ast = parser::parse::parse(tokens, source, src_len);
     let ast = combine_with_prelude(ast);
-    let (ast, op_precedence_map, mut token_map) = ast_step1::Ast::from(&ast);
-    let (ast, _resolved_idents) = to_step_3(ast, &mut token_map)
+    let (ast, op_precedence_map, mut token_map, imports) =
+        ast_step1::Ast::from(&ast).unwrap_or_else(|e| {
+            e.write(
+                source,
+                &mut std::io::stderr(),
+                filename,
+                &Default::default(),
+            )
+            .unwrap();
+            process::exit(1)
+        });
+    let (ast, _resolved_idents) = to_step_3(ast, &mut token_map, imports)
         .unwrap_or_else(|e| {
             e.write(
                 source,
@@ -116,9 +127,10 @@ pub fn run(
 fn to_step_3(
     ast: ast_step1::Ast,
     token_map: &mut TokenMap,
+    imports: Imports,
 ) -> Result<(ast_step3::Ast, FxHashMap<IdentId, ResolvedIdent>), CompileError> {
-    let ast = ast_step2::Ast::from(ast, token_map)?;
-    ast_step3::Ast::from(ast)
+    let ast = ast_step2::Ast::from(ast, token_map, imports)?;
+    ast_step3::Ast::from(ast, token_map)
 }
 
 pub fn combine_with_prelude(ast: parser::Ast) -> parser::Ast {
@@ -128,12 +140,12 @@ pub fn combine_with_prelude(ast: parser::Ast) -> parser::Ast {
     parser::Ast {
         decls: vec![
             parser::Decl::Module {
-                name: ("pkgroot".to_string(), None),
+                name: ("pkgroot".to_string(), None, None),
                 ast,
                 is_public: false,
             },
             parser::Decl::Module {
-                name: ("prelude".to_string(), None),
+                name: ("prelude".to_string(), None, None),
                 ast: prelude_ast,
                 is_public: false,
             },
@@ -159,9 +171,10 @@ pub struct TokenMapWithEnv<'a> {
 pub fn get_token_map(
     ast: &parser::Ast,
 ) -> Result<TokenMapWithEnv, CompileError> {
-    let (ast, op_precedence_map, mut token_map) = ast_step1::Ast::from(ast);
-    let ast = ast_step2::Ast::from(ast, &mut token_map)?;
-    let (ast, resolved_idents) = ast_step3::Ast::from(ast)?;
+    let (ast, op_precedence_map, mut token_map, imports) =
+        ast_step1::Ast::from(ast)?;
+    let ast = ast_step2::Ast::from(ast, &mut token_map, imports)?;
+    let (ast, resolved_idents) = ast_step3::Ast::from(ast, &mut token_map)?;
     let token_map = token_map
         .0
         .into_iter()

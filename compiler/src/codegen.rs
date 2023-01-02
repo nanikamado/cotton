@@ -2,7 +2,6 @@ mod type_restriction_pattern;
 
 use self::type_restriction_pattern::IS_INSTANCE_OF;
 use crate::ast_step1::decl_id::DeclId;
-use crate::ast_step1::name_id::Name;
 use crate::ast_step3::DataDecl;
 use crate::ast_step4::{Pattern, PatternUnit, Type};
 use crate::ast_step5::{Ast, Expr, ExprWithType, FnArm, VariableDecl};
@@ -229,7 +228,7 @@ fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
 fn bindings(
     pattern: &[Pattern],
     name_count: u32,
-) -> Vec<(Name, String, DeclId, &Type)> {
+) -> Vec<(String, String, DeclId, &Type)> {
     _bindings(
         pattern,
         (0..pattern.len())
@@ -241,15 +240,15 @@ fn bindings(
 fn _bindings(
     pattern: &[Pattern],
     names: Vec<String>,
-) -> Vec<(Name, String, DeclId, &Type)> {
+) -> Vec<(String, String, DeclId, &Type)> {
     fn _bindings_unit(
         (p, t): &Pattern,
         n: String,
-    ) -> Vec<(Name, String, DeclId, &Type)> {
+    ) -> Vec<(String, String, DeclId, &Type)> {
         if p.len() == 1 {
             match &p[0] {
                 PatternUnit::Binder(a, id) => {
-                    vec![(*a, n, *id, t)]
+                    vec![(a.to_string(), n, *id, t)]
                 }
                 PatternUnit::Constructor { args, .. } => _bindings(
                     args,

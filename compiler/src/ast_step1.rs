@@ -6,7 +6,12 @@ pub mod token_map;
 use self::decl_id::DeclId;
 use self::name_id::Name;
 use self::token_map::{TokenMap, TokenMapEntry};
-use crate::intrinsics::{INTRINSIC_CONSTRUCTORS, OP_PRECEDENCE};
+use crate::ast_step2::imports::Imports;
+use crate::errors::CompileError;
+use crate::intrinsics::{
+    IntrinsicConstructor, IntrinsicVariable, INTRINSIC_CONSTRUCTORS,
+    INTRINSIC_TYPES, OP_PRECEDENCE,
+};
 use fxhash::{FxHashMap, FxHashSet};
 use index_list::{Index, IndexList};
 use itertools::Itertools;
@@ -17,6 +22,7 @@ use parser::{
 };
 use std::collections::BTreeMap;
 use std::fmt::Debug;
+use strum::IntoEnumIterator;
 
 /// Difference between `parser::Ast` and `ast_step1::Ast`:
 /// - `OpSequence`s and `TypeOpSequence`s are converted to syntax trees
@@ -28,10 +34,9 @@ pub struct Ast<'a> {
     pub type_alias_decl: Vec<TypeAliasDecl<'a>>,
     pub interface_decl: Vec<InterfaceDecl<'a>>,
     pub modules: Vec<Module<'a>>,
-    pub use_decls: Vec<UseDecl<'a>>,
 }
 
-type StrWithId<'a> = (&'a str, Option<TokenId>);
+type StrWithId<'a> = (&'a str, Option<Span>, Option<TokenId>);
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Forall<'a> {
@@ -50,9 +55,7 @@ pub struct VariableDecl<'a> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Type<'a> {
-    pub name: StrWithId<'a>,
     pub path: Vec<StrWithId<'a>>,
-    pub span: Span,
     pub args: Vec<Type<'a>>,
 }
 
@@ -85,10 +88,7 @@ pub enum Expr<'a> {
     Lambda(Vec<FnArm<'a>>),
     Number(&'a str),
     StrLiteral(&'a str),
-    Ident {
-        name: StrWithId<'a>,
-        path: Vec<StrWithId<'a>>,
-    },
+    Ident { path: Vec<StrWithId<'a>> },
     Decl(Box<VariableDecl<'a>>),
     Call(Box<ExprWithSpan<'a>>, Box<ExprWithSpan<'a>>),
     Do(Vec<ExprWithSpan<'a>>),
@@ -107,7 +107,7 @@ pub enum Pattern<'a> {
     Number(&'a str),
     StrLiteral(&'a str),
     Constructor {
-        name: StrWithId<'a>,
+        path: Vec<StrWithId<'a>>,
         args: Vec<Pattern<'a>>,
     },
     Binder(StrWithId<'a>),
@@ -165,7 +165,7 @@ pub trait InfixOpCall {
 }
 
 pub trait IdentFromStr<'a> {
-    fn ident_from_str(s: StrWithId<'a>) -> Self;
+    fn ident_from_str(s: Vec<StrWithId<'a>>) -> Self;
 }
 
 pub trait AddArgument {
@@ -173,12 +173,10 @@ pub trait AddArgument {
 }
 
 impl<'a> IdentFromStr<'a> for Type<'a> {
-    fn ident_from_str(s: StrWithId<'a>) -> Self {
+    fn ident_from_str(s: Vec<StrWithId<'a>>) -> Self {
         Self {
-            name: s,
             args: Vec::new(),
-            path: Vec::new(),
-            span: 0..0, // TODO: not correct
+            path: s,
         }
     }
 }
@@ -191,11 +189,8 @@ impl<'a> AddArgument for (Type<'a>, Span) {
 }
 
 impl<'a> IdentFromStr<'a> for Expr<'a> {
-    fn ident_from_str(name: StrWithId<'a>) -> Self {
-        Self::Ident {
-            name,
-            path: Vec::new(),
-        }
+    fn ident_from_str(name: Vec<StrWithId<'a>>) -> Self {
+        Self::Ident { path: name }
     }
 }
 
@@ -211,9 +206,9 @@ impl<'a> AddArgument for ExprWithSpan<'a> {
 }
 
 impl<'a> IdentFromStr<'a> for Pattern<'a> {
-    fn ident_from_str(name: StrWithId<'a>) -> Self {
+    fn ident_from_str(name: Vec<StrWithId<'a>>) -> Self {
         Self::Constructor {
-            name,
+            path: name,
             args: Vec::new(),
         }
     }
@@ -221,10 +216,14 @@ impl<'a> IdentFromStr<'a> for Pattern<'a> {
 
 impl AddArgument for (Pattern<'_>, Span) {
     fn add_argument(self, arg: Self) -> Self {
-        if let Pattern::Constructor { name, mut args } = self.0 {
+        if let Pattern::Constructor {
+            path: name,
+            mut args,
+        } = self.0
+        {
             args.push(arg.0);
             (
-                Pattern::Constructor { name, args },
+                Pattern::Constructor { path: name, args },
                 merge_span(&self.1, &arg.1),
             )
         } else {
@@ -296,10 +295,10 @@ impl<'a> Ast<'a> {
         token_map: &mut TokenMap,
         constructors: &mut FxHashSet<&'a str>,
         op_precedence_map: &mut OpPrecedenceMap<'a>,
-    ) -> Self {
+        imports: &mut Imports,
+    ) -> Result<Self, CompileError> {
         let mut vs = Vec::new();
         let mut ds = Vec::new();
-        let mut use_decls = Vec::new();
         let mut aliases = Vec::new();
         let mut interfaces = Vec::new();
         let mut modules = Vec::new();
@@ -309,13 +308,15 @@ impl<'a> Ast<'a> {
                 parser::Decl::Data(a) => {
                     let decl_id = DeclId::new();
                     token_map
-                        .insert(a.name.1, TokenMapEntry::DataDecl(decl_id));
+                        .insert(a.name.2, TokenMapEntry::DataDecl(decl_id));
                     ds.push(DataDecl {
                         name: Name::from_str(module_path, &a.name.0),
                         fields: a
                             .fields
                             .iter()
-                            .map(|(name, id)| (name.as_str(), *id))
+                            .map(|(name, span, id)| {
+                                (name.as_str(), span.clone(), *id)
+                            })
                             .collect(),
                         type_variables: (&a.type_variables).into(),
                         decl_id,
@@ -344,35 +345,71 @@ impl<'a> Ast<'a> {
                         is_public,
                     ));
                 }
-                parser::Decl::Use {
-                    path,
-                    name,
-                    span,
-                    is_public,
-                } => use_decls.push(UseDecl {
-                    is_public: *is_public,
-                    name: (name.0.as_str(), name.1),
-                    path: path.iter().map(|(a, b)| (a.as_str(), *b)).collect(),
-                    span: span.clone(),
-                }),
+                parser::Decl::Use { path, is_public } => {
+                    let n =
+                        Name::from_str(module_path, &path.last().unwrap().0);
+                    if *is_public {
+                        imports.set_public(n);
+                    }
+                    imports.insert_name_alias(n, module_path, path.clone());
+                }
+            }
+        }
+        if module_path != Name::root() {
+            for v in IntrinsicVariable::iter() {
+                imports.insert_name_alias(
+                    Name::from_str(module_path, v.to_str()),
+                    Name::intrinsic(),
+                    vec![(v.to_str().to_string(), None, None)],
+                );
+            }
+            for v in IntrinsicConstructor::iter() {
+                imports.insert_name_alias(
+                    Name::from_str(module_path, v.to_str()),
+                    Name::intrinsic(),
+                    vec![(v.to_str().to_string(), None, None)],
+                );
+            }
+            for (name, _) in INTRINSIC_TYPES.iter() {
+                imports.insert_name_alias(
+                    Name::from_str(module_path, name),
+                    Name::intrinsic(),
+                    vec![(name.to_string(), None, None)],
+                );
+            }
+        }
+        if module_path != Name::prelude() {
+            for n in imports
+                .public_names_in_module(Name::prelude())
+                .iter()
+                .copied()
+                .collect_vec()
+            {
+                imports.insert_name_alias(
+                    Name::from_str(module_path, &n.split().unwrap().1),
+                    n,
+                    Vec::new(),
+                );
             }
         }
         let modules = modules
             .into_iter()
-            .map(|(name, ast, is_public)| Module {
-                name,
-                ast: Ast::from_rec(
-                    ast,
+            .map(|(name, ast, is_public)| {
+                Ok(Module {
                     name,
-                    token_map,
-                    constructors,
-                    op_precedence_map,
-                ),
-                is_public: *is_public,
+                    ast: Ast::from_rec(
+                        ast,
+                        name,
+                        token_map,
+                        constructors,
+                        op_precedence_map,
+                        imports,
+                    )?,
+                    is_public: *is_public,
+                })
             })
-            .collect();
-
-        Ast {
+            .try_collect()?;
+        Ok(Ast {
             variable_decl: vs
                 .into_iter()
                 .map(|v| {
@@ -391,7 +428,7 @@ impl<'a> Ast<'a> {
             type_alias_decl: aliases
                 .into_iter()
                 .map(|a| TypeAliasDecl {
-                    name: (&a.name.0, a.name.1),
+                    name: (&a.name.0, a.name.1.clone(), a.name.2),
                     body: (
                         fold_op_sequence(
                             &a.body.0,
@@ -411,13 +448,13 @@ impl<'a> Ast<'a> {
             interface_decl: interfaces
                 .into_iter()
                 .map(|a| InterfaceDecl {
-                    name: (&a.name.0, a.name.1),
+                    name: (&a.name.0, a.name.1.clone(), a.name.2),
                     variables: a
                         .variables
                         .iter()
-                        .map(|((name, id), t, forall)| {
+                        .map(|((name, span, id), t, forall)| {
                             (
-                                (name.as_str(), *id),
+                                (name.as_str(), span.clone(), *id),
                                 fold_op_sequence(
                                     t,
                                     &mut Env {
@@ -435,33 +472,85 @@ impl<'a> Ast<'a> {
                 })
                 .collect(),
             modules,
-            use_decls,
-        }
+        })
     }
 
-    fn collect_constructors(
+    fn collect_constructors_and_public_names(
         ast: &'a parser::Ast,
         constructors: &mut FxHashSet<&'a str>,
+        imports: &mut Imports,
+        module_path: Name,
     ) {
         for d in &ast.decls {
             match d {
                 parser::Decl::Data(d) => {
                     constructors.insert(&d.name.0);
+                    imports.add_true_name(
+                        Name::from_str(module_path, &d.name.0),
+                        d.is_public,
+                    );
                 }
-                parser::Decl::Module { ast, .. } => {
-                    Self::collect_constructors(ast, constructors)
+                parser::Decl::Module {
+                    ast,
+                    name,
+                    is_public,
+                } => {
+                    imports.add_true_name(
+                        Name::from_str(module_path, &name.0),
+                        *is_public,
+                    );
+                    Self::collect_constructors_and_public_names(
+                        ast,
+                        constructors,
+                        imports,
+                        Name::from_str(module_path, &name.0),
+                    )
                 }
-                parser::Decl::Use { .. } => (), // TODO: use Name instead of &str
-                _ => (),
+                parser::Decl::Use { path, is_public } => {
+                    if *is_public {
+                        imports.set_public(Name::from_str(
+                            module_path,
+                            &path.last().unwrap().0,
+                        ))
+                    }
+                }
+                parser::Decl::Variable(v) => {
+                    imports.add_true_name(
+                        Name::from_str(module_path, &v.name.0),
+                        v.is_public,
+                    );
+                }
+                parser::Decl::OpPrecedence(_) => (),
+                parser::Decl::TypeAlias(d) => {
+                    imports.add_true_name(
+                        Name::from_str(module_path, &d.name.0),
+                        d.is_public,
+                    );
+                }
+                parser::Decl::Interface(d) => {
+                    imports.add_true_name(
+                        Name::from_str(module_path, &d.name.0),
+                        false,
+                    );
+                }
             }
         }
     }
 
-    pub fn from(ast: &'a parser::Ast) -> (Self, OpPrecedenceMap<'a>, TokenMap) {
+    pub fn from(
+        ast: &'a parser::Ast,
+    ) -> Result<(Self, OpPrecedenceMap<'a>, TokenMap, Imports), CompileError>
+    {
         let mut token_map = TokenMap::default();
         let mut constructors =
             INTRINSIC_CONSTRUCTORS.keys().map(|s| s.as_str()).collect();
-        Self::collect_constructors(ast, &mut constructors);
+        let mut imports = Imports::default();
+        Self::collect_constructors_and_public_names(
+            ast,
+            &mut constructors,
+            &mut imports,
+            Name::root(),
+        );
         let mut precedence_map = OpPrecedenceMap(OP_PRECEDENCE.clone());
         let a = Self::from_rec(
             ast,
@@ -469,8 +558,9 @@ impl<'a> Ast<'a> {
             &mut token_map,
             &mut constructors,
             &mut precedence_map,
-        );
-        (a, precedence_map, token_map)
+            &mut imports,
+        )?;
+        Ok((a, precedence_map, token_map, imports))
     }
 }
 
@@ -479,10 +569,14 @@ impl<'a> From<&'a parser::Forall> for Forall<'a> {
         Forall {
             type_variables: type_variables
                 .iter()
-                .map(|((name, id), ts)| {
+                .map(|((name, span, id), ts)| {
                     (
-                        (name.as_str(), *id),
-                        ts.iter().map(|(n, id)| (n.as_str(), *id)).collect(),
+                        (name.as_str(), span.clone(), *id),
+                        ts.iter()
+                            .map(|(n, span, id)| {
+                                (n.as_str(), span.clone(), *id)
+                            })
+                            .collect(),
                     )
                 })
                 .collect(),
@@ -509,7 +603,7 @@ fn variable_decl<'a>(
     env: &mut Env,
 ) -> VariableDecl<'a> {
     let decl_id = DeclId::new();
-    env.token_map.insert(v.name.1, TokenMapEntry::Decl(decl_id));
+    env.token_map.insert(v.name.2, TokenMapEntry::Decl(decl_id));
     VariableDecl {
         name: Name::from_str(env.module_path, &v.name.0),
         type_annotation: v.type_annotation.as_ref().map(|(s, forall)| {
@@ -541,7 +635,7 @@ where
             match sequence.get_mut(i_prev).unwrap() {
                 OpSequenceUnit::Operand(e1) => {
                     if let OpSequenceUnit::Operand(e2) = s_i_next.unwrap() {
-                        *e1 = (T::ident_from_str(name), name_span)
+                        *e1 = (T::ident_from_str(vec![name]), name_span)
                             .add_argument(e1.clone())
                             .add_argument(e2);
                     } else {
@@ -640,18 +734,15 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::TypeUnit, &'a Span) {
 
     fn convert(self, env: &mut Env) -> Self::T {
         match self.0 {
-            parser::TypeUnit::Ident {
-                path,
-                name: (name, id),
-            } => (
+            parser::TypeUnit::Ident { path } => (
                 Type {
-                    name: (name, *id),
                     args: Vec::new(),
                     path: path
                         .iter()
-                        .map(|(name, id)| (name.as_str(), *id))
+                        .map(|(name, span, id)| {
+                            (name.as_str(), span.clone(), *id)
+                        })
                         .collect(),
-                    span: self.1.clone(),
                 },
                 self.1.clone(),
             ),
@@ -683,7 +774,7 @@ where
             }
             parser::OpSequenceUnit::Op(a, span) => {
                 let (ass, p) = env.op_precedence_map.get_unwrap(&a.0);
-                Operator((&a.0, a.1), ass, p, span.clone())
+                Operator((&a.0, a.1.clone(), a.2), ass, p, span.clone())
             }
             parser::OpSequenceUnit::Apply(a) => Apply(a),
         })
@@ -746,14 +837,10 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::ExprUnit, &'a Span) {
             }
             parser::ExprUnit::Int(a) => Number(a),
             parser::ExprUnit::Str(a) => StrLiteral(a),
-            parser::ExprUnit::Ident {
-                name: (n, id),
-                path,
-            } => Ident {
-                name: (n, *id),
+            parser::ExprUnit::Ident { path } => Ident {
                 path: path
                     .iter()
-                    .map(|(name, t)| (name.as_str(), *t))
+                    .map(|name| (name.0.as_str(), name.1.clone(), name.2))
                     .collect(),
             },
             parser::ExprUnit::VariableDecl(a) => {
@@ -782,10 +869,15 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::PatternUnit, &'a Span) {
         let a = match &self.0 {
             parser::PatternUnit::Int(a) => Pattern::Number(a),
             parser::PatternUnit::Str(a) => Pattern::StrLiteral(a),
-            parser::PatternUnit::Ident((name, id), ps) => {
-                if env.constructors.contains(name.as_str()) {
+            parser::PatternUnit::Ident(path, ps) => {
+                if env.constructors.contains(path.last().unwrap().0.as_str()) {
                     Pattern::Constructor {
-                        name: (name, *id),
+                        path: path
+                            .iter()
+                            .map(|name| {
+                                (name.0.as_str(), name.1.clone(), name.2)
+                            })
+                            .collect(),
                         args: ps
                             .iter()
                             .map(|p| fold_op_sequence(p, env).0)
@@ -793,7 +885,9 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::PatternUnit, &'a Span) {
                     }
                 } else {
                     assert!(ps.is_empty());
-                    Pattern::Binder((name, *id))
+                    debug_assert_eq!(path.len(), 1);
+                    let name = &path[0];
+                    Pattern::Binder((&name.0, name.1.clone(), name.2))
                 }
             }
             parser::PatternUnit::Underscore => Pattern::Underscore,
