@@ -1,8 +1,3 @@
-(.) : a -> (a -> b) -> b forall {a, b} =
-    | a, f => f(a)
-
-infixl 10 .
-
 add_one : (I64 | String) -> (I64 | String) =
     | a : I64 => a + 1
     | a : String => a <> " one"

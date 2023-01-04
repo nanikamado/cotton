@@ -22,7 +22,7 @@ pub enum Expr {
     Number(String),
     StrLiteral(String),
     Ident {
-        name: Name,
+        name: String,
         variable_id: VariableId,
         variable_kind: VariableKind,
     },

@@ -13,8 +13,20 @@ fn new_name() -> Name {
 }
 
 impl Name {
-    pub fn root_module() -> Self {
+    pub fn root() -> Self {
         Name(0)
+    }
+
+    pub fn pkg_root() -> Self {
+        Name::from_str(Self::root(), "pkgroot")
+    }
+
+    pub fn prelude() -> Self {
+        Name::from_str(Self::root(), "prelude")
+    }
+
+    pub fn intrinsic() -> Self {
+        Name::from_str(Self::root(), "intrinsic")
     }
 
     pub fn from_str(path: Self, name: &str) -> Self {
@@ -22,7 +34,7 @@ impl Name {
     }
 
     pub fn from_str_intrinsic(name: &str) -> Self {
-        let a = Name::from_str(Self::root_module(), "intrinsic");
+        let a = Name::from_str(Self::root(), "intrinsic");
         NAME_MAP.write().unwrap().get_name_id(a, name)
     }
 
@@ -93,7 +105,7 @@ impl NameMap {
 
     fn get_unique_name(&mut self) -> Name {
         let n = new_name();
-        let name = (Name::root_module(), format!("unique_name_{}", n.0));
+        let name = (Name::root(), format!("unique_name_{}", n.0));
         self.from_str.insert(name.clone(), n);
         self.from_name.insert(n, name);
         n

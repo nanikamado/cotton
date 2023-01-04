@@ -1,20 +1,7 @@
-(.) = | a, f => f(a)
-
-infixl 10 .
-
-data Nil
-data A /\ B forall { A, B }
-
-infixr 3 /\
-
-type List = Nil | (A /\ List[A]) forall { A }
-
 data E
 data T(A, B, C) forall { A, B, C }
 
 type Tree = E | T[A, Tree[A], Tree[A]] forall { A }
-
-type Bool = True | False
 
 empty : Bool = False
 empty : Tree[A] forall { A } = E
@@ -29,19 +16,19 @@ rfold_with_empty : List[A] -> (B -> A -> B) -> B forall { A, B : Empty } =
     | Nil, _ => empty
     | h /\ t, f => t.rfold_with_empty(f).f(h)
 
-append : List[A] -> List[A] -> List[A] forall { A } =
-    | h /\ t, l => h /\ t.append(l)
+local_append : List[A] -> List[A] -> List[A] forall { A } =
+    | h /\ t, l => h /\ t.local_append(l)
     | Nil, l => l
 
-append : I64 -> I64 -> I64 = (+)
+local_append : I64 -> I64 -> I64 = (+)
 
-append : String -> String -> String = (<>)
+local_append : String -> String -> String = (<>)
 
-interface Append where
-    append : Self -> Self -> Self
+interface local_append where
+    local_append : Self -> Self -> Self
 
-concat : List[A] -> A forall { A : Empty & Append } =
-    | l => l.rfold_with_empty(| a, b => b.append(a))
+concat : List[A] -> A forall { A : Empty & local_append } =
+    | l => l.rfold_with_empty(| a, b => b.local_append(a))
 
 main : () -> () =
     | () => do

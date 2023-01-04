@@ -1,19 +1,7 @@
-(.) =
-    | a, f => f(a)
-
-infixl 10 .
-
-infixl 5 >
-
-data A /\ B forall { A, B }
-
-infixl 3 /\
-
 data E
 data T(A, B, C) forall { A, B, C }
 
 type Tree = E | T[A, Tree[A], Tree[A]] forall { A }
-type Bool = True | False
 
 insert : Tree[I64] -> I64 -> Tree[I64] =
     | E, x => T(x, E, E)

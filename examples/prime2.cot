@@ -1,18 +1,7 @@
-type Bool = True | False
-
-(.)
-= | a, f => f(a)
-
-infixl 10 .
-
 ($) : (a -> b) -> a -> b forall {a, b}
 = | f, a => f(a)
 
 infixr 0 $
-
-data A /\ B forall { A, B }
-
-infixl 3 /\
 
 data A .. B forall { A, B }
 

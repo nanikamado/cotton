@@ -15,7 +15,6 @@ use itertools::Itertools;
 use parser::Span;
 use petgraph::algo::tarjan_scc;
 use petgraph::graphmap::DiGraphMap;
-use petgraph::{self};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
@@ -2355,7 +2354,7 @@ impl Display for VariableRequirement {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "  {:<3}  ?{} : {} , env = ",
+            "  {:<3}  ?{:?} : {} , env = ",
             self.ident, self.name, self.required_type
         )?;
         for (name, _, _) in &self.local_env {
@@ -2453,8 +2452,6 @@ mod tests {
     use super::destruct_type_by_pattern;
     use crate::ast_step1::decl_id::DeclId;
     use crate::ast_step1::name_id::Name;
-    use crate::ast_step1::{self};
-    use crate::ast_step2;
     use crate::ast_step2::types::{
         Type, TypeMatchable, TypeMatchableRef, TypeUnit, TypeVariable,
     };
@@ -2466,28 +2463,32 @@ mod tests {
         TypeDestructResult, TypeVariableMap,
     };
     use crate::intrinsics::IntrinsicType;
+    use crate::{ast_step1, ast_step2, combine_with_prelude, Imports};
     use itertools::Itertools;
     use stripmargin::StripMargin;
 
     #[test]
     fn simplify1() {
-        let src = r#"data A /\ B forall { A, B }
-        infixl 3 /\
-        main : () -> ()
-        = | () => ()
-        test : I64 /\ I64 ->
-        ((I64 /\ I64 | I64 /\ t1 | t2 /\ I64 | t3 /\ t4) -> I64 | String)
-        -> I64 | String forall {t1, t2, t3, t4}
-        = ()
-        dot : a -> (a -> b) -> b forall {a, b} = ()
-        "#;
-        let ast = parser::parse(src);
-        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
-        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
+        let src = r#"
+        |main : () -> () =
+        |    | () => ()
+        |test : I64 /\ I64 ->
+        |((I64 /\ I64 | I64 /\ t1 | t2 /\ I64 | t3 /\ t4) -> I64 | String)
+        |-> I64 | String forall {t1, t2, t3, t4}
+        |= ()
+        |dot : a -> (a -> b) -> b forall {a, b} = ()
+        |"#
+        .strip_margin();
+        let ast = combine_with_prelude(parser::parse(&src));
+        let mut imports = Imports::default();
+        let (ast, mut token_map) =
+            ast_step1::Ast::from(&ast, &mut imports).unwrap();
+        let ast =
+            ast_step2::Ast::from(ast, &mut token_map, &mut imports).unwrap();
         let (req_t, _) = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "test"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2497,7 +2498,7 @@ mod tests {
         let (dot, _) = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "dot"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "dot"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2529,22 +2530,25 @@ mod tests {
 
     #[test]
     fn simplify3() {
-        let src = r#"data A /\ B forall { A, B }
-        infixl 3 /\
-        main : () -> () =
-            | () => ()
-        test1 : (False /\ False /\ False) = ()
-        test2 : (True /\ a /\ b) |
-            (c /\ True /\ d) |
-            (e /\ f /\ True) forall {a,b,c,d,e,f} = ()
-        "#;
-        let ast = parser::parse(src);
-        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
-        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
+        let src = r#"
+        |main : () -> () =
+        |    | () => ()
+        |test1 : (False /\ False /\ False) = ()
+        |test2 : (True /\ a /\ b) |
+        |    (c /\ True /\ d) |
+        |    (e /\ f /\ True) forall {a,b,c,d,e,f} = ()
+        |"#
+        .strip_margin();
+        let ast = combine_with_prelude(parser::parse(&src));
+        let mut imports = Imports::default();
+        let (ast, mut token_map) =
+            ast_step1::Ast::from(&ast, &mut imports).unwrap();
+        let ast =
+            ast_step2::Ast::from(ast, &mut token_map, &mut imports).unwrap();
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2553,7 +2557,7 @@ mod tests {
         let (t2, _) = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "test2"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test2"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2566,19 +2570,22 @@ mod tests {
 
     #[test]
     fn destruct_type_0() {
-        let src = r#"data A /\ B forall { A, B }
-        infixl 3 /\
-        main : () -> () =
-            | () => ()
-        test1 : ((True | False) /\ (True | False)) = ()
-        "#;
-        let ast = parser::parse(src);
-        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
-        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
+        let src = r#"
+        |main : () -> () =
+        |    | () => ()
+        |test1 : ((True | False) /\ (True | False)) = ()
+        |"#
+        .strip_margin();
+        let ast = combine_with_prelude(parser::parse(&src));
+        let mut imports = Imports::default();
+        let (ast, mut token_map) =
+            ast_step1::Ast::from(&ast, &mut imports).unwrap();
+        let ast =
+            ast_step2::Ast::from(ast, &mut token_map, &mut imports).unwrap();
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2630,29 +2637,33 @@ mod tests {
 
     #[test]
     fn destruct_type_1() {
-        let src = r#"data A /\ B forall { A, B }
-        infixl 3 /\
-        main : () -> () =
-            | () => ()
-        data E
-        data T(C, N, T1, T2) forall { C, N, T1, T2 }
-        type Tree = E | T[A, Tree[A], Tree[A]] forall { A }
-        test1 : Tree[()] = ()
-        "#;
-        let ast = parser::parse(src);
-        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
-        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
+        let src = r#"
+        |data A /\ B forall { A, B }
+        |main : () -> () =
+        |    | () => ()
+        |data E
+        |data T(C, N, T1, T2) forall { C, N, T1, T2 }
+        |type Tree = E | T[A, Tree[A], Tree[A]] forall { A }
+        |test1 : Tree[()] = ()
+        |"#
+        .strip_margin();
+        let ast = combine_with_prelude(parser::parse(&src));
+        let mut imports = Imports::default();
+        let (ast, mut token_map) =
+            ast_step1::Ast::from(&ast, &mut imports).unwrap();
+        let ast =
+            ast_step2::Ast::from(ast, &mut token_map, &mut imports).unwrap();
         let t_id = ast
             .data_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "T"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "T"))
             .unwrap()
             .decl_id;
         let t_id = TypeId::DeclId(t_id);
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2752,28 +2763,32 @@ mod tests {
 
     #[test]
     fn apply_type_to_pattern_1() {
-        let src = r#"data A /\ B forall { A, B }
-        infixl 3 /\
-        main : () -> () =
-            | () => ()
-        data A
-        data B
-        test1 : A = A
-        "#;
-        let ast = parser::parse(src);
-        let (ast, _, mut token_map) = ast_step1::Ast::from(&ast);
-        let ast = ast_step2::Ast::from(ast, &mut token_map).unwrap();
+        let src = r#"
+        |data A /\ B forall { A, B }
+        |main : () -> () =
+        |    | () => ()
+        |data A
+        |data B
+        |test1 : A = A
+        |"#
+        .strip_margin();
+        let ast = combine_with_prelude(parser::parse(&src));
+        let mut imports = Imports::default();
+        let (ast, mut token_map) =
+            ast_step1::Ast::from(&ast, &mut imports).unwrap();
+        let ast =
+            ast_step2::Ast::from(ast, &mut token_map, &mut imports).unwrap();
         let b_id = ast
             .data_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "B"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "B"))
             .unwrap()
             .decl_id;
         let b_id = TypeId::DeclId(b_id);
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::root_module(), "test1"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test1"))
             .unwrap()
             .type_annotation
             .as_ref()

@@ -1,7 +1,3 @@
-(.) = | a, f => f(a)
-
-infixl 10 .
-
 data D1
 data D2
 data D3

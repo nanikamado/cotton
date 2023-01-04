@@ -1,25 +1,14 @@
-(.) : A -> (A -> B) -> B forall { A, B } =
-    | a, f => f(a)
-
-infixl 10 .
-
-data A /\ B forall { A, B }
-
-infixl 3 /\
-
 data A .. B forall { A, B }
 
 infixl 4 ..
 
-type List = () | (A /\ List[A]) forall { A }
-
 range_to_list : (I64 .. I64) -> List[I64] =
     | a .. b => (a < b).
         | True => a /\ ((a + 1)..b).range_to_list
-        | False => ()
+        | False => Nil
 
 print_num_list : List[I64] -> () =
-    | () => ()
+    | Nil => ()
     | h /\ t => do
         h.i64_to_string.println
         t.print_num_list

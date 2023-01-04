@@ -1,6 +1,7 @@
 use crate::ast_step1::name_id::Name;
+use crate::ast_step2::imports::Imports;
 use crate::ast_step2::types::Type;
-use crate::{OpPrecedenceMap, PrintTypeOfLocalVariableForUser};
+use crate::PrintTypeOfLocalVariableForUser;
 use ariadne::{Label, Report, ReportKind, Source};
 use colored::{ColoredString, Colorize};
 use itertools::Itertools;
@@ -11,7 +12,7 @@ use std::io::Write;
 #[derive(Debug, PartialEq, Eq)]
 pub enum CompileError {
     NoSuitableVariable {
-        name: Name,
+        name: String,
         reason: Vec<CompileError>,
     },
     ManyCandidates {
@@ -36,6 +37,10 @@ pub enum CompileError {
         path: Name,
         span: Span,
     },
+    NoOpPrecedenceDecl {
+        path: Name,
+        span: Span,
+    },
 }
 
 impl CompileError {
@@ -44,19 +49,18 @@ impl CompileError {
         src: &str,
         w: &mut W,
         filename: &str,
-        op_precedence_map: &OpPrecedenceMap,
+        imports: &Imports,
     ) -> std::io::Result<()> {
         match self {
             CompileError::NoSuitableVariable { name, reason } => {
                 if reason.is_empty() {
                     writeln!(w, "{} not found", name)
                 } else if reason.len() == 1 {
-                    reason.into_iter().next().unwrap().write(
-                        src,
-                        w,
-                        filename,
-                        op_precedence_map,
-                    )
+                    reason
+                        .into_iter()
+                        .next()
+                        .unwrap()
+                        .write(src, w, filename, imports)
                 } else {
                     writeln!(
                         w,
@@ -67,7 +71,7 @@ impl CompileError {
                         reason.len(),
                     )?;
                     for r in reason {
-                        r.write(src, w, filename, op_precedence_map)?;
+                        r.write(src, w, filename, imports)?;
                     }
                     Ok(())
                 }
@@ -82,6 +86,19 @@ impl CompileError {
                             )),
                         )
                         .with_message("not found in this scope");
+                report.finish().write((filename, Source::from(src)), w)?;
+                Ok(())
+            }
+            CompileError::NoOpPrecedenceDecl { path, span } => {
+                let report =
+                    Report::build(ReportKind::Error, filename, span.start)
+                        .with_label(Label::new((filename, span)).with_message(
+                            format!(
+                    "precedence declaration for operator `{:?}` not found",
+                    path
+                ),
+                        ))
+                        .with_message("no precedence declaration");
                 report.finish().write((filename, Source::from(src)), w)?;
                 Ok(())
             }
@@ -101,7 +118,7 @@ impl CompileError {
                                 "",
                                 |t, f| f(&format_args!(
                                     "{}\n",
-                                    print_type(t, op_precedence_map)
+                                    print_type(t, imports)
                                 ))
                             )
                         ),
@@ -120,14 +137,14 @@ impl CompileError {
                         .with_label(Label::new((filename, span)).with_message(
                             format!(
                                 "expected `{}` but found `{}`.",
-                                print_type(&super_type, op_precedence_map),
-                                print_type(&sub_type, op_precedence_map),
+                                print_type(&super_type, imports),
+                                print_type(&sub_type, imports),
                             ),
                         ))
                         .with_message(NotSubtypeReasonDisplay {
                             reason: &reason,
                             depth: 0,
-                            op_precedence_map,
+                            imports,
                         });
                 report.finish().write((filename, Source::from(src)), w)?;
                 Ok(())
@@ -158,10 +175,10 @@ impl CompileError {
     }
 }
 
-fn print_type(t: &Type, op_precedence_map: &OpPrecedenceMap) -> ColoredString {
+fn print_type(t: &Type, imports: &Imports) -> ColoredString {
     PrintTypeOfLocalVariableForUser {
         t,
-        op_precedence_map,
+        imports,
         type_variable_decls: &Default::default(),
     }
     .to_string()
@@ -189,7 +206,7 @@ pub enum NotSubtypeReason {
 struct NotSubtypeReasonDisplay<'a> {
     reason: &'a NotSubtypeReason,
     depth: usize,
-    op_precedence_map: &'a OpPrecedenceMap<'a>,
+    imports: &'a Imports,
 }
 
 impl Display for NotSubtypeReasonDisplay<'_> {
@@ -203,10 +220,10 @@ impl Display for NotSubtypeReasonDisplay<'_> {
                 write!(
                     f,
                     "`{}` is not subtype of `{}`",
-                    print_type(left, self.op_precedence_map),
-                    print_type(right, self.op_precedence_map)
+                    print_type(left, self.imports),
+                    print_type(right, self.imports)
                 )?;
-                fmt_reasons(reasons, f, self.depth, self.op_precedence_map)
+                fmt_reasons(reasons, f, self.depth, self.imports)
             }
             NotSubtypeReason::Disjoint {
                 left,
@@ -216,18 +233,18 @@ impl Display for NotSubtypeReasonDisplay<'_> {
                 write!(
                     f,
                     "`{}` and `{}` are disjoint",
-                    print_type(left, self.op_precedence_map),
-                    print_type(right, self.op_precedence_map)
+                    print_type(left, self.imports),
+                    print_type(right, self.imports)
                 )?;
-                fmt_reasons(reasons, f, self.depth, self.op_precedence_map)
+                fmt_reasons(reasons, f, self.depth, self.imports)
             }
             NotSubtypeReason::LoopLimit { left, right } => {
                 write!(
                     f,
                     "could not verify `{}` is subtype of `{}` \
                     because of the loop count limit.",
-                    print_type(left, self.op_precedence_map),
-                    print_type(right, self.op_precedence_map)
+                    print_type(left, self.imports),
+                    print_type(right, self.imports)
                 )
             }
         }
@@ -238,7 +255,7 @@ fn fmt_reasons(
     reasons: &[NotSubtypeReason],
     f: &mut std::fmt::Formatter<'_>,
     depth: usize,
-    op_precedence_map: &OpPrecedenceMap,
+    imports: &Imports,
 ) -> std::fmt::Result {
     match reasons.len() {
         0 => Ok(()),
@@ -249,7 +266,7 @@ fn fmt_reasons(
             NotSubtypeReasonDisplay {
                 reason: &reasons[0],
                 depth,
-                op_precedence_map
+                imports
             }
         ),
         _ => write!(
@@ -264,14 +281,14 @@ fn fmt_reasons(
                     NotSubtypeReasonDisplay {
                         reason: r,
                         depth: depth + 2,
-                        op_precedence_map
+                        imports
                     }
                 ))),
             " ".repeat((depth + 1) * 4),
             NotSubtypeReasonDisplay {
                 reason: reasons.last().unwrap(),
                 depth: depth + 2,
-                op_precedence_map
+                imports
             }
         ),
     }

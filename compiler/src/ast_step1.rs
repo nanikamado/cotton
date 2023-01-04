@@ -6,8 +6,10 @@ pub mod token_map;
 use self::decl_id::DeclId;
 use self::name_id::Name;
 use self::token_map::{TokenMap, TokenMapEntry};
-use crate::intrinsics::{INTRINSIC_CONSTRUCTORS, OP_PRECEDENCE};
-use fxhash::{FxHashMap, FxHashSet};
+use crate::ast_step2::imports::Imports;
+use crate::errors::CompileError;
+use crate::intrinsics::INTRINSIC_CONSTRUCTORS;
+use fxhash::FxHashSet;
 use index_list::{Index, IndexList};
 use itertools::Itertools;
 use parser::token_id::TokenId;
@@ -28,10 +30,9 @@ pub struct Ast<'a> {
     pub type_alias_decl: Vec<TypeAliasDecl<'a>>,
     pub interface_decl: Vec<InterfaceDecl<'a>>,
     pub modules: Vec<Module<'a>>,
-    pub use_decls: Vec<UseDecl<'a>>,
 }
 
-type StrWithId<'a> = (&'a str, Option<TokenId>);
+type StrWithId<'a> = (&'a str, Option<Span>, Option<TokenId>);
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Forall<'a> {
@@ -50,9 +51,7 @@ pub struct VariableDecl<'a> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Type<'a> {
-    pub name: StrWithId<'a>,
     pub path: Vec<StrWithId<'a>>,
-    pub span: Span,
     pub args: Vec<Type<'a>>,
 }
 
@@ -69,6 +68,7 @@ pub struct DataDecl<'a> {
 pub struct TypeAliasDecl<'a> {
     pub name: StrWithId<'a>,
     pub body: (Type<'a>, Forall<'a>),
+    pub is_public: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -84,10 +84,7 @@ pub enum Expr<'a> {
     Lambda(Vec<FnArm<'a>>),
     Number(&'a str),
     StrLiteral(&'a str),
-    Ident {
-        name: StrWithId<'a>,
-        path: Vec<StrWithId<'a>>,
-    },
+    Ident { path: Vec<StrWithId<'a>> },
     Decl(Box<VariableDecl<'a>>),
     Call(Box<ExprWithSpan<'a>>, Box<ExprWithSpan<'a>>),
     Do(Vec<ExprWithSpan<'a>>),
@@ -106,7 +103,7 @@ pub enum Pattern<'a> {
     Number(&'a str),
     StrLiteral(&'a str),
     Constructor {
-        name: StrWithId<'a>,
+        path: Vec<StrWithId<'a>>,
         args: Vec<Pattern<'a>>,
     },
     Binder(StrWithId<'a>),
@@ -140,31 +137,12 @@ pub struct UseDecl<'a> {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct OpPrecedenceMap<'a>(FxHashMap<&'a str, (Associativity, i32)>);
-
-impl<'a> OpPrecedenceMap<'a> {
-    pub fn new(m: FxHashMap<&'a str, (Associativity, i32)>) -> Self {
-        OpPrecedenceMap(m)
-    }
-
-    fn get_unwrap(&self, name: &str) -> (Associativity, i32) {
-        *self.0.get(name).unwrap_or_else(|| {
-            panic!("key {:?} not found in {:?}", name, self.0)
-        })
-    }
-
-    pub fn get(&self, name: &str) -> Option<(Associativity, i32)> {
-        self.0.get(name).copied()
-    }
-}
-
 pub trait InfixOpCall {
     fn infix_op_call(op_name: &str, e1: Self, e2: Self) -> Self;
 }
 
 pub trait IdentFromStr<'a> {
-    fn ident_from_str(s: StrWithId<'a>) -> Self;
+    fn ident_from_str(s: Vec<StrWithId<'a>>) -> Self;
 }
 
 pub trait AddArgument {
@@ -172,12 +150,10 @@ pub trait AddArgument {
 }
 
 impl<'a> IdentFromStr<'a> for Type<'a> {
-    fn ident_from_str(s: StrWithId<'a>) -> Self {
+    fn ident_from_str(s: Vec<StrWithId<'a>>) -> Self {
         Self {
-            name: s,
             args: Vec::new(),
-            path: Vec::new(),
-            span: 0..0, // TODO: not correct
+            path: s,
         }
     }
 }
@@ -190,11 +166,8 @@ impl<'a> AddArgument for (Type<'a>, Span) {
 }
 
 impl<'a> IdentFromStr<'a> for Expr<'a> {
-    fn ident_from_str(name: StrWithId<'a>) -> Self {
-        Self::Ident {
-            name,
-            path: Vec::new(),
-        }
+    fn ident_from_str(name: Vec<StrWithId<'a>>) -> Self {
+        Self::Ident { path: name }
     }
 }
 
@@ -210,9 +183,9 @@ impl<'a> AddArgument for ExprWithSpan<'a> {
 }
 
 impl<'a> IdentFromStr<'a> for Pattern<'a> {
-    fn ident_from_str(name: StrWithId<'a>) -> Self {
+    fn ident_from_str(name: Vec<StrWithId<'a>>) -> Self {
         Self::Constructor {
-            name,
+            path: name,
             args: Vec::new(),
         }
     }
@@ -220,10 +193,14 @@ impl<'a> IdentFromStr<'a> for Pattern<'a> {
 
 impl AddArgument for (Pattern<'_>, Span) {
     fn add_argument(self, arg: Self) -> Self {
-        if let Pattern::Constructor { name, mut args } = self.0 {
+        if let Pattern::Constructor {
+            path: name,
+            mut args,
+        } = self.0
+        {
             args.push(arg.0);
             (
-                Pattern::Constructor { name, args },
+                Pattern::Constructor { path: name, args },
                 merge_span(&self.1, &arg.1),
             )
         } else {
@@ -233,26 +210,41 @@ impl AddArgument for (Pattern<'_>, Span) {
 }
 
 struct Env<'a> {
-    op_precedence_map: &'a OpPrecedenceMap<'a>,
+    imports: &'a mut Imports,
     constructors: &'a FxHashSet<&'a str>,
     module_path: Name,
     token_map: &'a mut TokenMap,
 }
 
-trait ApplySuffixOp<'a> {
+trait ApplySuffixOp<'a>: Sized {
     type Op;
-    fn apply_suffix_op(self, arg: &'a Self::Op, env: &mut Env) -> Self;
+    fn apply_suffix_op(
+        self,
+        arg: &'a Self::Op,
+        env: &mut Env,
+        module_path: Name,
+    ) -> Result<Self, CompileError>;
 }
 
 impl<'a> ApplySuffixOp<'a> for ExprWithSpan<'a> {
     type Op = ExprSuffixOp;
 
-    fn apply_suffix_op(self, arg: &'a Self::Op, env: &mut Env) -> Self {
+    fn apply_suffix_op(
+        self,
+        arg: &'a Self::Op,
+        env: &mut Env,
+        module_path: Name,
+    ) -> Result<Self, CompileError> {
         match arg {
-            ExprSuffixOp::Apply(s) => self.add_argument(expr(s, env)),
+            ExprSuffixOp::Apply(s) => {
+                Ok(self.add_argument(expr(s, env, module_path)?))
+            }
             ExprSuffixOp::Question(question_span) => {
                 let span = self.1.clone();
-                (Expr::Question(Box::new(self), question_span.clone()), span)
+                Ok((
+                    Expr::Question(Box::new(self), question_span.clone()),
+                    span,
+                ))
             }
         }
     }
@@ -261,16 +253,26 @@ impl<'a> ApplySuffixOp<'a> for ExprWithSpan<'a> {
 impl<'a> ApplySuffixOp<'a> for (Pattern<'a>, Span) {
     type Op = PatternApply;
 
-    fn apply_suffix_op(self, arg: &'a Self::Op, env: &mut Env) -> Self {
-        self.add_argument(fold_op_sequence(&arg.0, env))
+    fn apply_suffix_op(
+        self,
+        arg: &'a Self::Op,
+        env: &mut Env,
+        module_path: Name,
+    ) -> Result<Self, CompileError> {
+        Ok(self.add_argument(fold_op_sequence(&arg.0, env, module_path)?))
     }
 }
 
 impl<'a> ApplySuffixOp<'a> for (Type<'a>, Span) {
     type Op = TypeApply;
 
-    fn apply_suffix_op(self, arg: &'a Self::Op, env: &mut Env) -> Self {
-        self.add_argument(fold_op_sequence(&arg.0, env))
+    fn apply_suffix_op(
+        self,
+        arg: &'a Self::Op,
+        env: &mut Env,
+        module_path: Name,
+    ) -> Result<Self, CompileError> {
+        Ok(self.add_argument(fold_op_sequence(&arg.0, env, module_path)?))
     }
 }
 
@@ -293,15 +295,13 @@ impl<'a> Ast<'a> {
         ast: &'a parser::Ast,
         module_path: Name,
         token_map: &mut TokenMap,
-    ) -> (Self, OpPrecedenceMap<'a>) {
+        constructors: &mut FxHashSet<&'a str>,
+        imports: &mut Imports,
+    ) -> Result<Self, CompileError> {
         let mut vs = Vec::new();
         let mut ds = Vec::new();
-        let mut use_decls = Vec::new();
         let mut aliases = Vec::new();
-        let mut precedence_map = OP_PRECEDENCE.clone();
         let mut interfaces = Vec::new();
-        let mut constructors: FxHashSet<&str> =
-            INTRINSIC_CONSTRUCTORS.keys().map(|s| s.as_str()).collect();
         let mut modules = Vec::new();
         for d in &ast.decls {
             match d {
@@ -309,27 +309,22 @@ impl<'a> Ast<'a> {
                 parser::Decl::Data(a) => {
                     let decl_id = DeclId::new();
                     token_map
-                        .insert(a.name.1, TokenMapEntry::DataDecl(decl_id));
+                        .insert(a.name.2, TokenMapEntry::DataDecl(decl_id));
                     ds.push(DataDecl {
                         name: Name::from_str(module_path, &a.name.0),
                         fields: a
                             .fields
                             .iter()
-                            .map(|(name, id)| (name.as_str(), *id))
+                            .map(|(name, span, id)| {
+                                (name.as_str(), span.clone(), *id)
+                            })
                             .collect(),
                         type_variables: (&a.type_variables).into(),
                         decl_id,
                         is_public: a.is_public,
                     });
-                    constructors.insert(&a.name.0);
                 }
-                parser::Decl::OpPrecedence(OpPrecedenceDecl {
-                    name,
-                    associativity,
-                    precedence,
-                }) => {
-                    precedence_map.insert(name, (*associativity, *precedence));
-                }
+                parser::Decl::OpPrecedence(OpPrecedenceDecl { .. }) => (),
                 parser::Decl::TypeAlias(a) => aliases.push(a),
                 parser::Decl::Interface(a) => interfaces.push(a),
                 parser::Decl::Module {
@@ -337,98 +332,183 @@ impl<'a> Ast<'a> {
                     ast,
                     is_public,
                 } => {
-                    let name = Name::from_str(module_path, &name.0);
-                    modules.push(Module {
-                        name,
-                        ast: Ast::from_rec(ast, name, token_map).0,
-                        is_public: *is_public,
-                    });
+                    modules.push((
+                        Name::from_str(module_path, &name.0),
+                        ast,
+                        is_public,
+                    ));
                 }
-                parser::Decl::Use {
-                    path,
-                    name,
-                    span,
-                    is_public,
-                } => use_decls.push(UseDecl {
-                    is_public: *is_public,
-                    name: (name.0.as_str(), name.1),
-                    path: path.iter().map(|(a, b)| (a.as_str(), *b)).collect(),
-                    span: span.clone(),
-                }),
+                parser::Decl::Use { .. } => {}
             }
         }
-        let op_precedence_map = OpPrecedenceMap::new(precedence_map);
-        let ast = Ast {
+        let modules = modules
+            .into_iter()
+            .map(|(name, ast, is_public)| {
+                Ok(Module {
+                    name,
+                    ast: Ast::from_rec(
+                        ast,
+                        name,
+                        token_map,
+                        constructors,
+                        imports,
+                    )?,
+                    is_public: *is_public,
+                })
+            })
+            .try_collect()?;
+        Ok(Ast {
             variable_decl: vs
                 .into_iter()
                 .map(|v| {
                     variable_decl(
                         v,
                         &mut Env {
-                            op_precedence_map: &op_precedence_map,
-                            constructors: &constructors,
+                            constructors,
                             module_path,
                             token_map,
+                            imports,
                         },
+                        module_path,
                     )
                 })
-                .collect(),
+                .try_collect()?,
             data_decl: ds,
             type_alias_decl: aliases
                 .into_iter()
-                .map(|a| TypeAliasDecl {
-                    name: (&a.name.0, a.name.1),
-                    body: (
-                        fold_op_sequence(
-                            &a.body.0,
-                            &mut Env {
-                                op_precedence_map: &op_precedence_map,
-                                constructors: &constructors,
+                .map(|a| {
+                    Ok(TypeAliasDecl {
+                        name: (&a.name.0, a.name.1.clone(), a.name.2),
+                        body: (
+                            fold_op_sequence(
+                                &a.body.0,
+                                &mut Env {
+                                    constructors,
+                                    module_path,
+                                    token_map,
+                                    imports,
+                                },
                                 module_path,
-                                token_map,
-                            },
-                        )
-                        .0,
-                        (&a.body.1).into(),
-                    ),
+                            )?
+                            .0,
+                            (&a.body.1).into(),
+                        ),
+                        is_public: a.is_public,
+                    })
                 })
-                .collect(),
+                .try_collect()?,
             interface_decl: interfaces
                 .into_iter()
-                .map(|a| InterfaceDecl {
-                    name: (&a.name.0, a.name.1),
-                    variables: a
-                        .variables
-                        .iter()
-                        .map(|((name, id), t, forall)| {
-                            (
-                                (name.as_str(), *id),
-                                fold_op_sequence(
-                                    t,
-                                    &mut Env {
-                                        op_precedence_map: &op_precedence_map,
-                                        constructors: &constructors,
+                .map(|a| {
+                    Ok(InterfaceDecl {
+                        name: (&a.name.0, a.name.1.clone(), a.name.2),
+                        variables: a
+                            .variables
+                            .iter()
+                            .map(|((name, span, id), t, forall)| {
+                                Ok((
+                                    (name.as_str(), span.clone(), *id),
+                                    fold_op_sequence(
+                                        t,
+                                        &mut Env {
+                                            constructors,
+                                            module_path,
+                                            token_map,
+                                            imports,
+                                        },
                                         module_path,
-                                        token_map,
-                                    },
-                                )
-                                .0,
-                                forall.into(),
-                            )
-                        })
-                        .collect(),
+                                    )?
+                                    .0,
+                                    forall.into(),
+                                ))
+                            })
+                            .try_collect()?,
+                    })
                 })
-                .collect(),
+                .try_collect()?,
             modules,
-            use_decls,
-        };
-        (ast, op_precedence_map)
+        })
     }
 
-    pub fn from(ast: &'a parser::Ast) -> (Self, OpPrecedenceMap<'a>, TokenMap) {
+    fn collect_constructors_and_public_names(
+        ast: &'a parser::Ast,
+        constructors: &mut FxHashSet<&'a str>,
+        module_path: Name,
+        imports: &mut Imports,
+    ) {
+        for d in &ast.decls {
+            match d {
+                parser::Decl::Data(d) => {
+                    constructors.insert(&d.name.0);
+                }
+                parser::Decl::Module {
+                    ast,
+                    name,
+                    is_public: _,
+                } => Self::collect_constructors_and_public_names(
+                    ast,
+                    constructors,
+                    Name::from_str(module_path, &name.0),
+                    imports,
+                ),
+                parser::Decl::Variable(_) => (),
+                parser::Decl::OpPrecedence(op) => imports.add_op_precedence(
+                    Name::from_str(module_path, &op.name),
+                    op.associativity,
+                    op.precedence,
+                    op.is_public,
+                ),
+                parser::Decl::TypeAlias(_) => (),
+                parser::Decl::Interface(_) => (),
+                parser::Decl::Use { path, is_public } => {
+                    imports.insert_name_alias(
+                        Name::from_str(module_path, &path.last().unwrap().0),
+                        module_path,
+                        path.clone(),
+                        *is_public,
+                    );
+                }
+            }
+        }
+        if module_path != Name::root() {
+            imports.insert_wild_card_import(
+                module_path,
+                Name::intrinsic(),
+                Vec::new(),
+                false,
+            );
+        }
+        if module_path != Name::prelude() {
+            imports.insert_wild_card_import(
+                module_path,
+                Name::prelude(),
+                Vec::new(),
+                false,
+            );
+        }
+    }
+
+    pub fn from(
+        ast: &'a parser::Ast,
+        imports: &mut Imports,
+    ) -> Result<(Self, TokenMap), CompileError> {
         let mut token_map = TokenMap::default();
-        let (a, b) = Self::from_rec(ast, Name::root_module(), &mut token_map);
-        (a, b, token_map)
+        let mut constructors =
+            INTRINSIC_CONSTRUCTORS.keys().map(|s| s.as_str()).collect();
+        Self::collect_constructors_and_public_names(
+            ast,
+            &mut constructors,
+            Name::root(),
+            imports,
+        );
+        let a = Self::from_rec(
+            ast,
+            Name::root(),
+            &mut token_map,
+            &mut constructors,
+            imports,
+        )?;
+        Ok((a, token_map))
     }
 }
 
@@ -437,10 +517,14 @@ impl<'a> From<&'a parser::Forall> for Forall<'a> {
         Forall {
             type_variables: type_variables
                 .iter()
-                .map(|((name, id), ts)| {
+                .map(|((name, span, id), ts)| {
                     (
-                        (name.as_str(), *id),
-                        ts.iter().map(|(n, id)| (n.as_str(), *id)).collect(),
+                        (name.as_str(), span.clone(), *id),
+                        ts.iter()
+                            .map(|(n, span, id)| {
+                                (n.as_str(), span.clone(), *id)
+                            })
+                            .collect(),
                     )
                 })
                 .collect(),
@@ -448,44 +532,54 @@ impl<'a> From<&'a parser::Forall> for Forall<'a> {
     }
 }
 
-fn expr<'a>(e: &'a parser::Expr, env: &mut Env) -> ExprWithSpan<'a> {
-    let value = fold_op_sequence(&e.0, env);
+fn expr<'a>(
+    e: &'a parser::Expr,
+    env: &mut Env,
+    module_path: Name,
+) -> Result<ExprWithSpan<'a>, CompileError> {
+    let value = fold_op_sequence(&e.0, env, module_path)?;
     if let Some((annotation, forall)) = &e.1 {
-        let (t, _span) = fold_op_sequence(annotation, env);
+        let (t, _span) = fold_op_sequence(annotation, env, module_path)?;
         let span = value.1.clone();
-        (
+        Ok((
             Expr::TypeAnnotation(Box::new(value), t, forall.into()),
             span,
-        )
+        ))
     } else {
-        value
+        Ok(value)
     }
 }
 
 fn variable_decl<'a>(
     v: &'a parser::VariableDecl,
     env: &mut Env,
-) -> VariableDecl<'a> {
+    module_path: Name,
+) -> Result<VariableDecl<'a>, CompileError> {
     let decl_id = DeclId::new();
-    env.token_map.insert(v.name.1, TokenMapEntry::Decl(decl_id));
-    VariableDecl {
+    env.token_map.insert(v.name.2, TokenMapEntry::Decl(decl_id));
+    Ok(VariableDecl {
         name: Name::from_str(env.module_path, &v.name.0),
-        type_annotation: v.type_annotation.as_ref().map(|(s, forall)| {
-            let (t, span) = fold_op_sequence(s, env);
-            (t, forall.into(), span)
-        }),
-        value: expr(&v.expr, env),
+        type_annotation: v
+            .type_annotation
+            .as_ref()
+            .map(|(s, forall)| {
+                let (t, span) = fold_op_sequence(s, env, module_path)?;
+                Ok((t, forall.into(), span))
+            })
+            .transpose()?,
+        value: expr(&v.expr, env, module_path)?,
         span: v.span.clone(),
         is_public: v.is_public,
         decl_id,
-    }
+    })
 }
 
 fn apply_type_op<'a, T: IdentFromStr<'a> + Clone + Debug>(
     mut sequence: IndexList<OpSequenceUnit<'a, (T, Span)>>,
     i: Index,
     env: &mut Env,
-) -> IndexList<OpSequenceUnit<'a, (T, Span)>>
+    module_path: Name,
+) -> Result<IndexList<OpSequenceUnit<'a, (T, Span)>>, CompileError>
 where
     (T, Span): AddArgument + ApplySuffixOp<'a>,
     <(T, Span) as ApplySuffixOp<'a>>::Op: Clone + Debug,
@@ -499,7 +593,7 @@ where
             match sequence.get_mut(i_prev).unwrap() {
                 OpSequenceUnit::Operand(e1) => {
                     if let OpSequenceUnit::Operand(e2) = s_i_next.unwrap() {
-                        *e1 = (T::ident_from_str(name), name_span)
+                        *e1 = (T::ident_from_str(vec![name]), name_span)
                             .add_argument(e1.clone())
                             .add_argument(e2);
                     } else {
@@ -509,8 +603,9 @@ where
                     sequence.remove(i_next);
                 }
                 OpSequenceUnit::Apply(_) => {
-                    sequence = apply_type_op(sequence, i_prev, env);
-                    sequence = apply_type_op(sequence, i, env);
+                    sequence =
+                        apply_type_op(sequence, i_prev, env, module_path)?;
+                    sequence = apply_type_op(sequence, i, env, module_path)?;
                 }
                 _ => panic!(),
             }
@@ -518,12 +613,13 @@ where
         Some(OpSequenceUnit::Apply(a)) => {
             match sequence.get_mut(i_prev).unwrap() {
                 OpSequenceUnit::Operand(e) => {
-                    *e = e.clone().apply_suffix_op(a, env);
+                    *e = e.clone().apply_suffix_op(a, env, module_path)?;
                     sequence.remove(i);
                 }
                 OpSequenceUnit::Apply(_) => {
-                    sequence = apply_type_op(sequence, i_prev, env);
-                    sequence = apply_type_op(sequence, i, env);
+                    sequence =
+                        apply_type_op(sequence, i_prev, env, module_path)?;
+                    sequence = apply_type_op(sequence, i, env, module_path)?;
                 }
                 _ => panic!(),
             }
@@ -533,14 +629,15 @@ where
             panic!("specified position is a operand {:?}", a)
         }
     }
-    sequence
+    Ok(sequence)
 }
 
 fn op_apply_left<'a, T: IdentFromStr<'a> + Clone + Debug>(
     mut sequence: Vec<OpSequenceUnit<'a, (T, Span)>>,
     precedence: i32,
     env: &mut Env,
-) -> Vec<OpSequenceUnit<'a, (T, Span)>>
+    module_path: Name,
+) -> Result<Vec<OpSequenceUnit<'a, (T, Span)>>, CompileError>
 where
     (T, Span): AddArgument + ApplySuffixOp<'a>,
     <(T, Span) as ApplySuffixOp<'a>>::Op: Clone + Debug,
@@ -552,7 +649,8 @@ where
         if let Some(u) = sequence.get(next_i) {
             match u.operator_precedence() {
                 Some(p) if p == precedence => {
-                    sequence = apply_type_op(sequence, next_i, env)
+                    sequence =
+                        apply_type_op(sequence, next_i, env, module_path)?
                 }
                 _ => {
                     i = sequence.next_index(i);
@@ -562,14 +660,15 @@ where
             break;
         }
     }
-    sequence.drain_iter().collect()
+    Ok(sequence.drain_iter().collect())
 }
 
 fn op_apply_right<'a, T: IdentFromStr<'a> + Clone + Debug>(
     mut sequence: Vec<OpSequenceUnit<'a, (T, Span)>>,
     precedence: i32,
     env: &mut Env,
-) -> Vec<OpSequenceUnit<'a, (T, Span)>>
+    module_path: Name,
+) -> Result<Vec<OpSequenceUnit<'a, (T, Span)>>, CompileError>
 where
     (T, Span): AddArgument + ApplySuffixOp<'a>,
     <(T, Span) as ApplySuffixOp<'a>>::Op: Clone + Debug,
@@ -581,7 +680,8 @@ where
         if let Some(u) = sequence.get(i_next) {
             match u.operator_precedence() {
                 Some(p) if p == precedence => {
-                    sequence = apply_type_op(sequence, i_next, env)
+                    sequence =
+                        apply_type_op(sequence, i_next, env, module_path)?
                 }
                 _ => (),
             }
@@ -590,30 +690,31 @@ where
             break;
         }
     }
-    sequence.drain_iter().collect()
+    Ok(sequence.drain_iter().collect())
 }
 
 impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::TypeUnit, &'a Span) {
     type T = (Type<'a>, Span);
 
-    fn convert(self, env: &mut Env) -> Self::T {
+    fn convert(
+        self,
+        env: &mut Env,
+        module_path: Name,
+    ) -> Result<Self::T, CompileError> {
         match self.0 {
-            parser::TypeUnit::Ident {
-                path,
-                name: (name, id),
-            } => (
+            parser::TypeUnit::Ident { path } => Ok((
                 Type {
-                    name: (name, *id),
                     args: Vec::new(),
                     path: path
                         .iter()
-                        .map(|(name, id)| (name.as_str(), *id))
+                        .map(|(name, span, id)| {
+                            (name.as_str(), span.clone(), *id)
+                        })
                         .collect(),
-                    span: self.1.clone(),
                 },
                 self.1.clone(),
-            ),
-            parser::TypeUnit::Paren(s) => fold_op_sequence(s, env),
+            )),
+            parser::TypeUnit::Paren(s) => fold_op_sequence(s, env, module_path),
         }
     }
 }
@@ -625,7 +726,8 @@ fn fold_op_sequence<'a, T, U: 'a>(
         <(U, Span) as ApplySuffixOp<'a>>::Op,
     >],
     env: &mut Env,
-) -> (U, Span)
+    module_path: Name,
+) -> Result<(U, Span), CompileError>
 where
     (U, Span): AddArgument + ApplySuffixOp<'a>,
     (&'a T, &'a Span): ConvertWithOpPrecedenceMap<T = (U, Span)>,
@@ -633,19 +735,25 @@ where
     U: IdentFromStr<'a> + Clone + Debug,
 {
     use OpSequenceUnit::*;
-    let mut s = s
+    let mut s: Vec<_> = s
         .iter()
         .map(|u| match u {
             parser::OpSequenceUnit::Operand((e, e_span)) => {
-                Operand((e, e_span).convert(env))
+                Ok(Operand((e, e_span).convert(env, module_path)?))
             }
             parser::OpSequenceUnit::Op(a, span) => {
-                let (ass, p) = env.op_precedence_map.get_unwrap(&a.0);
-                Operator((&a.0, a.1), ass, p, span.clone())
+                let (ass, p) = env.imports.get_op_precedence(
+                    module_path,
+                    module_path,
+                    &a.0,
+                    Some(span.clone()),
+                    env.token_map,
+                )?;
+                Ok(Operator((&a.0, a.1.clone(), a.2), ass, p, span.clone()))
             }
-            parser::OpSequenceUnit::Apply(a) => Apply(a),
+            parser::OpSequenceUnit::Apply(a) => Ok(Apply(a)),
         })
-        .collect_vec();
+        .try_collect()?;
     let mut precedence_list = BTreeMap::new();
     for op in &s {
         match op {
@@ -675,14 +783,14 @@ where
     for (p, kind) in precedence_list.into_iter().rev() {
         match kind {
             Associativity::Left | Associativity::UnaryLeft => {
-                s = op_apply_left(s, p, env)
+                s = op_apply_left(s, p, env, module_path)?
             }
-            Associativity::Right => s = op_apply_right(s, p, env),
+            Associativity::Right => s = op_apply_right(s, p, env, module_path)?,
         }
     }
     debug_assert_eq!(s.len(), 1);
     if let OpSequenceUnit::Operand(t) = &s[0] {
-        t.clone()
+        Ok(t.clone())
     } else {
         panic!()
     }
@@ -690,79 +798,107 @@ where
 
 trait ConvertWithOpPrecedenceMap {
     type T;
-    fn convert(self, env: &mut Env) -> Self::T;
+    fn convert(
+        self,
+        env: &mut Env,
+        module_path: Name,
+    ) -> Result<Self::T, CompileError>;
 }
 
 impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::ExprUnit, &'a Span) {
     type T = ExprWithSpan<'a>;
 
-    fn convert(self, env: &mut Env) -> Self::T {
+    fn convert(
+        self,
+        env: &mut Env,
+        module_path: Name,
+    ) -> Result<Self::T, CompileError> {
         use Expr::*;
         let e = match &self.0 {
-            parser::ExprUnit::Case(arms) => {
-                Lambda(arms.iter().map(|a| fn_arm(a, env)).collect())
-            }
+            parser::ExprUnit::Case(arms) => Lambda(
+                arms.iter()
+                    .map(|a| fn_arm(a, env, module_path))
+                    .try_collect()?,
+            ),
             parser::ExprUnit::Int(a) => Number(a),
             parser::ExprUnit::Str(a) => StrLiteral(a),
-            parser::ExprUnit::Ident {
-                name: (n, id),
-                path,
-            } => Ident {
-                name: (n, *id),
+            parser::ExprUnit::Ident { path } => Ident {
                 path: path
                     .iter()
-                    .map(|(name, t)| (name.as_str(), *t))
+                    .map(|name| (name.0.as_str(), name.1.clone(), name.2))
                     .collect(),
             },
             parser::ExprUnit::VariableDecl(a) => {
-                Decl(Box::new(variable_decl(a, env)))
+                Decl(Box::new(variable_decl(a, env, module_path)?))
             }
-            parser::ExprUnit::Paren(a) => expr(a, env).0,
-            parser::ExprUnit::Do(es) => {
-                Do(es.iter().map(|e| expr(e, env)).collect())
-            }
+            parser::ExprUnit::Paren(a) => expr(a, env, module_path)?.0,
+            parser::ExprUnit::Do(es) => Do(es
+                .iter()
+                .map(|e| expr(e, env, module_path))
+                .try_collect()?),
         };
-        (e, self.1.clone())
+        Ok((e, self.1.clone()))
     }
 }
 
-fn fn_arm<'a>(a: &'a parser::FnArm, env: &mut Env) -> FnArm<'a> {
-    FnArm {
-        pattern: a.pattern.iter().map(|s| fold_op_sequence(s, env)).collect(),
-        expr: expr(&a.expr, env),
-    }
+fn fn_arm<'a>(
+    a: &'a parser::FnArm,
+    env: &mut Env,
+    module_path: Name,
+) -> Result<FnArm<'a>, CompileError> {
+    Ok(FnArm {
+        pattern: a
+            .pattern
+            .iter()
+            .map(|s| fold_op_sequence(s, env, module_path))
+            .try_collect()?,
+        expr: expr(&a.expr, env, module_path)?,
+    })
 }
 
 impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::PatternUnit, &'a Span) {
     type T = (Pattern<'a>, Span);
 
-    fn convert(self, env: &mut Env) -> Self::T {
+    fn convert(
+        self,
+        env: &mut Env,
+        module_path: Name,
+    ) -> Result<Self::T, CompileError> {
         let a = match &self.0 {
             parser::PatternUnit::Int(a) => Pattern::Number(a),
             parser::PatternUnit::Str(a) => Pattern::StrLiteral(a),
-            parser::PatternUnit::Ident((name, id), ps) => {
-                if env.constructors.contains(name.as_str()) {
+            parser::PatternUnit::Ident(path, ps) => {
+                if env.constructors.contains(path.last().unwrap().0.as_str()) {
                     Pattern::Constructor {
-                        name: (name, *id),
+                        path: path
+                            .iter()
+                            .map(|name| {
+                                (name.0.as_str(), name.1.clone(), name.2)
+                            })
+                            .collect(),
                         args: ps
                             .iter()
-                            .map(|p| fold_op_sequence(p, env).0)
-                            .collect(),
+                            .map(|p| {
+                                Ok(fold_op_sequence(p, env, module_path)?.0)
+                            })
+                            .try_collect()?,
                     }
                 } else {
                     assert!(ps.is_empty());
-                    Pattern::Binder((name, *id))
+                    debug_assert_eq!(path.len(), 1);
+                    let name = &path[0];
+                    Pattern::Binder((&name.0, name.1.clone(), name.2))
                 }
             }
             parser::PatternUnit::Underscore => Pattern::Underscore,
             parser::PatternUnit::TypeRestriction(p, t, forall) => {
                 Pattern::TypeRestriction(
-                    Box::new(fold_op_sequence(p, env).0),
-                    fold_op_sequence(t, env).0,
+                    Box::new(fold_op_sequence(p, env, module_path)?.0),
+                    fold_op_sequence(t, env, module_path)?.0,
                     forall.into(),
                 )
             }
         };
-        (a, self.1.clone())
+        Ok((a, self.1.clone()))
     }
 }

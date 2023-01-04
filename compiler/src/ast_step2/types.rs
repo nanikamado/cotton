@@ -1,7 +1,6 @@
 pub use self::type_type::Type;
 pub use self::type_unit::{TypeUnit, TypeVariable};
 use super::{SubtypeRelations, TypeWithEnv};
-use crate::ast_step1::name_id::Name;
 use crate::ast_step2::TypeId;
 use crate::ast_step3::simplify_subtype_rel;
 use crate::intrinsics::{IntrinsicType, INTRINSIC_TYPES};
@@ -27,7 +26,7 @@ pub enum TypeMatchable {
     },
     Restrictions {
         t: Type,
-        variable_requirements: Vec<(Name, Type)>,
+        variable_requirements: Vec<(String, Type)>,
         subtype_relations: SubtypeRelations,
     },
     Const {
@@ -52,7 +51,7 @@ pub enum TypeMatchableRef<'b> {
     },
     Restrictions {
         t: &'b Type,
-        variable_requirements: &'b Vec<(Name, Type)>,
+        variable_requirements: &'b Vec<(String, Type)>,
         subtype_relations: &'b SubtypeRelations,
     },
     Const {
@@ -63,7 +62,6 @@ pub enum TypeMatchableRef<'b> {
 
 mod type_unit {
     use super::Type;
-    use crate::ast_step1::name_id::Name;
     use crate::ast_step2::{SubtypeRelations, TypeId};
     use std::cell::Cell;
     use std::fmt::{Debug, Display};
@@ -91,7 +89,7 @@ mod type_unit {
         },
         Restrictions {
             t: Type,
-            variable_requirements: Vec<(Name, Type)>,
+            variable_requirements: Vec<(String, Type)>,
             subtype_relations: SubtypeRelations,
         },
         Const {

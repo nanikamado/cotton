@@ -11,12 +11,9 @@ use crate::ast_step1::ident_id::IdentId;
 use crate::ast_step1::name_id::Name;
 use crate::ast_step1::token_map::{TokenMap, TokenMapEntry};
 use crate::ast_step1::{self, merge_span};
-use crate::ast_step3::VariableRequirement;
+use crate::ast_step3::{VariableId, VariableRequirement};
 use crate::errors::CompileError;
-use crate::intrinsics::{
-    IntrinsicConstructor, IntrinsicType, IntrinsicVariable,
-    INTRINSIC_CONSTRUCTORS, INTRINSIC_TYPES,
-};
+use crate::intrinsics::{IntrinsicConstructor, IntrinsicType, INTRINSIC_TYPES};
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
@@ -24,7 +21,6 @@ use parser::token_id::TokenId;
 use parser::Span;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
-use strum::IntoEnumIterator;
 use tracing_mutex::stdsync::TracingRwLock as RwLock;
 use types::TypeConstructor;
 
@@ -46,10 +42,9 @@ pub enum TypeId {
 /// - Local variable declarations are converted into lambdas and function calls.
 /// - Question notations are desugared.
 #[derive(Debug, PartialEq)]
-pub struct Ast {
-    pub variable_decl: Vec<VariableDecl>,
+pub struct Ast<'a> {
+    pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl>,
-    pub imports: Imports,
     pub entry_point: DeclId,
 }
 
@@ -108,7 +103,7 @@ pub type PatternRestrictions =
     Vec<(Type, Vec<(PatternUnitForRestriction, Span)>, Span)>;
 type ModulePath = Name;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TypeWithEnv<T = Type>
 where
     T: TypeConstructor,
@@ -122,10 +117,10 @@ where
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct VariableDecl {
+pub struct VariableDecl<'a> {
     pub name: Name,
     pub type_annotation: Option<Annotation>,
-    pub value: ExprWithTypeAndSpan<TypeVariable>,
+    pub value: ExprWithTypeAndSpan<'a, TypeVariable>,
     pub decl_id: DeclId,
     pub span: Span,
 }
@@ -134,28 +129,38 @@ pub struct VariableDecl {
 pub struct Annotation {
     pub unfixed: Type,
     pub fixed: Type,
-    pub implicit_parameters: Vec<(Name, Type, DeclId)>,
+    pub implicit_parameters: Vec<(String, Type, DeclId)>,
     pub fixed_parameter_names: FxHashMap<TypeUnit, Name>,
     pub span: Span,
 }
 
-pub type ExprWithTypeAndSpan<T> = (Expr<T>, T, Span);
+pub type ExprWithTypeAndSpan<'a, T> = (Expr<'a, T>, T, Span);
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Expr<T> {
-    Lambda(Vec<FnArm<T>>),
+pub enum Expr<'a, T> {
+    Lambda(Vec<FnArm<'a, T>>),
     Number(String),
     StrLiteral(String),
-    Ident { name: Name, ident_id: IdentId },
-    Call(Box<ExprWithTypeAndSpan<T>>, Box<ExprWithTypeAndSpan<T>>),
-    Do(Vec<ExprWithTypeAndSpan<T>>),
-    TypeAnnotation(Box<ExprWithTypeAndSpan<T>>, Type),
+    Ident {
+        name: Vec<(&'a str, Option<Span>, Option<TokenId>)>,
+        ident_id: IdentId,
+    },
+    ResolvedIdent {
+        decl_id: DeclId,
+        type_: TypeVariable,
+    },
+    Call(
+        Box<ExprWithTypeAndSpan<'a, T>>,
+        Box<ExprWithTypeAndSpan<'a, T>>,
+    ),
+    Do(Vec<ExprWithTypeAndSpan<'a, T>>),
+    TypeAnnotation(Box<ExprWithTypeAndSpan<'a, T>>, Type),
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct FnArm<T> {
+pub struct FnArm<'a, T> {
     pub pattern: Vec<(Pattern<T>, Span)>,
-    pub expr: ExprWithTypeAndSpan<T>,
+    pub expr: ExprWithTypeAndSpan<'a, T>,
 }
 
 /// Represents a multi-case pattern which matches if any of the `PatternUnit` in it matches.
@@ -171,23 +176,26 @@ pub enum PatternUnit<T> {
         id: ConstructorId,
         args: Vec<Pattern<T>>,
     },
-    Binder(Name, DeclId, T),
+    Binder(String, DeclId, T),
+    ResolvedBinder(DeclId, T),
     Underscore,
     TypeRestriction(Pattern<T>, Type),
 }
 
-enum FlatMapEnv {
+#[derive(Debug)]
+enum FlatMapEnv<'a> {
     FlatMap {
-        variable_name: Name,
-        pre_calc: ExprWithTypeAndSpan<TypeVariable>,
+        decl_id: DeclId,
+        type_of_decl: TypeVariable,
+        pre_calc: ExprWithTypeAndSpan<'a, TypeVariable>,
         question_span: Span,
     },
-    Decl(Name, ExprWithTypeAndSpan<TypeVariable>),
+    Decl(DeclId, ExprWithTypeAndSpan<'a, TypeVariable>),
 }
 
-struct WithFlatMapEnv<Value = ExprWithTypeAndSpan<TypeVariable>> {
+struct WithFlatMapEnv<'a, Value = ExprWithTypeAndSpan<'a, TypeVariable>> {
     value: Value,
-    env: Vec<FlatMapEnv>,
+    env: Vec<FlatMapEnv<'a>>,
 }
 
 static TYPE_NAMES: Lazy<RwLock<FxHashMap<TypeId, Name>>> = Lazy::new(|| {
@@ -205,69 +213,68 @@ pub fn get_type_name(type_id: TypeId) -> Name {
     *TYPE_NAMES.read().unwrap().get(&type_id).unwrap()
 }
 
-impl Ast {
+impl<'a> Ast<'a> {
     pub fn from(
-        ast: ast_step1::Ast,
+        ast: ast_step1::Ast<'a>,
         token_map: &mut TokenMap,
+        imports: &mut Imports,
     ) -> Result<Self, CompileError> {
-        let module_path = Name::root_module();
         let mut data_decls = Vec::new();
-        let mut type_alias_map = TypeAliasMap::default();
         let mut variable_decls = Vec::new();
-        let mut interface_decls = Default::default();
-        let mut imports = Imports::default();
-        collect_data_and_type_alias_decls(
-            &ast,
-            module_path,
+        let mut env = Env {
             token_map,
-            &mut data_decls,
-            &mut type_alias_map,
-            &mut imports,
-        )?;
-        let data_decl_map =
-            data_decls.iter().map(|d| (d.name, d.decl_id)).collect();
-        {
-            TYPE_NAMES.write().unwrap().extend(
-                data_decls
-                    .iter()
-                    .map(|d| (TypeId::DeclId(d.decl_id), d.name)),
-            );
-        }
-        collect_interface_decls(
-            &ast,
-            module_path,
-            &mut Env {
-                token_map,
-                type_alias_map: &mut type_alias_map,
-                interface_decls: &mut interface_decls,
-                imports: &mut imports,
-                data_decl_map: &data_decl_map,
-            },
-        )?;
-        collect_variable_decls(
+            type_alias_map: &mut TypeAliasMap::default(),
+            interface_decls: &mut Default::default(),
+            imports,
+            data_decl_map: &mut FxHashMap::default(),
+        };
+        collect_decls(
             ast,
-            module_path,
+            Name::root(),
+            &mut env,
             &mut variable_decls,
-            &mut Env {
-                token_map,
-                type_alias_map: &mut type_alias_map,
-                interface_decls: &mut interface_decls,
-                imports: &mut imports,
-                data_decl_map: &data_decl_map,
-            },
+            &mut data_decls,
         )?;
         let entry_point = variable_decls
             .iter()
-            .find(|d| d.name == Name::from_str(module_path, "main"))
+            .find(|d| d.name == Name::from_str(Name::pkg_root(), "main"))
             .unwrap_or_else(|| panic!("entry point not found"))
             .decl_id;
         Ok(Self {
             variable_decl: variable_decls,
             data_decl: data_decls,
-            imports,
             entry_point,
         })
     }
+}
+
+fn collect_decls<'a>(
+    ast: ast_step1::Ast<'a>,
+    module_path: ModulePath,
+    env: &mut Env<'_, 'a>,
+    variable_decls: &mut Vec<VariableDecl<'a>>,
+    data_decls: &mut Vec<DataDecl>,
+) -> Result<(), CompileError> {
+    collect_data_and_type_alias_decls(
+        &ast,
+        module_path,
+        env.token_map,
+        data_decls,
+        env.type_alias_map,
+        env.imports,
+    )?;
+    env.data_decl_map
+        .extend(data_decls.iter().map(|d| (d.name, d.decl_id)));
+    {
+        TYPE_NAMES.write().unwrap().extend(
+            data_decls
+                .iter()
+                .map(|d| (TypeId::DeclId(d.decl_id), d.name)),
+        );
+    }
+    collect_interface_decls(&ast, module_path, env)?;
+    collect_variable_decls(ast, module_path, variable_decls, env)?;
+    Ok(())
 }
 
 fn collect_data_and_type_alias_decls<'a>(
@@ -279,25 +286,27 @@ fn collect_data_and_type_alias_decls<'a>(
     imports: &mut Imports,
 ) -> Result<(), CompileError> {
     for d in &ast.variable_decl {
-        imports.add_true_name(d.name, d.is_public);
+        imports.add_variable(d.name, VariableId::Decl(d.decl_id), d.is_public);
     }
     data_decls.extend(ast.data_decl.iter().map(|d| {
         let mut type_variables = FxHashMap::default();
-        for ((name, id), interfaces) in &d.type_variables.type_variables {
+        for ((name, _, id), interfaces) in &d.type_variables.type_variables {
             token_map.insert(*id, TokenMapEntry::TypeVariable);
             type_variables.insert(*name, TypeVariable::new());
-            for (_, id) in interfaces {
+            for (_, _, id) in interfaces {
                 token_map.insert(*id, TokenMapEntry::Interface);
             }
         }
-        imports.add_true_name(d.name, d.is_public);
+        imports.add_data(d.name, ConstructorId::DeclId(d.decl_id), d.is_public);
+        imports.add_variable(d.name, VariableId::Decl(d.decl_id), d.is_public);
+        imports.add_type(d.name, TypeId::DeclId(d.decl_id), d.is_public);
         DataDecl {
             name: d.name,
             fields: d
                 .fields
                 .iter()
                 .map(|f| {
-                    token_map.insert(f.1, TokenMapEntry::TypeVariable);
+                    token_map.insert(f.2, TokenMapEntry::TypeVariable);
                     type_variables[f.0]
                 })
                 .collect(),
@@ -308,36 +317,14 @@ fn collect_data_and_type_alias_decls<'a>(
                 .collect(),
         }
     }));
-    type_alias_map.add_decls(&ast.type_alias_decl, token_map, module_path);
-    for v in IntrinsicVariable::iter() {
-        imports
-            .insert_name_alias(
-                Name::from_str(module_path, v.to_str()),
-                Name::from_str_intrinsic(v.to_str()),
-                None,
-            )
-            .unwrap();
-    }
-    for v in IntrinsicConstructor::iter() {
-        imports
-            .insert_name_alias(
-                Name::from_str(module_path, v.to_str()),
-                Name::from_str_intrinsic(v.to_str()),
-                None,
-            )
-            .unwrap();
-    }
-    for (name, _) in INTRINSIC_TYPES.iter() {
-        imports
-            .insert_name_alias(
-                Name::from_str(module_path, name),
-                Name::from_str_intrinsic(name),
-                None,
-            )
-            .unwrap();
-    }
+    type_alias_map.add_decls(
+        &ast.type_alias_decl,
+        token_map,
+        module_path,
+        imports,
+    );
     for m in &ast.modules {
-        imports.add_true_name(m.name, m.is_public);
+        imports.add_module(m.name, m.is_public);
         collect_data_and_type_alias_decls(
             &m.ast,
             m.name,
@@ -347,37 +334,19 @@ fn collect_data_and_type_alias_decls<'a>(
             imports,
         )?
     }
-    for u in &ast.use_decls {
-        let name = Name::from_str(module_path, u.name.0);
-        if u.is_public {
-            imports.set_public(name);
-        }
-        imports.insert_name_alias(
-            name,
-            Name::from_path(
-                module_path,
-                &u.path,
-                u.name,
-                imports,
-                token_map,
-                u.span.clone(),
-            )?,
-            Some(u.span.clone()),
-        )?
-    }
     Ok(())
 }
 
-fn collect_interface_decls(
-    ast: &ast_step1::Ast,
+fn collect_interface_decls<'a>(
+    ast: &ast_step1::Ast<'a>,
     module_path: ModulePath,
-    env: &mut Env<'_, '_>,
+    env: &mut Env<'a, '_>,
 ) -> Result<(), CompileError> {
     env.interface_decls.extend(
         ast.interface_decl
             .iter()
             .map(|i| {
-                env.token_map.insert(i.name.1, TokenMapEntry::Interface);
+                env.token_map.insert(i.name.2, TokenMapEntry::Interface);
                 Ok((
                     Name::from_str(module_path, i.name.0),
                     i.variables
@@ -402,12 +371,12 @@ fn collect_interface_decls(
                                 },
                             )?;
                             env.token_map.insert(
-                                name.1,
+                                name.2,
                                 TokenMapEntry::VariableDeclInInterface(
                                     t.clone(),
                                 ),
                             );
-                            Ok((Name::from_str(module_path, name.0), t, self_))
+                            Ok((name.0, t, self_))
                         })
                         .try_collect()?,
                 ))
@@ -415,7 +384,7 @@ fn collect_interface_decls(
             .try_collect::<_, Vec<_>, _>()?,
     );
     for m in &ast.modules {
-        collect_interface_decls(&m.ast, module_path, env)?;
+        collect_interface_decls(&m.ast, m.name, env)?;
     }
     Ok(())
 }
@@ -423,21 +392,22 @@ fn collect_interface_decls(
 struct Env<'a, 'b> {
     token_map: &'a mut TokenMap,
     type_alias_map: &'a mut TypeAliasMap<'b>,
-    interface_decls: &'a mut FxHashMap<Name, Vec<(Name, Type, TypeVariable)>>,
+    interface_decls:
+        &'a mut FxHashMap<Name, Vec<(&'a str, Type, TypeVariable)>>,
     imports: &'a mut Imports,
-    data_decl_map: &'a FxHashMap<Name, DeclId>,
+    data_decl_map: &'a mut FxHashMap<Name, DeclId>,
 }
 
-fn collect_variable_decls(
-    ast: ast_step1::Ast,
+fn collect_variable_decls<'a>(
+    ast: ast_step1::Ast<'a>,
     module_path: ModulePath,
-    variable_decls: &mut Vec<VariableDecl>,
+    variable_decls: &mut Vec<VariableDecl<'a>>,
     env: &mut Env<'_, '_>,
 ) -> Result<(), CompileError> {
     variable_decls.extend(
         ast.variable_decl
             .into_iter()
-            .map(|d| -> Result<VariableDecl, CompileError> {
+            .map(|d| -> Result<VariableDecl<'a>, CompileError> {
                 let WithFlatMapEnv {
                     value:
                         VariableDecl {
@@ -450,13 +420,10 @@ fn collect_variable_decls(
                     env: flat_map_env,
                 } = variable_decl(d, module_path, env, &Default::default())?;
                 Ok(VariableDecl {
-                    value: catch_flat_map(
-                        WithFlatMapEnv {
-                            value,
-                            env: flat_map_env,
-                        },
-                        module_path,
-                    ),
+                    value: catch_flat_map(WithFlatMapEnv {
+                        value,
+                        env: flat_map_env,
+                    })?,
                     name,
                     type_annotation,
                     decl_id,
@@ -504,12 +471,12 @@ impl<T> From<PatternUnit<T>> for Pattern<T> {
     }
 }
 
-fn variable_decl(
-    v: ast_step1::VariableDecl,
+fn variable_decl<'a>(
+    v: ast_step1::VariableDecl<'a>,
     module_path: ModulePath,
     env: &mut Env<'_, '_>,
     type_variable_names: &FxHashMap<Name, TypeVariable>,
-) -> Result<WithFlatMapEnv<VariableDecl>, CompileError> {
+) -> Result<WithFlatMapEnv<'a, VariableDecl<'a>>, CompileError> {
     let expr = expr(v.value, module_path, type_variable_names, env)?;
     let d = VariableDecl {
         type_annotation: v
@@ -587,22 +554,21 @@ fn variable_decl(
 
 fn catch_flat_map(
     e: WithFlatMapEnv,
-    module_path: ModulePath,
-) -> ExprWithTypeAndSpan<TypeVariable> {
+) -> Result<ExprWithTypeAndSpan<TypeVariable>, CompileError> {
     let mut expr = e.value;
-    for env in e.env.into_iter().rev() {
-        match env {
+    for flat_map_env in e.env.into_iter().rev() {
+        match flat_map_env {
             FlatMapEnv::FlatMap {
-                variable_name,
+                decl_id,
+                type_of_decl,
                 pre_calc,
                 question_span,
             } => {
                 let continuation = Expr::Lambda(vec![FnArm {
                     pattern: vec![(
-                        vec![PatternUnit::Binder(
-                            variable_name,
-                            DeclId::new(),
-                            TypeVariable::new(),
+                        vec![PatternUnit::ResolvedBinder(
+                            decl_id,
+                            type_of_decl,
                         )],
                         0..0,
                     )],
@@ -614,10 +580,7 @@ fn catch_flat_map(
                             Expr::Call(
                                 Box::new((
                                     Expr::Ident {
-                                        name: Name::from_str(
-                                            module_path,
-                                            "flat_map",
-                                        ),
+                                        name: vec![("flat_map", None, None)],
                                         ident_id: IdentId::new(),
                                     },
                                     TypeVariable::new(),
@@ -637,7 +600,7 @@ fn catch_flat_map(
             FlatMapEnv::Decl(name, e) => {
                 let l = Expr::Lambda(vec![FnArm {
                     pattern: vec![(
-                        PatternUnit::Binder(name, DeclId::new(), e.1).into(),
+                        PatternUnit::ResolvedBinder(name, e.1).into(),
                         0..0,
                     )],
                     expr,
@@ -653,15 +616,15 @@ fn catch_flat_map(
             }
         }
     }
-    expr
+    Ok(expr)
 }
 
-fn expr(
-    e: ast_step1::ExprWithSpan,
+fn expr<'a>(
+    e: ast_step1::ExprWithSpan<'a>,
     module_path: ModulePath,
     type_variable_names: &FxHashMap<Name, TypeVariable>,
     env: &mut Env<'_, '_>,
-) -> Result<WithFlatMapEnv, CompileError> {
+) -> Result<WithFlatMapEnv<'a>, CompileError> {
     use Expr::*;
     let span = e.1;
     let (flat_map_env, e) = match e.0 {
@@ -679,18 +642,17 @@ fn expr(
         ast_step1::Expr::StrLiteral(s) => {
             (Vec::new(), StrLiteral(s.to_string()))
         }
-        ast_step1::Expr::Ident { name, path } => {
+        ast_step1::Expr::Ident { path } => {
             let ident_id = IdentId::new();
-            env.token_map.insert(name.1, TokenMapEntry::Ident(ident_id));
-            let name = Name::from_path(
-                module_path,
-                &path,
-                name,
-                env.imports,
-                env.token_map,
-                span.clone(),
-            )?;
-            (Vec::new(), Ident { name, ident_id })
+            env.token_map
+                .insert(path.last().unwrap().2, TokenMapEntry::Ident(ident_id));
+            (
+                Vec::new(),
+                Ident {
+                    name: path,
+                    ident_id,
+                },
+            )
         }
         ast_step1::Expr::Decl(_) => {
             panic!()
@@ -701,19 +663,19 @@ fn expr(
             if f.env.is_empty() {
                 (a.env, Call(Box::new(f.value), Box::new(a.value)))
             } else {
-                let name = Name::get_unique();
+                let decl_id = DeclId::new();
                 let mut env = f.env;
                 let f_span = f.value.2.clone();
                 let f_type = f.value.1;
-                env.push(FlatMapEnv::Decl(name, f.value));
+                env.push(FlatMapEnv::Decl(decl_id, f.value));
                 env.append(&mut a.env);
                 (
                     env,
                     Call(
                         Box::new((
-                            Expr::Ident {
-                                name,
-                                ident_id: IdentId::new(),
+                            Expr::ResolvedIdent {
+                                decl_id,
+                                type_: f_type,
                             },
                             f_type,
                             f_span,
@@ -745,17 +707,19 @@ fn expr(
         ast_step1::Expr::Question(e, question_span) => {
             let e = expr(*e, module_path, type_variable_names, env)?;
             let mut env = e.env;
-            let name = Name::get_unique();
+            let decl_id = DeclId::new();
+            let type_of_decl = TypeVariable::new();
             env.push(FlatMapEnv::FlatMap {
-                variable_name: name,
+                decl_id,
+                type_of_decl,
                 pre_calc: e.value,
                 question_span,
             });
             (
                 env,
-                Expr::Ident {
-                    name,
-                    ident_id: IdentId::new(),
+                Expr::ResolvedIdent {
+                    decl_id,
+                    type_: type_of_decl,
                 },
             )
         }
@@ -777,14 +741,14 @@ fn expr(
     })
 }
 
-fn add_expr_in_do(
-    e: ast_step1::ExprWithSpan,
+fn add_expr_in_do<'a>(
+    e: ast_step1::ExprWithSpan<'a>,
     module_path: ModulePath,
-    mut es: Vec<ExprWithTypeAndSpan<TypeVariable>>,
+    mut es: Vec<ExprWithTypeAndSpan<'a, TypeVariable>>,
     es_span: Span,
     type_variable_names: &FxHashMap<Name, TypeVariable>,
     env: &mut Env<'_, '_>,
-) -> Result<(Vec<ExprWithTypeAndSpan<TypeVariable>>, Span), CompileError> {
+) -> Result<(Vec<ExprWithTypeAndSpan<'a, TypeVariable>>, Span), CompileError> {
     match e {
         (ast_step1::Expr::Decl(d), d_span) => {
             let d = variable_decl(*d, module_path, env, type_variable_names)?;
@@ -793,19 +757,16 @@ fn add_expr_in_do(
                     vec![
                         (
                             Expr::Ident {
-                                name: Name::from_str_intrinsic("()"),
+                                name: vec![("()", None, None)],
                                 ident_id: IdentId::new(),
                             },
                             TypeVariable::new(),
                             d_span.clone(),
                         ),
-                        catch_flat_map(
-                            WithFlatMapEnv {
-                                value: d.value.value,
-                                env: d.env,
-                            },
-                            module_path,
-                        ),
+                        catch_flat_map(WithFlatMapEnv {
+                            value: d.value.value,
+                            env: d.env,
+                        })?,
                     ],
                     d_span,
                 ))
@@ -814,7 +775,7 @@ fn add_expr_in_do(
                 let l = Expr::Lambda(vec![FnArm {
                     pattern: vec![(
                         PatternUnit::Binder(
-                            d.value.name,
+                            d.value.name.to_string(),
                             d.value.decl_id,
                             TypeVariable::new(),
                         )
@@ -824,24 +785,21 @@ fn add_expr_in_do(
                     expr: (Expr::Do(es), TypeVariable::new(), es_span.clone()),
                 }]);
                 Ok((
-                    vec![catch_flat_map(
-                        WithFlatMapEnv {
-                            value: (
-                                Expr::Call(
-                                    Box::new((
-                                        l,
-                                        TypeVariable::new(),
-                                        d_span.clone(),
-                                    )),
-                                    Box::new(d.value.value),
-                                ),
-                                TypeVariable::new(),
-                                d_span.clone(),
+                    vec![catch_flat_map(WithFlatMapEnv {
+                        value: (
+                            Expr::Call(
+                                Box::new((
+                                    l,
+                                    TypeVariable::new(),
+                                    d_span.clone(),
+                                )),
+                                Box::new(d.value.value),
                             ),
-                            env: d.env,
-                        },
-                        module_path,
-                    )],
+                            TypeVariable::new(),
+                            d_span.clone(),
+                        ),
+                        env: d.env,
+                    })?],
                     merge_span(&es_span, &d_span),
                 ))
             }
@@ -856,13 +814,10 @@ fn add_expr_in_do(
             } else {
                 es.reverse();
                 Ok((
-                    vec![catch_flat_map(
-                        WithFlatMapEnv {
-                            value: (Expr::Do(es), TypeVariable::new(), es_span),
-                            env: e.env,
-                        },
-                        module_path,
-                    )],
+                    vec![catch_flat_map(WithFlatMapEnv {
+                        value: (Expr::Do(es), TypeVariable::new(), es_span),
+                        env: e.env,
+                    })?],
                     span,
                 ))
             }
@@ -870,22 +825,24 @@ fn add_expr_in_do(
     }
 }
 
-fn fn_arm(
-    arm: ast_step1::FnArm,
+fn fn_arm<'a>(
+    arm: ast_step1::FnArm<'a>,
     module_path: ModulePath,
     type_variable_names: &FxHashMap<Name, TypeVariable>,
     env: &mut Env<'_, '_>,
-) -> Result<FnArm<TypeVariable>, CompileError> {
+) -> Result<FnArm<'a, TypeVariable>, CompileError> {
     Ok(FnArm {
         pattern: arm
             .pattern
             .into_iter()
             .map(|(p, span)| Ok((pattern(p, module_path, env)?, span)))
             .try_collect()?,
-        expr: catch_flat_map(
-            expr(arm.expr, module_path, type_variable_names, env)?,
+        expr: catch_flat_map(expr(
+            arm.expr,
             module_path,
-        ),
+            type_variable_names,
+            env,
+        )?)?,
     })
 }
 
@@ -899,83 +856,6 @@ impl Name {
             false
         }
     }
-
-    fn from_path(
-        base: Name,
-        path: &[(&str, Option<TokenId>)],
-        name: (&str, Option<TokenId>),
-        imports: &Imports,
-        token_map: &mut TokenMap,
-        span: Span,
-    ) -> Result<Self, CompileError> {
-        let (path, mut path_name) = if !path.is_empty() && path[0].0 == "pkg" {
-            token_map.insert(path[0].1, TokenMapEntry::KeyWord);
-            (&path[1..], Name::root_module())
-        } else {
-            (path, base)
-        };
-        for (p, _) in path {
-            let p = Name::from_str(path_name, p);
-            if !imports.exists(p) {
-                return Err(CompileError::NotFound { path: p, span });
-            }
-            if !imports.is_public(p)
-                && !path_name.is_same_as_or_ancestor_of(base)
-            {
-                return Err(CompileError::InaccessibleName { path: p, span });
-            }
-            let m = imports.get_all_candidates(p).collect_vec();
-            debug_assert_eq!(m.len(), 1);
-            path_name = m[0];
-        }
-        let name = Name::from_str(path_name, name.0);
-        if imports.exists(name)
-            && !imports.is_public(name)
-            && !path_name.is_same_as_or_ancestor_of(base)
-        {
-            return Err(CompileError::InaccessibleName { path: name, span });
-        }
-        Ok(name)
-    }
-}
-
-impl TypeId {
-    fn get(
-        name: Name,
-        span: Span,
-        env: &mut Env<'_, '_>,
-    ) -> Result<TypeId, CompileError> {
-        let names = env.imports.get_all_candidates(name).collect_vec();
-        if names.is_empty() {
-            return Err(CompileError::NotFound { path: name, span });
-        }
-        let name = names[0];
-        if let Some(id) = env.data_decl_map.get(&name) {
-            Ok(TypeId::DeclId(*id))
-        } else if let Some(i) = INTRINSIC_TYPES.get(&name.to_string().as_str())
-        {
-            Ok(TypeId::Intrinsic(*i))
-        } else {
-            Err(CompileError::NotFound { path: name, span })
-        }
-    }
-}
-
-impl ConstructorId {
-    fn get(
-        name: Name,
-        data_decl_map: &FxHashMap<Name, DeclId>,
-    ) -> ConstructorId {
-        if let Some(id) = data_decl_map.get(&name) {
-            ConstructorId::DeclId(*id)
-        } else if let Some(i) =
-            INTRINSIC_CONSTRUCTORS.get(name.to_string().as_str())
-        {
-            ConstructorId::Intrinsic(*i)
-        } else {
-            panic!("{:?} not found", name)
-        }
-    }
 }
 
 fn pattern(
@@ -987,14 +867,17 @@ fn pattern(
     Ok(match p {
         ast_step1::Pattern::Number(n) => I64(n.parse().unwrap()),
         ast_step1::Pattern::StrLiteral(s) => Str(s.to_string()),
-        ast_step1::Pattern::Constructor { name, args } => {
-            let id = ConstructorId::get(
-                Name::from_str(module_path, name.0),
-                env.data_decl_map,
-            );
-            env.token_map.insert(name.1, TokenMapEntry::Constructor(id));
+        ast_step1::Pattern::Constructor { path, args } => {
+            let (name, id) = env.imports.get_constructor(
+                module_path,
+                module_path,
+                &path,
+                env.token_map,
+            )?;
+            env.token_map
+                .insert(path.last().unwrap().2, TokenMapEntry::Constructor(id));
             Constructor {
-                name: Name::from_str(module_path, name.0),
+                name,
                 id,
                 args: args
                     .into_iter()
@@ -1004,12 +887,8 @@ fn pattern(
         }
         ast_step1::Pattern::Binder(name) => {
             let decl_id = DeclId::new();
-            env.token_map.insert(name.1, TokenMapEntry::Decl(decl_id));
-            Binder(
-                Name::from_str(module_path, name.0),
-                decl_id,
-                TypeVariable::new(),
-            )
+            env.token_map.insert(name.2, TokenMapEntry::Decl(decl_id));
+            Binder(name.0.to_string(), decl_id, TypeVariable::new())
         }
         ast_step1::Pattern::Underscore => Underscore,
         ast_step1::Pattern::TypeRestriction(p, t, forall) => {
@@ -1034,8 +913,8 @@ fn type_to_type(
     search_type: SearchMode,
     env: &mut Env<'_, '_>,
 ) -> Result<Type, CompileError> {
-    match t.name.0 {
-        "|" => Ok(t
+    match (t.path.len(), t.path.last().unwrap().0) {
+        (1, "|") => Ok(t
             .args
             .iter()
             .map(|a| {
@@ -1051,7 +930,7 @@ fn type_to_type(
             .into_iter()
             .flatten()
             .collect()),
-        "->" => Ok(TypeUnit::Fn(
+        (1, "->") => Ok(TypeUnit::Fn(
             type_to_type(
                 &t.args[0],
                 module_path,
@@ -1069,15 +948,17 @@ fn type_to_type(
         )
         .into()),
         _ => {
-            if let Some(n) = type_variable_names.get(&Name::from_path(
+            let base_path = env.imports.get_module_with_path(
                 module_path,
-                &t.path,
-                t.name,
-                env.imports,
+                module_path,
+                &t.path[..t.path.len() - 1],
                 env.token_map,
-                t.span.clone(),
-            )?) {
-                env.token_map.insert(t.name.1, TokenMapEntry::TypeVariable);
+                &Default::default(),
+            )?;
+            let (name, span, token_id) = t.path.last().unwrap();
+            let path = Name::from_str(base_path, name);
+            if let Some(n) = type_variable_names.get(&path) {
+                env.token_map.insert(*token_id, TokenMapEntry::TypeVariable);
                 let mut new_t = Type::from(TypeUnit::Variable(*n));
                 for a in &t.args {
                     new_t = new_t.type_level_function_apply(type_to_type(
@@ -1089,60 +970,71 @@ fn type_to_type(
                     )?);
                 }
                 Ok(new_t)
-            } else if let Some(mut unaliased) = env.get_type_from_alias(
-                (Name::from_str(module_path, t.name.0), t.name.1),
-                type_variable_names,
-                if search_type == SearchMode::Normal {
-                    SearchMode::Alias
-                } else {
-                    SearchMode::AliasSub
-                },
-            )? {
-                for a in &t.args {
-                    unaliased =
-                        unaliased.type_level_function_apply(type_to_type(
-                            a,
-                            module_path,
-                            type_variable_names,
-                            search_type,
-                            env,
-                        )?);
-                }
-                Ok(unaliased)
             } else {
-                let mut tuple = Type::label_from_str("()");
-                for a in t
-                    .args
-                    .iter()
-                    .map(|a| {
-                        type_to_type(
-                            a,
-                            module_path,
-                            type_variable_names,
-                            search_type,
-                            env,
-                        )
-                    })
-                    .try_collect::<_, Vec<_>, _>()?
-                    .into_iter()
-                    .rev()
-                {
-                    tuple = TypeUnit::Tuple(a, tuple).into();
-                }
-                let id = TypeId::get(
-                    Name::from_path(
-                        module_path,
-                        &t.path,
-                        t.name,
-                        env.imports,
-                        env.token_map,
-                        t.span.clone(),
-                    )?,
-                    t.span.clone(),
-                    env,
+                let const_or_alias = env.imports.get_type(
+                    module_path,
+                    base_path,
+                    name,
+                    span.clone(),
+                    env.token_map,
                 )?;
-                env.token_map.insert(t.name.1, TokenMapEntry::TypeId(id));
-                Ok(TypeUnit::Tuple(TypeUnit::Const { id }.into(), tuple).into())
+                match const_or_alias {
+                    imports::ConstOrAlias::Const(id) => {
+                        let mut tuple = Type::label_from_str("()");
+                        for a in t
+                            .args
+                            .iter()
+                            .map(|a| {
+                                type_to_type(
+                                    a,
+                                    module_path,
+                                    type_variable_names,
+                                    search_type,
+                                    env,
+                                )
+                            })
+                            .try_collect::<_, Vec<_>, _>()?
+                            .into_iter()
+                            .rev()
+                        {
+                            tuple = TypeUnit::Tuple(a, tuple).into();
+                        }
+                        env.token_map.insert(
+                            t.path.last().unwrap().2,
+                            TokenMapEntry::TypeId(id),
+                        );
+                        Ok(TypeUnit::Tuple(
+                            TypeUnit::Const { id }.into(),
+                            tuple,
+                        )
+                        .into())
+                    }
+                    imports::ConstOrAlias::Alias(name) => {
+                        let mut unaliased = env
+                            .get_type_from_alias(
+                                (name, *token_id),
+                                type_variable_names,
+                                if search_type == SearchMode::Normal {
+                                    SearchMode::Alias
+                                } else {
+                                    SearchMode::AliasSub
+                                },
+                            )?
+                            .unwrap();
+                        for a in &t.args {
+                            unaliased = unaliased.type_level_function_apply(
+                                type_to_type(
+                                    a,
+                                    module_path,
+                                    type_variable_names,
+                                    search_type,
+                                    env,
+                                )?,
+                            );
+                        }
+                        Ok(unaliased)
+                    }
+                }
             }
         }
     }
@@ -1158,10 +1050,10 @@ fn type_to_type_with_forall(
     let mut variable_requirements = Vec::new();
     let mut type_parameters = Vec::new();
     for (s, interface_names) in forall.type_variables {
-        env.token_map.insert(s.1, TokenMapEntry::TypeVariable);
+        env.token_map.insert(s.2, TokenMapEntry::TypeVariable);
         let v = TypeVariable::new();
         for name in interface_names {
-            env.token_map.insert(name.1, TokenMapEntry::Interface);
+            env.token_map.insert(name.2, TokenMapEntry::Interface);
             for (name, t, self_) in
                 &env.interface_decls[&Name::from_str(module_path, name.0)]
             {
@@ -1185,7 +1077,10 @@ fn type_to_type_with_forall(
     if !variable_requirements.is_empty() {
         t = TypeUnit::Restrictions {
             t,
-            variable_requirements,
+            variable_requirements: variable_requirements
+                .into_iter()
+                .map(|(name, t)| (name.to_string(), t))
+                .collect(),
             subtype_relations: Default::default(),
         }
         .into();

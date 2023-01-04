@@ -1,26 +1,21 @@
-(.) : A -> (A -> B) -> B forall { A, B } =
-    | a, f => f(a)
+data A /=\ B forall { A, B }
 
-infixl 10 .
-
-data A /\ B forall { A, B }
-
-infixl 3 /\
+infixl 3 /=\
 
 data A .. B forall { A, B }
 
 infixl 4 ..
 
-type List = () | (A /\ List) forall { A }
+type LocalList = () | (A /=\ LocalList) forall { A }
 
-range_to_list : (I64 .. I64) -> List[()] =
+range_to_list : (I64 .. I64) -> LocalList[()] =
     | a .. b => (a < b).
-        | True => a /\ ((a + 1)..b).range_to_list
+        | True => a /=\ ((a + 1)..b).range_to_list
         | False => ()
 
-print_num_list : List[I64] -> () =
+print_num_list : LocalList[I64] -> () =
     | () => ()
-    | h /\ t => do
+    | h /=\ t => do
         h.i64_to_string.println
         t.print_num_list
 

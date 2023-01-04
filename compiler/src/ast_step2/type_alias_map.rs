@@ -1,3 +1,4 @@
+use super::imports::Imports;
 use super::types::{Type, TypeUnit, TypeVariable};
 use super::{Env, ModulePath};
 use crate::ast_step1::name_id::Name;
@@ -83,8 +84,8 @@ impl<'a> Env<'a, '_> {
                     .iter()
                     .map(|(s, interfaces)| {
                         let v = TypeVariable::new();
-                        self.token_map.insert(s.1, TokenMapEntry::TypeVariable);
-                        for (_, id) in interfaces {
+                        self.token_map.insert(s.2, TokenMapEntry::TypeVariable);
+                        for (_, _, id) in interfaces {
                             self.token_map
                                 .insert(*id, TokenMapEntry::Interface);
                         }
@@ -139,11 +140,14 @@ impl<'a> TypeAliasMap<'a> {
         type_alias_decls: &[TypeAliasDecl<'a>],
         token_map: &mut TokenMap,
         module_path: ModulePath,
+        imports: &mut Imports,
     ) {
         self.0.extend(type_alias_decls.iter().map(|a| {
-            token_map.insert(a.name.1, TokenMapEntry::TypeAlias);
+            token_map.insert(a.name.2, TokenMapEntry::TypeAlias);
+            let name = Name::from_str(module_path, a.name.0);
+            imports.add_type_alias(name, a.is_public);
             (
-                Name::from_str(module_path, a.name.0),
+                name,
                 AliasEntry {
                     type_: a.body.0.clone(),
                     type_variables: a.body.1.clone(),

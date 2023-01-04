@@ -1,20 +1,20 @@
+use super::imports::Imports;
 use super::types::{Type, TypeUnit, TypeVariable};
 use super::{collect_tuple_rev, TypeId};
 use crate::ast_step1::name_id::Name;
 use crate::ast_step3::GlobalVariableType;
-use crate::OpPrecedenceMap;
 use fxhash::FxHashMap;
 use itertools::Itertools;
 use std::fmt::Display;
 
 pub struct PrintTypeOfGlobalVariableForUser<'a> {
     pub t: &'a GlobalVariableType,
-    pub op_precedence_map: &'a OpPrecedenceMap<'a>,
+    pub imports: &'a Imports,
 }
 
 pub struct PrintTypeOfLocalVariableForUser<'a> {
     pub t: &'a Type,
-    pub op_precedence_map: &'a OpPrecedenceMap<'a>,
+    pub imports: &'a Imports,
     pub type_variable_decls: &'a FxHashMap<TypeUnit, Name>,
 }
 
@@ -23,12 +23,7 @@ impl Display for PrintTypeOfGlobalVariableForUser<'_> {
         write!(
             f,
             "{}",
-            fmt_type_with_env(
-                &self.t.t,
-                self.op_precedence_map,
-                &Default::default()
-            )
-            .0
+            fmt_type_with_env(&self.t.t, self.imports, &Default::default()).0
         )?;
         Ok(())
     }
@@ -39,12 +34,7 @@ impl Display for PrintTypeOfLocalVariableForUser<'_> {
         write!(
             f,
             "{}",
-            fmt_type_with_env(
-                self.t,
-                self.op_precedence_map,
-                self.type_variable_decls
-            )
-            .0
+            fmt_type_with_env(self.t, self.imports, self.type_variable_decls).0
         )?;
         Ok(())
     }
@@ -60,7 +50,7 @@ enum OperatorContext {
 
 fn fmt_type_with_env(
     t: &Type,
-    op_precedence_map: &OpPrecedenceMap,
+    imports: &Imports,
     type_variable_decls: &FxHashMap<TypeUnit, Name>,
 ) -> (String, OperatorContext) {
     if t.is_empty() {
@@ -68,18 +58,15 @@ fn fmt_type_with_env(
     } else if t.len() == 1 {
         fmt_type_unit_with_env(
             t.iter().next().unwrap(),
-            op_precedence_map,
+            imports,
             type_variable_decls,
         )
     } else {
         (
             t.iter()
                 .format_with(" | ", |t, f| {
-                    let (t, t_context) = fmt_type_unit_with_env(
-                        t,
-                        op_precedence_map,
-                        type_variable_decls,
-                    );
+                    let (t, t_context) =
+                        fmt_type_unit_with_env(t, imports, type_variable_decls);
                     let s = match t_context {
                         OperatorContext::Single | OperatorContext::Or => t,
                         _ => format!("({})", t),
@@ -94,7 +81,7 @@ fn fmt_type_with_env(
 
 fn fmt_type_unit_with_env(
     t: &TypeUnit,
-    op_precedence_map: &OpPrecedenceMap,
+    imports: &Imports,
     type_variable_decls: &FxHashMap<TypeUnit, Name>,
 ) -> (String, OperatorContext) {
     use OperatorContext::*;
@@ -104,9 +91,9 @@ fn fmt_type_unit_with_env(
     match t {
         TypeUnit::Fn(a, b) => {
             let (b, b_context) =
-                fmt_type_with_env(b, op_precedence_map, type_variable_decls);
+                fmt_type_with_env(b, imports, type_variable_decls);
             let (a, a_context) =
-                fmt_type_with_env(a, op_precedence_map, type_variable_decls);
+                fmt_type_with_env(a, imports, type_variable_decls);
             let s = match (a_context, b_context) {
                 (Single, Single | Fn) => format!("{} -> {}", a, b),
                 (Single, _) => format!("{} -> ({})", a, b),
@@ -122,8 +109,7 @@ fn fmt_type_unit_with_env(
         TypeUnit::RecursiveAlias { body } => (
             format!(
                 "rec[{}]",
-                fmt_type_with_env(body, op_precedence_map, type_variable_decls)
-                    .0
+                fmt_type_with_env(body, imports, type_variable_decls).0
             ),
             Single,
         ),
@@ -137,18 +123,13 @@ fn fmt_type_unit_with_env(
             if hts.len() == 1 {
                 let (h, tuple_rev) = hts[0];
                 if let TypeUnit::Const { id } = &**h {
-                    fmt_tuple(
-                        *id,
-                        tuple_rev,
-                        op_precedence_map,
-                        type_variable_decls,
-                    )
+                    fmt_tuple(*id, tuple_rev, imports, type_variable_decls)
                 } else {
                     (
                         fmt_tuple_as_tuple(
                             h,
                             tuple_rev,
-                            op_precedence_map,
+                            imports,
                             type_variable_decls,
                         ),
                         OperatorContext::Single,
@@ -159,12 +140,8 @@ fn fmt_type_unit_with_env(
                     "{}",
                     hts.iter().format_with(" | ", |(h, t), f| {
                         if let TypeUnit::Const { id } = &***h {
-                            let (t, t_context) = fmt_tuple(
-                                *id,
-                                t,
-                                op_precedence_map,
-                                type_variable_decls,
-                            );
+                            let (t, t_context) =
+                                fmt_tuple(*id, t, imports, type_variable_decls);
                             match t_context {
                                 Single | Or => f(&t),
                                 _ => f(&format_args!("({})", t)),
@@ -173,7 +150,7 @@ fn fmt_type_unit_with_env(
                             f(&fmt_tuple_as_tuple(
                                 h,
                                 t,
-                                op_precedence_map,
+                                imports,
                                 type_variable_decls,
                             ))
                         }
@@ -185,15 +162,14 @@ fn fmt_type_unit_with_env(
         TypeUnit::TypeLevelFn(f) => (
             format!(
                 "fn[{}]",
-                fmt_type_with_env(f, op_precedence_map, type_variable_decls).0
+                fmt_type_with_env(f, imports, type_variable_decls).0
             ),
             Single,
         ),
         TypeUnit::TypeLevelApply { f, a } => {
             let (f, f_context) =
-                fmt_type_with_env(f, op_precedence_map, type_variable_decls);
-            let (a, _) =
-                fmt_type_with_env(a, op_precedence_map, type_variable_decls);
+                fmt_type_with_env(f, imports, type_variable_decls);
+            let (a, _) = fmt_type_with_env(a, imports, type_variable_decls);
             let s = if f_context == Single {
                 format!("{}[{}]", f, a)
             } else {
@@ -222,7 +198,7 @@ fn fmt_type_unit_with_env(
 fn fmt_tuple(
     head: TypeId,
     tuple_rev: &[&Type],
-    op_precedence_map: &OpPrecedenceMap,
+    imports: &Imports,
     type_variable_decls: &FxHashMap<TypeUnit, Name>,
 ) -> (String, OperatorContext) {
     use OperatorContext::*;
@@ -233,27 +209,19 @@ fn fmt_tuple(
             format!(
                 "{}[{}]",
                 head,
-                fmt_type_with_env(
-                    tuple_rev[0],
-                    op_precedence_map,
-                    type_variable_decls
-                )
-                .0
+                fmt_type_with_env(tuple_rev[0], imports, type_variable_decls).0
             ),
             Single,
         )
-    } else if op_precedence_map.get(head.to_string().as_str()).is_some() {
+    } else if imports.get_op_precedence_from_type_id(head).is_some() {
         debug_assert_eq!(tuple_rev.len(), 2);
         (
             tuple_rev
                 .iter()
                 .rev()
                 .map(|t| {
-                    let (t, t_context) = fmt_type_with_env(
-                        t,
-                        op_precedence_map,
-                        type_variable_decls,
-                    );
+                    let (t, t_context) =
+                        fmt_type_with_env(t, imports, type_variable_decls);
                     match t_context {
                         Single => t,
                         _ => format!("({})", t),
@@ -269,11 +237,8 @@ fn fmt_tuple(
                 "{}[{}]",
                 head,
                 tuple_rev.iter().rev().format_with(", ", |t, f| {
-                    let (t, t_context) = fmt_type_with_env(
-                        t,
-                        op_precedence_map,
-                        type_variable_decls,
-                    );
+                    let (t, t_context) =
+                        fmt_type_with_env(t, imports, type_variable_decls);
                     let s = match t_context {
                         Single => t,
                         _ => format!("({})", t),
@@ -289,18 +254,18 @@ fn fmt_tuple(
 fn fmt_tuple_as_tuple(
     head: &TypeUnit,
     tuple_rev: &[&Type],
-    op_precedence_map: &OpPrecedenceMap,
+    imports: &Imports,
     type_variable_decls: &FxHashMap<TypeUnit, Name>,
 ) -> String {
     format!(
         "({}{})",
-        fmt_type_unit_with_env(head, op_precedence_map, type_variable_decls).0,
+        fmt_type_unit_with_env(head, imports, type_variable_decls).0,
         tuple_rev
             .iter()
             .rev()
             .format_with("", |t, f| f(&format_args!(
                 ", {}",
-                fmt_type_with_env(t, op_precedence_map, type_variable_decls).0
+                fmt_type_with_env(t, imports, type_variable_decls).0
             )))
     )
 }
