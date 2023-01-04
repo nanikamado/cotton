@@ -426,7 +426,9 @@ fn resolve_names(
             );
         }
     }
-    let types = resolved_variable_map.into_values().map(|t| {
+    let types = resolved_variable_map
+        .into_values()
+        .map(|t| {
             (
                 t.decl_id,
                 GlobalVariableType {
@@ -706,18 +708,16 @@ fn resolve_scc(
     for (i, t) in scc.iter().enumerate() {
         scc_map.insert(t.decl_id, i);
     }
-    let candidates_provider = CandidatesProviderForScc {
-        candidates_provider_with_fn: CandidatesProviderWithFn {
-            scc_map: &scc_map,
-            f: |j| Candidate {
-                type_: if let Some(annotation) = &scc[j].type_annotation {
-                    annotation.clone().into()
-                } else {
-                    constructors[j].type_.clone().into()
-                },
-                variable_id: scc[j].decl_id,
-                variable_kind: scc[j].variable_kind,
+    let candidates_provider = CandidateProvider {
+        scc_map: &scc_map,
+        f: |j| Candidate {
+            type_: if let Some(annotation) = &scc[j].type_annotation {
+                annotation.clone().into()
+            } else {
+                constructors[j].type_.clone().into()
             },
+            variable_id: scc[j].decl_id,
+            variable_kind: scc[j].variable_kind,
         },
         normal_map: resolved_variable_map,
         candidates_from_implicit_parameters,
@@ -831,10 +831,10 @@ struct Difficulty {
     start: usize,
 }
 
-fn difficulty_of_resolving<C: CandidatesProvider>(
+fn difficulty_of_resolving<F: FnMut(usize) -> Candidate + Copy>(
     req_name: &[VariableId],
     span_start: usize,
-    resolved_variable_map: C,
+    resolved_variable_map: CandidateProvider<'_, F>,
 ) -> Difficulty {
     Difficulty {
         multiple_candidates: resolved_variable_map
@@ -868,20 +868,28 @@ struct SatisfiedType<T> {
     number_of_variable_requirements_added: usize,
 }
 
-trait CandidatesProvider: Copy {
-    type T: Iterator<Item = Candidate>;
-    fn get_candidates(self, req_name: &[VariableId]) -> Self::T;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Candidate {
+    type_: ast_step2::TypeWithEnv,
+    variable_id: VariableId,
+    variable_kind: VariableKind,
 }
 
-impl CandidatesProvider for &FxHashMap<VariableId, Toplevel> {
-    type T = std::vec::IntoIter<Candidate>;
+#[derive(Debug, Clone, Copy)]
+struct CandidateProvider<'b, F: FnMut(usize) -> Candidate> {
+    scc_map: &'b FxHashMap<VariableId, usize>,
+    f: F,
+    normal_map: &'b FxHashMap<VariableId, Toplevel>,
+    candidates_from_implicit_parameters: &'b FxHashMap<VariableId, Candidate>,
+}
 
-    fn get_candidates(self, req_name: &[VariableId]) -> Self::T {
-        req_name
-            .iter()
-            .flat_map(|name| self.get(name))
-            .cloned()
-            .map(|t| {
+impl<'b, F: FnMut(usize) -> Candidate + Copy + 'b> CandidateProvider<'b, F> {
+    fn get_candidates(
+        mut self,
+        req_name: &'b [VariableId],
+    ) -> impl Iterator<Item = Candidate> + 'b {
+        req_name.iter().map(move |n| {
+            if let Some(c) = self.normal_map.get(n).cloned().map(|t| {
                 let type_ = if let Some(annotation) = t.type_annotation {
                     annotation.into()
                 } else {
@@ -892,91 +900,25 @@ impl CandidatesProvider for &FxHashMap<VariableId, Toplevel> {
                     variable_id: t.decl_id,
                     variable_kind: t.variable_kind,
                 }
-            })
-            .collect_vec()
-            .into_iter()
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct CandidatesProviderWithFn<'b, F: FnMut(usize) -> Candidate> {
-    scc_map: &'b FxHashMap<VariableId, usize>,
-    f: F,
-}
-
-impl<'b, F: FnMut(usize) -> Candidate + Copy> CandidatesProvider
-    for CandidatesProviderWithFn<'b, F>
-{
-    type T = std::iter::Map<std::vec::IntoIter<usize>, F>;
-
-    fn get_candidates(self, req_name: &[VariableId]) -> Self::T {
-        req_name
-            .iter()
-            .flat_map(|name| self.scc_map.get(name))
-            .copied()
-            .collect_vec()
-            .into_iter()
-            .map(self.f)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Candidate {
-    type_: ast_step2::TypeWithEnv,
-    variable_id: VariableId,
-    variable_kind: VariableKind,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct CandidatesProviderForScc<'b, F: FnMut(usize) -> Candidate> {
-    candidates_provider_with_fn: CandidatesProviderWithFn<'b, F>,
-    normal_map: &'b FxHashMap<VariableId, Toplevel>,
-    candidates_from_implicit_parameters: &'b FxHashMap<VariableId, Candidate>,
-}
-
-impl<'b, F: FnMut(usize) -> Candidate + Copy> CandidatesProvider
-    for CandidatesProviderForScc<'b, F>
-{
-    type T = std::vec::IntoIter<Candidate>;
-
-    fn get_candidates(mut self, req_name: &[VariableId]) -> Self::T {
-        req_name
-            .iter()
-            .map(|n| {
-                if let Some(c) = self.normal_map.get(n).cloned().map(|t| {
-                    let type_ = if let Some(annotation) = t.type_annotation {
-                        annotation.into()
-                    } else {
-                        t.type_with_env
-                    };
-                    Candidate {
-                        type_,
-                        variable_id: t.decl_id,
-                        variable_kind: t.variable_kind,
-                    }
-                }) {
-                    c
-                } else if let Some(c) =
-                    self.candidates_from_implicit_parameters.get(n)
-                {
-                    c.clone()
-                } else if let Some(c) =
-                    self.candidates_provider_with_fn.scc_map.get(n)
-                {
-                    (self.candidates_provider_with_fn.f)(*c)
-                } else {
-                    panic!()
-                }
-            })
-            .collect_vec()
-            .into_iter()
+            }) {
+                c
+            } else if let Some(c) =
+                self.candidates_from_implicit_parameters.get(n)
+            {
+                c.clone()
+            } else if let Some(c) = self.scc_map.get(n) {
+                (self.f)(*c)
+            } else {
+                panic!()
+            }
+        })
     }
 }
 
 fn find_satisfied_types<T: TypeConstructor>(
     req: &VariableRequirement,
     type_of_unresolved_decl: &ast_step2::TypeWithEnv<T>,
-    resolved_variable_map: CandidatesProviderForScc<
+    resolved_variable_map: CandidateProvider<
         impl FnMut(usize) -> Candidate + Copy,
     >,
     map: &TypeVariableMap,
@@ -1281,7 +1223,7 @@ fn get_one_satisfied<T: Display>(
 fn resolve_requirements_in_type_with_env(
     mut resolve_num: usize,
     type_of_unresolved_decl: &mut ast_step2::TypeWithEnv<impl TypeConstructor>,
-    resolved_variable_map: CandidatesProviderForScc<
+    resolved_variable_map: CandidateProvider<
         impl FnMut(usize) -> Candidate + Copy,
     >,
     map: &mut TypeVariableMap,
