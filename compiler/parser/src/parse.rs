@@ -257,10 +257,12 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
             .map(|(name, args)| {
                 PatternUnit::Ident(name, args.unwrap_or_default())
             });
-        let pattern_unit = constructor_pattern
-            .or(underscore.map(|_| PatternUnit::Underscore))
-            .or(int.map(PatternUnit::Int))
-            .or(str.map(PatternUnit::Str));
+        let pattern_unit = choice((
+            constructor_pattern,
+            underscore.map(|_| PatternUnit::Underscore),
+            int.map(PatternUnit::Int),
+            str.map(PatternUnit::Str),
+        ));
         pattern_unit
             .clone()
             .map_with_span(|p, s: Span| (p, s))
@@ -335,19 +337,18 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                         .or(expr.clone().map(|e| vec![e])),
                 )
                 .map(ExprUnit::Do);
-            let expr_unit = do_
-                .or(case)
-                .or(int.map(ExprUnit::Int))
-                .or(str.map(ExprUnit::Str))
-                .or(variable_decl.map(ExprUnit::VariableDecl))
-                .or(ident_with_path
-                    .clone()
-                    .map(|path| ExprUnit::Ident { path }))
-                .or(lambda.map(|a| ExprUnit::Case(vec![a])))
-                .or(expr
-                    .clone()
+            let expr_unit = choice((
+                do_,
+                case,
+                int.map(ExprUnit::Int),
+                str.map(ExprUnit::Str),
+                variable_decl.map(ExprUnit::VariableDecl),
+                ident_with_path.clone().map(|path| ExprUnit::Ident { path }),
+                lambda.map(|a| ExprUnit::Case(vec![a])),
+                expr.clone()
                     .delimited_by(open_paren, just(Token::Paren(')')))
-                    .map(ExprUnit::Paren));
+                    .map(ExprUnit::Paren),
+            ));
             let apply = expr
                 .separated_by(just(Token::Comma))
                 .at_least(1)
