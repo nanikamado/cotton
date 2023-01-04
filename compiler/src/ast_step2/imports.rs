@@ -233,21 +233,25 @@ impl Imports {
         }
         if let Some(name_entry) = self.name_map.get_mut(&name) {
             for name_alias_entry in name_entry.true_names.clone().into_iter() {
-                self.get_true_names_with_path_rec(
-                    scope,
-                    name_alias_entry.base_path,
-                    &name_alias_entry
-                        .alias
-                        .iter()
-                        .map(|(s, span, token_id)| {
-                            (s.as_str(), span.clone(), *token_id)
-                        })
-                        .collect_vec(),
-                    token_map,
-                    &visited,
-                    check_existence_in_name_map,
-                    &mut ns,
-                )?;
+                if name_alias_entry.is_public
+                    || path.is_same_as_or_ancestor_of(scope)
+                {
+                    self.get_true_names_with_path_rec(
+                        scope,
+                        name_alias_entry.base_path,
+                        &name_alias_entry
+                            .alias
+                            .iter()
+                            .map(|(s, span, token_id)| {
+                                (s.as_str(), span.clone(), *token_id)
+                            })
+                            .collect_vec(),
+                        token_map,
+                        &visited,
+                        check_existence_in_name_map,
+                        &mut ns,
+                    )?;
+                }
             }
             let name_entry = self.name_map.get_mut(&name).unwrap();
             for v in &name_entry.variables {

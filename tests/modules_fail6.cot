@@ -1,0 +1,14 @@
+infixl 5 .
+
+mod aaa {
+    pub data D1
+
+    pub mod bbb {
+        use pkg::aaa::to_string
+    }
+
+    pub to_string : D1 -> String = | _ => "D1"
+}
+
+main : () -> () =
+    | () => aaa::D1.aaa::bbb::to_string.println

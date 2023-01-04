@@ -402,3 +402,8 @@ fn modules_fail4() {
 fn modules_fail5() {
     test_test("modules_fail5.cot").code(1);
 }
+
+#[test]
+fn modules_fail6() {
+    test_test("modules_fail6.cot").code(1);
+}
