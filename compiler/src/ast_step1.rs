@@ -8,10 +8,7 @@ use self::name_id::Name;
 use self::token_map::{TokenMap, TokenMapEntry};
 use crate::ast_step2::imports::Imports;
 use crate::errors::CompileError;
-use crate::intrinsics::{
-    IntrinsicConstructor, IntrinsicVariable, INTRINSIC_CONSTRUCTORS,
-    INTRINSIC_TYPES, OP_PRECEDENCE,
-};
+use crate::intrinsics::{INTRINSIC_CONSTRUCTORS, OP_PRECEDENCE};
 use fxhash::{FxHashMap, FxHashSet};
 use index_list::{Index, IndexList};
 use itertools::Itertools;
@@ -22,7 +19,6 @@ use parser::{
 };
 use std::collections::BTreeMap;
 use std::fmt::Debug;
-use strum::IntoEnumIterator;
 
 /// Difference between `parser::Ast` and `ast_step1::Ast`:
 /// - `OpSequence`s and `TypeOpSequence`s are converted to syntax trees
@@ -348,49 +344,30 @@ impl<'a> Ast<'a> {
                 parser::Decl::Use { path, is_public } => {
                     let n =
                         Name::from_str(module_path, &path.last().unwrap().0);
-                    if *is_public {
-                        imports.set_public(n);
-                    }
-                    imports.insert_name_alias(n, module_path, path.clone());
+                    imports.insert_name_alias(
+                        n,
+                        module_path,
+                        path.clone(),
+                        *is_public,
+                    );
                 }
             }
         }
         if module_path != Name::root() {
-            for v in IntrinsicVariable::iter() {
-                imports.insert_name_alias(
-                    Name::from_str(module_path, v.to_str()),
-                    Name::intrinsic(),
-                    vec![(v.to_str().to_string(), None, None)],
-                );
-            }
-            for v in IntrinsicConstructor::iter() {
-                imports.insert_name_alias(
-                    Name::from_str(module_path, v.to_str()),
-                    Name::intrinsic(),
-                    vec![(v.to_str().to_string(), None, None)],
-                );
-            }
-            for (name, _) in INTRINSIC_TYPES.iter() {
-                imports.insert_name_alias(
-                    Name::from_str(module_path, name),
-                    Name::intrinsic(),
-                    vec![(name.to_string(), None, None)],
-                );
-            }
+            imports.insert_wild_card_import(
+                module_path,
+                Name::intrinsic(),
+                Vec::new(),
+                false,
+            );
         }
         if module_path != Name::prelude() {
-            for n in imports
-                .public_names_in_module(Name::prelude())
-                .iter()
-                .copied()
-                .collect_vec()
-            {
-                imports.insert_name_alias(
-                    Name::from_str(module_path, &n.split().unwrap().1),
-                    n,
-                    Vec::new(),
-                );
-            }
+            imports.insert_wild_card_import(
+                module_path,
+                Name::prelude(),
+                Vec::new(),
+                false,
+            );
         }
         let modules = modules
             .into_iter()
@@ -478,61 +455,23 @@ impl<'a> Ast<'a> {
     fn collect_constructors_and_public_names(
         ast: &'a parser::Ast,
         constructors: &mut FxHashSet<&'a str>,
-        imports: &mut Imports,
         module_path: Name,
     ) {
         for d in &ast.decls {
             match d {
                 parser::Decl::Data(d) => {
                     constructors.insert(&d.name.0);
-                    imports.add_true_name(
-                        Name::from_str(module_path, &d.name.0),
-                        d.is_public,
-                    );
                 }
                 parser::Decl::Module {
                     ast,
                     name,
-                    is_public,
-                } => {
-                    imports.add_true_name(
-                        Name::from_str(module_path, &name.0),
-                        *is_public,
-                    );
-                    Self::collect_constructors_and_public_names(
-                        ast,
-                        constructors,
-                        imports,
-                        Name::from_str(module_path, &name.0),
-                    )
-                }
-                parser::Decl::Use { path, is_public } => {
-                    if *is_public {
-                        imports.set_public(Name::from_str(
-                            module_path,
-                            &path.last().unwrap().0,
-                        ))
-                    }
-                }
-                parser::Decl::Variable(v) => {
-                    imports.add_true_name(
-                        Name::from_str(module_path, &v.name.0),
-                        v.is_public,
-                    );
-                }
-                parser::Decl::OpPrecedence(_) => (),
-                parser::Decl::TypeAlias(d) => {
-                    imports.add_true_name(
-                        Name::from_str(module_path, &d.name.0),
-                        d.is_public,
-                    );
-                }
-                parser::Decl::Interface(d) => {
-                    imports.add_true_name(
-                        Name::from_str(module_path, &d.name.0),
-                        false,
-                    );
-                }
+                    is_public: _,
+                } => Self::collect_constructors_and_public_names(
+                    ast,
+                    constructors,
+                    Name::from_str(module_path, &name.0),
+                ),
+                _ => (),
             }
         }
     }
@@ -548,7 +487,6 @@ impl<'a> Ast<'a> {
         Self::collect_constructors_and_public_names(
             ast,
             &mut constructors,
-            &mut imports,
             Name::root(),
         );
         let mut precedence_map = OpPrecedenceMap(OP_PRECEDENCE.clone());

@@ -11,12 +11,9 @@ use crate::ast_step1::ident_id::IdentId;
 use crate::ast_step1::name_id::Name;
 use crate::ast_step1::token_map::{TokenMap, TokenMapEntry};
 use crate::ast_step1::{self, merge_span};
-use crate::ast_step3::VariableRequirement;
+use crate::ast_step3::{VariableId, VariableRequirement};
 use crate::errors::CompileError;
-use crate::intrinsics::{
-    IntrinsicConstructor, IntrinsicType, INTRINSIC_CONSTRUCTORS,
-    INTRINSIC_TYPES,
-};
+use crate::intrinsics::{IntrinsicConstructor, IntrinsicType, INTRINSIC_TYPES};
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
@@ -107,7 +104,7 @@ pub type PatternRestrictions =
     Vec<(Type, Vec<(PatternUnitForRestriction, Span)>, Span)>;
 type ModulePath = Name;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TypeWithEnv<T = Type>
 where
     T: TypeConstructor,
@@ -291,7 +288,7 @@ fn collect_data_and_type_alias_decls<'a>(
     imports: &mut Imports,
 ) -> Result<(), CompileError> {
     for d in &ast.variable_decl {
-        imports.add_true_name(d.name, d.is_public);
+        imports.add_variable(d.name, VariableId::Decl(d.decl_id), d.is_public);
     }
     data_decls.extend(ast.data_decl.iter().map(|d| {
         let mut type_variables = FxHashMap::default();
@@ -302,7 +299,9 @@ fn collect_data_and_type_alias_decls<'a>(
                 token_map.insert(*id, TokenMapEntry::Interface);
             }
         }
-        imports.add_true_name(d.name, d.is_public);
+        imports.add_data(d.name, ConstructorId::DeclId(d.decl_id), d.is_public);
+        imports.add_variable(d.name, VariableId::Decl(d.decl_id), d.is_public);
+        imports.add_type(d.name, TypeId::DeclId(d.decl_id), d.is_public);
         DataDecl {
             name: d.name,
             fields: d
@@ -327,7 +326,7 @@ fn collect_data_and_type_alias_decls<'a>(
         imports,
     );
     for m in &ast.modules {
-        imports.add_true_name(m.name, m.is_public);
+        imports.add_module(m.name, m.is_public);
         collect_data_and_type_alias_decls(
             &m.ast,
             m.name,
@@ -861,36 +860,6 @@ impl Name {
     }
 }
 
-impl TypeId {
-    fn get(name: Name, env: &mut Env<'_, '_>) -> Result<TypeId, CompileError> {
-        if let Some(id) = env.data_decl_map.get(&name) {
-            Ok(TypeId::DeclId(*id))
-        } else if let Some(i) = INTRINSIC_TYPES.get(&name.to_string().as_str())
-        {
-            Ok(TypeId::Intrinsic(*i))
-        } else {
-            panic!();
-        }
-    }
-}
-
-impl ConstructorId {
-    fn get(
-        name: Name,
-        data_decl_map: &FxHashMap<Name, DeclId>,
-    ) -> ConstructorId {
-        if let Some(id) = data_decl_map.get(&name) {
-            ConstructorId::DeclId(*id)
-        } else if let Some(i) =
-            INTRINSIC_CONSTRUCTORS.get(name.to_string().as_str())
-        {
-            ConstructorId::Intrinsic(*i)
-        } else {
-            panic!("{:?} not found", name)
-        }
-    }
-}
-
 fn pattern(
     p: ast_step1::Pattern,
     module_path: ModulePath,
@@ -901,35 +870,16 @@ fn pattern(
         ast_step1::Pattern::Number(n) => I64(n.parse().unwrap()),
         ast_step1::Pattern::StrLiteral(s) => Str(s.to_string()),
         ast_step1::Pattern::Constructor { path, args } => {
-            let n = env
-                .imports
-                .get_true_names_with_path(
-                    module_path,
-                    module_path,
-                    &path,
-                    env.token_map,
-                )?
-                .collect_vec();
-            if n.is_empty() {
-                panic!("{:?} not found", path);
-            } else if n.len() == 2 {
-                panic!(
-                    "there are {} candidates for {:?}. \
-                Multiple dispatching on pattern is not implemented.",
-                    n.len(),
-                    path
-                );
-            }
-            let id = ConstructorId::get(n[0], env.data_decl_map);
+            let (name, id) = env.imports.get_constructor(
+                module_path,
+                module_path,
+                &path,
+                env.token_map,
+            )?;
             env.token_map
                 .insert(path.last().unwrap().2, TokenMapEntry::Constructor(id));
             Constructor {
-                name: env.imports.get_true_name_with_path(
-                    module_path,
-                    module_path,
-                    &path,
-                    env.token_map,
-                )?,
+                name,
                 id,
                 args: args
                     .into_iter()
@@ -1000,17 +950,17 @@ fn type_to_type(
         )
         .into()),
         _ => {
-            let n = env.imports.get_true_name_with_path_unchecked(
+            let base_path = env.imports.get_module_with_path(
                 module_path,
                 module_path,
-                &t.path,
+                &t.path[..t.path.len() - 1],
                 env.token_map,
+                &Default::default(),
             )?;
-            if let Some(n) = type_variable_names.get(&n) {
-                env.token_map.insert(
-                    t.path.last().unwrap().2,
-                    TokenMapEntry::TypeVariable,
-                );
+            let (name, span, token_id) = t.path.last().unwrap();
+            let path = Name::from_str(base_path, name);
+            if let Some(n) = type_variable_names.get(&path) {
+                env.token_map.insert(*token_id, TokenMapEntry::TypeVariable);
                 let mut new_t = Type::from(TypeUnit::Variable(*n));
                 for a in &t.args {
                     new_t = new_t.type_level_function_apply(type_to_type(
@@ -1022,62 +972,71 @@ fn type_to_type(
                     )?);
                 }
                 Ok(new_t)
-            } else if let Some(mut unaliased) = {
-                env.get_type_from_alias(
-                    (n, t.path.last().unwrap().2),
-                    type_variable_names,
-                    if search_type == SearchMode::Normal {
-                        SearchMode::Alias
-                    } else {
-                        SearchMode::AliasSub
-                    },
-                )?
-            } {
-                for a in &t.args {
-                    unaliased =
-                        unaliased.type_level_function_apply(type_to_type(
-                            a,
-                            module_path,
-                            type_variable_names,
-                            search_type,
-                            env,
-                        )?);
-                }
-                Ok(unaliased)
             } else {
-                let mut tuple = Type::label_from_str("()");
-                for a in t
-                    .args
-                    .iter()
-                    .map(|a| {
-                        type_to_type(
-                            a,
-                            module_path,
-                            type_variable_names,
-                            search_type,
-                            env,
-                        )
-                    })
-                    .try_collect::<_, Vec<_>, _>()?
-                    .into_iter()
-                    .rev()
-                {
-                    tuple = TypeUnit::Tuple(a, tuple).into();
-                }
-                let id = TypeId::get(
-                    env.imports.get_true_name_with_path_unchecked(
-                        module_path,
-                        module_path,
-                        &t.path,
-                        env.token_map,
-                    )?,
-                    env,
+                let const_or_alias = env.imports.get_type(
+                    module_path,
+                    base_path,
+                    name,
+                    span.clone(),
+                    env.token_map,
                 )?;
-                env.token_map.insert(
-                    t.path.last().unwrap().2,
-                    TokenMapEntry::TypeId(id),
-                );
-                Ok(TypeUnit::Tuple(TypeUnit::Const { id }.into(), tuple).into())
+                match const_or_alias {
+                    imports::ConstOrAlias::Const(id) => {
+                        let mut tuple = Type::label_from_str("()");
+                        for a in t
+                            .args
+                            .iter()
+                            .map(|a| {
+                                type_to_type(
+                                    a,
+                                    module_path,
+                                    type_variable_names,
+                                    search_type,
+                                    env,
+                                )
+                            })
+                            .try_collect::<_, Vec<_>, _>()?
+                            .into_iter()
+                            .rev()
+                        {
+                            tuple = TypeUnit::Tuple(a, tuple).into();
+                        }
+                        env.token_map.insert(
+                            t.path.last().unwrap().2,
+                            TokenMapEntry::TypeId(id),
+                        );
+                        Ok(TypeUnit::Tuple(
+                            TypeUnit::Const { id }.into(),
+                            tuple,
+                        )
+                        .into())
+                    }
+                    imports::ConstOrAlias::Alias(name) => {
+                        let mut unaliased = env
+                            .get_type_from_alias(
+                                (name, *token_id),
+                                type_variable_names,
+                                if search_type == SearchMode::Normal {
+                                    SearchMode::Alias
+                                } else {
+                                    SearchMode::AliasSub
+                                },
+                            )?
+                            .unwrap();
+                        for a in &t.args {
+                            unaliased = unaliased.type_level_function_apply(
+                                type_to_type(
+                                    a,
+                                    module_path,
+                                    type_variable_names,
+                                    search_type,
+                                    env,
+                                )?,
+                            );
+                        }
+                        Ok(unaliased)
+                    }
+                }
             }
         }
     }

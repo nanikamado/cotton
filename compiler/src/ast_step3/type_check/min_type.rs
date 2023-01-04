@@ -56,6 +56,7 @@ pub fn min_type_with_env(
     map: &mut TypeVariableMap,
     imports: &mut Imports,
     token_map: &mut TokenMap,
+    candidates_from_implicit_parameters: &FxHashMap<&str, Vec<DeclId>>,
 ) -> Result<
     (ast_step2::TypeWithEnv, Resolved, TypesOfLocalDeclsVec),
     CompileError,
@@ -68,24 +69,27 @@ pub fn min_type_with_env(
             .variable_requirements
             .into_iter()
             .map(|r| {
+                let name = imports.get_variables_with_path(
+                    r.module_path,
+                    r.module_path,
+                    &r.name
+                        .iter()
+                        .map(|(a, b, c)| (a.as_str(), b.clone(), *c))
+                        .collect_vec(),
+                    token_map,
+                    candidates_from_implicit_parameters,
+                )?;
                 Ok(super::VariableRequirement {
-                    name: imports
-                        .get_true_names_with_path(
-                            r.module_path,
-                            r.module_path,
-                            &r.name
-                                .iter()
-                                .map(|(a, b, c)| (a.as_str(), b.clone(), *c))
-                                .collect_vec(),
-                            token_map,
-                        )?
-                        .collect(),
+                    name,
                     module_path: r.module_path,
                     required_type: r.required_type,
                     ident: r.ident,
                     span: r.span,
                     local_env: r.local_env,
-                    additional_candidates: Default::default(),
+                    additional_candidates: candidates_from_implicit_parameters
+                        .iter()
+                        .map(|(a, b)| (a.to_string(), b.clone()))
+                        .collect(),
                     req_recursion_count: r.req_recursion_count,
                 })
             })

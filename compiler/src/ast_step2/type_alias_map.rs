@@ -145,7 +145,7 @@ impl<'a> TypeAliasMap<'a> {
         self.0.extend(type_alias_decls.iter().map(|a| {
             token_map.insert(a.name.2, TokenMapEntry::TypeAlias);
             let name = Name::from_str(module_path, a.name.0);
-            imports.add_true_name(name, a.is_public);
+            imports.add_type_alias(name, a.is_public);
             (
                 name,
                 AliasEntry {
