@@ -1,5 +1,3 @@
-infixl 10 .
-
 data Err(A) forall { A }
 data Ok(A) forall { A }
 

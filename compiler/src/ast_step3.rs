@@ -10,6 +10,7 @@ use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::ident_id::IdentId;
 use crate::ast_step1::name_id::Name;
 use crate::ast_step1::token_map::TokenMap;
+use crate::ast_step2::imports::Imports;
 use crate::ast_step2::types::{Type, TypeConstructor, TypeUnit, TypeVariable};
 use crate::ast_step2::{self, Pattern, PatternUnit};
 use crate::errors::CompileError;
@@ -76,13 +77,14 @@ impl Ast {
     pub fn from(
         mut ast: ast_step2::Ast,
         token_map: &mut TokenMap,
+        imports: &mut Imports,
     ) -> Result<(Self, FxHashMap<IdentId, ResolvedIdent>), CompileError> {
         let TypeCheckResult {
             resolved_idents,
             global_variable_types,
             mut local_variable_types,
             type_variable_map: mut map,
-        } = type_check(&mut ast, token_map)?;
+        } = type_check(&mut ast, token_map, imports)?;
         let (variable_decl, entry_point) = variable_decl(
             ast.variable_decl,
             ast.entry_point,

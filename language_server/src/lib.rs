@@ -2,9 +2,9 @@
 mod tests;
 
 use compiler::{
-    combine_with_prelude, FxHashMap, OpPrecedenceMap,
-    PrintTypeOfGlobalVariableForUser, PrintTypeOfLocalVariableForUser, Token,
-    TokenId, TokenKind, TokenMapWithEnv,
+    combine_with_prelude, FxHashMap, Imports, PrintTypeOfGlobalVariableForUser,
+    PrintTypeOfLocalVariableForUser, Token, TokenId, TokenKind,
+    TokenMapWithEnv,
 };
 use dashmap::DashMap;
 use once_cell::sync::Lazy;
@@ -250,10 +250,8 @@ fn semantic_tokens_from_src(src: &str) -> Option<(SemanticTokens, HoverMap)> {
     let (ts, src_len) = compiler::lex(src);
     let ast = compiler::parse_result(ts.clone(), src_len).ok()?;
     let ast = combine_with_prelude(ast);
-    let TokenMapWithEnv {
-        token_map,
-        op_precedence_map,
-    } = compiler::get_token_map(&ast).ok()?;
+    let TokenMapWithEnv { token_map, imports } =
+        compiler::get_token_map(&ast).ok()?;
     let mut tokens = Vec::new();
     let mut line = 0;
     let mut start = 0;
@@ -355,9 +353,8 @@ fn semantic_tokens_from_src(src: &str) -> Option<(SemanticTokens, HoverMap)> {
                                         value: format!(
                                             "```\n{}\n```",
                                             print_type(
-                                                &ts_head.0,
-                                                &token_map,
-                                                &op_precedence_map
+                                                &ts_head.0, &token_map,
+                                                &imports
                                             )?
                                         ),
                                         kind: MarkupKind::Markdown,
@@ -427,7 +424,7 @@ fn make_map(src: &str) -> (Vec<(u32, u32)>, Utf16ToCharMap) {
 fn print_type(
     token: &Token,
     token_map: &FxHashMap<TokenId, TokenKind>,
-    op_precedence_map: &OpPrecedenceMap,
+    imports: &Imports,
 ) -> Option<String> {
     match token {
         Token::Int(_) => Some("I64".to_string()),
@@ -438,16 +435,12 @@ fn print_type(
                 TokenKind::GlobalVariable(_, Some(t))
                 | TokenKind::VariableDeclInInterface(t)
                 | TokenKind::Constructor(Some(t)) => Some(
-                    PrintTypeOfGlobalVariableForUser {
-                        t,
-                        op_precedence_map,
-                    }
-                    .to_string(),
+                    PrintTypeOfGlobalVariableForUser { t, imports }.to_string(),
                 ),
                 TokenKind::LocalVariable(_, Some(t)) => Some(
                     PrintTypeOfLocalVariableForUser {
                         t: &t.0,
-                        op_precedence_map,
+                        imports,
                         type_variable_decls: &t.1,
                     }
                     .to_string(),

@@ -1,8 +1,6 @@
 interface ToString where
     to_string : Self -> String
 
-infixl 10 .
-
 data LocalNil
 data A /=\ B forall { A, B }
 

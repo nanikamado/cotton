@@ -1048,20 +1048,22 @@ impl TypeWithEnv {
 #[cfg(test)]
 mod tests {
     use crate::ast_step1::name_id::Name;
-    use crate::{ast_step1, ast_step2, combine_with_prelude};
+    use crate::{ast_step1, ast_step2, combine_with_prelude, Imports};
+    use stripmargin::StripMargin;
 
     #[test]
     fn conjunctive_0() {
         let src = r#"
-        infixl 3 /\
-        main : () -> () =
-            | () => ()
-        test1 : (False /\ False) | (False /\ True) | (True /\ False) | (True /\ True) = ()
-        "#;
-        let ast = combine_with_prelude(parser::parse(src));
-        let (ast, _, mut token_map, imports) =
-            ast_step1::Ast::from(&ast).unwrap();
-        let ast = ast_step2::Ast::from(ast, &mut token_map, imports).unwrap();
+        |main : () -> () =
+        |    | () => ()
+        |test1 : (False /\ False) | (False /\ True) | (True /\ False) | (True /\ True) = ()
+        |"#.strip_margin();
+        let ast = combine_with_prelude(parser::parse(&src));
+        let mut imports = Imports::default();
+        let (ast, mut token_map) =
+            ast_step1::Ast::from(&ast, &mut imports).unwrap();
+        let ast =
+            ast_step2::Ast::from(ast, &mut token_map, &mut imports).unwrap();
         let t = ast
             .variable_decl
             .iter()

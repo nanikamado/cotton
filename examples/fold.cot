@@ -1,6 +1,3 @@
-infixl 10 .
-infixr 3 /\
-
 fold : List[A] -> B -> (B -> A -> B) -> B forall { A, B } =
     | Nil, init, _ => init
     | h /\ t, init, f => t.fold(init.f(h), f)

@@ -81,6 +81,7 @@ pub struct TypeCheckResult {
 pub fn type_check(
     ast: &mut Ast,
     token_map: &mut TokenMap,
+    imports: &mut Imports,
 ) -> Result<TypeCheckResult, CompileError> {
     let mut toplevels: Vec<Toplevel> = Default::default();
     for v in IntrinsicVariable::iter() {
@@ -152,7 +153,7 @@ pub fn type_check(
             d.name.split().unwrap().0,
             &mut subtype_relations,
             &mut map,
-            &mut ast.imports,
+            imports,
             token_map,
             &candidates_from_implicit_parameters_str,
         )?;
@@ -215,7 +216,7 @@ pub fn type_check(
     }
     let (mut resolved_names, types, _rel) = resolve_names(
         toplevels,
-        &mut ast.imports,
+        imports,
         &mut map,
         &candidates_from_implicit_parameters,
     )?;

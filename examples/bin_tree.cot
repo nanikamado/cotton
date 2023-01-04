@@ -1,6 +1,3 @@
-infixl 10 .
-infixl 3 /\
-
 data E
 data T(A, B, C) forall { A, B, C }
 

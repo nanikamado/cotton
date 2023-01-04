@@ -84,9 +84,10 @@ pub struct OpPrecedenceDecl {
     pub name: String,
     pub associativity: Associativity,
     pub precedence: i32,
+    pub is_public: bool,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub enum Associativity {
     Left,
     Right,
@@ -408,18 +409,25 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 },
             )
     });
-    let op_precedence_decl = just(Token::Infixl)
-        .map(|_| Associativity::Left)
-        .or(just(Token::Infixr).map(|_| Associativity::Right))
+    let op_precedence_decl = just(Token::Pub)
+        .or_not()
+        .then(
+            just(Token::Infixl)
+                .map(|_| Associativity::Left)
+                .or(just(Token::Infixr).map(|_| Associativity::Right)),
+        )
         .then(int)
         .then(op)
-        .map(|((associativity, i), (name, _span, _token_id))| {
-            OpPrecedenceDecl {
-                name,
-                associativity,
-                precedence: i.parse().unwrap(),
-            }
-        });
+        .map(
+            |(((pub_or_not, associativity), i), (name, _span, _token_id))| {
+                OpPrecedenceDecl {
+                    name,
+                    associativity,
+                    precedence: i.parse().unwrap(),
+                    is_public: pub_or_not.is_some(),
+                }
+            },
+        );
     let data_decl_normal = ident
         .then(
             ident_or_op

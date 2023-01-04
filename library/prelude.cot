@@ -1,7 +1,7 @@
 pub (.) : A -> (A -> B) -> B forall { A, B } =
     | a, f => f(a)
 
-infixl 10 .
+pub infixl 10 .
 
 pub data None
 pub data Some(A) forall { A }
@@ -11,7 +11,7 @@ pub type Option = None | Some[A] forall { A }
 pub data Nil
 pub data A /\ B forall { A, B }
 
-infixr 5 /\
+pub infixr 3 /\
 
 pub type List = Nil | A /\ List[A] forall { A }
 

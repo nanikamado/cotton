@@ -1,5 +1,3 @@
-infixl 10 .
-
 data O
 data S(A) forall { A }
 

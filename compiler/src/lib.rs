@@ -12,8 +12,7 @@ mod rust_backend;
 use ast_step1::ident_id::IdentId;
 use ast_step1::name_id::Name;
 use ast_step1::token_map::{TokenMap, TokenMapEntry};
-pub use ast_step1::OpPrecedenceMap;
-use ast_step2::imports::Imports;
+pub use ast_step2::imports::Imports;
 pub use ast_step2::type_display::{
     PrintTypeOfGlobalVariableForUser, PrintTypeOfLocalVariableForUser,
 };
@@ -82,8 +81,9 @@ pub fn run(
     let (tokens, src_len) = lex(source);
     let ast = parser::parse::parse(tokens, source, src_len);
     let ast = combine_with_prelude(ast);
-    let (ast, op_precedence_map, mut token_map, imports) =
-        ast_step1::Ast::from(&ast).unwrap_or_else(|e| {
+    let mut imports = Imports::default();
+    let (ast, mut token_map) = ast_step1::Ast::from(&ast, &mut imports)
+        .unwrap_or_else(|e| {
             e.write(
                 source,
                 &mut std::io::stderr(),
@@ -93,15 +93,10 @@ pub fn run(
             .unwrap();
             process::exit(1)
         });
-    let (ast, _resolved_idents) = to_step_3(ast, &mut token_map, imports)
+    let (ast, _resolved_idents) = to_step_3(ast, &mut token_map, &mut imports)
         .unwrap_or_else(|e| {
-            e.write(
-                source,
-                &mut std::io::stderr(),
-                filename,
-                &op_precedence_map,
-            )
-            .unwrap();
+            e.write(source, &mut std::io::stderr(), filename, &imports)
+                .unwrap();
             process::exit(1)
         });
     if command == Command::PrintTypes {
@@ -127,10 +122,10 @@ pub fn run(
 fn to_step_3(
     ast: ast_step1::Ast,
     token_map: &mut TokenMap,
-    imports: Imports,
+    imports: &mut Imports,
 ) -> Result<(ast_step3::Ast, FxHashMap<IdentId, ResolvedIdent>), CompileError> {
     let ast = ast_step2::Ast::from(ast, token_map, imports)?;
-    ast_step3::Ast::from(ast, token_map)
+    ast_step3::Ast::from(ast, token_map, imports)
 }
 
 pub fn combine_with_prelude(ast: parser::Ast) -> parser::Ast {
@@ -163,18 +158,19 @@ pub enum TokenKind {
     VariableDeclInInterface(GlobalVariableType),
 }
 
-pub struct TokenMapWithEnv<'a> {
+pub struct TokenMapWithEnv {
     pub token_map: FxHashMap<TokenId, TokenKind>,
-    pub op_precedence_map: OpPrecedenceMap<'a>,
+    pub imports: Imports,
 }
 
 pub fn get_token_map(
     ast: &parser::Ast,
 ) -> Result<TokenMapWithEnv, CompileError> {
-    let (ast, op_precedence_map, mut token_map, imports) =
-        ast_step1::Ast::from(ast)?;
-    let ast = ast_step2::Ast::from(ast, &mut token_map, imports)?;
-    let (ast, resolved_idents) = ast_step3::Ast::from(ast, &mut token_map)?;
+    let mut imports = Imports::default();
+    let (ast, mut token_map) = ast_step1::Ast::from(ast, &mut imports)?;
+    let ast = ast_step2::Ast::from(ast, &mut token_map, &mut imports)?;
+    let (ast, resolved_idents) =
+        ast_step3::Ast::from(ast, &mut token_map, &mut imports)?;
     let token_map = token_map
         .0
         .into_iter()
@@ -271,10 +267,7 @@ pub fn get_token_map(
             (id, t)
         })
         .collect();
-    Ok(TokenMapWithEnv {
-        token_map,
-        op_precedence_map,
-    })
+    Ok(TokenMapWithEnv { token_map, imports })
 }
 
 pub fn print_types(ast: &ast_step3::Ast) {

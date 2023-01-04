@@ -5,18 +5,19 @@ use crate::ast_step1::token_map::{TokenMap, TokenMapEntry};
 use crate::ast_step3::VariableId;
 use crate::errors::CompileError;
 use crate::intrinsics::{
-    IntrinsicConstructor, IntrinsicVariable, INTRINSIC_TYPES,
+    IntrinsicConstructor, IntrinsicVariable, INTRINSIC_TYPES, OP_PRECEDENCE,
 };
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use parser::token_id::TokenId;
-use parser::Span;
+use parser::{Associativity, Span};
 use strum::IntoEnumIterator;
 
 #[derive(Debug, Eq, PartialEq, Default)]
 struct NameEntry {
     true_names: Vec<NameAliasEntry>,
     variables: Vec<VariableDecl>,
+    op_precedence: Option<OpPrecedenceDecl>,
     data: Option<DataDecl>,
     type_: Option<TypeDecl>,
     module: Option<ModuleDecl>,
@@ -28,6 +29,7 @@ enum NameKind {
     Data(ConstructorId),
     Type(ConstOrAlias),
     Module(Name),
+    OpPrecedence(Associativity, i32),
 }
 
 #[derive(Debug)]
@@ -36,6 +38,7 @@ struct NameResult {
     data: Option<ConstructorId>,
     type_: Option<ConstOrAlias>,
     module: Option<Name>,
+    op_precedence: Option<(Associativity, i32)>,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
@@ -67,6 +70,13 @@ struct ModuleDecl {
     is_public: bool,
 }
 
+#[derive(Debug, Eq, PartialEq)]
+struct OpPrecedenceDecl {
+    associativity: Associativity,
+    precedence: i32,
+    is_public: bool,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct NameAliasEntry {
     alias: Vec<(String, Option<Span>, Option<TokenId>)>,
@@ -78,6 +88,7 @@ struct NameAliasEntry {
 pub struct Imports {
     name_map: FxHashMap<Name, NameEntry>,
     wilde_card_imports: FxHashMap<Name, Vec<NameAliasEntry>>,
+    type_id_to_name: FxHashMap<TypeId, Name>,
 }
 
 impl Imports {
@@ -90,6 +101,24 @@ impl Imports {
         let a = self.name_map.entry(name).or_default();
         a.variables.push(VariableDecl {
             variable_id,
+            is_public,
+        });
+    }
+
+    pub fn add_op_precedence(
+        &mut self,
+        name: Name,
+        associativity: Associativity,
+        precedence: i32,
+        is_public: bool,
+    ) {
+        let a = self.name_map.entry(name).or_default();
+        if a.op_precedence.is_some() {
+            panic!("Multiple precedence declarations for operators with the same name.")
+        }
+        a.op_precedence = Some(OpPrecedenceDecl {
+            associativity,
+            precedence,
             is_public,
         });
     }
@@ -115,6 +144,7 @@ impl Imports {
         if a.type_.is_some() {
             panic!("Type with the same name cannot be declared more than once.")
         }
+        self.type_id_to_name.insert(type_id, name);
         a.type_ = Some(TypeDecl {
             is_public,
             const_or_alias: ConstOrAlias::Const(type_id),
@@ -272,6 +302,14 @@ impl Imports {
             if let Some(d) = &name_entry.module {
                 if d.is_public || path.is_same_as_or_ancestor_of(scope) {
                     ns.insert(NameKind::Module(name));
+                }
+            }
+            if let Some(d) = &name_entry.op_precedence {
+                if d.is_public || path.is_same_as_or_ancestor_of(scope) {
+                    ns.insert(NameKind::OpPrecedence(
+                        d.associativity,
+                        d.precedence,
+                    ));
                 }
             }
         }
@@ -464,6 +502,40 @@ impl Imports {
         })
     }
 
+    pub fn get_op_precedence(
+        &mut self,
+        scope: Name,
+        base_path: Name,
+        name: &str,
+        span: Option<Span>,
+        token_map: &mut TokenMap,
+    ) -> Result<(Associativity, i32), CompileError> {
+        if name == "|" {
+            return Ok(OP_PRECEDENCE["|"]);
+        } else if name == "->" {
+            return Ok(OP_PRECEDENCE["->"]);
+        }
+        let mut ns = Default::default();
+        self.get_true_names_rec(
+            scope,
+            base_path,
+            name,
+            span.clone(),
+            token_map,
+            &FxHashSet::default(),
+            true,
+            &mut ns,
+        )?;
+        let n = collect_name_kinds(ns);
+        n.op_precedence.ok_or_else(|| {
+            Name::from_str(base_path, name);
+            CompileError::NoOpPrecedenceDecl {
+                path: Name::from_str(base_path, name),
+                span: span.unwrap(),
+            }
+        })
+    }
+
     pub fn get_variables(
         &mut self,
         scope: Name,
@@ -532,6 +604,18 @@ impl Imports {
             Ok(names)
         }
     }
+
+    pub fn get_op_precedence_from_type_id(
+        &self,
+        type_id: TypeId,
+    ) -> Option<(Associativity, i32)> {
+        let p = self
+            .name_map
+            .get(self.type_id_to_name.get(&type_id)?)?
+            .op_precedence
+            .as_ref()?;
+        Some((p.associativity, p.precedence))
+    }
 }
 
 fn collect_name_kinds(names: FxHashSet<NameKind>) -> NameResult {
@@ -539,6 +623,7 @@ fn collect_name_kinds(names: FxHashSet<NameKind>) -> NameResult {
     let mut data = None;
     let mut type_ = None;
     let mut module = None;
+    let mut op_precedence = None;
     for n in names {
         match n {
             NameKind::Variable(v) => variables.push(v),
@@ -554,6 +639,10 @@ fn collect_name_kinds(names: FxHashSet<NameKind>) -> NameResult {
                 debug_assert!(module.is_none());
                 module = Some(m);
             }
+            NameKind::OpPrecedence(a, p) => {
+                debug_assert!(op_precedence.is_none());
+                op_precedence = Some((a, p))
+            }
         }
     }
     NameResult {
@@ -561,6 +650,7 @@ fn collect_name_kinds(names: FxHashSet<NameKind>) -> NameResult {
         data,
         type_,
         module,
+        op_precedence,
     }
 }
 
@@ -569,8 +659,8 @@ impl Default for Imports {
         let mut imports = Imports {
             name_map: Default::default(),
             wilde_card_imports: Default::default(),
+            type_id_to_name: Default::default(),
         };
-
         for v in IntrinsicVariable::iter() {
             imports.add_variable(
                 Name::from_str_intrinsic(v.to_str()),
@@ -594,6 +684,14 @@ impl Default for Imports {
             imports.add_type(
                 Name::from_str_intrinsic(name),
                 TypeId::Intrinsic(*id),
+                true,
+            );
+        }
+        for (name, (associativity, precedence)) in OP_PRECEDENCE.iter() {
+            imports.add_op_precedence(
+                Name::from_str_intrinsic(name),
+                *associativity,
+                *precedence,
                 true,
             );
         }

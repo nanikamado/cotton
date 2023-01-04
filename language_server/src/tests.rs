@@ -7,7 +7,7 @@ fn prime_local_type() {
     let src = fs::read_to_string("../examples/prime.cot").unwrap();
     let (_, hover_map) = semantic_tokens_from_src(&src).unwrap();
     if let HoverContents::Markup(c) =
-        &hover_map[35][6].as_ref().unwrap().contents
+        &hover_map[31][6].as_ref().unwrap().contents
     {
         assert_eq!(
             c.value,
@@ -17,7 +17,7 @@ fn prime_local_type() {
         panic!()
     };
     if let HoverContents::Markup(c) =
-        &hover_map[26][10].as_ref().unwrap().contents
+        &hover_map[22][10].as_ref().unwrap().contents
     {
         assert_eq!(
             c.value,
@@ -33,7 +33,7 @@ fn red_black_tree_local_type() {
     let src = fs::read_to_string("../examples/red_black_tree.cot").unwrap();
     let (_, hover_map) = semantic_tokens_from_src(&src).unwrap();
     if let HoverContents::Markup(c) =
-        &hover_map[32][14].as_ref().unwrap().contents
+        &hover_map[29][14].as_ref().unwrap().contents
     {
         assert_eq!(
             c.value,
@@ -52,7 +52,7 @@ fn red_black_tree_local_type() {
         panic!()
     };
     if let HoverContents::Markup(c) =
-        &hover_map[29][24].as_ref().unwrap().contents
+        &hover_map[26][24].as_ref().unwrap().contents
     {
         assert_eq!(
             c.value,

@@ -45,7 +45,6 @@ pub enum TypeId {
 pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl>,
-    pub imports: Imports,
     pub entry_point: DeclId,
 }
 
@@ -218,7 +217,7 @@ impl<'a> Ast<'a> {
     pub fn from(
         ast: ast_step1::Ast<'a>,
         token_map: &mut TokenMap,
-        mut imports: Imports,
+        imports: &mut Imports,
     ) -> Result<Self, CompileError> {
         let mut data_decls = Vec::new();
         let mut variable_decls = Vec::new();
@@ -226,7 +225,7 @@ impl<'a> Ast<'a> {
             token_map,
             type_alias_map: &mut TypeAliasMap::default(),
             interface_decls: &mut Default::default(),
-            imports: &mut imports,
+            imports,
             data_decl_map: &mut FxHashMap::default(),
         };
         collect_decls(
@@ -244,7 +243,6 @@ impl<'a> Ast<'a> {
         Ok(Self {
             variable_decl: variable_decls,
             data_decl: data_decls,
-            imports,
             entry_point,
         })
     }
