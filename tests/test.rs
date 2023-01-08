@@ -407,3 +407,18 @@ fn modules_fail5() {
 fn modules_fail6() {
     test_test("modules_fail6.cot").code(1);
 }
+
+#[test]
+fn apply_pattern() {
+    test_examples(
+        "apply_pattern.cot",
+        "n == 2\nn == 6, m == 8, m.fib == 21\nn == 7\n",
+    );
+}
+
+#[test]
+fn lambda_in_apply_pattern() {
+    test_test("lambda_in_apply_pattern.cot")
+        .stdout("2\n20!\n20\n")
+        .success();
+}

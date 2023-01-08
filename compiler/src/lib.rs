@@ -119,11 +119,12 @@ pub fn run(
     }
 }
 
-fn to_step_3(
-    ast: ast_step1::Ast,
+fn to_step_3<'a>(
+    ast: ast_step1::Ast<'a>,
     token_map: &mut TokenMap,
     imports: &mut Imports,
-) -> Result<(ast_step3::Ast, FxHashMap<IdentId, ResolvedIdent>), CompileError> {
+) -> Result<(ast_step3::Ast<'a>, FxHashMap<IdentId, ResolvedIdent>), CompileError>
+{
     let ast = ast_step2::Ast::from(ast, token_map, imports)?;
     ast_step3::Ast::from(ast, token_map, imports)
 }

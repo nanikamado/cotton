@@ -119,7 +119,6 @@ pub fn type_check(
         });
     }
     let mut resolved_idents = Vec::new();
-    let mut subtype_relations = SubtypeRelations::default();
     let mut map = TypeVariableMap::default();
     let mut types_of_local_decls = Vec::new();
     let mut candidates_from_implicit_parameters: FxHashMap<
@@ -151,7 +150,6 @@ pub fn type_check(
         let (mut t, resolved, tod) = min_type_with_env(
             &d.value,
             d.name.split().unwrap().0,
-            &mut subtype_relations,
             &mut map,
             imports,
             token_map,

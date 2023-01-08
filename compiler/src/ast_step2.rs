@@ -96,11 +96,20 @@ pub enum PatternUnitForRestriction {
     ),
     Binder(Type, DeclId),
     TypeRestriction(Box<PatternUnitForRestriction>, Type),
+    Apply(Box<PatternUnitForRestriction>),
 }
 
 pub type PatternForRestriction = Vec<(PatternUnitForRestriction, Span)>;
-pub type PatternRestrictions =
-    Vec<(Type, Vec<(PatternUnitForRestriction, Span)>, Span)>;
+
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub struct PatternRestriction {
+    pub type_: Type,
+    pub pattern: PatternForRestriction,
+    pub span: Span,
+    pub allow_inexhaustive: bool,
+}
+
+pub type PatternRestrictions = Vec<PatternRestriction>;
 type ModulePath = Name;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -139,8 +148,8 @@ pub type ExprWithTypeAndSpan<'a, T> = (Expr<'a, T>, T, Span);
 #[derive(Debug, PartialEq, Clone)]
 pub enum Expr<'a, T> {
     Lambda(Vec<FnArm<'a, T>>),
-    Number(String),
-    StrLiteral(String),
+    Number(&'a str),
+    StrLiteral(&'a str),
     Ident {
         name: Vec<(&'a str, Option<Span>, Option<TokenId>)>,
         ident_id: IdentId,
@@ -159,27 +168,35 @@ pub enum Expr<'a, T> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct FnArm<'a, T> {
-    pub pattern: Vec<(Pattern<T>, Span)>,
+    pub pattern: Vec<(Pattern<'a, T>, Span)>,
     pub expr: ExprWithTypeAndSpan<'a, T>,
 }
 
 /// Represents a multi-case pattern which matches if any of the `PatternUnit` in it matches.
 /// It should have at least one `PatternUnit`.
-pub type Pattern<T> = Vec<PatternUnit<T>>;
+pub type Pattern<'a, T, E = ExprWithTypeAndSpan<'a, TypeVariable>> =
+    Vec<PatternUnit<'a, T, E>>;
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum PatternUnit<T> {
-    I64(String),
-    Str(String),
+#[derive(Debug, PartialEq, Clone)]
+pub enum PatternUnit<'a, T, E = ExprWithTypeAndSpan<'a, TypeVariable>> {
+    I64(&'a str),
+    Str(&'a str),
     Constructor {
         name: Name,
         id: ConstructorId,
-        args: Vec<Pattern<T>>,
+        args: Vec<Pattern<'a, T, E>>,
     },
     Binder(String, DeclId, T),
     ResolvedBinder(DeclId, T),
     Underscore,
-    TypeRestriction(Pattern<T>, Type),
+    TypeRestriction(Pattern<'a, T, E>, Type),
+    Apply(Box<Pattern<'a, T, E>>, Vec<ApplyPattern<'a, T, E>>),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct ApplyPattern<'a, T, E> {
+    pub function: E,
+    pub post_pattern: Pattern<'a, T, E>,
 }
 
 #[derive(Debug)]
@@ -465,8 +482,8 @@ impl From<Type> for TypeWithEnv {
     }
 }
 
-impl<T> From<PatternUnit<T>> for Pattern<T> {
-    fn from(p: PatternUnit<T>) -> Self {
+impl<'a, T, U> From<PatternUnit<'a, T, U>> for Pattern<'a, T, U> {
+    fn from(p: PatternUnit<'a, T, U>) -> Self {
         vec![p]
     }
 }
@@ -638,10 +655,8 @@ fn expr<'a>(
                     .collect::<Result<_, _>>()?,
             ),
         ),
-        ast_step1::Expr::Number(n) => (Vec::new(), Number(n.to_string())),
-        ast_step1::Expr::StrLiteral(s) => {
-            (Vec::new(), StrLiteral(s.to_string()))
-        }
+        ast_step1::Expr::Number(n) => (Vec::new(), Number(n)),
+        ast_step1::Expr::StrLiteral(s) => (Vec::new(), StrLiteral(s)),
         ast_step1::Expr::Ident { path } => {
             let ident_id = IdentId::new();
             env.token_map
@@ -835,7 +850,9 @@ fn fn_arm<'a>(
         pattern: arm
             .pattern
             .into_iter()
-            .map(|(p, span)| Ok((pattern(p, module_path, env)?, span)))
+            .map(|(p, span)| {
+                Ok((pattern(p, module_path, type_variable_names, env)?, span))
+            })
             .try_collect()?,
         expr: catch_flat_map(expr(
             arm.expr,
@@ -858,15 +875,16 @@ impl Name {
     }
 }
 
-fn pattern(
-    p: ast_step1::Pattern,
+fn pattern<'a>(
+    p: ast_step1::Pattern<'a>,
     module_path: ModulePath,
+    type_variable_names: &FxHashMap<Name, TypeVariable>,
     env: &mut Env<'_, '_>,
-) -> Result<Pattern<TypeVariable>, CompileError> {
+) -> Result<Pattern<'a, TypeVariable>, CompileError> {
     use PatternUnit::*;
     Ok(match p {
-        ast_step1::Pattern::Number(n) => I64(n.parse().unwrap()),
-        ast_step1::Pattern::StrLiteral(s) => Str(s.to_string()),
+        ast_step1::Pattern::Number(n) => I64(n),
+        ast_step1::Pattern::StrLiteral(s) => Str(s),
         ast_step1::Pattern::Constructor { path, args } => {
             let (name, id) = env.imports.get_constructor(
                 module_path,
@@ -881,7 +899,9 @@ fn pattern(
                 id,
                 args: args
                     .into_iter()
-                    .map(|arg| pattern(arg, module_path, env))
+                    .map(|arg| {
+                        pattern(arg, module_path, type_variable_names, env)
+                    })
                     .try_collect()?,
             }
         }
@@ -899,9 +919,36 @@ fn pattern(
                 forall,
                 env,
             )?;
-            let p = pattern(*p, module_path, env)?;
+            let p = pattern(*p, module_path, type_variable_names, env)?;
             TypeRestriction(p, t)
         }
+        ast_step1::Pattern::Apply(pre_pattern, applications) => Apply(
+            Box::new(pattern(
+                *pre_pattern,
+                module_path,
+                type_variable_names,
+                env,
+            )?),
+            applications
+                .into_iter()
+                .map(|a| {
+                    Ok(ApplyPattern {
+                        function: catch_flat_map(expr(
+                            a.function,
+                            module_path,
+                            type_variable_names,
+                            env,
+                        )?)?,
+                        post_pattern: pattern(
+                            a.post_pattern,
+                            module_path,
+                            type_variable_names,
+                            env,
+                        )?,
+                    })
+                })
+                .try_collect()?,
+        ),
     }
     .into())
 }
@@ -1179,6 +1226,9 @@ impl Display for PatternUnitForRestriction {
             PatternUnitForRestriction::TypeRestriction(p, t) => {
                 write!(f, "({p} : {t})")
             }
+            PatternUnitForRestriction::Apply(p) => {
+                write!(f, "Apply({p})")
+            }
         }
     }
 }
@@ -1200,6 +1250,7 @@ impl PatternUnitForRestriction {
             PatternUnitForRestriction::TypeRestriction(p, _) => {
                 p.covariant_type_variables()
             }
+            PatternUnitForRestriction::Apply(p) => p.covariant_type_variables(),
         }
     }
 
@@ -1217,6 +1268,9 @@ impl PatternUnitForRestriction {
                 .chain(b.contravariant_type_variables())
                 .collect(),
             PatternUnitForRestriction::TypeRestriction(p, _) => {
+                p.contravariant_type_variables()
+            }
+            PatternUnitForRestriction::Apply(p) => {
                 p.contravariant_type_variables()
             }
         }
@@ -1238,6 +1292,7 @@ impl PatternUnitForRestriction {
             PatternUnitForRestriction::TypeRestriction(p, _) => {
                 p.all_type_variables_vec()
             }
+            PatternUnitForRestriction::Apply(p) => p.all_type_variables_vec(),
         }
     }
 
@@ -1261,33 +1316,35 @@ impl PatternUnitForRestriction {
             PatternUnitForRestriction::TypeRestriction(p, _) => {
                 p.decl_type_map()
             }
+            PatternUnitForRestriction::Apply(p) => p.decl_type_map(),
         }
     }
 
-    pub fn map_type<F>(self, f: F) -> Self
+    pub fn map_type<F>(self, mut f: F) -> Self
     where
         F: FnMut(Type) -> Type,
     {
-        self.map_type_rec(f).0
+        self.map_type_rec(&mut f)
     }
 
-    fn map_type_rec<F>(self, mut f: F) -> (Self, F)
+    fn map_type_rec<F>(self, f: &mut F) -> Self
     where
         F: FnMut(Type) -> Type,
     {
         use PatternUnitForRestriction::*;
         match self {
-            a @ (I64 | Str | Const { .. }) => (a, f),
+            a @ (I64 | Str | Const { .. }) => a,
             Tuple(a, b) => {
-                let (a, f) = a.map_type_rec(f);
-                let (b, f) = b.map_type_rec(f);
-                (Tuple(a.into(), b.into()), f)
+                let a = a.map_type_rec(f);
+                let b = b.map_type_rec(f);
+                Tuple(a.into(), b.into())
             }
-            Binder(t, decl_id) => (Binder(f(t), decl_id), f),
+            Binder(t, decl_id) => Binder(f(t), decl_id),
             TypeRestriction(p, t) => {
-                let (p, mut f) = p.map_type_rec(f);
-                (TypeRestriction(Box::new(p), f(t)), f)
+                let p = p.map_type_rec(f);
+                TypeRestriction(Box::new(p), f(t))
             }
+            Apply(a) => Apply(Box::new(a.map_type_rec(f))),
         }
     }
 }

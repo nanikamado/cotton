@@ -109,6 +109,13 @@ pub enum Pattern<'a> {
     Binder(StrWithId<'a>),
     Underscore,
     TypeRestriction(Box<Pattern<'a>>, Type<'a>, Forall<'a>),
+    Apply(Box<Pattern<'a>>, Vec<ApplyPattern<'a>>),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct ApplyPattern<'a> {
+    pub function: ExprWithSpan<'a>,
+    pub post_pattern: Pattern<'a>,
 }
 
 #[derive(Debug, Clone)]
@@ -896,6 +903,29 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::PatternUnit, &'a Span) {
                     Box::new(fold_op_sequence(p, env, module_path)?.0),
                     fold_op_sequence(t, env, module_path)?.0,
                     forall.into(),
+                )
+            }
+            parser::PatternUnit::Apply(pre_pattern, applications) => {
+                Pattern::Apply(
+                    Box::new(
+                        (&pre_pattern.0, &pre_pattern.1)
+                            .convert(env, module_path)?
+                            .0,
+                    ),
+                    applications
+                        .iter()
+                        .map(|a| {
+                            Ok(ApplyPattern {
+                                function: expr(&a.function, env, module_path)?,
+                                post_pattern: fold_op_sequence(
+                                    &a.post_pattern,
+                                    env,
+                                    module_path,
+                                )?
+                                .0,
+                            })
+                        })
+                        .try_collect()?,
                 )
             }
         };

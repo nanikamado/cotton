@@ -66,6 +66,13 @@ pub enum PatternUnit {
     Ident(Vec<StringWithId>, Vec<Pattern>),
     Underscore,
     TypeRestriction(Box<Pattern>, Type, Forall),
+    Apply(Box<(PatternUnit, Span)>, Vec<ApplyPattern>),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct ApplyPattern {
+    pub function: Expr,
+    pub post_pattern: Pattern,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -244,77 +251,106 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
             }),
         )
     });
-    let pattern = recursive(|pattern| {
-        let constructor_pattern = ident_with_path
-            .clone()
-            .then(
-                pattern
-                    .separated_by(just(Token::Comma))
-                    .allow_trailing()
-                    .delimited_by(open_paren.clone(), just(Token::Paren(')')))
-                    .or_not(),
-            )
-            .map(|(name, args)| {
-                PatternUnit::Ident(name, args.unwrap_or_default())
-            });
-        let pattern_unit = choice((
-            constructor_pattern,
-            underscore.map(|_| PatternUnit::Underscore),
-            int.map(PatternUnit::Int),
-            str.map(PatternUnit::Str),
-        ));
-        pattern_unit
-            .clone()
-            .map_with_span(|p, s: Span| (p, s))
-            .then(
-                op.map_with_span(|op, span: Span| (op, span))
-                    .then(
-                        pattern_unit.clone().map_with_span(|p, s: Span| (p, s)),
-                    )
-                    .map(|((s, s_span), (e, e_span))| {
-                        vec![
-                            OpSequenceUnit::Op(s, s_span),
-                            OpSequenceUnit::Operand((e, e_span)),
-                        ]
-                    })
-                    .repeated()
-                    .flatten(),
-            )
-            .then(
-                just(Token::Colon)
-                    .ignore_then(
-                        type_
-                            .clone()
-                            .map_with_span(|op, span: Span| (op, span)),
-                    )
-                    .or_not(),
-            )
-            .map_with_span(|p, s: Span| (p, s))
-            .map(|((((e, e_span), oes), type_annotation), whole_span)| {
-                let p =
-                    [vec![OpSequenceUnit::Operand((e, e_span))], oes].concat();
-                if let Some(((type_restriction, forall), _type_span)) =
-                    type_annotation
-                {
-                    vec![OpSequenceUnit::Operand((
-                        PatternUnit::TypeRestriction(
-                            Box::new(p),
-                            type_restriction,
-                            forall,
-                        ),
-                        whole_span,
-                    ))]
-                } else {
-                    p
-                }
-            })
-    });
-    let patterns = pattern
-        .separated_by(just(Token::Comma))
-        .allow_trailing()
-        .at_least(1);
     let variable_decl = recursive(|variable_decl| {
-        let expr = recursive(|expr| {
+        let expr = recursive(|expr_without_type_annotation| {
+            let expr = expr_without_type_annotation
+                .clone()
+                .then(just(Token::Colon).ignore_then(type_.clone()).or_not());
+            let pattern = recursive(|pattern| {
+                let constructor_pattern = ident_with_path
+                    .clone()
+                    .then(
+                        pattern
+                            .clone()
+                            .separated_by(just(Token::Comma))
+                            .allow_trailing()
+                            .delimited_by(
+                                open_paren.clone(),
+                                just(Token::Paren(')')),
+                            )
+                            .or_not(),
+                    )
+                    .map(|(name, args)| {
+                        PatternUnit::Ident(name, args.unwrap_or_default())
+                    });
+                let pattern_unit = choice((
+                    constructor_pattern,
+                    underscore.map(|_| PatternUnit::Underscore),
+                    int.map(PatternUnit::Int),
+                    str.map(PatternUnit::Str),
+                ));
+                let apply_filter = indented(
+                    expr_without_type_annotation
+                        .map(|e| (e, None))
+                        .then_ignore(just(Token::Colon))
+                        .then(pattern)
+                        .map(|(function, post_pattern)| ApplyPattern {
+                            function,
+                            post_pattern,
+                        })
+                        .separated_by(just(Token::Comma))
+                        .allow_trailing(),
+                );
+                let pattern_unit = pattern_unit
+                    .clone()
+                    .map_with_span(|p, s| (p, s))
+                    .then(apply_filter.map_with_span(|a, s| (a, s)).repeated())
+                    .foldl(|acc, a| {
+                        (PatternUnit::Apply(Box::new(acc), a.0), a.1)
+                    });
+                pattern_unit
+                    .clone()
+                    .then(
+                        op.map_with_span(|op, span: Span| (op, span))
+                            .then(pattern_unit.clone())
+                            .map(|((s, s_span), (e, e_span))| {
+                                vec![
+                                    OpSequenceUnit::Op(s, s_span),
+                                    OpSequenceUnit::Operand((e, e_span)),
+                                ]
+                            })
+                            .repeated()
+                            .flatten(),
+                    )
+                    .then(
+                        just(Token::Colon)
+                            .ignore_then(
+                                type_
+                                    .clone()
+                                    .map_with_span(|op, span: Span| (op, span)),
+                            )
+                            .or_not(),
+                    )
+                    .map_with_span(
+                        |(((e, e_span), oes), type_annotation), whole_span| {
+                            let p = [
+                                vec![OpSequenceUnit::Operand((e, e_span))],
+                                oes,
+                            ]
+                            .concat();
+                            if let Some((
+                                (type_restriction, forall),
+                                _type_span,
+                            )) = type_annotation
+                            {
+                                vec![OpSequenceUnit::Operand((
+                                    PatternUnit::TypeRestriction(
+                                        Box::new(p),
+                                        type_restriction,
+                                        forall,
+                                    ),
+                                    whole_span,
+                                ))]
+                            } else {
+                                p
+                            }
+                        },
+                    )
+            });
+            let patterns = pattern
+                .separated_by(just(Token::Comma))
+                .allow_trailing()
+                .at_least(1);
             let lambda = just(Token::Bar)
                 .ignore_then(patterns)
                 .then_ignore(just(Token::BArrow))
@@ -387,11 +423,11 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                         .repeated()
                         .flatten(),
                 )
-                .then(just(Token::Colon).ignore_then(type_.clone()).or_not())
-                .map(|((e, oes), t)| {
-                    ([vec![OpSequenceUnit::Operand(e)], oes].concat(), t)
+                .map(|(e, oes)| {
+                    [vec![OpSequenceUnit::Operand(e)], oes].concat()
                 })
-        });
+        })
+        .then(just(Token::Colon).ignore_then(type_.clone()).or_not());
         just(Token::Pub)
             .or_not()
             .then(ident_or_op.clone())

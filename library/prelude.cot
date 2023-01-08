@@ -63,3 +63,7 @@ pub flat_map : F[A] -> (A -> F[B]) -> F[B] forall { F: Map & Flatten, A, B } =
     | x, f => x.map(f).flatten
 
 pub type Bool = True | False
+
+pub to_string : Bool -> String =
+    | True => "True"
+    | False => "False"
