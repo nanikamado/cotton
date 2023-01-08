@@ -218,7 +218,6 @@ impl Imports {
         span: Option<Span>,
         token_map: &mut TokenMap,
         visited: &FxHashSet<Name>,
-        check_existence_in_name_map: bool,
         true_names: &mut FxHashSet<NameKind>,
     ) -> Result<(), CompileError> {
         let name = Name::from_str(path, name_str);
@@ -256,7 +255,6 @@ impl Imports {
                     span.clone(),
                     token_map,
                     &visited,
-                    check_existence_in_name_map,
                     &mut ns,
                 )?;
             }
@@ -278,7 +276,6 @@ impl Imports {
                             .collect_vec(),
                         token_map,
                         &visited,
-                        check_existence_in_name_map,
                         &mut ns,
                     )?;
                 }
@@ -336,7 +333,6 @@ impl Imports {
             span.clone(),
             token_map,
             visited,
-            true,
             &mut ns,
         )?;
         let n = collect_name_kinds(ns);
@@ -387,7 +383,6 @@ impl Imports {
         mut path: &[(&str, Option<Span>, Option<TokenId>)],
         token_map: &mut TokenMap,
         visited: &FxHashSet<Name>,
-        check_existence_in_name_map: bool,
         true_names: &mut FxHashSet<NameKind>,
     ) -> Result<(), CompileError> {
         if path.is_empty() {
@@ -418,7 +413,6 @@ impl Imports {
                 span.clone(),
                 token_map,
                 visited,
-                check_existence_in_name_map,
                 true_names,
             )?;
             Ok(())
@@ -449,7 +443,6 @@ impl Imports {
             span.clone(),
             token_map,
             &FxHashSet::default(),
-            true,
             &mut ns,
         )?;
         Ok((
@@ -492,7 +485,6 @@ impl Imports {
             span.clone(),
             token_map,
             &FxHashSet::default(),
-            true,
             &mut ns,
         )?;
         let n = collect_name_kinds(ns);
@@ -523,7 +515,6 @@ impl Imports {
             span.clone(),
             token_map,
             &FxHashSet::default(),
-            true,
             &mut ns,
         )?;
         let n = collect_name_kinds(ns);
@@ -553,7 +544,6 @@ impl Imports {
             span.clone(),
             token_map,
             &FxHashSet::default(),
-            true,
             &mut ns,
         )?;
         let n = collect_name_kinds(ns);
