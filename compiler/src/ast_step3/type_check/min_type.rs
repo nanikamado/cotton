@@ -478,10 +478,10 @@ fn pattern_to_type(
     env: &mut Env<'_>,
     bindings: &mut FxHashMap<String, (DeclId, types::Type)>,
 ) -> (Type, (PatternUnitForRestriction, Span)) {
-    if p.len() >= 2 {
+    if p.0.len() >= 2 {
         unimplemented!()
     }
-    let mut ps = p.iter();
+    let mut ps = p.0.iter();
     let first_p = ps.next().unwrap();
     let (t, pattern) =
         pattern_unit_to_type(first_p, bindings, span.clone(), module_path, env);

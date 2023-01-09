@@ -56,8 +56,13 @@ pub enum Expr<T> {
 
 /// Represents a multi-case pattern which matches if any of the `PatternUnit` in it matches.
 /// It should have at least one `PatternUnit`.
-pub type Pattern<T = TypePointer, E = ExprWithType<T>> =
-    (Vec<PatternUnit<T, E>>, T);
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Pattern<T = TypePointer, E = ExprWithType<T>> {
+    pub patterns: Vec<PatternUnit<T, E>>,
+    pub type_: T,
+}
+// pub type Pattern<T = TypePointer, E = ExprWithType<T>> =
+//     (Vec<PatternUnit<T, E>>, T);
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum PatternUnit<T, E = ExprWithType<T>> {
@@ -456,11 +461,11 @@ impl<'b> VariableMemo<'b> {
         local_variables: &mut FxHashMap<VariableId, TypePointer>,
         trace: &FxHashMap<VariableId, TypePointer>,
     ) -> Pattern {
-        if pattern.len() != 1 {
+        if pattern.0.len() != 1 {
             unimplemented!()
         } else {
             use crate::ast_step2::PatternUnit::*;
-            let pattern = match &pattern[0] {
+            let pattern = match &pattern.0[0] {
                 I64(a) => {
                     self.type_map.insert_normal(
                         type_pointer,
@@ -497,7 +502,7 @@ impl<'b> VariableMemo<'b> {
                     self.type_map.insert_normal(
                         type_pointer,
                         (*id).into(),
-                        args.iter().map(|(_, p)| *p).collect(),
+                        args.iter().map(|p| p.type_).collect(),
                     );
                     let mut p = PatternUnit::Constructor {
                         name: *name,
@@ -514,7 +519,10 @@ impl<'b> VariableMemo<'b> {
                             &mut self.type_map,
                         );
                         p = PatternUnit::Apply {
-                            pre_pattern: (vec![p], type_pointer),
+                            pre_pattern: Pattern {
+                                patterns: vec![p],
+                                type_: type_pointer,
+                            },
                             function: (
                                 Expr::Ident {
                                     name: format!("_{i}"),
@@ -574,9 +582,9 @@ impl<'b> VariableMemo<'b> {
                     for a in applications {
                         let post_pattern_p = self.type_map.new_pointer();
                         let function_p = self.type_map.new_pointer();
-                        let p_p = p.1;
-                        p = (
-                            vec![PatternUnit::Apply {
+                        let p_p = p.type_;
+                        p = Pattern {
+                            patterns: vec![PatternUnit::Apply {
                                 pre_pattern: p,
                                 function: (
                                     self.expr(
@@ -594,13 +602,16 @@ impl<'b> VariableMemo<'b> {
                                     trace,
                                 ),
                             }],
-                            p_p,
-                        );
+                            type_: p_p,
+                        };
                     }
                     return p;
                 }
             };
-            (vec![pattern], type_pointer)
+            Pattern {
+                patterns: vec![pattern],
+                type_: type_pointer,
+            }
         }
     }
 }

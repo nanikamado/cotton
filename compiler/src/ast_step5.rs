@@ -211,11 +211,12 @@ impl VariableMemo {
 
     fn monomorphize_pattern(
         &mut self,
-        (pattern, t): ast_step4::Pattern<TypePointer>,
+        pattern: ast_step4::Pattern<TypePointer>,
         replace_map: &FxHashMap<TypePointer, TypePointer>,
         trace: &FxHashMap<DeclId, DeclId>,
     ) -> Pattern {
-        let pattern = pattern
+        let patterns = pattern
+            .patterns
             .into_iter()
             .map(|p| match p {
                 PatternUnit::Constructor { name, id } => {
@@ -254,6 +255,11 @@ impl VariableMemo {
                 },
             })
             .collect();
-        (pattern, self.map.get_type_with_replace_map(t, replace_map))
+        Pattern {
+            patterns,
+            type_: self
+                .map
+                .get_type_with_replace_map(pattern.type_, replace_map),
+        }
     }
 }

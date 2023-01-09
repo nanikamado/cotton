@@ -136,11 +136,9 @@ fn variable_decl<'a>(
                     },
                 );
                 value = Expr::Lambda(vec![FnArm {
-                    pattern: vec![vec![PatternUnit::Binder(
-                        name,
-                        decl_id,
-                        t.clone(),
-                    )]],
+                    pattern: vec![ast_step2::Pattern(vec![
+                        PatternUnit::Binder(name, decl_id, t.clone()),
+                    ])],
                     expr: (value, value_t.clone()),
                 }]);
                 value_t = TypeUnit::Fn(t, value_t).into();
@@ -284,10 +282,13 @@ fn normalize_types_in_pattern<'a>(
     resolved_idents: &FxHashMap<IdentId, ResolvedIdent>,
     map: &mut TypeVariableMap,
 ) -> Pattern<'a> {
-    pattern
-        .into_iter()
-        .map(|p| normalize_types_in_pattern_unit(p, resolved_idents, map))
-        .collect()
+    ast_step2::Pattern(
+        pattern
+            .0
+            .into_iter()
+            .map(|p| normalize_types_in_pattern_unit(p, resolved_idents, map))
+            .collect(),
+    )
 }
 
 fn normalize_types_in_pattern_unit<'a>(

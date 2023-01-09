@@ -178,16 +178,16 @@ fn condition(pattern: &[Pattern], name_count: u32) -> String {
 }
 
 fn single_condition(
-    (pattern, _): &Pattern,
+    p: &Pattern,
     arg: &str,
     name_count: u32,
     condition: &mut String,
 ) {
-    if pattern.len() != 1 {
+    if p.patterns.len() != 1 {
         unimplemented!()
     }
     use PatternUnit::*;
-    match &pattern[0] {
+    match &p.patterns[0] {
         I64(a) | Str(a) => {
             write!(condition, "&&{}==={}", a, arg).unwrap();
         }
@@ -246,11 +246,11 @@ fn _condition(
 }
 
 fn bindings(pattern: &[Pattern]) -> Vec<(String, DeclId, &Type)> {
-    fn _bindings_unit((p, t): &Pattern) -> Vec<(String, DeclId, &Type)> {
-        if p.len() == 1 {
-            match &p[0] {
+    fn _bindings_unit(p: &Pattern) -> Vec<(String, DeclId, &Type)> {
+        if p.patterns.len() == 1 {
+            match &p.patterns[0] {
                 PatternUnit::Binder(a, id) => {
-                    vec![(a.to_string(), *id, t)]
+                    vec![(a.to_string(), *id, &p.type_)]
                 }
                 PatternUnit::TypeRestriction(p, _) => _bindings_unit(p),
                 PatternUnit::Apply {

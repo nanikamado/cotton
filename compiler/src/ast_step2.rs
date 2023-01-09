@@ -180,8 +180,10 @@ pub struct FnArm<'a, T> {
 
 /// Represents a multi-case pattern which matches if any of the `PatternUnit` in it matches.
 /// It should have at least one `PatternUnit`.
-pub type Pattern<'a, T, E = ExprWithTypeAndSpan<'a, TypeVariable>> =
-    Vec<PatternUnit<'a, T, E>>;
+#[derive(Debug, PartialEq, Clone)]
+pub struct Pattern<'a, T, E = ExprWithTypeAndSpan<'a, TypeVariable>>(
+    pub Vec<PatternUnit<'a, T, E>>,
+);
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum PatternUnit<'a, T, E = ExprWithTypeAndSpan<'a, TypeVariable>> {
@@ -511,7 +513,7 @@ impl From<Type> for TypeWithEnv {
 
 impl<'a, T, U> From<PatternUnit<'a, T, U>> for Pattern<'a, T, U> {
     fn from(p: PatternUnit<'a, T, U>) -> Self {
-        vec![p]
+        Pattern(vec![p])
     }
 }
 
@@ -610,10 +612,10 @@ fn catch_flat_map(
             } => {
                 let continuation = Expr::Lambda(vec![FnArm {
                     pattern: vec![(
-                        vec![PatternUnit::ResolvedBinder(
+                        Pattern(vec![PatternUnit::ResolvedBinder(
                             decl_id,
                             type_of_decl,
-                        )],
+                        )]),
                         0..0,
                     )],
                     expr,
