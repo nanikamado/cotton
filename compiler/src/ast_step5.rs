@@ -218,14 +218,8 @@ impl VariableMemo {
         let pattern = pattern
             .into_iter()
             .map(|p| match p {
-                PatternUnit::Constructor { name, id, args } => {
-                    let args = args
-                        .into_iter()
-                        .map(|p| {
-                            self.monomorphize_pattern(p, replace_map, trace)
-                        })
-                        .collect();
-                    PatternUnit::Constructor { name, id, args }
+                PatternUnit::Constructor { name, id } => {
+                    PatternUnit::Constructor { name, id }
                 }
                 PatternUnit::I64(a) => PatternUnit::I64(a),
                 PatternUnit::Str(a) => PatternUnit::Str(a),

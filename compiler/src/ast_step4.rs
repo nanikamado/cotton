@@ -66,7 +66,6 @@ pub enum PatternUnit<T, E = ExprWithType<T>> {
     Constructor {
         name: Name,
         id: ConstructorId,
-        args: Vec<Pattern<T, E>>,
     },
     Binder(String, DeclId),
     Underscore,
@@ -478,7 +477,11 @@ impl<'b> VariableMemo<'b> {
                     );
                     PatternUnit::Str(a.to_string())
                 }
-                Constructor { name, id, args } => {
+                Constructor {
+                    name,
+                    id: id @ ConstructorId::DeclId(decl_id),
+                    args,
+                } => {
                     let args = args
                         .iter()
                         .map(|pattern| {
@@ -496,10 +499,51 @@ impl<'b> VariableMemo<'b> {
                         (*id).into(),
                         args.iter().map(|(_, p)| *p).collect(),
                     );
+                    let mut p = PatternUnit::Constructor {
+                        name: *name,
+                        id: *id,
+                    };
+                    let field_len = args.len();
+                    for (i, arg) in args.into_iter().enumerate() {
+                        let accessor_t = self.type_map.new_pointer();
+                        insert_accessor_type(
+                            accessor_t,
+                            field_len,
+                            TypeId::DeclId(*decl_id),
+                            i,
+                            &mut self.type_map,
+                        );
+                        p = PatternUnit::Apply {
+                            pre_pattern: (vec![p], type_pointer),
+                            function: (
+                                Expr::Ident {
+                                    name: format!("_{i}"),
+                                    variable_id: VariableId::FieldAccessor {
+                                        constructor: *decl_id,
+                                        field: i,
+                                    },
+                                },
+                                accessor_t,
+                            ),
+                            post_pattern: arg,
+                        };
+                    }
+                    p
+                }
+                Constructor {
+                    name,
+                    id: id @ ConstructorId::Intrinsic(_),
+                    args,
+                } => {
+                    debug_assert!(args.is_empty());
+                    self.type_map.insert_normal(
+                        type_pointer,
+                        (*id).into(),
+                        Vec::new(),
+                    );
                     PatternUnit::Constructor {
                         name: *name,
                         id: *id,
-                        args,
                     }
                 }
                 Binder(name, d, _) => {

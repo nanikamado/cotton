@@ -2,6 +2,7 @@ mod type_restriction_pattern;
 
 use self::type_restriction_pattern::IS_INSTANCE_OF;
 use crate::ast_step1::decl_id::DeclId;
+use crate::ast_step2::types::merge_vec;
 use crate::ast_step3::{DataDecl, VariableId};
 use crate::ast_step4::{PatternUnit, Type};
 use crate::ast_step5::{Ast, Expr, ExprWithType, FnArm, Pattern, VariableDecl};
@@ -190,7 +191,7 @@ fn single_condition(
         I64(a) | Str(a) => {
             write!(condition, "&&{}==={}", a, arg).unwrap();
         }
-        Constructor { id, args, name } => {
+        Constructor { id, name } => {
             write!(
                 condition,
                 "&&'${}${}'==={}.name",
@@ -199,14 +200,6 @@ fn single_condition(
                 arg
             )
             .unwrap();
-            _condition(
-                args,
-                &(0..args.len())
-                    .map(|i| format!("{}[{}]", arg, i))
-                    .collect_vec(),
-                name_count,
-                condition,
-            );
         }
         TypeRestriction(p, t) => {
             write!(
@@ -259,13 +252,15 @@ fn bindings(pattern: &[Pattern]) -> Vec<(String, DeclId, &Type)> {
                 PatternUnit::Binder(a, id) => {
                     vec![(a.to_string(), *id, t)]
                 }
-                PatternUnit::Constructor { args, .. } => {
-                    args.iter().flat_map(_bindings_unit).collect()
-                }
                 PatternUnit::TypeRestriction(p, _) => _bindings_unit(p),
-                PatternUnit::Apply { pre_pattern, .. } => {
-                    _bindings_unit(pre_pattern)
-                }
+                PatternUnit::Apply {
+                    pre_pattern,
+                    post_pattern,
+                    function: _,
+                } => merge_vec(
+                    _bindings_unit(pre_pattern),
+                    _bindings_unit(post_pattern),
+                ),
                 _ => Vec::new(),
             }
         } else {
