@@ -2,7 +2,7 @@ mod type_restriction_pattern;
 
 use self::type_restriction_pattern::IS_INSTANCE_OF;
 use crate::ast_step1::decl_id::DeclId;
-use crate::ast_step3::DataDecl;
+use crate::ast_step3::{DataDecl, VariableId};
 use crate::ast_step4::{PatternUnit, Type};
 use crate::ast_step5::{Ast, Expr, ExprWithType, FnArm, Pattern, VariableDecl};
 use crate::intrinsics::{IntrinsicConstructor, IntrinsicVariable};
@@ -19,7 +19,8 @@ pub fn codegen(ast: Ast) -> String {
         PRIMITIVE_CONSTRUCTOR_DEF[&IntrinsicConstructor::True],
         PRIMITIVE_CONSTRUCTOR_DEF[&IntrinsicConstructor::False],
         r#"{
-        |let $$unexpected = () => {throw new Error("unexpected")};
+        |let $$unexpected=()=>{throw new Error("unexpected")};
+        |let $field_accessor=i=>a=>a[i];
         |"#
         .strip_margin(),
         PRIMITIVES_DEF
@@ -126,15 +127,21 @@ fn expr((e, t): &ExprWithType, name_count: u32) -> String {
         Expr::Number(a) => a.to_string(),
         Expr::StrLiteral(a) => format!("\"{}\"", a),
         Expr::Ident {
-            name: info,
-            variable_id,
-            variable_kind: _,
+            name: _,
+            variable_id:
+                VariableId::FieldAccessor {
+                    constructor: _,
+                    field,
+                },
         } => {
+            format!("$field_accessor({field})")
+        }
+        Expr::Ident { name, variable_id } => {
             format!(
                 "${}${} /* ({}) */",
                 variable_id,
-                convert_name(info.to_string().as_str()),
-                info,
+                convert_name(name.to_string().as_str()),
+                name,
             )
         }
         Expr::Call(f, a) => {

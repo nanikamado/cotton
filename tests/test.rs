@@ -422,3 +422,8 @@ fn lambda_in_apply_pattern() {
         .stdout("2\n20!\n20\n")
         .success();
 }
+
+#[test]
+fn field_accessor() {
+    test_examples("field_accessor.cot", "2\n");
+}

@@ -19,7 +19,6 @@ pub use ast_step2::type_display::{
 use ast_step2::types::{Type, TypeMatchableRef, TypeUnit};
 use ast_step3::{
     GlobalVariableType, LocalVariableType, ResolvedIdent, VariableId,
-    VariableKind,
 };
 use codegen::codegen;
 use errors::CompileError;
@@ -151,7 +150,7 @@ pub fn combine_with_prelude(ast: parser::Ast) -> parser::Ast {
 
 pub enum TokenKind {
     GlobalVariable(VariableId, Option<GlobalVariableType>),
-    LocalVariable(VariableId, Option<(Type, FxHashMap<TypeUnit, Name>)>),
+    LocalVariable(VariableId, (Type, FxHashMap<TypeUnit, Name>)),
     Constructor(Option<GlobalVariableType>),
     Type,
     Interface,
@@ -180,40 +179,38 @@ pub fn get_token_map(
                 TokenMapEntry::Decl(decl_id) => {
                     if let Some(t) = ast
                         .types_of_global_decls
-                        .get(&VariableId::Decl(decl_id))
+                        .get(&VariableId::Global(decl_id))
                     {
                         TokenKind::GlobalVariable(
-                            VariableId::Decl(decl_id),
+                            VariableId::Global(decl_id),
                             Some(t.clone()),
                         )
                     } else {
-                        let t = ast
-                            .types_of_local_decls
-                            .get(&VariableId::Decl(decl_id));
+                        let LocalVariableType { t, toplevel } = &ast
+                            .types_of_local_decls[&VariableId::Local(decl_id)];
                         TokenKind::LocalVariable(
-                            VariableId::Decl(decl_id),
-                            t.map(|LocalVariableType { t, toplevel }| {
-                                (
-                                    t.clone(),
-                                    ast.types_of_global_decls
-                                        [&VariableId::Decl(*toplevel)]
-                                        .fixed_parameters
-                                        .clone(),
-                                )
-                            }),
+                            VariableId::Local(decl_id),
+                            (
+                                t.clone(),
+                                ast.types_of_global_decls
+                                    [&VariableId::Global(*toplevel)]
+                                    .fixed_parameters
+                                    .clone(),
+                            ),
                         )
                     }
                 }
                 TokenMapEntry::Ident(ident_id) => {
                     let r = resolved_idents.get(&ident_id).unwrap();
-                    match r.variable_kind {
-                        VariableKind::IntrinsicConstructor => TokenKind::Type,
-                        VariableKind::Constructor => TokenKind::Constructor(
+                    use VariableId::*;
+                    match r.variable_id {
+                        IntrinsicConstructor(_) => TokenKind::Type,
+                        Constructor(_) => TokenKind::Constructor(
                             ast.types_of_global_decls
                                 .get(&r.variable_id)
                                 .cloned(),
                         ),
-                        VariableKind::Global | VariableKind::Intrinsic => {
+                        Global(_) | IntrinsicVariable(_) => {
                             TokenKind::GlobalVariable(
                                 r.variable_id,
                                 ast.types_of_global_decls
@@ -221,20 +218,21 @@ pub fn get_token_map(
                                     .cloned(),
                             )
                         }
-                        VariableKind::Local => TokenKind::LocalVariable(
-                            r.variable_id,
-                            ast.types_of_local_decls.get(&r.variable_id).map(
-                                |LocalVariableType { t, toplevel }| {
-                                    (
-                                        t.clone(),
-                                        ast.types_of_global_decls
-                                            [&VariableId::Decl(*toplevel)]
-                                            .fixed_parameters
-                                            .clone(),
-                                    )
-                                },
-                            ),
-                        ),
+                        Local(_) => {
+                            let LocalVariableType { t, toplevel } =
+                                &ast.types_of_local_decls[&r.variable_id];
+                            TokenKind::LocalVariable(
+                                r.variable_id,
+                                (
+                                    t.clone(),
+                                    ast.types_of_global_decls
+                                        [&VariableId::Global(*toplevel)]
+                                        .fixed_parameters
+                                        .clone(),
+                                ),
+                            )
+                        }
+                        FieldAccessor { .. } => panic!(),
                     }
                 }
                 TokenMapEntry::VariableDeclInInterface(t) => {
@@ -251,7 +249,7 @@ pub fn get_token_map(
                     ast_step2::ConstructorId::DeclId(decl_id) => {
                         TokenKind::Constructor(
                             ast.types_of_global_decls
-                                .get(&VariableId::Decl(decl_id))
+                                .get(&VariableId::Constructor(decl_id))
                                 .cloned(),
                         )
                     }
@@ -276,7 +274,7 @@ pub fn print_types(ast: &ast_step3::Ast) {
         println!(
             "{} : {}",
             d.name,
-            &ast.types_of_global_decls[&VariableId::Decl(d.decl_id)].t
+            &ast.types_of_global_decls[&VariableId::Global(d.decl_id)].t
         );
     }
 }

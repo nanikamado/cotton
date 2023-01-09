@@ -274,15 +274,14 @@ fn semantic_tokens_from_src(src: &str) -> Option<(SemanticTokens, HoverMap)> {
                                     SemanticTokenType::VARIABLE
                                 }
                             }
-                            TokenKind::LocalVariable(_, Some(t)) => {
+                            TokenKind::LocalVariable(_, t) => {
                                 if t.0.is_function() {
                                     SemanticTokenType::FUNCTION
                                 } else {
                                     SemanticTokenType::VARIABLE
                                 }
                             }
-                            TokenKind::GlobalVariable(_, _)
-                            | TokenKind::LocalVariable(_, _) => {
+                            TokenKind::GlobalVariable(_, _) => {
                                 eprintln!("id = {id} ({s}) is variable but could not get its type.");
                                 SemanticTokenType::VARIABLE
                             }
@@ -437,7 +436,7 @@ fn print_type(
                 | TokenKind::Constructor(Some(t)) => Some(
                     PrintTypeOfGlobalVariableForUser { t, imports }.to_string(),
                 ),
-                TokenKind::LocalVariable(_, Some(t)) => Some(
+                TokenKind::LocalVariable(_, t) => Some(
                     PrintTypeOfLocalVariableForUser {
                         t: &t.0,
                         imports,

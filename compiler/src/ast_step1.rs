@@ -58,9 +58,16 @@ pub struct Type<'a> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DataDecl<'a> {
     pub name: Name,
-    pub fields: Vec<StrWithId<'a>>,
+    pub fields: Vec<Field<'a>>,
     pub type_variables: Forall<'a>,
     pub decl_id: DeclId,
+    pub is_public: bool,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Field<'a> {
+    pub type_: StrWithId<'a>,
+    pub name: Name,
     pub is_public: bool,
 }
 
@@ -322,8 +329,14 @@ impl<'a> Ast<'a> {
                         fields: a
                             .fields
                             .iter()
-                            .map(|(name, span, id)| {
-                                (name.as_str(), span.clone(), *id)
+                            .enumerate()
+                            .map(|(i, (name, span, id))| Field {
+                                type_: (name.as_str(), span.clone(), *id),
+                                name: Name::from_str(
+                                    module_path,
+                                    &format!("_{i}"),
+                                ),
+                                is_public: true,
                             })
                             .collect(),
                         type_variables: (&a.type_variables).into(),

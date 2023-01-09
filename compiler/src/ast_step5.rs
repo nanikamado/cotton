@@ -1,6 +1,6 @@
 use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::name_id::Name;
-use crate::ast_step3::{DataDecl, VariableId, VariableKind};
+use crate::ast_step3::{DataDecl, VariableId};
 use crate::ast_step4::{self, PaddedTypeMap, PatternUnit, Type, TypePointer};
 use fxhash::FxHashMap;
 
@@ -22,7 +22,6 @@ pub enum Expr {
     Ident {
         name: String,
         variable_id: VariableId,
-        variable_kind: VariableKind,
     },
     Call(Box<ExprWithType>, Box<ExprWithType>),
     DoBlock(Vec<ExprWithType>),
@@ -143,17 +142,15 @@ impl VariableMemo {
             ),
             Expr::Ident {
                 name,
-                variable_id: VariableId::Decl(decl_id),
-                variable_kind: VariableKind::Global,
+                variable_id: VariableId::Global(decl_id),
             } => Ident {
                 name,
-                variable_id: VariableId::Decl(self.monomorphize_decl(
+                variable_id: VariableId::Global(self.monomorphize_decl(
                     decl_id,
                     t,
                     replace_map,
                     trace,
                 )),
-                variable_kind: VariableKind::Global,
             },
             Expr::GlobalVariable {
                 name,
@@ -161,7 +158,7 @@ impl VariableMemo {
                 replace_map: r,
             } => Ident {
                 name,
-                variable_id: VariableId::Decl(
+                variable_id: VariableId::Global(
                     self.monomorphize_decl(
                         decl_id,
                         t,
@@ -178,7 +175,6 @@ impl VariableMemo {
                         trace,
                     ),
                 ),
-                variable_kind: VariableKind::Global,
             },
             Expr::Call(a, b) => Call(
                 Box::new(self.monomorphize_expr(*a, replace_map, trace)),
@@ -191,15 +187,7 @@ impl VariableMemo {
             ),
             Expr::Number(a) => Number(a),
             Expr::StrLiteral(a) => StrLiteral(a),
-            Expr::Ident {
-                name,
-                variable_id,
-                variable_kind,
-            } => Ident {
-                name,
-                variable_id,
-                variable_kind,
-            },
+            Expr::Ident { name, variable_id } => Ident { name, variable_id },
         };
         let t = self.map.get_type_with_replace_map(t, replace_map);
         (e, t)

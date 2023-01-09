@@ -1,0 +1,6 @@
+data Tuple(A, B, C, D) forall { A, B, C, D }
+
+main : () -> () =
+    | () => do
+        a = Tuple(1, 2, 3, 4)
+        a._1.puts

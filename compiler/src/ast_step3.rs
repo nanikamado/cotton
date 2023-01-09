@@ -35,15 +35,6 @@ pub struct VariableDecl<'a> {
     pub decl_id: DeclId,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash, Copy)]
-pub enum VariableKind {
-    Local,
-    Global,
-    Constructor,
-    Intrinsic,
-    IntrinsicConstructor,
-}
-
 pub type ExprWithType<'a> = (Expr<'a>, Type);
 
 #[derive(Debug, PartialEq, Clone)]
@@ -54,7 +45,6 @@ pub enum Expr<'a> {
     Ident {
         name: String,
         variable_id: VariableId,
-        variable_kind: VariableKind,
     },
     Call(Box<ExprWithType<'a>>, Box<ExprWithType<'a>>),
     DoBlock(Vec<ExprWithType<'a>>),
@@ -77,7 +67,7 @@ pub struct DataDecl {
 
 impl<'a> Ast<'a> {
     pub fn from(
-        mut ast: ast_step2::Ast<'a>,
+        ast: ast_step2::Ast<'a>,
         token_map: &mut TokenMap,
         imports: &mut Imports,
     ) -> Result<(Self, FxHashMap<IdentId, ResolvedIdent>), CompileError> {
@@ -86,10 +76,9 @@ impl<'a> Ast<'a> {
             global_variable_types,
             mut local_variable_types,
             type_variable_map: mut map,
-        } = type_check(&mut ast, token_map, imports)?;
-        let (variable_decl, entry_point) = variable_decl(
+        } = type_check(&ast, token_map, imports)?;
+        let variable_decl = variable_decl(
             ast.variable_decl,
-            ast.entry_point,
             &resolved_idents,
             &mut map,
             &mut local_variable_types,
@@ -98,7 +87,7 @@ impl<'a> Ast<'a> {
             log::debug!(
                 "type_ {} : {}",
                 v.name,
-                global_variable_types[&VariableId::Decl(v.decl_id)].t
+                global_variable_types[&VariableId::Global(v.decl_id)].t
             );
         }
         let data_decl = ast
@@ -114,7 +103,7 @@ impl<'a> Ast<'a> {
             Self {
                 variable_decl,
                 data_decl,
-                entry_point,
+                entry_point: ast.entry_point,
                 types_of_global_decls: global_variable_types,
                 types_of_local_decls: local_variable_types,
             },
@@ -125,12 +114,11 @@ impl<'a> Ast<'a> {
 
 fn variable_decl<'a>(
     variable_decls: Vec<ast_step2::VariableDecl<'a>>,
-    entry_point: DeclId,
     resolved_idents: &FxHashMap<IdentId, ResolvedIdent>,
     map: &mut TypeVariableMap,
     types_of_decls: &mut FxHashMap<VariableId, LocalVariableType>,
-) -> (Vec<VariableDecl<'a>>, DeclId) {
-    let variable_decls = variable_decls
+) -> Vec<VariableDecl<'a>> {
+    variable_decls
         .into_iter()
         .map(|d| {
             let (mut value, mut value_t) = expr(d.value, resolved_idents, map);
@@ -141,7 +129,7 @@ fn variable_decl<'a>(
                 .rev()
             {
                 types_of_decls.insert(
-                    VariableId::Decl(decl_id),
+                    VariableId::Local(decl_id),
                     LocalVariableType {
                         t: t.clone(),
                         toplevel: d.decl_id,
@@ -164,8 +152,7 @@ fn variable_decl<'a>(
                 decl_id: d.decl_id,
             }
         })
-        .collect();
-    (variable_decls, entry_point)
+        .collect()
 }
 
 fn expr<'a>(
@@ -208,8 +195,7 @@ fn expr<'a>(
         }
         ast_step2::Expr::ResolvedIdent { decl_id, .. } => Expr::Ident {
             name: "unique".to_string(),
-            variable_id: VariableId::Decl(decl_id),
-            variable_kind: VariableKind::Local,
+            variable_id: VariableId::Local(decl_id),
         },
         ast_step2::Expr::Call(f, a) => Expr::Call(
             expr(*f, resolved_idents, map).into(),
@@ -236,7 +222,6 @@ fn get_expr_from_resolved_ident(
     let mut value = Expr::Ident {
         name,
         variable_id: resolved_ident.variable_id,
-        variable_kind: resolved_ident.variable_kind,
     };
     let mut ts = Vec::new();
     let mut fn_t = t;

@@ -553,7 +553,7 @@ impl Imports {
                 .get(name)
                 .into_iter()
                 .flatten()
-                .map(|d| VariableId::Decl(*d)),
+                .map(|d| VariableId::Local(*d)),
         );
         if names.is_empty() {
             Err(CompileError::NotFound {
@@ -582,7 +582,7 @@ impl Imports {
                     .get(n)
                     .into_iter()
                     .flatten()
-                    .map(|d| VariableId::Decl(*d)),
+                    .map(|d| VariableId::Local(*d)),
             );
         }
         if names.is_empty() {

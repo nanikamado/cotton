@@ -12,7 +12,6 @@ use crate::ast_step2::{
     PatternRestrictions, PatternUnit, PatternUnitForRestriction, RelOrigin,
     SubtypeRelations,
 };
-use crate::ast_step3::VariableKind;
 use crate::errors::CompileError;
 use fxhash::FxHashMap;
 use itertools::Itertools;
@@ -321,9 +320,8 @@ fn register_requirement(
             env.resolved_idents.push((
                 req.ident,
                 ResolvedIdent {
-                    variable_id: VariableId::Decl(a.0),
+                    variable_id: VariableId::Local(a.0),
                     implicit_args: Vec::new(),
-                    variable_kind: VariableKind::Local,
                 },
             ));
         }
@@ -388,7 +386,7 @@ fn pattern_unit_to_type(
             let t = Type::from(TypeUnit::Variable(*t));
             bindings.insert(name.to_string(), (*decl_id, t.clone()));
             env.types_of_decls
-                .push((VariableId::Decl(*decl_id), t.clone()));
+                .push((VariableId::Local(*decl_id), t.clone()));
             (t.clone(), PatternUnitForRestriction::Binder(t, *decl_id))
         }
         ResolvedBinder(decl_id, t) => (

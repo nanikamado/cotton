@@ -49,9 +49,15 @@ pub struct Ast<'a> {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Field {
+    pub type_: TypeVariable,
+    pub name: Name,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DataDecl {
     pub name: Name,
-    pub fields: Vec<TypeVariable>,
+    pub fields: Vec<Field>,
     pub type_variable_decls: Vec<(TypeVariable, Name)>,
     pub decl_id: DeclId,
 }
@@ -303,7 +309,11 @@ fn collect_data_and_type_alias_decls<'a>(
     imports: &mut Imports,
 ) -> Result<(), CompileError> {
     for d in &ast.variable_decl {
-        imports.add_variable(d.name, VariableId::Decl(d.decl_id), d.is_public);
+        imports.add_variable(
+            d.name,
+            VariableId::Global(d.decl_id),
+            d.is_public,
+        );
     }
     data_decls.extend(ast.data_decl.iter().map(|d| {
         let mut type_variables = FxHashMap::default();
@@ -315,16 +325,33 @@ fn collect_data_and_type_alias_decls<'a>(
             }
         }
         imports.add_data(d.name, ConstructorId::DeclId(d.decl_id), d.is_public);
-        imports.add_variable(d.name, VariableId::Decl(d.decl_id), d.is_public);
+        imports.add_variable(
+            d.name,
+            VariableId::Constructor(d.decl_id),
+            d.is_public,
+        );
         imports.add_type(d.name, TypeId::DeclId(d.decl_id), d.is_public);
+        for (i, f) in d.fields.iter().enumerate() {
+            imports.add_variable(
+                f.name,
+                VariableId::FieldAccessor {
+                    constructor: d.decl_id,
+                    field: i,
+                },
+                f.is_public,
+            );
+        }
         DataDecl {
             name: d.name,
             fields: d
                 .fields
                 .iter()
                 .map(|f| {
-                    token_map.insert(f.2, TokenMapEntry::TypeVariable);
-                    type_variables[f.0]
+                    token_map.insert(f.type_.2, TokenMapEntry::TypeVariable);
+                    Field {
+                        type_: type_variables[f.type_.0],
+                        name: f.name,
+                    }
                 })
                 .collect(),
             decl_id: d.decl_id,
