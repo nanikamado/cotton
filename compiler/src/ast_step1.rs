@@ -91,7 +91,13 @@ pub enum Expr<'a> {
     Lambda(Vec<FnArm<'a>>),
     Number(&'a str),
     StrLiteral(&'a str),
-    Ident { path: Vec<StrWithId<'a>> },
+    Ident {
+        path: Vec<StrWithId<'a>>,
+    },
+    Record {
+        path: Vec<StrWithId<'a>>,
+        fields: Vec<(StrWithId<'a>, Expr<'a>)>,
+    },
     Decl(Box<VariableDecl<'a>>),
     Call(Box<ExprWithSpan<'a>>, Box<ExprWithSpan<'a>>),
     Do(Vec<ExprWithSpan<'a>>),
@@ -329,15 +335,16 @@ impl<'a> Ast<'a> {
                         fields: a
                             .fields
                             .iter()
-                            .enumerate()
-                            .map(|(i, (name, span, id))| Field {
-                                type_: (name.as_str(), span.clone(), *id),
-                                name: Name::from_str(
-                                    module_path,
-                                    &format!("_{i}"),
-                                ),
-                                is_public: true,
-                            })
+                            .map(
+                                |parser::Field {
+                                     type_: (t, span, id),
+                                     name,
+                                 }| Field {
+                                    type_: (t.as_str(), span.clone(), *id),
+                                    name: Name::from_str(module_path, &name.0),
+                                    is_public: true,
+                                },
+                            )
                             .collect(),
                         type_variables: (&a.type_variables).into(),
                         decl_id,
@@ -856,6 +863,21 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::ExprUnit, &'a Span) {
                 .iter()
                 .map(|e| expr(e, env, module_path))
                 .try_collect()?),
+            parser::ExprUnit::Record { path, fields } => Record {
+                path: path
+                    .iter()
+                    .map(|name| (name.0.as_str(), name.1.clone(), name.2))
+                    .collect(),
+                fields: fields
+                    .iter()
+                    .map(|(f, e)| {
+                        Ok((
+                            (f.0.as_str(), f.1.clone(), f.2),
+                            expr(e, env, module_path)?.0,
+                        ))
+                    })
+                    .try_collect()?,
+            },
         };
         Ok((e, self.1.clone()))
     }

@@ -40,7 +40,13 @@ pub type Expr = (
 pub enum ExprUnit {
     Int(String),
     Str(String),
-    Ident { path: Vec<StringWithId> },
+    Ident {
+        path: Vec<StringWithId>,
+    },
+    Record {
+        path: Vec<StringWithId>,
+        fields: Vec<(StringWithId, Expr)>,
+    },
     Case(Vec<FnArm>),
     Paren(Expr),
     Do(Vec<Expr>),
@@ -104,9 +110,15 @@ pub enum Associativity {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DataDecl {
     pub name: StringWithId,
-    pub fields: Vec<StringWithId>,
+    pub fields: Vec<Field>,
     pub type_variables: Forall,
     pub is_public: bool,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Field {
+    pub name: StringWithId,
+    pub type_: StringWithId,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -379,6 +391,19 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 int.map(ExprUnit::Int),
                 str.map(ExprUnit::Str),
                 variable_decl.map(ExprUnit::VariableDecl),
+                ident_with_path
+                    .clone()
+                    .then(indented(
+                        ident
+                            .then_ignore(just(Token::Colon))
+                            .then(expr.clone())
+                            .separated_by(just(Token::Comma))
+                            .allow_trailing(),
+                    ))
+                    .map(|(name, fields)| ExprUnit::Record {
+                        path: name,
+                        fields,
+                    }),
                 ident_with_path.clone().map(|path| ExprUnit::Ident { path }),
                 lambda.map(|a| ExprUnit::Case(vec![a])),
                 expr.clone()
@@ -480,14 +505,49 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         .then(forall.clone().or_not())
         .map(|((name, args), forall)| DataDecl {
             name,
-            fields: args.unwrap_or_default(),
+            fields: args
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .map(|(i, a)| Field {
+                    name: (format!("_{i}"), None, None),
+                    type_: a,
+                })
+                .collect(),
+            type_variables: forall.unwrap_or_default(),
+            is_public: false,
+        });
+    let data_decl_record = ident
+        .then(indented(
+            ident
+                .then_ignore(just(Token::Colon))
+                .then(ident)
+                .separated_by(just(Token::Comma))
+                .allow_trailing(),
+        ))
+        .then(forall.clone().or_not())
+        .map(|((name, args), forall)| DataDecl {
+            name,
+            fields: args
+                .into_iter()
+                .map(|(name, type_)| Field { name, type_ })
+                .collect(),
             type_variables: forall.unwrap_or_default(),
             is_public: false,
         });
     let data_decl_infix = ident.then(op).then(ident).then(forall.or_not()).map(
         |(((ident1, name), ident2), forall)| DataDecl {
             name,
-            fields: vec![ident1, ident2],
+            fields: vec![
+                Field {
+                    name: ("_0".to_string(), None, None),
+                    type_: ident1,
+                },
+                Field {
+                    name: ("_1".to_string(), None, None),
+                    type_: ident2,
+                },
+            ],
             type_variables: forall.unwrap_or_default(),
             is_public: false,
         },
@@ -495,7 +555,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
     let data_decl = just(Token::Pub)
         .or_not()
         .then_ignore(just(Token::Data))
-        .then(data_decl_infix.or(data_decl_normal))
+        .then(data_decl_infix.or(data_decl_record).or(data_decl_normal))
         .map(|(pub_or_not, d)| {
             Decl::Data(DataDecl {
                 is_public: pub_or_not.is_some(),

@@ -210,14 +210,14 @@ pub fn get_token_map(
                                 .get(&r.variable_id)
                                 .cloned(),
                         ),
-                        Global(_) | IntrinsicVariable(_) => {
-                            TokenKind::GlobalVariable(
-                                r.variable_id,
-                                ast.types_of_global_decls
-                                    .get(&r.variable_id)
-                                    .cloned(),
-                            )
-                        }
+                        Global(_)
+                        | IntrinsicVariable(_)
+                        | FieldAccessor { .. } => TokenKind::GlobalVariable(
+                            r.variable_id,
+                            ast.types_of_global_decls
+                                .get(&r.variable_id)
+                                .cloned(),
+                        ),
                         Local(_) => {
                             let LocalVariableType { t, toplevel } =
                                 &ast.types_of_local_decls[&r.variable_id];
@@ -232,7 +232,6 @@ pub fn get_token_map(
                                 ),
                             )
                         }
-                        FieldAccessor { .. } => panic!(),
                     }
                 }
                 TokenMapEntry::VariableDeclInInterface(t) => {

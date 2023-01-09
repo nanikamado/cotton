@@ -469,7 +469,7 @@ impl Display for SccTypeConstructor {
 }
 
 impl Type {
-    fn argument_tuple_from_arguments(ts: Vec<Self>) -> Self {
+    pub fn argument_tuple_from_arguments(ts: Vec<Self>) -> Self {
         let mut new_ts = Type::label_from_str("()");
         for t in ts.into_iter().rev() {
             new_ts = TypeUnit::Tuple(t, new_ts).into();
@@ -930,6 +930,7 @@ impl<'b, F: FnMut(usize) -> Candidate + Copy + 'b> CandidateProvider<'b, F> {
 fn find_satisfied_types<T: TypeConstructor>(
     req: &VariableRequirement,
     type_of_unresolved_decl: &ast_step2::TypeWithEnv<T>,
+    no_type_check: bool,
     resolved_variable_map: CandidateProvider<
         impl FnMut(usize) -> Candidate + Copy,
     >,
@@ -947,7 +948,6 @@ fn find_satisfied_types<T: TypeConstructor>(
     let candidates = resolved_variable_map
         .get_candidates(&req.name)
         .collect_vec();
-    let is_single_candidate = candidates.len() == 1;
     candidates
         .into_iter()
         .map(
@@ -1081,27 +1081,22 @@ fn find_satisfied_types<T: TypeConstructor>(
                 t.subtype_relations.extend(cand_t.subtype_relations.clone());
                 let implicit_parameters_len =
                     cand_t.variable_requirements.len();
-                if is_single_candidate {
-                    for req in &cand_t.variable_requirements {
-                        let diff = difficulty_of_resolving(
-                            &req.name,
-                            req.span.start,
+                for req in &cand_t.variable_requirements {
+                    let diff = difficulty_of_resolving(
+                        &req.name,
+                        req.span.start,
+                        resolved_variable_map,
+                    );
+                    let i = t.variable_requirements.partition_point(|r| {
+                        difficulty_of_resolving(
+                            &r.name,
+                            r.span.start,
                             resolved_variable_map,
-                        );
-                        let i = t.variable_requirements.partition_point(|r| {
-                            difficulty_of_resolving(
-                                &r.name,
-                                r.span.start,
-                                resolved_variable_map,
-                            ) > diff
-                        });
-                        t.variable_requirements.insert(i, req.clone());
-                    }
-                } else {
-                    t.variable_requirements
-                        .extend(cand_t.variable_requirements.clone());
+                        ) > diff
+                    });
+                    t.variable_requirements.insert(i, req.clone());
                 }
-                let t = if is_single_candidate {
+                let t = if no_type_check {
                     Ok(t)
                 } else {
                     simplify::simplify_type(&mut map, t)
@@ -1113,7 +1108,7 @@ fn find_satisfied_types<T: TypeConstructor>(
                         {
                             return Err(CompileError::RecursionLimit);
                         }
-                        if !is_single_candidate {
+                        if !no_type_check {
                             resolve_requirements_in_type_with_env(
                                 implicit_parameters_len,
                                 &mut t,
@@ -1130,7 +1125,7 @@ fn find_satisfied_types<T: TypeConstructor>(
                             type_of_satisfied_variable: cand_t.constructor,
                             map,
                             number_of_variable_requirements_added:
-                                if is_single_candidate {
+                                if no_type_check {
                                     implicit_parameters_len
                                 } else {
                                     0
@@ -1244,9 +1239,20 @@ fn resolve_requirements_in_type_with_env(
     while resolve_num > 0 {
         resolve_num -= 1;
         let req = type_of_unresolved_decl.variable_requirements.pop().unwrap();
+        let no_type_check =
+            resolved_variable_map.get_candidates(&req.name).count() == 1
+                && type_of_unresolved_decl
+                    .variable_requirements
+                    .get(0)
+                    .map(|req| {
+                        resolved_variable_map.get_candidates(&req.name).count()
+                            == 1
+                    })
+                    .unwrap_or(false);
         let (satisfied, es) = find_satisfied_types(
             &req,
             type_of_unresolved_decl,
+            no_type_check,
             resolved_variable_map,
             map,
             resolved_idents,
@@ -1278,7 +1284,6 @@ fn constructor_type(d: &DataDecl) -> TypeUnit {
         .map(|(i, _t)| {
             TypeUnit::Variable(TypeVariable::RecursiveIndex(i)).into()
         })
-        .rev()
         .collect();
     let mut t = TypeUnit::Tuple(
         TypeUnit::Const {
@@ -1304,7 +1309,6 @@ fn accessor_type(d: &DataDecl, i: usize) -> TypeUnit {
         .map(|(i, _t)| {
             TypeUnit::Variable(TypeVariable::RecursiveIndex(i)).into()
         })
-        .rev()
         .collect();
     let t = TypeUnit::Tuple(
         TypeUnit::Const {

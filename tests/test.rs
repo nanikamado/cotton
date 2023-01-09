@@ -425,5 +425,5 @@ fn lambda_in_apply_pattern() {
 
 #[test]
 fn field_accessor() {
-    test_examples("field_accessor.cot", "2\n");
+    test_examples("field_accessor.cot", "1\n1\n1\n");
 }

@@ -191,9 +191,18 @@ fn expr<'a>(
                 resolved_idents,
             )
         }
-        ast_step2::Expr::ResolvedIdent { decl_id, .. } => Expr::Ident {
+        ast_step2::Expr::ResolvedIdent {
+            variable_id: variable_id @ VariableId::Local(_),
+            ..
+        } => Expr::Ident {
             name: "unique".to_string(),
-            variable_id: VariableId::Local(decl_id),
+            variable_id,
+        },
+        ast_step2::Expr::ResolvedIdent {
+            variable_id, name, ..
+        } => Expr::Ident {
+            name: name.unwrap().to_string(),
+            variable_id,
         },
         ast_step2::Expr::Call(f, a) => Expr::Call(
             expr(*f, resolved_idents, map).into(),

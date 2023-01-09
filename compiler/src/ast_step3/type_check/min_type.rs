@@ -195,10 +195,12 @@ fn min_type_with_env_rec(
             t
         }
         Expr::ResolvedIdent { type_, .. } => {
-            let t: Type = TypeUnit::Variable(*type_).into();
-            env.map
-                .insert(env.subtype_relations, *type_variable, t.clone());
-            t
+            env.map.insert(
+                env.subtype_relations,
+                *type_variable,
+                type_.clone(),
+            );
+            type_.clone()
         }
         Expr::Call(f, a) => {
             let f_t = min_type_with_env_rec(f, module_path, env, bindings);

@@ -1,6 +1,17 @@
-data Tuple(A, B, C, D) forall { A, B, C, D }
+data T(A, B, C, D) forall { A, B, C, D }
+
+data R {
+    a: A,
+    b: B,
+    c: C,
+    d: D,
+} forall { A, B, C, D }
 
 main : () -> () =
     | () => do
-        a = Tuple(1, 2, 3, 4)
-        a._1.puts
+        t = T(1, 2, 3, 4)
+        r = R { a: 1, b: 4, c: 3, d: 4 }
+        t._0.puts
+        r.a.puts
+        t = T { _0: 1, _1: 2, _2: 3, _3: 4 }
+        t._0.puts
