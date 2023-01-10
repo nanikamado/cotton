@@ -442,3 +442,8 @@ fn apply_pattern2() {
 fn apply_pattern_fail() {
     test_test("apply_pattern_fail.cot").code(1);
 }
+
+#[test]
+fn bin_tree_fail() {
+    test_test("bin_tree_fail.cot").code(1);
+}

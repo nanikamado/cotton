@@ -427,6 +427,7 @@ fn pattern_unit_to_type(
                 env,
                 bindings,
             );
+            let mut all_post_patterns_are_bind = true;
             for a in applications {
                 let function_t = min_type_with_env_rec(
                     &a.function,
@@ -442,6 +443,9 @@ fn pattern_unit_to_type(
                     env,
                     bindings,
                 );
+                if !matches!(r.0, PatternUnitForRestriction::Binder(_, _)) {
+                    all_post_patterns_are_bind = false;
+                }
                 let (r, span) =
                     PatternUnitForRestriction::argument_tuple_from_arguments(
                         vec![r],
@@ -468,7 +472,13 @@ fn pattern_unit_to_type(
             }
             (
                 t,
-                PatternUnitForRestriction::Apply(Box::new(pattern_restriction)),
+                if all_post_patterns_are_bind {
+                    pattern_restriction
+                } else {
+                    PatternUnitForRestriction::Apply(Box::new(
+                        pattern_restriction,
+                    ))
+                },
             )
         }
     }
