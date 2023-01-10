@@ -447,3 +447,8 @@ fn apply_pattern_fail() {
 fn bin_tree_fail() {
     test_test("bin_tree_fail.cot").code(1);
 }
+
+#[test]
+fn and_fail() {
+    test_test("and_fail.cot").code(1);
+}

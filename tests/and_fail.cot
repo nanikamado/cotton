@@ -1,0 +1,15 @@
+data Pair {
+    left: A,
+    right: B,
+} forall { A, B }
+
+identity = | a => a
+
+and : Pair[Bool, Bool] -> Bool =
+    | Pair { identity(left): False, right: _ } => False
+    | Pair { left: _, right: False } => False
+    | Pair { left: True, right: True } => True
+
+main =
+    | () => do
+        Pair { left: True, right: False }.and.puts
