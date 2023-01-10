@@ -1060,7 +1060,9 @@ fn pattern<'a>(
                             }
                         }
                         args.extend(new_args.into_iter().map(|a| {
-                            a.unwrap_or(Pattern(vec![PatternUnit::Underscore]))
+                            a.unwrap_or_else(|| {
+                                Pattern(vec![PatternUnit::Underscore])
+                            })
                         }));
                     }
                     _ => {
