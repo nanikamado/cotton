@@ -434,7 +434,8 @@ fn pattern_unit_to_type(
                     env,
                     bindings,
                 );
-                let (post_pattern_t, r) = pattern_to_type(
+                let post_pattern_t = Type::from(TypeUnit::new_variable());
+                let (_, r) = pattern_to_type(
                     &a.post_pattern,
                     span.clone(),
                     module_path,

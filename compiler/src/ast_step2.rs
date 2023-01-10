@@ -340,6 +340,7 @@ fn collect_data_and_type_alias_decls<'a>(
                 },
                 f.is_public,
             );
+            env.imports.add_accessor(f.name, d.decl_id, i, f.is_public);
         }
         let d = DataDecl {
             name: d.name,
@@ -971,8 +972,8 @@ fn pattern<'a>(
 ) -> Result<Pattern<'a, TypeVariable>, CompileError> {
     use PatternUnit::*;
     Ok(match p {
-        ast_step1::Pattern::Number(n) => I64(n),
-        ast_step1::Pattern::StrLiteral(s) => Str(s),
+        ast_step1::Pattern::Number(n) => I64(n).into(),
+        ast_step1::Pattern::StrLiteral(s) => Str(s).into(),
         ast_step1::Pattern::Constructor { path, args } => {
             let (name, id) = env.imports.get_constructor(
                 module_path,
@@ -992,13 +993,14 @@ fn pattern<'a>(
                     })
                     .try_collect()?,
             }
+            .into()
         }
         ast_step1::Pattern::Binder(name) => {
             let decl_id = DeclId::new();
             env.token_map.insert(name.2, TokenMapEntry::Decl(decl_id));
-            Binder(name.0.to_string(), decl_id, TypeVariable::new())
+            Binder(name.0.to_string(), decl_id, TypeVariable::new()).into()
         }
-        ast_step1::Pattern::Underscore => Underscore,
+        ast_step1::Pattern::Underscore => Underscore.into(),
         ast_step1::Pattern::TypeRestriction(p, t, forall) => {
             let t = type_to_type_with_forall(
                 t,
@@ -1008,37 +1010,95 @@ fn pattern<'a>(
                 env,
             )?;
             let p = pattern(*p, module_path, type_variable_names, env)?;
-            TypeRestriction(p, t)
+            TypeRestriction(p, t).into()
         }
-        ast_step1::Pattern::Apply(pre_pattern, applications) => Apply(
-            Box::new(pattern(
-                *pre_pattern,
-                module_path,
-                type_variable_names,
-                env,
-            )?),
-            applications
-                .into_iter()
-                .map(|a| {
-                    Ok(ApplyPattern {
-                        function: catch_flat_map(expr(
-                            a.function,
-                            module_path,
-                            type_variable_names,
-                            env,
-                        )?)?,
-                        post_pattern: pattern(
-                            a.post_pattern,
-                            module_path,
-                            type_variable_names,
-                            env,
-                        )?,
-                    })
-                })
-                .try_collect()?,
-        ),
-    }
-    .into())
+        ast_step1::Pattern::Apply(pre_pattern, applications) => {
+            let mut pre_pattern =
+                pattern(*pre_pattern, module_path, type_variable_names, env)?;
+            let mut functions;
+            if pre_pattern.0.len() == 1 {
+                match &mut pre_pattern.0[0] {
+                    PatternUnit::Constructor {
+                        name: _,
+                        id: ConstructorId::DeclId(constructor_id),
+                        args,
+                    } if args.is_empty() => {
+                        let mut new_args =
+                            vec![
+                                None;
+                                env.field_names
+                                    [&ConstructorId::DeclId(*constructor_id)]
+                                    .fields
+                                    .len()
+                            ];
+                        functions = Vec::new();
+                        for a in applications {
+                            if let ast_step1::Expr::Ident { path } =
+                                &a.function.0
+                            {
+                                if let Some(field) =
+                                    env.imports.get_accessor_with_path(
+                                        module_path,
+                                        module_path,
+                                        path,
+                                        *constructor_id,
+                                        env.token_map,
+                                    )?
+                                {
+                                    debug_assert!(new_args[field].is_none());
+                                    new_args[field] = Some(pattern(
+                                        a.post_pattern,
+                                        module_path,
+                                        type_variable_names,
+                                        env,
+                                    )?);
+                                } else {
+                                    functions.push(a);
+                                }
+                            } else {
+                                functions.push(a);
+                            }
+                        }
+                        args.extend(new_args.into_iter().map(|a| {
+                            a.unwrap_or(Pattern(vec![PatternUnit::Underscore]))
+                        }));
+                    }
+                    _ => {
+                        functions = applications;
+                    }
+                }
+            } else {
+                functions = applications;
+            }
+            if functions.is_empty() {
+                pre_pattern
+            } else {
+                Apply(
+                    Box::new(pre_pattern),
+                    functions
+                        .into_iter()
+                        .map(|a| {
+                            Ok(ApplyPattern {
+                                function: catch_flat_map(expr(
+                                    a.function,
+                                    module_path,
+                                    type_variable_names,
+                                    env,
+                                )?)?,
+                                post_pattern: pattern(
+                                    a.post_pattern,
+                                    module_path,
+                                    type_variable_names,
+                                    env,
+                                )?,
+                            })
+                        })
+                        .try_collect()?,
+                )
+                .into()
+            }
+        }
+    })
 }
 
 fn type_to_type(

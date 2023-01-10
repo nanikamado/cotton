@@ -17,6 +17,7 @@ use strum::IntoEnumIterator;
 struct NameEntry {
     true_names: Vec<NameAliasEntry>,
     variables: Vec<VariableDecl>,
+    accessors: Vec<AccessorDecl>,
     op_precedence: Option<OpPrecedenceDecl>,
     data: Option<DataDecl>,
     type_: Option<TypeDecl>,
@@ -26,6 +27,7 @@ struct NameEntry {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 enum NameKind {
     Variable(VariableId),
+    Accessor { constructor: DeclId, field: usize },
     Data(ConstructorId),
     Type(ConstOrAlias),
     Module(Name),
@@ -35,6 +37,7 @@ enum NameKind {
 #[derive(Debug)]
 struct NameResult {
     variables: Vec<VariableId>,
+    accessors: Vec<(DeclId, usize)>,
     data: Option<ConstructorId>,
     type_: Option<ConstOrAlias>,
     module: Option<Name>,
@@ -50,6 +53,13 @@ pub enum ConstOrAlias {
 #[derive(Debug, Eq, PartialEq)]
 struct VariableDecl {
     variable_id: VariableId,
+    is_public: bool,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct AccessorDecl {
+    constructor: DeclId,
+    field: usize,
     is_public: bool,
 }
 
@@ -101,6 +111,21 @@ impl Imports {
         let a = self.name_map.entry(name).or_default();
         a.variables.push(VariableDecl {
             variable_id,
+            is_public,
+        });
+    }
+
+    pub fn add_accessor(
+        &mut self,
+        name: Name,
+        constructor: DeclId,
+        field: usize,
+        is_public: bool,
+    ) {
+        let a = self.name_map.entry(name).or_default();
+        a.accessors.push(AccessorDecl {
+            constructor,
+            field,
             is_public,
         });
     }
@@ -284,6 +309,14 @@ impl Imports {
             for v in &name_entry.variables {
                 if v.is_public || path.is_same_as_or_ancestor_of(scope) {
                     ns.insert(NameKind::Variable(v.variable_id));
+                }
+            }
+            for v in &name_entry.accessors {
+                if v.is_public || path.is_same_as_or_ancestor_of(scope) {
+                    ns.insert(NameKind::Accessor {
+                        constructor: v.constructor,
+                        field: v.field,
+                    });
                 }
             }
             if let Some(d) = &name_entry.data {
@@ -595,6 +628,28 @@ impl Imports {
         }
     }
 
+    pub fn get_accessor_with_path(
+        &mut self,
+        scope: Name,
+        base_path: Name,
+        path: &[(&str, Option<Span>, Option<TokenId>)],
+        constructor_id: DeclId,
+        token_map: &mut TokenMap,
+    ) -> Result<Option<usize>, CompileError> {
+        let (n, _, _) = self.get_names(scope, base_path, path, token_map)?;
+        let names = n
+            .accessors
+            .into_iter()
+            .filter(|(c, _)| *c == constructor_id)
+            .collect_vec();
+        Ok(if names.is_empty() {
+            None
+        } else {
+            debug_assert_eq!(names.len(), 1);
+            Some(names[0].1)
+        })
+    }
+
     pub fn get_op_precedence_from_type_id(
         &self,
         type_id: TypeId,
@@ -610,6 +665,7 @@ impl Imports {
 
 fn collect_name_kinds(names: FxHashSet<NameKind>) -> NameResult {
     let mut variables = Vec::new();
+    let mut accessors = Vec::new();
     let mut data = None;
     let mut type_ = None;
     let mut module = None;
@@ -617,6 +673,9 @@ fn collect_name_kinds(names: FxHashSet<NameKind>) -> NameResult {
     for n in names {
         match n {
             NameKind::Variable(v) => variables.push(v),
+            NameKind::Accessor { constructor, field } => {
+                accessors.push((constructor, field))
+            }
             NameKind::Data(d) => {
                 debug_assert!(data.is_none());
                 data = Some(d);
@@ -637,6 +696,7 @@ fn collect_name_kinds(names: FxHashSet<NameKind>) -> NameResult {
     }
     NameResult {
         variables,
+        accessors,
         data,
         type_,
         module,

@@ -427,3 +427,18 @@ fn lambda_in_apply_pattern() {
 fn field_accessor() {
     test_examples("field_accessor.cot", "1\n1\n1\n");
 }
+
+#[test]
+fn bin_tree2() {
+    test_test("bin_tree2.cot").stdout("ok\n").success();
+}
+
+#[test]
+fn apply_pattern2() {
+    test_test("apply_pattern2.cot").stdout("1\n").success();
+}
+
+#[test]
+fn apply_pattern_fail() {
+    test_test("apply_pattern_fail.cot").code(1);
+}

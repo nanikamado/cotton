@@ -1964,6 +1964,7 @@ fn apply_type_to_pattern(
         log::debug!("missing type = {}", remained);
         Err(CompileError::InexhaustiveMatch {
             description: format!("missing type = {}", remained),
+            span: restriction.span.clone(),
         })
     } else {
         if not_sure {
@@ -1979,17 +1980,19 @@ fn apply_type_to_pattern(
                 reason,
                 span: restriction.span.clone(),
             })?;
-            subtype_rels.extend(r.into_iter().map(|(a, b)| {
-                (
-                    a.clone(),
-                    b.clone(),
-                    RelOrigin {
-                        left: a,
-                        right: b,
-                        span: restriction.span.clone(),
-                    },
-                )
-            }));
+            if !restriction.allow_inexhaustive {
+                subtype_rels.extend(r.into_iter().map(|(a, b)| {
+                    (
+                        a.clone(),
+                        b.clone(),
+                        RelOrigin {
+                            left: a,
+                            right: b,
+                            span: restriction.span.clone(),
+                        },
+                    )
+                }));
+            }
         }
         Ok(subtype_rels)
     }
