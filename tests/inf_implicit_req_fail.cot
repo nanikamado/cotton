@@ -1,6 +1,3 @@
-interface ToString where
-    to_string : Self -> String
-
 data LocalNil
 data A /=\ B forall { A, B }
 

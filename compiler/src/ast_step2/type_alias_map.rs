@@ -85,9 +85,11 @@ impl<'a> Env<'a, '_> {
                     .map(|(s, interfaces)| {
                         let v = TypeVariable::new();
                         self.token_map.insert(s.2, TokenMapEntry::TypeVariable);
-                        for (_, _, id) in interfaces {
-                            self.token_map
-                                .insert(*id, TokenMapEntry::Interface);
+                        for path in interfaces {
+                            self.token_map.insert(
+                                path.last().unwrap().2,
+                                TokenMapEntry::Interface,
+                            );
                         }
                         type_variable_names
                             .insert(Name::from_str(alias.base_path, s.0), v);

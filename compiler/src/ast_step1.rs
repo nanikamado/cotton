@@ -36,7 +36,7 @@ type StrWithId<'a> = (&'a str, Option<Span>, Option<TokenId>);
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Forall<'a> {
-    pub type_variables: Vec<(StrWithId<'a>, Vec<StrWithId<'a>>)>,
+    pub type_variables: Vec<(StrWithId<'a>, Vec<Vec<StrWithId<'a>>>)>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -82,6 +82,7 @@ pub struct TypeAliasDecl<'a> {
 pub struct InterfaceDecl<'a> {
     pub name: StrWithId<'a>,
     pub variables: Vec<(StrWithId<'a>, Type<'a>, Forall<'a>)>,
+    pub is_public: bool,
 }
 
 pub type ExprWithSpan<'a> = (Expr<'a>, Span);
@@ -450,6 +451,7 @@ impl<'a> Ast<'a> {
                                 ))
                             })
                             .try_collect()?,
+                        is_public: a.is_public,
                     })
                 })
                 .try_collect()?,
@@ -548,8 +550,12 @@ impl<'a> From<&'a parser::Forall> for Forall<'a> {
                     (
                         (name.as_str(), span.clone(), *id),
                         ts.iter()
-                            .map(|(n, span, id)| {
-                                (n.as_str(), span.clone(), *id)
+                            .map(|path| {
+                                path.iter()
+                                    .map(|(n, span, id)| {
+                                        (n.as_str(), span.clone(), *id)
+                                    })
+                                    .collect()
                             })
                             .collect(),
                     )

@@ -315,8 +315,9 @@ fn collect_data_and_type_alias_decls<'a>(
         for ((name, _, id), interfaces) in &d.type_variables.type_variables {
             env.token_map.insert(*id, TokenMapEntry::TypeVariable);
             type_variables.insert(*name, TypeVariable::new());
-            for (_, _, id) in interfaces {
-                env.token_map.insert(*id, TokenMapEntry::Interface);
+            for path in interfaces {
+                env.token_map
+                    .insert(path.last().unwrap().2, TokenMapEntry::Interface);
             }
         }
         env.imports.add_data(
@@ -389,8 +390,10 @@ fn collect_interface_decls<'a>(
             .iter()
             .map(|i| {
                 env.token_map.insert(i.name.2, TokenMapEntry::Interface);
+                let name = Name::from_str(module_path, i.name.0);
+                env.imports.add_interface(name, i.is_public);
                 Ok((
-                    Name::from_str(module_path, i.name.0),
+                    name,
                     i.variables
                         .iter()
                         .map(|(name, t, forall)| {
@@ -1249,11 +1252,14 @@ fn type_to_type_with_forall(
     for (s, interface_names) in forall.type_variables {
         env.token_map.insert(s.2, TokenMapEntry::TypeVariable);
         let v = TypeVariable::new();
-        for name in interface_names {
-            env.token_map.insert(name.2, TokenMapEntry::Interface);
-            for (name, t, self_) in
-                &env.interface_decls[&Name::from_str(module_path, name.0)]
-            {
+        for path in interface_names {
+            let name = env.imports.get_interface(
+                module_path,
+                module_path,
+                &path,
+                env.token_map,
+            )?;
+            for (name, t, self_) in &env.interface_decls[&name] {
                 variable_requirements.push((
                     *name,
                     t.clone()

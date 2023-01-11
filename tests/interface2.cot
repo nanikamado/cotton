@@ -1,0 +1,22 @@
+mod aaa {
+    pub interface Greet where
+        greet : Self -> String
+}
+
+data Hoge
+
+greet : Hoge -> String =
+    | _ => "Hogeeeeee"
+
+data Fuga
+
+greet : Fuga -> String =
+    | _ => "Fugaaaaaa"
+
+greet_twice : A -> String forall { A : aaa::Greet } =
+    | a => a.greet <> a.greet
+
+main : () -> () =
+    | () => do
+        Hoge.greet_twice.println
+        Fuga.greet_twice.println

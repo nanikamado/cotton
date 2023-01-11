@@ -21,6 +21,7 @@ struct NameEntry {
     op_precedence: Option<OpPrecedenceDecl>,
     data: Option<DataDecl>,
     type_: Option<TypeDecl>,
+    interface: Option<InterfaceDecl>,
     module: Option<ModuleDecl>,
 }
 
@@ -30,6 +31,7 @@ enum NameKind {
     Accessor { constructor: DeclId, field: usize },
     Data(ConstructorId),
     Type(ConstOrAlias),
+    Interface(Name),
     Module(Name),
     OpPrecedence(Associativity, i32),
 }
@@ -40,6 +42,7 @@ struct NameResult {
     accessors: Vec<(DeclId, usize)>,
     data: Option<ConstructorId>,
     type_: Option<ConstOrAlias>,
+    interface: Option<Name>,
     module: Option<Name>,
     op_precedence: Option<(Associativity, i32)>,
 }
@@ -72,6 +75,11 @@ struct DataDecl {
 #[derive(Debug, Eq, PartialEq)]
 struct TypeDecl {
     const_or_alias: ConstOrAlias,
+    is_public: bool,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+struct InterfaceDecl {
     is_public: bool,
 }
 
@@ -185,6 +193,14 @@ impl Imports {
             is_public,
             const_or_alias: ConstOrAlias::Alias(name),
         });
+    }
+
+    pub fn add_interface(&mut self, name: Name, is_public: bool) {
+        let a = self.name_map.entry(name).or_default();
+        if a.type_.is_some() {
+            panic!("Type with the same name cannot be declared more than once.")
+        }
+        a.interface = Some(InterfaceDecl { is_public });
     }
 
     pub fn add_module(&mut self, name: Name, is_public: bool) {
@@ -329,6 +345,11 @@ impl Imports {
                     ns.insert(NameKind::Type(d.const_or_alias));
                 }
             }
+            if let Some(d) = &name_entry.interface {
+                if d.is_public || path.is_same_as_or_ancestor_of(scope) {
+                    ns.insert(NameKind::Interface(name));
+                }
+            }
             if let Some(d) = &name_entry.module {
                 if d.is_public || path.is_same_as_or_ancestor_of(scope) {
                     ns.insert(NameKind::Module(name));
@@ -458,7 +479,8 @@ impl Imports {
         base_path: Name,
         path: &[(&str, Option<Span>, Option<TokenId>)],
         token_map: &mut TokenMap,
-    ) -> Result<(NameResult, Name, Option<Span>), CompileError> {
+    ) -> Result<(NameResult, Name, Option<Span>, Option<TokenId>), CompileError>
+    {
         let visited = Default::default();
         let base_path = self.get_module_with_path(
             scope,
@@ -467,7 +489,7 @@ impl Imports {
             token_map,
             &visited,
         )?;
-        let (name, span, _token_id) = path.last().unwrap();
+        let (name, span, token_id) = path.last().unwrap();
         let mut ns = Default::default();
         self.get_true_names_rec(
             scope,
@@ -482,6 +504,7 @@ impl Imports {
             collect_name_kinds(ns),
             Name::from_str(base_path, name),
             span.clone(),
+            *token_id,
         ))
     }
 
@@ -492,10 +515,13 @@ impl Imports {
         path: &[(&str, Option<Span>, Option<TokenId>)],
         token_map: &mut TokenMap,
     ) -> Result<(Name, ConstructorId), CompileError> {
-        let (n, path, span) =
+        let (n, path, span, token_id) =
             self.get_names(scope, base_path, path, token_map)?;
         n.data
-            .map(|id| (path, id))
+            .map(|id| {
+                token_map.insert(token_id, TokenMapEntry::Constructor(id));
+                (path, id)
+            })
             .ok_or_else(|| CompileError::NotFound {
                 path,
                 span: span.unwrap(),
@@ -525,6 +551,26 @@ impl Imports {
             path: Name::from_str(base_path, name),
             span: span.unwrap(),
         })
+    }
+
+    pub fn get_interface(
+        &mut self,
+        scope: Name,
+        base_path: Name,
+        path: &[(&str, Option<Span>, Option<TokenId>)],
+        token_map: &mut TokenMap,
+    ) -> Result<Name, CompileError> {
+        let (n, path, span, token_id) =
+            self.get_names(scope, base_path, path, token_map)?;
+        n.interface
+            .map(|a| {
+                token_map.insert(token_id, TokenMapEntry::Interface);
+                a
+            })
+            .ok_or_else(|| CompileError::NotFound {
+                path,
+                span: span.unwrap(),
+            })
     }
 
     pub fn get_op_precedence(
@@ -606,7 +652,8 @@ impl Imports {
         token_map: &mut TokenMap,
         candidates_from_implicit_parameters: &FxHashMap<&str, Vec<DeclId>>,
     ) -> Result<Vec<VariableId>, CompileError> {
-        let (n, p, span) = self.get_names(scope, base_path, path, token_map)?;
+        let (n, p, span, _) =
+            self.get_names(scope, base_path, path, token_map)?;
         let mut names = n.variables;
         if path.len() == 1 {
             let n = path.last().unwrap().0;
@@ -636,7 +683,7 @@ impl Imports {
         constructor_id: DeclId,
         token_map: &mut TokenMap,
     ) -> Result<Option<usize>, CompileError> {
-        let (n, _, _) = self.get_names(scope, base_path, path, token_map)?;
+        let (n, _, _, _) = self.get_names(scope, base_path, path, token_map)?;
         let names = n
             .accessors
             .into_iter()
@@ -668,6 +715,7 @@ fn collect_name_kinds(names: FxHashSet<NameKind>) -> NameResult {
     let mut accessors = Vec::new();
     let mut data = None;
     let mut type_ = None;
+    let mut interface = None;
     let mut module = None;
     let mut op_precedence = None;
     for n in names {
@@ -683,6 +731,10 @@ fn collect_name_kinds(names: FxHashSet<NameKind>) -> NameResult {
             NameKind::Type(n) => {
                 debug_assert!(type_.is_none());
                 type_ = Some(n);
+            }
+            NameKind::Interface(d) => {
+                debug_assert!(interface.is_none());
+                interface = Some(d)
             }
             NameKind::Module(m) => {
                 debug_assert!(module.is_none());
@@ -701,6 +753,7 @@ fn collect_name_kinds(names: FxHashSet<NameKind>) -> NameResult {
         type_,
         module,
         op_precedence,
+        interface,
     }
 }
 
