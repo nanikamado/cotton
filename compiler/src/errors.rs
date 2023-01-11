@@ -27,6 +27,7 @@ pub enum CompileError {
     },
     InexhaustiveMatch {
         description: String,
+        span: Span,
     },
     RecursionLimit,
     InaccessibleName {
@@ -134,13 +135,15 @@ impl CompileError {
                 log::debug!("{} is not subtype of {}", sub_type, super_type);
                 let report =
                     Report::build(ReportKind::Error, filename, span.start)
-                        .with_label(Label::new((filename, span)).with_message(
-                            format!(
-                                "expected `{}` but found `{}`.",
-                                print_type(&super_type, imports),
-                                print_type(&sub_type, imports),
+                        .with_label(
+                            Label::new((filename, dbg!(span))).with_message(
+                                format!(
+                                    "expected `{}` but found `{}`.",
+                                    print_type(&super_type, imports),
+                                    print_type(&sub_type, imports),
+                                ),
                             ),
-                        ))
+                        )
                         .with_message(NotSubtypeReasonDisplay {
                             reason: &reason,
                             depth: 0,
@@ -149,8 +152,15 @@ impl CompileError {
                 report.finish().write((filename, Source::from(src)), w)?;
                 Ok(())
             }
-            CompileError::InexhaustiveMatch { description } => {
-                writeln!(w, "{}", description)
+            CompileError::InexhaustiveMatch { description, span } => {
+                let report =
+                    Report::build(ReportKind::Error, filename, span.start)
+                        .with_label(
+                            Label::new((filename, span))
+                                .with_message(description),
+                        );
+                report.finish().write((filename, Source::from(src)), w)?;
+                Ok(())
             }
             CompileError::RecursionLimit => {
                 writeln!(w, "recursion of implicit variable reached the limit.")

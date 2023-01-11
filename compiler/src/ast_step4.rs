@@ -4,7 +4,7 @@ pub use self::padded_type_map::{PaddedTypeMap, TypePointer};
 use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::name_id::Name;
 use crate::ast_step2::{self, types, ConstructorId, TypeId};
-use crate::ast_step3::{self, DataDecl, VariableId, VariableKind};
+use crate::ast_step3::{self, DataDecl, VariableId};
 use crate::intrinsics::{
     IntrinsicConstructor, IntrinsicType, IntrinsicVariable,
 };
@@ -27,24 +27,23 @@ pub struct Ast {
     pub map: PaddedTypeMap,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VariableDecl<T = Type> {
     pub name: Name,
     pub value: ExprWithType<T>,
     pub decl_id: DeclId,
 }
 
-pub type ExprWithType<T = Type> = (Expr<T>, T);
+pub type ExprWithType<T = TypePointer> = (Expr<T>, T);
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum Expr<T = Type> {
-    Lambda(Vec<FnArm<T>>),
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Expr<T> {
+    Lambda(Vec<FnArm>),
     Number(String),
     StrLiteral(String),
     Ident {
         name: String,
         variable_id: VariableId,
-        variable_kind: VariableKind,
     },
     GlobalVariable {
         name: String,
@@ -57,26 +56,36 @@ pub enum Expr<T = Type> {
 
 /// Represents a multi-case pattern which matches if any of the `PatternUnit` in it matches.
 /// It should have at least one `PatternUnit`.
-pub type Pattern<T = Type> = (Vec<PatternUnit<T>>, T);
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Pattern<T = TypePointer, E = ExprWithType<T>> {
+    pub patterns: Vec<PatternUnit<T, E>>,
+    pub type_: T,
+}
+// pub type Pattern<T = TypePointer, E = ExprWithType<T>> =
+//     (Vec<PatternUnit<T, E>>, T);
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum PatternUnit<T> {
+pub enum PatternUnit<T, E = ExprWithType<T>> {
     I64(String),
     Str(String),
     Constructor {
         name: Name,
         id: ConstructorId,
-        args: Vec<Pattern<T>>,
     },
     Binder(String, DeclId),
     Underscore,
-    TypeRestriction(Pattern<T>, types::Type),
+    TypeRestriction(Pattern<T, E>, types::Type),
+    Apply {
+        pre_pattern: Pattern<T, E>,
+        function: E,
+        post_pattern: Pattern<T, E>,
+    },
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct FnArm<T = Type> {
-    pub pattern: Vec<Pattern<T>>,
-    pub expr: ExprWithType<T>,
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct FnArm {
+    pub pattern: Vec<Pattern>,
+    pub expr: ExprWithType,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Clone)]
@@ -157,7 +166,7 @@ impl Ast {
                 .insert(VariableId::IntrinsicConstructor(d), p);
         }
         memo.get_type_global(
-            VariableId::Decl(ast.entry_point),
+            VariableId::Global(ast.entry_point),
             &Default::default(),
         );
         let map = memo.type_map;
@@ -222,14 +231,14 @@ struct VariableMemo<'b> {
     pub type_map: PaddedTypeMap,
     pub global_variable_types: FxHashMap<VariableId, TypePointer>,
     pub intrinsic_variables: FxHashMap<VariableId, TypePointer>,
-    pub global_variables_step4: FxHashMap<DeclId, ast_step3::VariableDecl>,
+    pub global_variables_step4: FxHashMap<DeclId, ast_step3::VariableDecl<'b>>,
     pub global_variables_done: Vec<VariableDecl<TypePointer>>,
     pub data_decls: FxHashMap<DeclId, &'b ast_step3::DataDecl>,
 }
 
 impl<'b> VariableMemo<'b> {
     pub fn new(
-        global_variables: Vec<ast_step3::VariableDecl>,
+        global_variables: Vec<ast_step3::VariableDecl<'b>>,
         data_decls: &'b [ast_step3::DataDecl],
     ) -> Self {
         Self {
@@ -253,35 +262,36 @@ impl<'b> VariableMemo<'b> {
         if let Some(p) = trace.get(&variable_id) {
             Some((*p, true))
         } else {
-            let p =
-                if let Some(p) = self.global_variable_types.get(&variable_id) {
-                    Some(*p)
-                } else if let VariableId::Decl(decl_id) = variable_id {
-                    let d = self.global_variables_step4.remove(&decl_id)?;
-                    let p = self.type_map.new_pointer();
-                    let mut trace = trace.clone();
-                    trace.insert(VariableId::Decl(decl_id), p);
-                    let d = VariableDecl {
-                        name: d.name,
-                        value: (
-                            self.expr(d.value, p, &Default::default(), &trace),
-                            p,
-                        ),
-                        decl_id,
-                    };
-                    self.global_variable_types.insert(variable_id, p);
-                    self.global_variables_done.push(d);
-                    Some(p)
-                } else {
-                    None
-                }?;
+            let p = if let Some(p) =
+                self.global_variable_types.get(&variable_id)
+            {
+                Some(*p)
+            } else if let VariableId::Global(decl_id) = variable_id {
+                let d = self.global_variables_step4.remove(&decl_id)?;
+                let p = self.type_map.new_pointer();
+                let mut trace = trace.clone();
+                trace.insert(VariableId::Global(decl_id), p);
+                let d = VariableDecl {
+                    name: d.name,
+                    value: (
+                        self.expr(d.value.0, p, &Default::default(), &trace),
+                        p,
+                    ),
+                    decl_id,
+                };
+                self.global_variable_types.insert(variable_id, p);
+                self.global_variables_done.push(d);
+                Some(p)
+            } else {
+                None
+            }?;
             Some((p, false))
         }
     }
 
     fn expr(
         &mut self,
-        (e, _): ast_step3::ExprWithType,
+        e: ast_step3::Expr,
         type_pointer: TypePointer,
         local_variables: &FxHashMap<VariableId, TypePointer>,
         trace: &FxHashMap<VariableId, TypePointer>,
@@ -302,7 +312,7 @@ impl<'b> VariableMemo<'b> {
                     TypeId::Intrinsic(IntrinsicType::I64),
                     Vec::new(),
                 );
-                Expr::Number(a)
+                Expr::Number(a.to_string())
             }
             ast_step3::Expr::StrLiteral(a) => {
                 self.type_map.insert_normal(
@@ -310,73 +320,48 @@ impl<'b> VariableMemo<'b> {
                     TypeId::Intrinsic(IntrinsicType::String),
                     Vec::new(),
                 );
-                Expr::StrLiteral(a)
+                Expr::StrLiteral(a.to_string())
             }
             ast_step3::Expr::Ident {
                 name,
-                variable_id,
-                variable_kind:
-                    variable_kind @ (VariableKind::Constructor
-                    | VariableKind::IntrinsicConstructor),
+                variable_id: variable_id @ VariableId::Constructor(d),
             } => {
-                let type_id = match variable_id {
-                    VariableId::Decl(d) => TypeId::DeclId(d),
-                    VariableId::IntrinsicVariable(_) => {
-                        panic!()
-                    }
-                    VariableId::IntrinsicConstructor(i) => {
-                        use crate::intrinsics::IntrinsicConstructor::*;
-                        TypeId::Intrinsic(match i {
-                            True => IntrinsicType::True,
-                            False => IntrinsicType::False,
-                            Unit => IntrinsicType::Unit,
-                        })
-                    }
-                };
-                let field_len = match variable_id {
-                    VariableId::Decl(d) => self.data_decls[&d].field_len,
-                    VariableId::IntrinsicConstructor(_) => 0,
-                    VariableId::IntrinsicVariable(_) => {
-                        unreachable!()
-                    }
-                };
                 let p = make_constructor_type(
-                    field_len,
-                    type_id,
+                    self.data_decls[&d].field_len,
+                    TypeId::DeclId(d),
                     &mut self.type_map,
                 );
                 self.type_map.union(type_pointer, p);
-                Expr::Ident {
-                    name,
-                    variable_id,
-                    variable_kind,
-                }
+                Expr::Ident { name, variable_id }
             }
             ast_step3::Expr::Ident {
                 name,
-                variable_id,
-                variable_kind: VariableKind::Local,
+                variable_id: variable_id @ VariableId::IntrinsicConstructor(i),
+            } => {
+                use crate::intrinsics::IntrinsicConstructor::*;
+                let type_id = TypeId::Intrinsic(match i {
+                    True => IntrinsicType::True,
+                    False => IntrinsicType::False,
+                    Unit => IntrinsicType::Unit,
+                });
+                self.type_map
+                    .insert_normal(type_pointer, type_id, Vec::new());
+                Expr::Ident { name, variable_id }
+            }
+            ast_step3::Expr::Ident {
+                name,
+                variable_id: variable_id @ VariableId::Local(_),
             } => {
                 let v = local_variables[&variable_id];
                 self.type_map.union(type_pointer, v);
-                Expr::Ident {
-                    name,
-                    variable_id,
-                    variable_kind: VariableKind::Local,
-                }
+                Expr::Ident { name, variable_id }
             }
             ast_step3::Expr::Ident {
                 name,
-                variable_id,
-                variable_kind: VariableKind::Global,
+                variable_id: variable_id @ VariableId::Global(decl_id),
             } => {
                 let (p, is_recursive) =
                     self.get_type_global(variable_id, trace).unwrap();
-                let decl_id = if let VariableId::Decl(decl_id) = variable_id {
-                    decl_id
-                } else {
-                    panic!()
-                };
                 if is_recursive {
                     self.type_map.union(p, type_pointer);
                     Expr::GlobalVariable {
@@ -398,24 +383,33 @@ impl<'b> VariableMemo<'b> {
             }
             ast_step3::Expr::Ident {
                 name,
-                variable_id,
-                variable_kind: VariableKind::Intrinsic,
+                variable_id: variable_id @ VariableId::IntrinsicVariable(_),
             } => {
                 let v = self.intrinsic_variables[&variable_id];
                 let v_listener = self.type_map.clone_pointer(v);
                 self.type_map.union(type_pointer, v_listener);
-                Expr::Ident {
-                    name,
-                    variable_id,
-                    variable_kind: VariableKind::Intrinsic,
-                }
+                Expr::Ident { name, variable_id }
+            }
+            ast_step3::Expr::Ident {
+                name,
+                variable_id:
+                    variable_id @ VariableId::FieldAccessor { constructor, field },
+            } => {
+                insert_accessor_type(
+                    type_pointer,
+                    self.data_decls[&constructor].field_len,
+                    TypeId::DeclId(constructor),
+                    field,
+                    &mut self.type_map,
+                );
+                Expr::Ident { name, variable_id }
             }
             ast_step3::Expr::Call(f, a) => {
                 let f_t = self.type_map.new_pointer();
                 let a_t = self.type_map.new_pointer();
                 let (para, ret) = self.type_map.get_fn(f_t);
-                let f = self.expr(*f, f_t, local_variables, trace);
-                let a = self.expr(*a, a_t, local_variables, trace);
+                let f = self.expr(f.0, f_t, local_variables, trace);
+                let a = self.expr(a.0, a_t, local_variables, trace);
                 self.type_map.union(a_t, para);
                 self.type_map.union(type_pointer, ret);
                 Expr::Call((f, f_t).into(), (a, a_t).into())
@@ -425,7 +419,7 @@ impl<'b> VariableMemo<'b> {
                     .into_iter()
                     .map(|e| {
                         let p = self.type_map.new_pointer();
-                        (self.expr(e, p, local_variables, trace), p)
+                        (self.expr(e.0, p, local_variables, trace), p)
                     })
                     .collect();
                 self.type_map.union(type_pointer, es.last().unwrap().1);
@@ -440,7 +434,7 @@ impl<'b> VariableMemo<'b> {
         local_variables: &FxHashMap<VariableId, TypePointer>,
         mut type_pointer: TypePointer,
         trace: &FxHashMap<VariableId, TypePointer>,
-    ) -> FnArm<TypePointer> {
+    ) -> FnArm {
         let mut local_variables = local_variables.clone();
         let mut pattern = Vec::new();
         for p in arm.pattern {
@@ -450,9 +444,10 @@ impl<'b> VariableMemo<'b> {
                 arg,
                 &p,
                 &mut local_variables,
+                trace,
             ));
         }
-        let expr = self.expr(arm.expr, type_pointer, &local_variables, trace);
+        let expr = self.expr(arm.expr.0, type_pointer, &local_variables, trace);
         FnArm {
             pattern,
             expr: (expr, type_pointer),
@@ -462,21 +457,22 @@ impl<'b> VariableMemo<'b> {
     fn unify_type_with_pattern(
         &mut self,
         type_pointer: TypePointer,
-        pattern: &ast_step2::Pattern<ast_step2::types::Type>,
+        pattern: &ast_step3::Pattern,
         local_variables: &mut FxHashMap<VariableId, TypePointer>,
-    ) -> Pattern<TypePointer> {
-        if pattern.len() != 1 {
+        trace: &FxHashMap<VariableId, TypePointer>,
+    ) -> Pattern {
+        if pattern.0.len() != 1 {
             unimplemented!()
         } else {
             use crate::ast_step2::PatternUnit::*;
-            let pattern = match &pattern[0] {
+            let pattern = match &pattern.0[0] {
                 I64(a) => {
                     self.type_map.insert_normal(
                         type_pointer,
                         TypeId::Intrinsic(IntrinsicType::I64),
                         Vec::new(),
                     );
-                    PatternUnit::I64(a.clone())
+                    PatternUnit::I64(a.to_string())
                 }
                 Str(a) => {
                     self.type_map.insert_normal(
@@ -484,9 +480,13 @@ impl<'b> VariableMemo<'b> {
                         TypeId::Intrinsic(IntrinsicType::String),
                         Vec::new(),
                     );
-                    PatternUnit::Str(a.clone())
+                    PatternUnit::Str(a.to_string())
                 }
-                Constructor { name, id, args } => {
+                Constructor {
+                    name,
+                    id: id @ ConstructorId::DeclId(decl_id),
+                    args,
+                } => {
                     let args = args
                         .iter()
                         .map(|pattern| {
@@ -495,26 +495,71 @@ impl<'b> VariableMemo<'b> {
                                 p,
                                 pattern,
                                 local_variables,
+                                trace,
                             )
                         })
                         .collect_vec();
                     self.type_map.insert_normal(
                         type_pointer,
                         (*id).into(),
-                        args.iter().map(|(_, p)| *p).collect(),
+                        args.iter().map(|p| p.type_).collect(),
+                    );
+                    let mut p = PatternUnit::Constructor {
+                        name: *name,
+                        id: *id,
+                    };
+                    let field_len = args.len();
+                    for (i, arg) in args.into_iter().enumerate() {
+                        let accessor_t = self.type_map.new_pointer();
+                        insert_accessor_type(
+                            accessor_t,
+                            field_len,
+                            TypeId::DeclId(*decl_id),
+                            i,
+                            &mut self.type_map,
+                        );
+                        p = PatternUnit::Apply {
+                            pre_pattern: Pattern {
+                                patterns: vec![p],
+                                type_: type_pointer,
+                            },
+                            function: (
+                                Expr::Ident {
+                                    name: format!("_{i}"),
+                                    variable_id: VariableId::FieldAccessor {
+                                        constructor: *decl_id,
+                                        field: i,
+                                    },
+                                },
+                                accessor_t,
+                            ),
+                            post_pattern: arg,
+                        };
+                    }
+                    p
+                }
+                Constructor {
+                    name,
+                    id: id @ ConstructorId::Intrinsic(_),
+                    args,
+                } => {
+                    debug_assert!(args.is_empty());
+                    self.type_map.insert_normal(
+                        type_pointer,
+                        (*id).into(),
+                        Vec::new(),
                     );
                     PatternUnit::Constructor {
                         name: *name,
                         id: *id,
-                        args,
                     }
                 }
                 Binder(name, d, _) => {
-                    local_variables.insert(VariableId::Decl(*d), type_pointer);
+                    local_variables.insert(VariableId::Local(*d), type_pointer);
                     PatternUnit::Binder(name.to_string(), *d)
                 }
                 ResolvedBinder(d, _) => {
-                    local_variables.insert(VariableId::Decl(*d), type_pointer);
+                    local_variables.insert(VariableId::Local(*d), type_pointer);
                     PatternUnit::Binder("unique".to_string(), *d)
                 }
                 Underscore => PatternUnit::Underscore,
@@ -523,11 +568,50 @@ impl<'b> VariableMemo<'b> {
                         type_pointer,
                         p,
                         local_variables,
+                        trace,
                     ),
                     t.clone(),
                 ),
+                Apply(pre_pattern, applications) => {
+                    let mut p = self.unify_type_with_pattern(
+                        type_pointer,
+                        pre_pattern,
+                        local_variables,
+                        trace,
+                    );
+                    for a in applications {
+                        let post_pattern_p = self.type_map.new_pointer();
+                        let function_p = self.type_map.new_pointer();
+                        let p_p = p.type_;
+                        p = Pattern {
+                            patterns: vec![PatternUnit::Apply {
+                                pre_pattern: p,
+                                function: (
+                                    self.expr(
+                                        a.function.clone(),
+                                        function_p,
+                                        local_variables,
+                                        trace,
+                                    ),
+                                    function_p,
+                                ),
+                                post_pattern: self.unify_type_with_pattern(
+                                    post_pattern_p,
+                                    &a.post_pattern,
+                                    local_variables,
+                                    trace,
+                                ),
+                            }],
+                            type_: p_p,
+                        };
+                    }
+                    return p;
+                }
             };
-            (vec![pattern], type_pointer)
+            Pattern {
+                patterns: vec![pattern],
+                type_: type_pointer,
+            }
         }
     }
 }
@@ -550,6 +634,19 @@ fn make_constructor_type(
     args.reverse();
     map.insert_normal(r, id, args.clone());
     f
+}
+
+fn insert_accessor_type(
+    p: TypePointer,
+    field_len: usize,
+    id: TypeId,
+    field: usize,
+    map: &mut PaddedTypeMap,
+) {
+    let args = (0..field_len).map(|_| map.new_pointer()).collect_vec();
+    let t = map.new_pointer();
+    map.insert_function(p, t, args[field]);
+    map.insert_normal(t, id, args);
 }
 
 impl Display for Type {

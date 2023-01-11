@@ -7,14 +7,15 @@ data T {
 
 type Tree = E | T[A, Tree[A], Tree[A]] forall { A }
 
-identity = | a => a
+contains_0 : Tree[I64] -> Bool = | a => a.contains(0)
 
 insert : Tree[I64] -> I64 -> Tree[I64] =
     | E, x => T { value: x, left: E, right: E }
-    | T { value: v, left: l, right: r, identity: t }, x => (x < v /\ v < x).
+    | T { value: v, left: l, right: r, contains_0: True }, x => T { value: v, left: l, right: r }
+    | T { value: v, left: l, right: r }, x => (x < v /\ v < x).
         | True /\ _ => T { value: v, left: l.insert(x), right: r }
         | _ /\ True => T { value: v, left: l, right: r.insert(x) }
-        | _ => t
+        | _ => T { value: v, left: l, right: r }
 
 contains : Tree[I64] -> I64 -> Bool =
     | E, _ => False
@@ -27,7 +28,7 @@ main =
     | () => do
         test0 = E.contains(0)
         test1 = E.insert(2).insert(4).insert(0).insert(0).insert(100).contains(0)
-        test2 = E.insert(2).insert(4).insert(0).insert(0).insert(100).contains(3)
+        test2 = E.insert(2).insert(4).insert(0).insert(0).insert(100).contains(100)
         (test0 /\ test1 /\ test2).
             | False /\ True /\ False => "ok"
             | _ => "ng"

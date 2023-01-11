@@ -1,9 +1,7 @@
 use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::name_id::Name;
-use crate::ast_step3::{DataDecl, VariableId, VariableKind};
-use crate::ast_step4::{
-    self, PaddedTypeMap, Pattern, PatternUnit, Type, TypePointer,
-};
+use crate::ast_step3::{DataDecl, VariableId};
+use crate::ast_step4::{self, PaddedTypeMap, PatternUnit, Type, TypePointer};
 use fxhash::FxHashMap;
 
 /// Difference between `ast_step4::Ast` and `ast_step5::Ast`:
@@ -24,7 +22,6 @@ pub enum Expr {
     Ident {
         name: String,
         variable_id: VariableId,
-        variable_kind: VariableKind,
     },
     Call(Box<ExprWithType>, Box<ExprWithType>),
     DoBlock(Vec<ExprWithType>),
@@ -39,9 +36,11 @@ pub struct VariableDecl {
     pub decl_id: DeclId,
 }
 
+pub type Pattern = ast_step4::Pattern<Type, ExprWithType>;
+
 #[derive(Debug, PartialEq, Clone)]
 pub struct FnArm {
-    pub pattern: Vec<Pattern<Type>>,
+    pub pattern: Vec<Pattern>,
     pub expr: ExprWithType,
 }
 
@@ -127,7 +126,7 @@ impl VariableMemo {
 
     fn monomorphize_expr(
         &mut self,
-        (e, t): ast_step4::ExprWithType<TypePointer>,
+        (e, t): ast_step4::ExprWithType,
         replace_map: &FxHashMap<TypePointer, TypePointer>,
         trace: &FxHashMap<DeclId, DeclId>,
     ) -> ExprWithType {
@@ -143,17 +142,15 @@ impl VariableMemo {
             ),
             Expr::Ident {
                 name,
-                variable_id: VariableId::Decl(decl_id),
-                variable_kind: VariableKind::Global,
+                variable_id: VariableId::Global(decl_id),
             } => Ident {
                 name,
-                variable_id: VariableId::Decl(self.monomorphize_decl(
+                variable_id: VariableId::Global(self.monomorphize_decl(
                     decl_id,
                     t,
                     replace_map,
                     trace,
                 )),
-                variable_kind: VariableKind::Global,
             },
             Expr::GlobalVariable {
                 name,
@@ -161,7 +158,7 @@ impl VariableMemo {
                 replace_map: r,
             } => Ident {
                 name,
-                variable_id: VariableId::Decl(
+                variable_id: VariableId::Global(
                     self.monomorphize_decl(
                         decl_id,
                         t,
@@ -178,7 +175,6 @@ impl VariableMemo {
                         trace,
                     ),
                 ),
-                variable_kind: VariableKind::Global,
             },
             Expr::Call(a, b) => Call(
                 Box::new(self.monomorphize_expr(*a, replace_map, trace)),
@@ -191,15 +187,7 @@ impl VariableMemo {
             ),
             Expr::Number(a) => Number(a),
             Expr::StrLiteral(a) => StrLiteral(a),
-            Expr::Ident {
-                name,
-                variable_id,
-                variable_kind,
-            } => Ident {
-                name,
-                variable_id,
-                variable_kind,
-            },
+            Expr::Ident { name, variable_id } => Ident { name, variable_id },
         };
         let t = self.map.get_type_with_replace_map(t, replace_map);
         (e, t)
@@ -207,7 +195,7 @@ impl VariableMemo {
 
     fn monomorphize_fn_arm(
         &mut self,
-        arm: ast_step4::FnArm<TypePointer>,
+        arm: ast_step4::FnArm,
         replace_map: &FxHashMap<TypePointer, TypePointer>,
         trace: &FxHashMap<DeclId, DeclId>,
     ) -> FnArm {
@@ -215,7 +203,7 @@ impl VariableMemo {
             pattern: arm
                 .pattern
                 .into_iter()
-                .map(|p| self.monomorphize_pattern(p, replace_map))
+                .map(|p| self.monomorphize_pattern(p, replace_map, trace))
                 .collect(),
             expr: self.monomorphize_expr(arm.expr, replace_map, trace),
         }
@@ -223,18 +211,16 @@ impl VariableMemo {
 
     fn monomorphize_pattern(
         &mut self,
-        (pattern, t): Pattern<TypePointer>,
+        pattern: ast_step4::Pattern<TypePointer>,
         replace_map: &FxHashMap<TypePointer, TypePointer>,
+        trace: &FxHashMap<DeclId, DeclId>,
     ) -> Pattern {
-        let pattern = pattern
+        let patterns = pattern
+            .patterns
             .into_iter()
             .map(|p| match p {
-                PatternUnit::Constructor { name, id, args } => {
-                    let args = args
-                        .into_iter()
-                        .map(|p| self.monomorphize_pattern(p, replace_map))
-                        .collect();
-                    PatternUnit::Constructor { name, id, args }
+                PatternUnit::Constructor { name, id } => {
+                    PatternUnit::Constructor { name, id }
                 }
                 PatternUnit::I64(a) => PatternUnit::I64(a),
                 PatternUnit::Str(a) => PatternUnit::Str(a),
@@ -242,12 +228,38 @@ impl VariableMemo {
                 PatternUnit::Underscore => PatternUnit::Underscore,
                 PatternUnit::TypeRestriction(p, t) => {
                     PatternUnit::TypeRestriction(
-                        self.monomorphize_pattern(p, replace_map),
+                        self.monomorphize_pattern(p, replace_map, trace),
                         t,
                     )
                 }
+                PatternUnit::Apply {
+                    pre_pattern,
+                    function,
+                    post_pattern,
+                } => PatternUnit::Apply {
+                    pre_pattern: self.monomorphize_pattern(
+                        pre_pattern,
+                        replace_map,
+                        trace,
+                    ),
+                    function: self.monomorphize_expr(
+                        function,
+                        replace_map,
+                        trace,
+                    ),
+                    post_pattern: self.monomorphize_pattern(
+                        post_pattern,
+                        replace_map,
+                        trace,
+                    ),
+                },
             })
             .collect();
-        (pattern, self.map.get_type_with_replace_map(t, replace_map))
+        Pattern {
+            patterns,
+            type_: self
+                .map
+                .get_type_with_replace_map(pattern.type_, replace_map),
+        }
     }
 }

@@ -7,14 +7,14 @@ data T {
 
 type Tree = E | T[A, Tree[A], Tree[A]] forall { A }
 
-identity = | a => a
+id = | a => a
 
 insert : Tree[I64] -> I64 -> Tree[I64] =
     | E, x => T { value: x, left: E, right: E }
-    | T { value: v, left: l, right: r, identity: t }, x => (x < v /\ v < x).
+    | T { value: v, left: l, right: r, id: E }, x => (x < v /\ v < x).
         | True /\ _ => T { value: v, left: l.insert(x), right: r }
         | _ /\ True => T { value: v, left: l, right: r.insert(x) }
-        | _ => t
+        | _ => E
 
 contains : Tree[I64] -> I64 -> Bool =
     | E, _ => False

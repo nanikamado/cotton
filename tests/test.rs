@@ -407,3 +407,48 @@ fn modules_fail5() {
 fn modules_fail6() {
     test_test("modules_fail6.cot").code(1);
 }
+
+#[test]
+fn apply_pattern() {
+    test_examples(
+        "apply_pattern.cot",
+        "n == 2\nn == 6, m == 8, m.fib == 21\nn == 7\n",
+    );
+}
+
+#[test]
+fn lambda_in_apply_pattern() {
+    test_test("lambda_in_apply_pattern.cot")
+        .stdout("2\n20!\n20\n")
+        .success();
+}
+
+#[test]
+fn field_accessor() {
+    test_examples("field_accessor.cot", "1\n1\n1\n");
+}
+
+#[test]
+fn bin_tree2() {
+    test_test("bin_tree2.cot").stdout("ok\n").success();
+}
+
+#[test]
+fn apply_pattern2() {
+    test_test("apply_pattern2.cot").stdout("1\n").success();
+}
+
+#[test]
+fn apply_pattern_fail() {
+    test_test("apply_pattern_fail.cot").code(1);
+}
+
+#[test]
+fn bin_tree_fail() {
+    test_test("bin_tree_fail.cot").code(1);
+}
+
+#[test]
+fn and_fail() {
+    test_test("and_fail.cot").code(1);
+}

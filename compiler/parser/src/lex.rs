@@ -166,13 +166,15 @@ fn lexer(
         .then(just(')'))
         .map(|_| Token::Ident("()".to_string(), TokenId::new()));
 
-    let paren = just('(')
-        .or(just(')'))
-        .or(just('}'))
-        .or(just('{'))
-        .or(just('['))
-        .or(just(']'))
-        .map(Token::Paren);
+    let paren = choice((
+        just('('),
+        just(')'),
+        just('}'),
+        just('{'),
+        just('['),
+        just(']'),
+    ))
+    .map(Token::Paren);
 
     let op = just(",")
         .map(|_| Token::Comma)
@@ -206,10 +208,7 @@ fn lexer(
             .map(|_| Token::OpenParenWithoutPad)
             .map_with_span(|tok, span| (tok, span)))
         .or(line_ws.repeated().ignore_then(
-            int.or(str)
-                .or(paren)
-                .or(op)
-                .or(ident)
+            choice((int, str, paren, op, ident))
                 .map_with_span(|tok, span| (tok, span)),
         ));
 

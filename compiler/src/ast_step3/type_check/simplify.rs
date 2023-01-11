@@ -5,7 +5,7 @@ use crate::ast_step2::types::{
     TypeMatchableRef, TypeUnit, TypeVariable,
 };
 use crate::ast_step2::{
-    self, PatternForRestriction, PatternRestrictions,
+    self, PatternForRestriction, PatternRestriction, PatternRestrictions,
     PatternUnitForRestriction, RelOrigin, SubtypeRelations, TypeWithEnv,
 };
 use crate::errors::{CompileError, NotSubtypeReason};
@@ -149,6 +149,7 @@ impl TypeVariableMap {
             TypeRestriction(p, t) => {
                 TypeRestriction(Box::new(self.normalize_pattern_unit(*p)), t)
             }
+            Apply(p) => Apply(Box::new(self.normalize_pattern_unit(*p))),
         }
     }
 
@@ -692,14 +693,22 @@ fn _simplify_type<T: TypeConstructor>(
         }
     }
     log::trace!("t{{8}} = {}", t);
-    for (i, (ts, patterns, _span)) in t.pattern_restrictions.iter().enumerate()
+    for (
+        i,
+        PatternRestriction {
+            type_: ts,
+            pattern,
+            span: _,
+            allow_inexhaustive: _,
+        },
+    ) in t.pattern_restrictions.iter().enumerate()
     {
-        if patterns.len() == 1
+        if pattern.len() == 1
             && ts
                 .clone()
                 .arguments_from_argument_tuple()
                 .iter()
-                .zip(&patterns[0].0.clone().arguments_from_argument_tuple())
+                .zip(&pattern[0].0.clone().arguments_from_argument_tuple())
                 .all(|(t, p)| {
                     if let PatternUnitForRestriction::Binder(p_t, _) = p {
                         t == p_t
@@ -764,12 +773,13 @@ fn _simplify_type<T: TypeConstructor>(
         return Ok((t, true));
     }
     log::trace!("t{{10}} = {}", t);
-    for (pattern_ts, pattern, span) in &t.pattern_restrictions {
+    for pattern_restriction in &t.pattern_restrictions {
         let subtype = apply_type_to_pattern(
-            pattern_ts.clone(),
-            pattern,
-            span.clone(),
-            pattern_ts.all_type_variables_vec().is_empty(),
+            pattern_restriction,
+            pattern_restriction
+                .type_
+                .all_type_variables_vec()
+                .is_empty(),
         )?;
         if !subtype.is_empty() {
             let mut t_normalized = t.clone();
@@ -819,9 +829,10 @@ fn _simplify_type<T: TypeConstructor>(
         t.pattern_restrictions =
             t.pattern_restrictions
                 .into_iter()
-                .map(|(pattern_ts, pattern, span)| {
+                .map(|pattern_restriction| {
                     let pattern_ts: Vec<_> =
-                        pattern_ts
+                        pattern_restriction
+                            .type_
                             .arguments_from_argument_tuple()
                             .iter()
                             .map(|pattern_t| {
@@ -837,19 +848,19 @@ fn _simplify_type<T: TypeConstructor>(
                                 }
                             })
                             .collect();
-                    (
-                        Type::argument_tuple_from_arguments(pattern_ts),
-                        pattern,
-                        span,
-                    )
+                    PatternRestriction {
+                        type_: Type::argument_tuple_from_arguments(pattern_ts),
+                        ..pattern_restriction
+                    }
                 })
                 .collect();
-        for (pattern_ts, pattern, span) in &t.pattern_restrictions {
+        for pattern_restriction in &t.pattern_restrictions {
             let subtype = apply_type_to_pattern(
-                pattern_ts.clone(),
-                pattern,
-                span.clone(),
-                pattern_ts.all_type_variables_vec().is_empty(),
+                pattern_restriction,
+                pattern_restriction
+                    .type_
+                    .all_type_variables_vec()
+                    .is_empty(),
             )?;
             if !subtype.is_empty() {
                 let mut t_normalized = t.clone();
@@ -866,8 +877,9 @@ fn _simplify_type<T: TypeConstructor>(
         let pattern_restrictions = old_pattern_restrictions
             .clone()
             .into_iter()
-            .map(|(pattern_t, pattern, span)| {
-                let pattern = pattern
+            .map(|pattern_restriction| {
+                let pattern = pattern_restriction
+                    .pattern
                     .into_iter()
                     .map(|(p, span)| {
                         let p = p.map_type(|mut t_in_p| {
@@ -906,7 +918,10 @@ fn _simplify_type<T: TypeConstructor>(
                         (p, span)
                     })
                     .collect();
-                (pattern_t, pattern, span)
+                PatternRestriction {
+                    pattern,
+                    ..pattern_restriction
+                }
             })
             .collect();
         if old_pattern_restrictions != pattern_restrictions {
@@ -1538,15 +1553,16 @@ fn possible_weakest(
         .0
         .iter()
         .map(|(a, b, _)| (a.clone(), b.clone()))
-        .chain(pattern_restrictions.iter().flat_map(
-            |(match_t, pattern, _span)| {
-                match_t
-                    .clone()
-                    .arguments_from_argument_tuple()
-                    .into_iter()
-                    .zip(type_from_pattern_for_restriction(pattern))
-            },
-        ))
+        .chain(pattern_restrictions.iter().flat_map(|pattern_restriction| {
+            pattern_restriction
+                .type_
+                .clone()
+                .arguments_from_argument_tuple()
+                .into_iter()
+                .zip(type_from_pattern_for_restriction(
+                    &pattern_restriction.pattern,
+                ))
+        }))
     {
         if sup.contravariant_type_variables().contains(&t) {
             return None;
@@ -1620,6 +1636,7 @@ impl From<&PatternUnitForRestriction> for Type {
                 TypeUnit::Tuple((&**a).into(), (&**b).into()).into()
             }
             PatternUnitForRestriction::TypeRestriction(_, t) => t.clone(),
+            PatternUnitForRestriction::Apply(p) => (&**p).into(),
         }
     }
 }
@@ -1701,8 +1718,9 @@ fn possible_strongest(
             return None;
         }
     }
-    for (_, pattern, _) in pattern_restrictions {
-        if pattern
+    for pattern_restriction in pattern_restrictions {
+        if pattern_restriction
+            .pattern
             .iter()
             .any(|p| p.0.covariant_type_variables().contains(&t))
         {
@@ -1798,16 +1816,14 @@ where
             pattern_restrictions: self
                 .pattern_restrictions
                 .into_iter()
-                .map(|(t, p, span)| {
-                    (
-                        map.normalize_type(t),
-                        p.into_iter()
-                            .map(|(p, span)| {
-                                (map.normalize_pattern_unit(p), span)
-                            })
-                            .collect(),
-                        span,
-                    )
+                .map(|p| PatternRestriction {
+                    type_: map.normalize_type(p.type_),
+                    pattern: p
+                        .pattern
+                        .into_iter()
+                        .map(|(p, span)| (map.normalize_pattern_unit(p), span))
+                        .collect(),
+                    ..p
                 })
                 .collect(),
             already_considered_relations: self.already_considered_relations,
@@ -1847,25 +1863,31 @@ where
 }
 
 fn apply_type_to_pattern(
-    t: Type,
-    pattern: &Vec<(PatternUnitForRestriction, Span)>,
-    t_span: Span,
+    restriction: &PatternRestriction,
     is_concrete_type: bool,
 ) -> Result<SubtypeRelations, CompileError> {
-    log::trace!("ts = ({})", t.iter().map(|t| format!("{t}")).join(", "));
+    log::trace!(
+        "ts = ({})",
+        restriction.type_.iter().map(|t| format!("{t}")).join(", ")
+    );
     log::trace!(
         "pattern = {}",
-        pattern.iter().map(|p| format!("{}", p.0)).join(" | ")
+        restriction
+            .pattern
+            .iter()
+            .map(|p| format!("{}", p.0))
+            .join(" | ")
     );
-    let mut remained = t.clone();
-    let decl_type_map_in_pattern: FxHashMap<DeclId, Type> = pattern
+    let mut remained = restriction.type_.clone();
+    let decl_type_map_in_pattern: FxHashMap<DeclId, Type> = restriction
+        .pattern
         .iter()
         .flat_map(|(p, _)| p.decl_type_map())
         .map(|(d, t)| (d, t.clone()))
         .collect();
     let mut subtype_rels = SubtypeRelations::default();
     let mut not_sure = false;
-    for (p, p_span) in pattern {
+    for (p, p_span) in &restriction.pattern {
         let TypeDestructResult {
             remained: r,
             matched,
@@ -1938,36 +1960,39 @@ fn apply_type_to_pattern(
             }
         }
     }
-    if !remained.is_empty() && !not_sure {
+    if !restriction.allow_inexhaustive && !remained.is_empty() && !not_sure {
         log::debug!("missing type = {}", remained);
         Err(CompileError::InexhaustiveMatch {
             description: format!("missing type = {}", remained),
+            span: restriction.span.clone(),
         })
     } else {
         if not_sure {
-            let pattern_t = pattern_to_type(pattern);
+            let pattern_t = pattern_to_type(&restriction.pattern);
             let r = simplify_subtype_rel(
-                t.clone(),
+                restriction.type_.clone(),
                 pattern_t.clone(),
                 Some(&mut Default::default()),
             )
             .map_err(|reason| CompileError::NotSubtypeOf {
-                sub_type: t,
+                sub_type: restriction.type_.clone(),
                 super_type: pattern_t,
                 reason,
-                span: t_span.clone(),
+                span: restriction.span.clone(),
             })?;
-            subtype_rels.extend(r.into_iter().map(|(a, b)| {
-                (
-                    a.clone(),
-                    b.clone(),
-                    RelOrigin {
-                        left: a,
-                        right: b,
-                        span: t_span.clone(),
-                    },
-                )
-            }));
+            if !restriction.allow_inexhaustive {
+                subtype_rels.extend(r.into_iter().map(|(a, b)| {
+                    (
+                        a.clone(),
+                        b.clone(),
+                        RelOrigin {
+                            left: a,
+                            right: b,
+                            span: restriction.span.clone(),
+                        },
+                    )
+                }));
+            }
         }
         Ok(subtype_rels)
     }
@@ -2132,6 +2157,18 @@ fn destruct_type_unit_by_pattern(
             bind_matched: None,
             kind: DestructResultKind::Fail,
         },
+        (t, PatternUnitForRestriction::Apply(p)) => {
+            let r = destruct_type_unit_by_pattern(
+                t.clone(),
+                p,
+                pattern_span,
+                is_concrete_type,
+            );
+            TypeDestructResult {
+                remained: t.into(),
+                ..r
+            }
+        }
         (
             TypeUnit::Const { id: id1 },
             PatternUnitForRestriction::Const { id: id2, .. },
@@ -2381,13 +2418,16 @@ impl<T: TypeConstructor> Display for ast_step2::TypeWithEnv<T> {
         for req in &self.variable_requirements {
             writeln!(f, "{},", req)?;
         }
-        for (a, b, span) in &self.pattern_restrictions {
+        for p in &self.pattern_restrictions {
             writeln!(
                 f,
                 "    ({}) = pat[{}] ({:?}),",
-                a.iter().map(|a| format!("{a}")).join(", "),
-                b.iter().map(|(p, _)| format!("({})", p)).join(" | "),
-                span
+                p.type_.iter().map(|a| format!("{a}")).join(", "),
+                p.pattern
+                    .iter()
+                    .map(|(p, _)| format!("({})", p))
+                    .join(" | "),
+                p.span
             )?;
         }
         if !self.already_considered_relations.is_empty() {
@@ -2456,7 +2496,8 @@ mod tests {
         Type, TypeMatchable, TypeMatchableRef, TypeUnit, TypeVariable,
     };
     use crate::ast_step2::{
-        PatternUnitForRestriction, RelOrigin, TypeId, TypeWithEnv,
+        PatternRestriction, PatternUnitForRestriction, RelOrigin, TypeId,
+        TypeWithEnv,
     };
     use crate::ast_step3::type_check::simplify::{
         apply_type_to_pattern, simplify_subtype_rel, simplify_type,
@@ -2726,25 +2767,28 @@ mod tests {
         let t1 = Type::intrinsic_from_str("I64").union(v1.clone().into());
         let v2 = TypeVariable::new();
         let r = apply_type_to_pattern(
-            Type::argument_tuple_from_arguments(vec![t1]),
-            &vec![
-                PatternUnitForRestriction::argument_tuple_from_arguments(vec![
-                    (PatternUnitForRestriction::I64, 0..0),
-                ]),
-                PatternUnitForRestriction::argument_tuple_from_arguments(vec![
-                    (
-                        PatternUnitForRestriction::Binder(
-                            TypeUnit::Variable(v2).into(),
-                            DeclId::new(),
-                        ),
-                        0..0,
+            &PatternRestriction {
+                type_: Type::argument_tuple_from_arguments(vec![t1]),
+                pattern: vec![
+                    PatternUnitForRestriction::argument_tuple_from_arguments(
+                        vec![(PatternUnitForRestriction::I64, 0..0)],
                     ),
-                ]),
-            ]
-            .into_iter()
-            .map(|(a, s)| (a, s.unwrap()))
-            .collect_vec(),
-            0..0,
+                    PatternUnitForRestriction::argument_tuple_from_arguments(
+                        vec![(
+                            PatternUnitForRestriction::Binder(
+                                TypeUnit::Variable(v2).into(),
+                                DeclId::new(),
+                            ),
+                            0..0,
+                        )],
+                    ),
+                ]
+                .into_iter()
+                .map(|(a, s)| (a, s.unwrap()))
+                .collect_vec(),
+                span: 0..0,
+                allow_inexhaustive: false,
+            },
             false,
         );
         let subtype_rels = r.unwrap();
@@ -2797,27 +2841,33 @@ mod tests {
             .clone();
         let v2 = TypeVariable::new();
         let r = apply_type_to_pattern(
-            Type::argument_tuple_from_arguments(vec![t1.clone(), t1]),
-            &vec![{
-                let (a, s) =
-                    PatternUnitForRestriction::argument_tuple_from_arguments(
-                        vec![
-                            (
-                                PatternUnitForRestriction::Const { id: b_id },
-                                0..0,
-                            ),
-                            (
-                                PatternUnitForRestriction::Binder(
-                                    TypeUnit::Variable(v2).into(),
-                                    DeclId::new(),
+            &PatternRestriction {
+                type_: Type::argument_tuple_from_arguments(vec![
+                    t1.clone(),
+                    t1,
+                ]),
+                pattern: vec![{
+                    let (a, s) =
+                        PatternUnitForRestriction::argument_tuple_from_arguments(
+                            vec![
+                                (
+                                    PatternUnitForRestriction::Const { id: b_id },
+                                    0..0,
                                 ),
-                                0..0,
-                            ),
-                        ],
-                    );
-                (a, s.unwrap())
-            }],
-            0..0,
+                                (
+                                    PatternUnitForRestriction::Binder(
+                                        TypeUnit::Variable(v2).into(),
+                                        DeclId::new(),
+                                    ),
+                                    0..0,
+                                ),
+                            ],
+                        );
+                    (a, s.unwrap())
+                }],
+                span: 0..0,
+                allow_inexhaustive: false,
+            },
             false,
         );
         assert!(r.is_err())

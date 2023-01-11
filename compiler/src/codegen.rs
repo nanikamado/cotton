@@ -2,13 +2,15 @@ mod type_restriction_pattern;
 
 use self::type_restriction_pattern::IS_INSTANCE_OF;
 use crate::ast_step1::decl_id::DeclId;
-use crate::ast_step3::DataDecl;
-use crate::ast_step4::{Pattern, PatternUnit, Type};
-use crate::ast_step5::{Ast, Expr, ExprWithType, FnArm, VariableDecl};
+use crate::ast_step2::types::merge_vec;
+use crate::ast_step3::{DataDecl, VariableId};
+use crate::ast_step4::{PatternUnit, Type};
+use crate::ast_step5::{Ast, Expr, ExprWithType, FnArm, Pattern, VariableDecl};
 use crate::intrinsics::{IntrinsicConstructor, IntrinsicVariable};
 use fxhash::FxHashMap;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
+use std::fmt::Write;
 use stripmargin::StripMargin;
 use unic_ucd_category::GeneralCategory;
 
@@ -18,7 +20,8 @@ pub fn codegen(ast: Ast) -> String {
         PRIMITIVE_CONSTRUCTOR_DEF[&IntrinsicConstructor::True],
         PRIMITIVE_CONSTRUCTOR_DEF[&IntrinsicConstructor::False],
         r#"{
-        |let $$unexpected = () => {throw new Error("unexpected")};
+        |let $$unexpected=()=>{throw new Error("unexpected")};
+        |let $field_accessor=i=>a=>a[i];
         |"#
         .strip_margin(),
         PRIMITIVES_DEF
@@ -109,25 +112,37 @@ static PRIMITIVE_CONSTRUCTOR_DEF: Lazy<
 
 fn expr((e, t): &ExprWithType, name_count: u32) -> String {
     let s = match e {
-        Expr::Lambda(a) => format!(
-            r#"({}{}$$unexpected())"#,
-            (0..a[0].pattern.len())
-                .map(|c| format!("${}=>", name_count + c as u32))
-                .join(""),
-            a.iter().map(|e| fn_arm(e, name_count)).join("")
-        ),
+        Expr::Lambda(a) => {
+            let bindings = a.iter().flat_map(|e| bindings(&e.pattern));
+            format!(
+                r#"({}{{{}return {}$$unexpected()}})"#,
+                (0..a[0].pattern.len())
+                    .map(|c| format!("${}=>", name_count + c as u32))
+                    .join(""),
+                bindings.format_with("", |(name, id, t), f| f(&format_args!(
+                    "let ${id}${name} /* : {t} */;",
+                ))),
+                a.iter().map(|e| fn_arm(e, name_count)).join("")
+            )
+        }
         Expr::Number(a) => a.to_string(),
         Expr::StrLiteral(a) => format!("\"{}\"", a),
         Expr::Ident {
-            name: info,
-            variable_id,
-            variable_kind: _,
+            name: _,
+            variable_id:
+                VariableId::FieldAccessor {
+                    constructor: _,
+                    field,
+                },
         } => {
+            format!("$field_accessor({field})")
+        }
+        Expr::Ident { name, variable_id } => {
             format!(
                 "${}${} /* ({}) */",
                 variable_id,
-                convert_name(info.to_string().as_str()),
-                info,
+                convert_name(name.to_string().as_str()),
+                name,
             )
         }
         Expr::Call(f, a) => {
@@ -142,130 +157,117 @@ fn expr((e, t): &ExprWithType, name_count: u32) -> String {
 
 fn fn_arm(e: &FnArm, name_count: u32) -> String {
     let cond = condition(&e.pattern, name_count);
-    let binds = bindings(&e.pattern, name_count);
-    if binds.is_empty() {
-        format!(
-            "{}?{}:",
-            cond,
-            expr(&e.expr, name_count + e.pattern.len() as u32),
-        )
-    } else {
-        format!(
-            "{}?({}{}){}:",
-            cond,
-            binds
-                .iter()
-                .map(|(s, _, id, t)| format!("${}${}/* : {} */=>", id, s, t))
-                .join(""),
-            expr(&e.expr, name_count + e.pattern.len() as u32),
-            binds.iter().map(|(_, n, _, _)| format!("({})", n)).join(""),
-        )
-    }
+    format!(
+        "{}?{}:",
+        cond,
+        expr(&e.expr, name_count + e.pattern.len() as u32),
+    )
 }
 
 fn condition(pattern: &[Pattern], name_count: u32) -> String {
-    let rst = _condition(
+    let mut condition = "true".to_string();
+    _condition(
         pattern,
         &(0..pattern.len())
             .map(|i| format!("${}", i + name_count as usize))
             .collect_vec(),
-    )
-    .join("&&");
-    if rst.is_empty() {
-        "true".to_string()
-    } else {
-        rst
+        name_count + pattern.len() as u32,
+        &mut condition,
+    );
+    condition
+}
+
+fn single_condition(
+    p: &Pattern,
+    arg: &str,
+    name_count: u32,
+    condition: &mut String,
+) {
+    if p.patterns.len() != 1 {
+        unimplemented!()
+    }
+    use PatternUnit::*;
+    match &p.patterns[0] {
+        I64(a) | Str(a) => {
+            write!(condition, "&&{}==={}", a, arg).unwrap();
+        }
+        Constructor { id, name } => {
+            write!(
+                condition,
+                "&&'${}${}'==={}.name",
+                id,
+                convert_name(&name.to_string()),
+                arg
+            )
+            .unwrap();
+        }
+        TypeRestriction(p, t) => {
+            write!(
+                condition,
+                "&&is_instance_of({},{},[])",
+                arg,
+                t.type_to_js_obj().0
+            )
+            .unwrap();
+            single_condition(p, arg, name_count, condition);
+        }
+        Apply {
+            pre_pattern,
+            function,
+            post_pattern,
+        } => {
+            let tmp = format!("$tmp${}", tmp_variable::new());
+            write!(condition, "&&({tmp}={arg},true)").unwrap();
+            single_condition(pre_pattern, &tmp, name_count, condition);
+            let f = expr(function, name_count);
+            single_condition(
+                post_pattern,
+                &format!("{}({})", f, tmp),
+                name_count,
+                condition,
+            );
+        }
+        Binder(name, decl_id) => {
+            write!(condition, "&&(${decl_id}${name}={arg},true)").unwrap();
+        }
+        Underscore => (),
     }
 }
 
-fn _condition(pattern: &[Pattern], names: &[String]) -> Vec<String> {
-    pattern
-        .iter()
-        .zip(names)
-        .flat_map(|((p, _), n)| {
-            if p.len() == 1 {
-                use PatternUnit::*;
-                match &p[0] {
-                    I64(a) | Str(a) => {
-                        vec![format!("{}==={}", a, n)]
-                    }
-                    Constructor { id, args, name } => {
-                        let mut v = vec![format!(
-                            "'${}${}'==={}.name",
-                            id,
-                            convert_name(&name.to_string()),
-                            n
-                        )];
-                        v.append(&mut _condition(
-                            args,
-                            &(0..args.len())
-                                .map(|i| format!("{}[{}]", n, i))
-                                .collect_vec(),
-                        ));
-                        v
-                    }
-                    TypeRestriction(p, t) => {
-                        let mut v = vec![format!(
-                            "is_instance_of({},{}, [])",
-                            n,
-                            t.type_to_js_obj().0
-                        )];
-                        v.append(&mut _condition(
-                            &[p.clone()],
-                            &[n.to_string()],
-                        ));
-                        v
-                    }
-                    _ => Vec::new(),
-                }
-            } else {
-                unimplemented!()
-            }
-        })
-        .collect()
-}
-
-fn bindings(
+fn _condition(
     pattern: &[Pattern],
+    names: &[String],
     name_count: u32,
-) -> Vec<(String, String, DeclId, &Type)> {
-    _bindings(
-        pattern,
-        (0..pattern.len())
-            .map(|i| format!("${}", i + name_count as usize))
-            .collect(),
-    )
+    condition: &mut String,
+) {
+    for (p, arg) in pattern.iter().zip(names) {
+        single_condition(p, arg, name_count, condition);
+    }
 }
 
-fn _bindings(
-    pattern: &[Pattern],
-    names: Vec<String>,
-) -> Vec<(String, String, DeclId, &Type)> {
-    fn _bindings_unit(
-        (p, t): &Pattern,
-        n: String,
-    ) -> Vec<(String, String, DeclId, &Type)> {
-        if p.len() == 1 {
-            match &p[0] {
+fn bindings(pattern: &[Pattern]) -> Vec<(String, DeclId, &Type)> {
+    fn _bindings_unit(p: &Pattern) -> Vec<(String, DeclId, &Type)> {
+        if p.patterns.len() == 1 {
+            match &p.patterns[0] {
                 PatternUnit::Binder(a, id) => {
-                    vec![(a.to_string(), n, *id, t)]
+                    vec![(a.to_string(), *id, &p.type_)]
                 }
-                PatternUnit::Constructor { args, .. } => _bindings(
-                    args,
-                    (0..args.len()).map(|i| format!("{}[{}]", n, i)).collect(),
+                PatternUnit::TypeRestriction(p, _) => _bindings_unit(p),
+                PatternUnit::Apply {
+                    pre_pattern,
+                    post_pattern,
+                    function: _,
+                } => merge_vec(
+                    _bindings_unit(pre_pattern),
+                    _bindings_unit(post_pattern),
                 ),
-                PatternUnit::TypeRestriction(p, _) => _bindings_unit(p, n),
                 _ => Vec::new(),
             }
         } else {
             unimplemented!()
         }
     }
-    pattern
-        .iter()
-        .zip(names)
-        .flat_map(|(p, n)| _bindings_unit(p, n))
-        .collect()
+    pattern.iter().flat_map(_bindings_unit).collect()
 }
 
 fn convert_name(name: &str) -> String {
@@ -290,4 +292,16 @@ fn is_valid_name(name: &str) -> bool {
             )
             || c == '_'
     }) && !(name.len() >= 8 && name[0..8] == *"unicode_")
+}
+
+mod tmp_variable {
+    use std::sync::Mutex;
+
+    static COUNT: Mutex<u32> = Mutex::new(0);
+
+    pub fn new() -> u32 {
+        let mut c = COUNT.lock().unwrap();
+        *c += 1;
+        *c
+    }
 }

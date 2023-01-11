@@ -58,9 +58,16 @@ pub struct Type<'a> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DataDecl<'a> {
     pub name: Name,
-    pub fields: Vec<StrWithId<'a>>,
+    pub fields: Vec<Field<'a>>,
     pub type_variables: Forall<'a>,
     pub decl_id: DeclId,
+    pub is_public: bool,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Field<'a> {
+    pub type_: StrWithId<'a>,
+    pub name: Name,
     pub is_public: bool,
 }
 
@@ -84,7 +91,13 @@ pub enum Expr<'a> {
     Lambda(Vec<FnArm<'a>>),
     Number(&'a str),
     StrLiteral(&'a str),
-    Ident { path: Vec<StrWithId<'a>> },
+    Ident {
+        path: Vec<StrWithId<'a>>,
+    },
+    Record {
+        path: Vec<StrWithId<'a>>,
+        fields: Vec<(StrWithId<'a>, Expr<'a>)>,
+    },
     Decl(Box<VariableDecl<'a>>),
     Call(Box<ExprWithSpan<'a>>, Box<ExprWithSpan<'a>>),
     Do(Vec<ExprWithSpan<'a>>),
@@ -109,6 +122,13 @@ pub enum Pattern<'a> {
     Binder(StrWithId<'a>),
     Underscore,
     TypeRestriction(Box<Pattern<'a>>, Type<'a>, Forall<'a>),
+    Apply(Box<Pattern<'a>>, Vec<ApplyPattern<'a>>),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct ApplyPattern<'a> {
+    pub function: ExprWithSpan<'a>,
+    pub post_pattern: Pattern<'a>,
 }
 
 #[derive(Debug, Clone)]
@@ -315,9 +335,16 @@ impl<'a> Ast<'a> {
                         fields: a
                             .fields
                             .iter()
-                            .map(|(name, span, id)| {
-                                (name.as_str(), span.clone(), *id)
-                            })
+                            .map(
+                                |parser::Field {
+                                     type_: (t, span, id),
+                                     name,
+                                 }| Field {
+                                    type_: (t.as_str(), span.clone(), *id),
+                                    name: Name::from_str(module_path, &name.0),
+                                    is_public: true,
+                                },
+                            )
                             .collect(),
                         type_variables: (&a.type_variables).into(),
                         decl_id,
@@ -836,6 +863,21 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::ExprUnit, &'a Span) {
                 .iter()
                 .map(|e| expr(e, env, module_path))
                 .try_collect()?),
+            parser::ExprUnit::Record { path, fields } => Record {
+                path: path
+                    .iter()
+                    .map(|name| (name.0.as_str(), name.1.clone(), name.2))
+                    .collect(),
+                fields: fields
+                    .iter()
+                    .map(|(f, e)| {
+                        Ok((
+                            (f.0.as_str(), f.1.clone(), f.2),
+                            expr(e, env, module_path)?.0,
+                        ))
+                    })
+                    .try_collect()?,
+            },
         };
         Ok((e, self.1.clone()))
     }
@@ -896,6 +938,29 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::PatternUnit, &'a Span) {
                     Box::new(fold_op_sequence(p, env, module_path)?.0),
                     fold_op_sequence(t, env, module_path)?.0,
                     forall.into(),
+                )
+            }
+            parser::PatternUnit::Apply(pre_pattern, applications) => {
+                Pattern::Apply(
+                    Box::new(
+                        (&pre_pattern.0, &pre_pattern.1)
+                            .convert(env, module_path)?
+                            .0,
+                    ),
+                    applications
+                        .iter()
+                        .map(|a| {
+                            Ok(ApplyPattern {
+                                function: expr(&a.function, env, module_path)?,
+                                post_pattern: fold_op_sequence(
+                                    &a.post_pattern,
+                                    env,
+                                    module_path,
+                                )?
+                                .0,
+                            })
+                        })
+                        .try_collect()?,
                 )
             }
         };
