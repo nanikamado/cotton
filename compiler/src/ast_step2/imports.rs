@@ -300,7 +300,7 @@ impl Imports {
                 )?;
             }
         }
-        if let Some(name_entry) = self.name_map.get_mut(&name) {
+        if let Some(name_entry) = self.name_map.get(&name) {
             for name_alias_entry in name_entry.true_names.clone().into_iter() {
                 if name_alias_entry.is_public
                     || path.is_same_as_or_ancestor_of(scope)
@@ -321,7 +321,7 @@ impl Imports {
                     )?;
                 }
             }
-            let name_entry = self.name_map.get_mut(&name).unwrap();
+            let name_entry = self.name_map.get(&name).unwrap();
             for v in &name_entry.variables {
                 if v.is_public || path.is_same_as_or_ancestor_of(scope) {
                     ns.insert(NameKind::Variable(v.variable_id));
