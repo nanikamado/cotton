@@ -135,15 +135,13 @@ impl CompileError {
                 log::debug!("{} is not subtype of {}", sub_type, super_type);
                 let report =
                     Report::build(ReportKind::Error, filename, span.start)
-                        .with_label(
-                            Label::new((filename, dbg!(span))).with_message(
-                                format!(
-                                    "expected `{}` but found `{}`.",
-                                    print_type(&super_type, imports),
-                                    print_type(&sub_type, imports),
-                                ),
+                        .with_label(Label::new((filename, span)).with_message(
+                            format!(
+                                "expected `{}` but found `{}`.",
+                                print_type(&super_type, imports),
+                                print_type(&sub_type, imports),
                             ),
-                        )
+                        ))
                         .with_message(NotSubtypeReasonDisplay {
                             reason: &reason,
                             depth: 0,

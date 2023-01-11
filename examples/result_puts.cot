@@ -3,9 +3,6 @@ data Ok(A) forall { A }
 
 type Result = Ok[A] | Err[B] forall { A, B }
 
-interface ToString where
-    to_string : Self -> String
-
 to_string : Result[A, E] -> String forall { A : ToString, E : ToString } =
     | Ok(a) => "Ok(" <> a.to_string <> ")"
     | Err(e) => "Err(" <> e.to_string <> ")"
@@ -13,9 +10,6 @@ to_string : Result[A, E] -> String forall { A : ToString, E : ToString } =
 map : Result[A, E] -> (A -> B) -> Result[B, E] forall { A, B, E } =
     | Err(a), _ => Err(a)
     | Ok(a), f => Ok(a.f)
-
-interface Flatten where
-    flatten : Self[Self[A]] -> Self[A] forall { A }
 
 flatten : Result[Result[A, E1], E2] -> Result[A, E1 | E2] forall { A, E1, E2 } =
     | Ok(a) => a

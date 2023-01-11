@@ -6,7 +6,7 @@ use chumsky::{Error, Stream};
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Forall {
-    pub type_variables: Vec<(StringWithId, Vec<StringWithId>)>,
+    pub type_variables: Vec<(StringWithId, Vec<Vec<StringWithId>>)>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -132,6 +132,7 @@ pub struct TypeAliasDecl {
 pub struct InterfaceDecl {
     pub name: StringWithId,
     pub variables: Vec<(StringWithId, Type, Forall)>,
+    pub is_public: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -180,9 +181,6 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
     let underscore =
         select! { Token::Ident(ident, id) if ident == "_" => (ident, id) };
     let and = select! { Token::Op(ident, id) if ident == "&" => (ident, id) };
-    // let capital_head_ident =
-    //     select! { Token::CapitalHeadIdent(ident) => ident };
-    // let ident = ident.or(capital_head_ident);
     let open_paren =
         just(Token::Paren('(')).or(just(Token::OpenParenWithoutPad));
     let ident_or_op =
@@ -200,7 +198,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
             ident
                 .then(
                     just(Token::Colon)
-                        .ignore_then(ident.separated_by(and))
+                        .ignore_then(ident_with_path.clone().separated_by(and))
                         .or_not(),
                 )
                 .separated_by(just(Token::Comma))
@@ -575,21 +573,23 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 is_public: pub_or_not.is_some(),
             })
         });
-    let interface_decl = ident
-        .delimited_by(just(Token::Interface), just(Token::Where))
+    let interface_decl = just(Token::Pub)
+        .or_not()
+        .then(ident.delimited_by(just(Token::Interface), just(Token::Where)))
         .then(indented(
             ident_or_op
                 .then_ignore(just(Token::Colon))
                 .then(type_)
                 .repeated(),
         ))
-        .map(|(name, vs)| {
+        .map(|((pub_or_not, name), vs)| {
             Decl::Interface(InterfaceDecl {
                 name,
                 variables: vs
                     .into_iter()
                     .map(|(n, (t, forall))| (n, t, forall))
                     .collect(),
+                is_public: pub_or_not.is_some(),
             })
         });
     let use_decl = just(Token::Pub)

@@ -3,9 +3,6 @@ data Ok(A) forall { A }
 
 type Result = Ok[A] | Err[B] forall { A, B }
 
-interface ToString where
-    to_string : Self -> String
-
 to_string : Result[A, E] -> String forall { A : ToString, E : ToString } =
     | Ok(a) => "Ok(" <> a.to_string <> ")"
     | Err(e) => "Err(" <> e.to_string <> ")"
