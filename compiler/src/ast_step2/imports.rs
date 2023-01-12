@@ -25,21 +25,10 @@ struct NameEntry {
     module: Option<ModuleDecl>,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
-enum NameKind {
-    Variable(VariableId),
-    Accessor { constructor: DeclId, field: usize },
-    Data(ConstructorId),
-    Type(ConstOrAlias),
-    Interface(Name),
-    Module(Name),
-    OpPrecedence(Associativity, i32),
-}
-
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct NameResult {
-    variables: Vec<VariableId>,
-    accessors: Vec<(DeclId, usize)>,
+    variables: FxHashSet<VariableId>,
+    accessors: FxHashSet<(DeclId, usize)>,
     data: Option<ConstructorId>,
     type_: Option<ConstOrAlias>,
     interface: Option<Name>,
@@ -259,7 +248,7 @@ impl Imports {
         span: Option<Span>,
         token_map: &mut TokenMap,
         visited: &FxHashSet<Name>,
-        true_names: &mut FxHashSet<NameKind>,
+        true_names: &mut NameResult,
     ) -> Result<(), CompileError> {
         let name = Name::from_str(path, name_str);
         if visited.contains(&name) {
@@ -270,7 +259,7 @@ impl Imports {
         }
         let mut visited = visited.clone();
         visited.insert(name);
-        let mut ns = Default::default();
+        let mut ns_from_wilde_cards = Default::default();
         for a in self
             .wilde_card_imports
             .get(&path)
@@ -296,10 +285,11 @@ impl Imports {
                     span.clone(),
                     token_map,
                     &visited,
-                    &mut ns,
+                    &mut ns_from_wilde_cards,
                 )?;
             }
         }
+        let mut ns = Default::default();
         if let Some(name_entry) = self.name_map.get(&name) {
             for name_alias_entry in name_entry.true_names.clone().into_iter() {
                 if name_alias_entry.is_public
@@ -324,47 +314,60 @@ impl Imports {
             let name_entry = self.name_map.get(&name).unwrap();
             for v in &name_entry.variables {
                 if v.is_public || path.is_same_as_or_ancestor_of(scope) {
-                    ns.insert(NameKind::Variable(v.variable_id));
+                    ns.variables.insert(v.variable_id);
                 }
             }
             for v in &name_entry.accessors {
                 if v.is_public || path.is_same_as_or_ancestor_of(scope) {
-                    ns.insert(NameKind::Accessor {
-                        constructor: v.constructor,
-                        field: v.field,
-                    });
+                    ns.accessors.insert((v.constructor, v.field));
                 }
             }
             if let Some(d) = &name_entry.data {
                 if d.is_public || path.is_same_as_or_ancestor_of(scope) {
-                    ns.insert(NameKind::Data(d.constructor_id));
+                    debug_assert!(ns.data.is_none());
+                    ns.data = Some(d.constructor_id);
                 }
             }
             if let Some(d) = &name_entry.type_ {
                 if d.is_public || path.is_same_as_or_ancestor_of(scope) {
-                    ns.insert(NameKind::Type(d.const_or_alias));
+                    debug_assert!(ns.type_.is_none());
+                    ns.type_ = Some(d.const_or_alias);
                 }
             }
             if let Some(d) = &name_entry.interface {
                 if d.is_public || path.is_same_as_or_ancestor_of(scope) {
-                    ns.insert(NameKind::Interface(name));
+                    debug_assert!(ns.interface.is_none());
+                    ns.interface = Some(name);
                 }
             }
             if let Some(d) = &name_entry.module {
                 if d.is_public || path.is_same_as_or_ancestor_of(scope) {
-                    ns.insert(NameKind::Module(name));
+                    debug_assert!(ns.module.is_none());
+                    ns.module = Some(name);
                 }
             }
             if let Some(d) = &name_entry.op_precedence {
                 if d.is_public || path.is_same_as_or_ancestor_of(scope) {
-                    ns.insert(NameKind::OpPrecedence(
-                        d.associativity,
-                        d.precedence,
-                    ));
+                    debug_assert!(ns.op_precedence.is_none());
+                    ns.op_precedence = Some((d.associativity, d.precedence));
                 }
             }
         }
-        true_names.extend(ns);
+        ns.variables.extend(ns_from_wilde_cards.variables);
+        ns.accessors.extend(ns_from_wilde_cards.accessors);
+        ns.data.set_if_none(ns_from_wilde_cards.data);
+        ns.type_.set_if_none(ns_from_wilde_cards.type_);
+        ns.interface.set_if_none(ns_from_wilde_cards.interface);
+        ns.module.set_if_none(ns_from_wilde_cards.module);
+        ns.op_precedence
+            .set_if_none(ns_from_wilde_cards.op_precedence);
+        true_names.variables.extend(ns.variables);
+        true_names.accessors.extend(ns.accessors);
+        true_names.data.set(ns.data);
+        true_names.type_.set(ns.type_);
+        true_names.interface.set(ns.interface);
+        true_names.module.set(ns.module);
+        true_names.op_precedence.set(ns.op_precedence);
         Ok(())
     }
 
@@ -389,8 +392,7 @@ impl Imports {
             visited,
             &mut ns,
         )?;
-        let n = collect_name_kinds(ns);
-        n.module.map(Ok).unwrap_or_else(|| {
+        ns.module.map(Ok).unwrap_or_else(|| {
             Err(CompileError::NotFound {
                 path: Name::from_str(base_path, name),
                 span: span.unwrap(),
@@ -437,10 +439,11 @@ impl Imports {
         mut path: &[(&str, Option<Span>, Option<TokenId>)],
         token_map: &mut TokenMap,
         visited: &FxHashSet<Name>,
-        true_names: &mut FxHashSet<NameKind>,
+        true_names: &mut NameResult,
     ) -> Result<(), CompileError> {
         if path.is_empty() {
-            true_names.insert(NameKind::Module(base_path));
+            debug_assert!(true_names.module.is_none());
+            true_names.module = Some(base_path);
             Ok(())
         } else {
             if path[0].0 == "pkg" {
@@ -500,12 +503,7 @@ impl Imports {
             &FxHashSet::default(),
             &mut ns,
         )?;
-        Ok((
-            collect_name_kinds(ns),
-            Name::from_str(base_path, name),
-            span.clone(),
-            *token_id,
-        ))
+        Ok((ns, Name::from_str(base_path, name), span.clone(), *token_id))
     }
 
     pub fn get_constructor(
@@ -546,8 +544,7 @@ impl Imports {
             &FxHashSet::default(),
             &mut ns,
         )?;
-        let n = collect_name_kinds(ns);
-        n.type_.ok_or_else(|| CompileError::NotFound {
+        ns.type_.ok_or_else(|| CompileError::NotFound {
             path: Name::from_str(base_path, name),
             span: span.unwrap(),
         })
@@ -596,8 +593,7 @@ impl Imports {
             &FxHashSet::default(),
             &mut ns,
         )?;
-        let n = collect_name_kinds(ns);
-        n.op_precedence.ok_or_else(|| {
+        ns.op_precedence.ok_or_else(|| {
             Name::from_str(base_path, name);
             CompileError::NoOpPrecedenceDecl {
                 path: Name::from_str(base_path, name),
@@ -625,8 +621,7 @@ impl Imports {
             &FxHashSet::default(),
             &mut ns,
         )?;
-        let n = collect_name_kinds(ns);
-        let mut names = n.variables;
+        let mut names = ns.variables;
         names.extend(
             candidates_from_implicit_parameters
                 .get(name)
@@ -640,7 +635,7 @@ impl Imports {
                 span: span.unwrap(),
             })
         } else {
-            Ok(names)
+            Ok(names.into_iter().collect())
         }
     }
 
@@ -671,7 +666,7 @@ impl Imports {
                 span: span.unwrap(),
             })
         } else {
-            Ok(names)
+            Ok(names.into_iter().collect())
         }
     }
 
@@ -710,50 +705,23 @@ impl Imports {
     }
 }
 
-fn collect_name_kinds(names: FxHashSet<NameKind>) -> NameResult {
-    let mut variables = Vec::new();
-    let mut accessors = Vec::new();
-    let mut data = None;
-    let mut type_ = None;
-    let mut interface = None;
-    let mut module = None;
-    let mut op_precedence = None;
-    for n in names {
-        match n {
-            NameKind::Variable(v) => variables.push(v),
-            NameKind::Accessor { constructor, field } => {
-                accessors.push((constructor, field))
-            }
-            NameKind::Data(d) => {
-                debug_assert!(data.is_none());
-                data = Some(d);
-            }
-            NameKind::Type(n) => {
-                debug_assert!(type_.is_none());
-                type_ = Some(n);
-            }
-            NameKind::Interface(d) => {
-                debug_assert!(interface.is_none());
-                interface = Some(d)
-            }
-            NameKind::Module(m) => {
-                debug_assert!(module.is_none());
-                module = Some(m);
-            }
-            NameKind::OpPrecedence(a, p) => {
-                debug_assert!(op_precedence.is_none());
-                op_precedence = Some((a, p))
-            }
+trait SetOnce {
+    fn set(&mut self, other: Self);
+    fn set_if_none(&mut self, other: Self);
+}
+
+impl<T> SetOnce for Option<T> {
+    fn set(&mut self, other: Self) {
+        if other.is_some() {
+            debug_assert!(self.is_none());
+            *self = other;
         }
     }
-    NameResult {
-        variables,
-        accessors,
-        data,
-        type_,
-        module,
-        op_precedence,
-        interface,
+
+    fn set_if_none(&mut self, other: Self) {
+        if self.is_none() {
+            *self = other;
+        }
     }
 }
 

@@ -14,5 +14,5 @@ to_string : List[A] -> String forall { A : ToString } =
     | h /=\ t => "[" <> h.to_string <> t.list_to_string_rec <> "]"
 
 main = | () => do
-    ((() /=\ Nil_) /=\ Nil_).to_string
+    (("a" /=\ Nil_) /=\ Nil_).to_string.println
     ()

@@ -452,3 +452,10 @@ fn bin_tree_fail() {
 fn and_fail() {
     test_test("and_fail.cot").code(1);
 }
+
+#[test]
+fn shadow_wildcard_import() {
+    test_test("shadow_wildcard_import.cot")
+        .stdout("[[a]]\n")
+        .success();
+}
