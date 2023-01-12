@@ -499,14 +499,6 @@ impl<'a> Ast<'a> {
                 }
             }
         }
-        if module_path != Path::root() {
-            imports.insert_wild_card_import(
-                module_path,
-                Path::intrinsic(),
-                Vec::new(),
-                false,
-            );
-        }
         if module_path != Path::prelude() {
             imports.insert_wild_card_import(
                 module_path,

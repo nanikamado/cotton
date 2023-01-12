@@ -766,6 +766,12 @@ impl Default for Imports {
                 true,
             );
         }
+        imports.insert_wild_card_import(
+            Path::prelude(),
+            Path::intrinsic(),
+            Vec::new(),
+            true,
+        );
         imports
     }
 }
