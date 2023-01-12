@@ -188,11 +188,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
     let ident_with_path = ident
         .then_ignore(just(Token::ColonColon))
         .repeated()
-        .then(ident_or_op.clone())
-        .map(|(mut path, name)| {
-            path.push(name);
-            path
-        });
+        .chain(ident_or_op.clone());
     let forall = just(Token::Forall)
         .ignore_then(indented(
             ident
