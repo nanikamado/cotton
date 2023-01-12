@@ -35,7 +35,7 @@ main : () -> () =
         l = (D1 /\ D2 /\ Nil)
         ls = (do (l? /\ l? /\ l? /\ l? /\ l? /\ l? /\ Nil) /\ Nil)
         ls.map(
-            | l : Palindrome => (l.to_string <> " palindrome!").puts
-            | l => l.puts
+            | l : Palindrome => (l.to_string <> " palindrome!").println
+            | l => l.println
         )
         ()

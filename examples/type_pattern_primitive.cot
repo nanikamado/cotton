@@ -8,6 +8,6 @@ to_string : (I64 | String) -> String =
 
 main : () -> () =
     | () => do
-        1.add_one.to_string.println
-        "1".add_one.to_string.println
+        1.add_one.to_string.println_str
+        "1".add_one.to_string.println_str
         ()

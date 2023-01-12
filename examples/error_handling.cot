@@ -38,5 +38,5 @@ do_1_2_3 : () -> Result[(), Error1 | Error2 | Error3] =
 
 main : () -> () =
     | () => do
-        do_1_2_3(()).puts
+        do_1_2_3(()).println
         ()

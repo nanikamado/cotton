@@ -9,6 +9,6 @@ test : I64 -> String =
 
 main : () -> () =
     | () => do
-        2.test.puts
-        10.test.puts
-        20.test.puts
+        2.test.println
+        10.test.println
+        20.test.println

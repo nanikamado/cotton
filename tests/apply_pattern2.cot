@@ -1,5 +1,5 @@
 main =
     | () => do
         ().
-            | _ { (| _ => (1 : String | I64)): a : I64 } => a.puts
+            | _ { (| _ => (1 : String | I64)): a : I64 } => a.println
             | _ => ()

@@ -1,0 +1,4 @@
+main : () -> () =
+    | () => do
+        1.println
+        (1 /\ 2 /\ 3 /\ Nil).println

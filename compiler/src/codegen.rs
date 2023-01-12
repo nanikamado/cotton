@@ -84,8 +84,7 @@ static PRIMITIVES_DEF: Lazy<FxHashMap<IntrinsicVariable, &'static str>> =
             (Minus, "a => b => a - b"),
             (Plus, "a => b => a + b"),
             (Multi, "a => b => a * b"),
-            (Print, "a => process.stdout.write(a)"),
-            (Println, "a => console.log(a)"),
+            (PrintStr, "a => process.stdout.write(a)"),
             (Percent, "a => b => a % b"),
             (Neq, "a => b => $$bool(a !== b)"),
             (Eq, "a => b => $$bool(a === b)"),
@@ -126,7 +125,7 @@ fn expr((e, t): &ExprWithType, name_count: u32) -> String {
             )
         }
         Expr::Number(a) => a.to_string(),
-        Expr::StrLiteral(a) => format!("\"{}\"", a),
+        Expr::StrLiteral(a) => format!("{:?}", a),
         Expr::Ident {
             name: _,
             variable_id:

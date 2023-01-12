@@ -10,5 +10,5 @@ greet : Fuga -> String =
 
 main : () -> () =
     | () => do
-        println(greet(Hoge))
-        println(greet(Fuga))
+        Hoge.greet.println
+        Fuga.greet.println

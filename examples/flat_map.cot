@@ -8,13 +8,13 @@ main : () -> () =
             None
         do
             a = Some("ok")?
-            Some(a.puts)
+            Some(a.println)
         (do
             ((1 /\ 2 /\ 3 /\ Nil)? + 1) /\ Nil
-        ).puts
+        ).println
         (do
             a = (1 /\ 2 /\ 3 /\ Nil)?
             a = (a /\ (a + 100) /\ Nil)?
             a /\ (a + 10000) /\ Nil
-        ).puts
+        ).println
         ()

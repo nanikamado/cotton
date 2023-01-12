@@ -3,6 +3,9 @@ pub (.) : A -> (A -> B) -> B forall { A, B } =
 
 pub infixl 10 .
 
+pub println_str : String -> () =
+    | a => (a <> "\n").print_str
+
 pub data None
 pub data Some(A) forall { A }
 
@@ -30,8 +33,8 @@ pub to_string : List[A] -> String forall { A : ToString } =
     | Nil => "[]"
     | h /\ t => "[" <> h.to_string <> t.list_to_string_rec <> "]"
 
-pub puts : A -> () forall { A : ToString } =
-    | a => a.to_string.println
+pub println : A -> () forall { A : ToString } =
+    | a => a.to_string.println_str
 
 pub interface Map {
     map : Self[A] -> (A -> B) -> Self[B] forall { A, B }

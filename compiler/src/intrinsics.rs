@@ -16,8 +16,7 @@ pub enum IntrinsicVariable {
     Lt,
     Neq,
     Eq,
-    Println,
-    Print,
+    PrintStr,
     I64ToString,
     Append,
 }
@@ -38,8 +37,7 @@ impl IntrinsicVariable {
             IntrinsicVariable::Lt => "<",
             IntrinsicVariable::Neq => "!=",
             IntrinsicVariable::Eq => "==",
-            IntrinsicVariable::Println => "println",
-            IntrinsicVariable::Print => "print",
+            IntrinsicVariable::PrintStr => "print_str",
             IntrinsicVariable::I64ToString => "i64_to_string",
             IntrinsicVariable::Append => "<>",
         }
@@ -82,9 +80,7 @@ impl IntrinsicVariable {
                         .union(Type::intrinsic_from_str("False")),
                 ),
             ),
-            IntrinsicVariable::Println => Type::intrinsic_from_str("String")
-                .arrow(Type::intrinsic_from_str("()")),
-            IntrinsicVariable::Print => Type::intrinsic_from_str("String")
+            IntrinsicVariable::PrintStr => Type::intrinsic_from_str("String")
                 .arrow(Type::intrinsic_from_str("()")),
             IntrinsicVariable::I64ToString => Type::intrinsic_from_str("I64")
                 .arrow(Type::intrinsic_from_str("String")),

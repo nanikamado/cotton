@@ -178,8 +178,8 @@ fn tuple_infer_fail() {
 }
 
 #[test]
-fn puts() {
-    test_examples("puts.cot", "1\n[1, 2, 3]\n");
+fn println() {
+    test_examples("println.cot", "1\n[1, 2, 3]\n");
 }
 
 #[test]
@@ -236,8 +236,8 @@ fn simple_subtype_error_fail() {
 }
 
 #[test]
-fn result_puts() {
-    test_examples("result_puts.cot", "Ok(ok!)\nErr(!)\n");
+fn result_println() {
+    test_examples("result_println.cot", "Ok(ok!)\nErr(!)\n");
 }
 
 #[test]

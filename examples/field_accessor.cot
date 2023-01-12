@@ -11,7 +11,7 @@ main : () -> () =
     | () => do
         t = T(1, 2, 3, 4)
         r = R { a: 1, b: 4, c: 3, d: 4 }
-        t._0.puts
-        r.a.puts
+        t._0.println
+        r.a.println
         t = T { _0: 1, _1: 2, _2: 3, _3: 4 }
-        t._0.puts
+        t._0.println

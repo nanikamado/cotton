@@ -13,4 +13,4 @@ double : String -> String =
     | a => a <> a
 
 main : () -> () =
-    | () => println(to_string(aaa::D1))
+    | () => aaa::D1.to_string.println_str
