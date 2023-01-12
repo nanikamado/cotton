@@ -94,7 +94,7 @@ struct NameAliasEntry {
 #[derive(Debug, Eq, PartialEq)]
 pub struct Imports {
     name_map: FxHashMap<Name, NameEntry>,
-    wilde_card_imports: FxHashMap<Name, Vec<NameAliasEntry>>,
+    wild_card_imports: FxHashMap<Name, Vec<NameAliasEntry>>,
     type_id_to_name: FxHashMap<TypeId, Name>,
 }
 
@@ -225,7 +225,7 @@ impl Imports {
         to: Vec<(String, Option<Span>, Option<TokenId>)>,
         is_public: bool,
     ) {
-        self.wilde_card_imports
+        self.wild_card_imports
             .entry(from)
             .or_default()
             .push(NameAliasEntry {
@@ -259,9 +259,9 @@ impl Imports {
         }
         let mut visited = visited.clone();
         visited.insert(name);
-        let mut ns_from_wilde_cards = Default::default();
+        let mut ns_from_wild_cards = Default::default();
         for a in self
-            .wilde_card_imports
+            .wild_card_imports
             .get(&path)
             .cloned()
             .into_iter()
@@ -285,7 +285,7 @@ impl Imports {
                     span.clone(),
                     token_map,
                     &visited,
-                    &mut ns_from_wilde_cards,
+                    &mut ns_from_wild_cards,
                 )?;
             }
         }
@@ -353,14 +353,14 @@ impl Imports {
                 }
             }
         }
-        ns.variables.extend(ns_from_wilde_cards.variables);
-        ns.accessors.extend(ns_from_wilde_cards.accessors);
-        ns.data.set_if_none(ns_from_wilde_cards.data);
-        ns.type_.set_if_none(ns_from_wilde_cards.type_);
-        ns.interface.set_if_none(ns_from_wilde_cards.interface);
-        ns.module.set_if_none(ns_from_wilde_cards.module);
+        ns.variables.extend(ns_from_wild_cards.variables);
+        ns.accessors.extend(ns_from_wild_cards.accessors);
+        ns.data.set_if_none(ns_from_wild_cards.data);
+        ns.type_.set_if_none(ns_from_wild_cards.type_);
+        ns.interface.set_if_none(ns_from_wild_cards.interface);
+        ns.module.set_if_none(ns_from_wild_cards.module);
         ns.op_precedence
-            .set_if_none(ns_from_wilde_cards.op_precedence);
+            .set_if_none(ns_from_wild_cards.op_precedence);
         true_names.variables.extend(ns.variables);
         true_names.accessors.extend(ns.accessors);
         true_names.data.set(ns.data);
@@ -729,7 +729,7 @@ impl Default for Imports {
     fn default() -> Self {
         let mut imports = Imports {
             name_map: Default::default(),
-            wilde_card_imports: Default::default(),
+            wild_card_imports: Default::default(),
             type_id_to_name: Default::default(),
         };
         for v in IntrinsicVariable::iter() {
