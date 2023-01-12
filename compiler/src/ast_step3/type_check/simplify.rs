@@ -2491,7 +2491,7 @@ impl Display for TypeVariableMap {
 mod tests {
     use super::destruct_type_by_pattern;
     use crate::ast_step1::decl_id::DeclId;
-    use crate::ast_step1::name_id::Name;
+    use crate::ast_step1::name_id::Path;
     use crate::ast_step2::types::{
         Type, TypeMatchable, TypeMatchableRef, TypeUnit, TypeVariable,
     };
@@ -2529,7 +2529,7 @@ mod tests {
         let (req_t, _) = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test"))
+            .find(|d| d.name == Path::from_str(Path::pkg_root(), "test"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2539,7 +2539,7 @@ mod tests {
         let (dot, _) = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::pkg_root(), "dot"))
+            .find(|d| d.name == Path::from_str(Path::pkg_root(), "dot"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2589,7 +2589,7 @@ mod tests {
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test1"))
+            .find(|d| d.name == Path::from_str(Path::pkg_root(), "test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2598,7 +2598,7 @@ mod tests {
         let (t2, _) = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test2"))
+            .find(|d| d.name == Path::from_str(Path::pkg_root(), "test2"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2626,7 +2626,7 @@ mod tests {
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test1"))
+            .find(|d| d.name == Path::from_str(Path::pkg_root(), "test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2697,14 +2697,14 @@ mod tests {
         let t_id = ast
             .data_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::pkg_root(), "T"))
+            .find(|d| d.name == Path::from_str(Path::pkg_root(), "T"))
             .unwrap()
             .decl_id;
         let t_id = TypeId::DeclId(t_id);
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test1"))
+            .find(|d| d.name == Path::from_str(Path::pkg_root(), "test1"))
             .unwrap()
             .type_annotation
             .clone()
@@ -2825,14 +2825,14 @@ mod tests {
         let b_id = ast
             .data_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::pkg_root(), "B"))
+            .find(|d| d.name == Path::from_str(Path::pkg_root(), "B"))
             .unwrap()
             .decl_id;
         let b_id = TypeId::DeclId(b_id);
         let t1 = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test1"))
+            .find(|d| d.name == Path::from_str(Path::pkg_root(), "test1"))
             .unwrap()
             .type_annotation
             .as_ref()

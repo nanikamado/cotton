@@ -4,7 +4,7 @@ pub mod name_id;
 pub mod token_map;
 
 use self::decl_id::DeclId;
-use self::name_id::Name;
+use self::name_id::Path;
 use self::token_map::{TokenMap, TokenMapEntry};
 use crate::ast_step2::imports::Imports;
 use crate::errors::CompileError;
@@ -41,7 +41,7 @@ pub struct Forall<'a> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VariableDecl<'a> {
-    pub name: Name,
+    pub name: Path,
     pub type_annotation: Option<(Type<'a>, Forall<'a>, Span)>,
     pub value: ExprWithSpan<'a>,
     pub span: Span,
@@ -57,7 +57,7 @@ pub struct Type<'a> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DataDecl<'a> {
-    pub name: Name,
+    pub name: Path,
     pub fields: Vec<Field<'a>>,
     pub type_variables: Forall<'a>,
     pub decl_id: DeclId,
@@ -67,7 +67,7 @@ pub struct DataDecl<'a> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Field<'a> {
     pub type_: StrWithId<'a>,
-    pub name: Name,
+    pub name: Path,
     pub is_public: bool,
 }
 
@@ -145,7 +145,7 @@ where
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Module<'a> {
-    pub name: Name,
+    pub name: Path,
     pub ast: Ast<'a>,
     pub is_public: bool,
 }
@@ -233,7 +233,7 @@ impl AddArgument for (Pattern<'_>, Span) {
 struct Env<'a> {
     imports: &'a mut Imports,
     constructors: &'a FxHashSet<&'a str>,
-    module_path: Name,
+    module_path: Path,
     token_map: &'a mut TokenMap,
 }
 
@@ -243,7 +243,7 @@ trait ApplySuffixOp<'a>: Sized {
         self,
         arg: &'a Self::Op,
         env: &mut Env,
-        module_path: Name,
+        module_path: Path,
     ) -> Result<Self, CompileError>;
 }
 
@@ -254,7 +254,7 @@ impl<'a> ApplySuffixOp<'a> for ExprWithSpan<'a> {
         self,
         arg: &'a Self::Op,
         env: &mut Env,
-        module_path: Name,
+        module_path: Path,
     ) -> Result<Self, CompileError> {
         match arg {
             ExprSuffixOp::Apply(s) => {
@@ -278,7 +278,7 @@ impl<'a> ApplySuffixOp<'a> for (Pattern<'a>, Span) {
         self,
         arg: &'a Self::Op,
         env: &mut Env,
-        module_path: Name,
+        module_path: Path,
     ) -> Result<Self, CompileError> {
         Ok(self.add_argument(fold_op_sequence(&arg.0, env, module_path)?))
     }
@@ -291,7 +291,7 @@ impl<'a> ApplySuffixOp<'a> for (Type<'a>, Span) {
         self,
         arg: &'a Self::Op,
         env: &mut Env,
-        module_path: Name,
+        module_path: Path,
     ) -> Result<Self, CompileError> {
         Ok(self.add_argument(fold_op_sequence(&arg.0, env, module_path)?))
     }
@@ -314,7 +314,7 @@ where
 impl<'a> Ast<'a> {
     fn from_rec(
         ast: &'a parser::Ast,
-        module_path: Name,
+        module_path: Path,
         token_map: &mut TokenMap,
         constructors: &mut FxHashSet<&'a str>,
         imports: &mut Imports,
@@ -332,7 +332,7 @@ impl<'a> Ast<'a> {
                     token_map
                         .insert(a.name.2, TokenMapEntry::DataDecl(decl_id));
                     ds.push(DataDecl {
-                        name: Name::from_str(module_path, &a.name.0),
+                        name: Path::from_str(module_path, &a.name.0),
                         fields: a
                             .fields
                             .iter()
@@ -342,7 +342,7 @@ impl<'a> Ast<'a> {
                                      name,
                                  }| Field {
                                     type_: (t.as_str(), span.clone(), *id),
-                                    name: Name::from_str(module_path, &name.0),
+                                    name: Path::from_str(module_path, &name.0),
                                     is_public: true,
                                 },
                             )
@@ -361,7 +361,7 @@ impl<'a> Ast<'a> {
                     is_public,
                 } => {
                     modules.push((
-                        Name::from_str(module_path, &name.0),
+                        Path::from_str(module_path, &name.0),
                         ast,
                         is_public,
                     ));
@@ -462,7 +462,7 @@ impl<'a> Ast<'a> {
     fn collect_constructors_and_public_names(
         ast: &'a parser::Ast,
         constructors: &mut FxHashSet<&'a str>,
-        module_path: Name,
+        module_path: Path,
         imports: &mut Imports,
     ) {
         for d in &ast.decls {
@@ -477,12 +477,12 @@ impl<'a> Ast<'a> {
                 } => Self::collect_constructors_and_public_names(
                     ast,
                     constructors,
-                    Name::from_str(module_path, &name.0),
+                    Path::from_str(module_path, &name.0),
                     imports,
                 ),
                 parser::Decl::Variable(_) => (),
                 parser::Decl::OpPrecedence(op) => imports.add_op_precedence(
-                    Name::from_str(module_path, &op.name),
+                    Path::from_str(module_path, &op.name),
                     op.associativity,
                     op.precedence,
                     op.is_public,
@@ -491,7 +491,7 @@ impl<'a> Ast<'a> {
                 parser::Decl::Interface(_) => (),
                 parser::Decl::Use { path, is_public } => {
                     imports.insert_name_alias(
-                        Name::from_str(module_path, &path.last().unwrap().0),
+                        Path::from_str(module_path, &path.last().unwrap().0),
                         module_path,
                         path.clone(),
                         *is_public,
@@ -499,18 +499,18 @@ impl<'a> Ast<'a> {
                 }
             }
         }
-        if module_path != Name::root() {
+        if module_path != Path::root() {
             imports.insert_wild_card_import(
                 module_path,
-                Name::intrinsic(),
+                Path::intrinsic(),
                 Vec::new(),
                 false,
             );
         }
-        if module_path != Name::prelude() {
+        if module_path != Path::prelude() {
             imports.insert_wild_card_import(
                 module_path,
-                Name::prelude(),
+                Path::prelude(),
                 Vec::new(),
                 false,
             );
@@ -527,12 +527,12 @@ impl<'a> Ast<'a> {
         Self::collect_constructors_and_public_names(
             ast,
             &mut constructors,
-            Name::root(),
+            Path::root(),
             imports,
         );
         let a = Self::from_rec(
             ast,
-            Name::root(),
+            Path::root(),
             &mut token_map,
             &mut constructors,
             imports,
@@ -568,7 +568,7 @@ impl<'a> From<&'a parser::Forall> for Forall<'a> {
 fn expr<'a>(
     e: &'a parser::Expr,
     env: &mut Env,
-    module_path: Name,
+    module_path: Path,
 ) -> Result<ExprWithSpan<'a>, CompileError> {
     let value = fold_op_sequence(&e.0, env, module_path)?;
     if let Some((annotation, forall)) = &e.1 {
@@ -586,12 +586,12 @@ fn expr<'a>(
 fn variable_decl<'a>(
     v: &'a parser::VariableDecl,
     env: &mut Env,
-    module_path: Name,
+    module_path: Path,
 ) -> Result<VariableDecl<'a>, CompileError> {
     let decl_id = DeclId::new();
     env.token_map.insert(v.name.2, TokenMapEntry::Decl(decl_id));
     Ok(VariableDecl {
-        name: Name::from_str(env.module_path, &v.name.0),
+        name: Path::from_str(env.module_path, &v.name.0),
         type_annotation: v
             .type_annotation
             .as_ref()
@@ -611,7 +611,7 @@ fn apply_type_op<'a, T: IdentFromStr<'a> + Clone + Debug>(
     mut sequence: IndexList<OpSequenceUnit<'a, (T, Span)>>,
     i: Index,
     env: &mut Env,
-    module_path: Name,
+    module_path: Path,
 ) -> Result<IndexList<OpSequenceUnit<'a, (T, Span)>>, CompileError>
 where
     (T, Span): AddArgument + ApplySuffixOp<'a>,
@@ -669,7 +669,7 @@ fn op_apply_left<'a, T: IdentFromStr<'a> + Clone + Debug>(
     mut sequence: Vec<OpSequenceUnit<'a, (T, Span)>>,
     precedence: i32,
     env: &mut Env,
-    module_path: Name,
+    module_path: Path,
 ) -> Result<Vec<OpSequenceUnit<'a, (T, Span)>>, CompileError>
 where
     (T, Span): AddArgument + ApplySuffixOp<'a>,
@@ -700,7 +700,7 @@ fn op_apply_right<'a, T: IdentFromStr<'a> + Clone + Debug>(
     mut sequence: Vec<OpSequenceUnit<'a, (T, Span)>>,
     precedence: i32,
     env: &mut Env,
-    module_path: Name,
+    module_path: Path,
 ) -> Result<Vec<OpSequenceUnit<'a, (T, Span)>>, CompileError>
 where
     (T, Span): AddArgument + ApplySuffixOp<'a>,
@@ -732,7 +732,7 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::TypeUnit, &'a Span) {
     fn convert(
         self,
         env: &mut Env,
-        module_path: Name,
+        module_path: Path,
     ) -> Result<Self::T, CompileError> {
         match self.0 {
             parser::TypeUnit::Ident { path } => Ok((
@@ -759,7 +759,7 @@ fn fold_op_sequence<'a, T, U: 'a>(
         <(U, Span) as ApplySuffixOp<'a>>::Op,
     >],
     env: &mut Env,
-    module_path: Name,
+    module_path: Path,
 ) -> Result<(U, Span), CompileError>
 where
     (U, Span): AddArgument + ApplySuffixOp<'a>,
@@ -834,7 +834,7 @@ trait ConvertWithOpPrecedenceMap {
     fn convert(
         self,
         env: &mut Env,
-        module_path: Name,
+        module_path: Path,
     ) -> Result<Self::T, CompileError>;
 }
 
@@ -844,7 +844,7 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::ExprUnit, &'a Span) {
     fn convert(
         self,
         env: &mut Env,
-        module_path: Name,
+        module_path: Path,
     ) -> Result<Self::T, CompileError> {
         use Expr::*;
         let e = match &self.0 {
@@ -892,7 +892,7 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::ExprUnit, &'a Span) {
 fn fn_arm<'a>(
     a: &'a parser::FnArm,
     env: &mut Env,
-    module_path: Name,
+    module_path: Path,
 ) -> Result<FnArm<'a>, CompileError> {
     Ok(FnArm {
         pattern: a
@@ -910,7 +910,7 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::PatternUnit, &'a Span) {
     fn convert(
         self,
         env: &mut Env,
-        module_path: Name,
+        module_path: Path,
     ) -> Result<Self::T, CompileError> {
         let a = match &self.0 {
             parser::PatternUnit::Int(a) => Pattern::Number(a),

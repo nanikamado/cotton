@@ -8,7 +8,7 @@ use self::type_alias_map::{SearchMode, TypeAliasMap};
 use self::types::{Type, TypeMatchable, TypeUnit, TypeVariable};
 use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::ident_id::IdentId;
-use crate::ast_step1::name_id::Name;
+use crate::ast_step1::name_id::Path;
 use crate::ast_step1::token_map::{TokenMap, TokenMapEntry};
 use crate::ast_step1::{self, merge_span};
 use crate::ast_step3::{VariableId, VariableRequirement};
@@ -51,14 +51,14 @@ pub struct Ast<'a> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Field {
     pub type_: TypeVariable,
-    pub name: Name,
+    pub name: Path,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DataDecl {
-    pub name: Name,
+    pub name: Path,
     pub fields: Vec<Field>,
-    pub type_variable_decls: Vec<(TypeVariable, Name)>,
+    pub type_variable_decls: Vec<(TypeVariable, Path)>,
     pub decl_id: DeclId,
 }
 
@@ -116,7 +116,7 @@ pub struct PatternRestriction {
 }
 
 pub type PatternRestrictions = Vec<PatternRestriction>;
-type ModulePath = Name;
+type ModulePath = Path;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TypeWithEnv<T = Type>
@@ -133,7 +133,7 @@ where
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct VariableDecl<'a> {
-    pub name: Name,
+    pub name: Path,
     pub type_annotation: Option<Annotation>,
     pub value: ExprWithTypeAndSpan<'a, TypeVariable>,
     pub decl_id: DeclId,
@@ -145,7 +145,7 @@ pub struct Annotation {
     pub unfixed: Type,
     pub fixed: Type,
     pub implicit_parameters: Vec<(String, Type, DeclId)>,
-    pub fixed_parameter_names: FxHashMap<TypeUnit, Name>,
+    pub fixed_parameter_names: FxHashMap<TypeUnit, Path>,
     pub span: Span,
 }
 
@@ -163,7 +163,7 @@ pub enum Expr<'a, T> {
     ResolvedIdent {
         variable_id: VariableId,
         type_: Type,
-        name: Option<Name>,
+        name: Option<Path>,
     },
     Call(
         Box<ExprWithTypeAndSpan<'a, T>>,
@@ -191,7 +191,7 @@ pub enum PatternUnit<'a, T, E = ExprWithTypeAndSpan<'a, TypeVariable>> {
     I64(&'a str),
     Str(&'a str),
     Constructor {
-        name: Name,
+        name: Path,
         id: ConstructorId,
         args: Vec<Pattern<'a, T, E>>,
     },
@@ -224,18 +224,18 @@ struct WithFlatMapEnv<'a, Value = ExprWithTypeAndSpan<'a, TypeVariable>> {
     env: Vec<FlatMapEnv<'a>>,
 }
 
-static TYPE_NAMES: Lazy<RwLock<FxHashMap<TypeId, Name>>> = Lazy::new(|| {
+static TYPE_NAMES: Lazy<RwLock<FxHashMap<TypeId, Path>>> = Lazy::new(|| {
     RwLock::new(
         INTRINSIC_TYPES
             .iter()
             .map(|(name, id)| {
-                (TypeId::Intrinsic(*id), Name::from_str_intrinsic(name))
+                (TypeId::Intrinsic(*id), Path::from_str_intrinsic(name))
             })
             .collect(),
     )
 });
 
-pub fn get_type_name(type_id: TypeId) -> Name {
+pub fn get_type_name(type_id: TypeId) -> Path {
     *TYPE_NAMES.read().unwrap().get(&type_id).unwrap()
 }
 
@@ -257,14 +257,14 @@ impl<'a> Ast<'a> {
         };
         collect_decls(
             ast,
-            Name::root(),
+            Path::root(),
             &mut env,
             &mut variable_decls,
             &mut data_decls,
         )?;
         let entry_point = variable_decls
             .iter()
-            .find(|d| d.name == Name::from_str(Name::pkg_root(), "main"))
+            .find(|d| d.name == Path::from_str(Path::pkg_root(), "main"))
             .unwrap_or_else(|| panic!("entry point not found"))
             .decl_id;
         Ok(Self {
@@ -360,7 +360,7 @@ fn collect_data_and_type_alias_decls<'a>(
             decl_id: d.decl_id,
             type_variable_decls: type_variables
                 .into_iter()
-                .map(|(n, v)| (v, Name::from_str(module_path, n)))
+                .map(|(n, v)| (v, Path::from_str(module_path, n)))
                 .collect(),
         };
         env.field_names
@@ -390,7 +390,7 @@ fn collect_interface_decls<'a>(
             .iter()
             .map(|i| {
                 env.token_map.insert(i.name.2, TokenMapEntry::Interface);
-                let name = Name::from_str(module_path, i.name.0);
+                let name = Path::from_str(module_path, i.name.0);
                 env.imports.add_interface(name, i.is_public);
                 Ok((
                     name,
@@ -402,7 +402,7 @@ fn collect_interface_decls<'a>(
                                 t.clone(),
                                 module_path,
                                 std::iter::once((
-                                    Name::from_str(module_path, "Self"),
+                                    Path::from_str(module_path, "Self"),
                                     self_,
                                 ))
                                 .collect(),
@@ -439,9 +439,9 @@ struct Env<'a, 'b> {
     token_map: &'a mut TokenMap,
     type_alias_map: &'a mut TypeAliasMap<'b>,
     interface_decls:
-        &'a mut FxHashMap<Name, Vec<(&'a str, Type, TypeVariable)>>,
+        &'a mut FxHashMap<Path, Vec<(&'a str, Type, TypeVariable)>>,
     imports: &'a mut Imports,
-    data_decl_map: &'a mut FxHashMap<Name, DeclId>,
+    data_decl_map: &'a mut FxHashMap<Path, DeclId>,
     field_names: &'a mut FxHashMap<ConstructorId, DataDecl>,
 }
 
@@ -522,7 +522,7 @@ fn variable_decl<'a>(
     v: ast_step1::VariableDecl<'a>,
     module_path: ModulePath,
     env: &mut Env<'_, '_>,
-    type_variable_names: &FxHashMap<Name, TypeVariable>,
+    type_variable_names: &FxHashMap<Path, TypeVariable>,
 ) -> Result<WithFlatMapEnv<'a, VariableDecl<'a>>, CompileError> {
     let expr = expr(v.value, module_path, type_variable_names, env)?;
     let d = VariableDecl {
@@ -532,7 +532,7 @@ fn variable_decl<'a>(
                 let implicit_type_parameters: Vec<_> = forall
                     .type_variables
                     .iter()
-                    .map(|(name, _)| Name::from_str(module_path, name.0))
+                    .map(|(name, _)| Path::from_str(module_path, name.0))
                     .collect();
                 let t = type_to_type_with_forall(
                     t,
@@ -669,7 +669,7 @@ fn catch_flat_map(
 fn expr<'a>(
     e: ast_step1::ExprWithSpan<'a>,
     module_path: ModulePath,
-    type_variable_names: &FxHashMap<Name, TypeVariable>,
+    type_variable_names: &FxHashMap<Path, TypeVariable>,
     env: &mut Env<'_, '_>,
 ) -> Result<WithFlatMapEnv<'a>, CompileError> {
     use Expr::*;
@@ -853,7 +853,7 @@ fn add_expr_in_do<'a>(
     module_path: ModulePath,
     mut es: Vec<ExprWithTypeAndSpan<'a, TypeVariable>>,
     es_span: Span,
-    type_variable_names: &FxHashMap<Name, TypeVariable>,
+    type_variable_names: &FxHashMap<Path, TypeVariable>,
     env: &mut Env<'_, '_>,
 ) -> Result<(Vec<ExprWithTypeAndSpan<'a, TypeVariable>>, Span), CompileError> {
     match e {
@@ -935,7 +935,7 @@ fn add_expr_in_do<'a>(
 fn fn_arm<'a>(
     arm: ast_step1::FnArm<'a>,
     module_path: ModulePath,
-    type_variable_names: &FxHashMap<Name, TypeVariable>,
+    type_variable_names: &FxHashMap<Path, TypeVariable>,
     env: &mut Env<'_, '_>,
 ) -> Result<FnArm<'a, TypeVariable>, CompileError> {
     Ok(FnArm {
@@ -955,8 +955,8 @@ fn fn_arm<'a>(
     })
 }
 
-impl Name {
-    fn is_same_as_or_ancestor_of(self, path: Name) -> bool {
+impl Path {
+    fn is_same_as_or_ancestor_of(self, path: Path) -> bool {
         if self.is_root() || self == path {
             true
         } else if let Some((path, _)) = path.split() {
@@ -970,7 +970,7 @@ impl Name {
 fn pattern<'a>(
     p: ast_step1::Pattern<'a>,
     module_path: ModulePath,
-    type_variable_names: &FxHashMap<Name, TypeVariable>,
+    type_variable_names: &FxHashMap<Path, TypeVariable>,
     env: &mut Env<'_, '_>,
 ) -> Result<Pattern<'a, TypeVariable>, CompileError> {
     use PatternUnit::*;
@@ -1109,7 +1109,7 @@ fn pattern<'a>(
 fn type_to_type(
     t: &ast_step1::Type,
     module_path: ModulePath,
-    type_variable_names: &FxHashMap<Name, TypeVariable>,
+    type_variable_names: &FxHashMap<Path, TypeVariable>,
     search_type: SearchMode,
     env: &mut Env<'_, '_>,
 ) -> Result<Type, CompileError> {
@@ -1156,7 +1156,7 @@ fn type_to_type(
                 &Default::default(),
             )?;
             let (name, span, token_id) = t.path.last().unwrap();
-            let path = Name::from_str(base_path, name);
+            let path = Path::from_str(base_path, name);
             if let Some(n) = type_variable_names.get(&path) {
                 env.token_map.insert(*token_id, TokenMapEntry::TypeVariable);
                 let mut new_t = Type::from(TypeUnit::Variable(*n));
@@ -1243,7 +1243,7 @@ fn type_to_type(
 fn type_to_type_with_forall(
     t: ast_step1::Type,
     module_path: ModulePath,
-    mut type_variable_names: FxHashMap<Name, TypeVariable>,
+    mut type_variable_names: FxHashMap<Path, TypeVariable>,
     forall: ast_step1::Forall,
     env: &mut Env<'_, '_>,
 ) -> Result<Type, CompileError> {
@@ -1268,7 +1268,7 @@ fn type_to_type_with_forall(
             }
         }
         type_parameters.push(v);
-        type_variable_names.insert(Name::from_str(module_path, s.0), v);
+        type_variable_names.insert(Path::from_str(module_path, s.0), v);
     }
     let mut t = type_to_type(
         &t,

@@ -1,5 +1,5 @@
 use crate::ast_step1::decl_id::DeclId;
-use crate::ast_step1::name_id::Name;
+use crate::ast_step1::name_id::Path;
 use crate::ast_step3::{DataDecl, VariableId};
 use crate::ast_step4::{self, PaddedTypeMap, PatternUnit, Type, TypePointer};
 use fxhash::FxHashMap;
@@ -31,7 +31,7 @@ pub type ExprWithType = (Expr, Type);
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct VariableDecl {
-    pub name: Name,
+    pub name: Path,
     pub value: ExprWithType,
     pub decl_id: DeclId,
 }

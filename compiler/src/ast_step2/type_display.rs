@@ -1,7 +1,7 @@
 use super::imports::Imports;
 use super::types::{Type, TypeUnit, TypeVariable};
 use super::{collect_tuple_rev, TypeId};
-use crate::ast_step1::name_id::Name;
+use crate::ast_step1::name_id::Path;
 use crate::ast_step3::GlobalVariableType;
 use fxhash::FxHashMap;
 use itertools::Itertools;
@@ -15,7 +15,7 @@ pub struct PrintTypeOfGlobalVariableForUser<'a> {
 pub struct PrintTypeOfLocalVariableForUser<'a> {
     pub t: &'a Type,
     pub imports: &'a Imports,
-    pub type_variable_decls: &'a FxHashMap<TypeUnit, Name>,
+    pub type_variable_decls: &'a FxHashMap<TypeUnit, Path>,
 }
 
 impl Display for PrintTypeOfGlobalVariableForUser<'_> {
@@ -51,7 +51,7 @@ enum OperatorContext {
 fn fmt_type_with_env(
     t: &Type,
     imports: &Imports,
-    type_variable_decls: &FxHashMap<TypeUnit, Name>,
+    type_variable_decls: &FxHashMap<TypeUnit, Path>,
 ) -> (String, OperatorContext) {
     if t.is_empty() {
         ("∅".to_string(), OperatorContext::Single)
@@ -82,7 +82,7 @@ fn fmt_type_with_env(
 fn fmt_type_unit_with_env(
     t: &TypeUnit,
     imports: &Imports,
-    type_variable_decls: &FxHashMap<TypeUnit, Name>,
+    type_variable_decls: &FxHashMap<TypeUnit, Path>,
 ) -> (String, OperatorContext) {
     use OperatorContext::*;
     if let Some(s) = type_variable_decls.get(t) {
@@ -199,7 +199,7 @@ fn fmt_tuple(
     head: TypeId,
     tuple_rev: &[&Type],
     imports: &Imports,
-    type_variable_decls: &FxHashMap<TypeUnit, Name>,
+    type_variable_decls: &FxHashMap<TypeUnit, Path>,
 ) -> (String, OperatorContext) {
     use OperatorContext::*;
     if tuple_rev.is_empty() {
@@ -255,7 +255,7 @@ fn fmt_tuple_as_tuple(
     head: &TypeUnit,
     tuple_rev: &[&Type],
     imports: &Imports,
-    type_variable_decls: &FxHashMap<TypeUnit, Name>,
+    type_variable_decls: &FxHashMap<TypeUnit, Path>,
 ) -> String {
     format!(
         "({}{})",

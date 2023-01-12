@@ -3,7 +3,7 @@ use super::{
 };
 use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::ident_id::IdentId;
-use crate::ast_step1::name_id::Name;
+use crate::ast_step1::name_id::Path;
 use crate::ast_step1::token_map::TokenMap;
 use crate::ast_step2::imports::Imports;
 use crate::ast_step2::types::{self, Type, TypeUnit, TypeVariable};
@@ -21,7 +21,7 @@ use parser::Span;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct VariableRequirement {
     pub name: Vec<(String, Option<Span>, Option<TokenId>)>,
-    pub module_path: Name,
+    pub module_path: Path,
     pub required_type: Type,
     pub ident: IdentId,
     pub span: Span,
@@ -31,7 +31,7 @@ struct VariableRequirement {
 
 pub fn min_type_with_env(
     e: &ExprWithTypeAndSpan<TypeVariable>,
-    module_path: Name,
+    module_path: Path,
     map: &mut TypeVariableMap,
     imports: &mut Imports,
     token_map: &mut TokenMap,
@@ -108,7 +108,7 @@ struct Env<'a> {
 
 fn min_type_with_env_rec(
     (expr, type_variable, span): &ExprWithTypeAndSpan<TypeVariable>,
-    module_path: Name,
+    module_path: Path,
     env: &mut Env<'_>,
     bindings: &FxHashMap<String, (DeclId, types::Type)>,
 ) -> Type {
@@ -274,7 +274,7 @@ struct ArmType {
 /// variable requirements, subtype relation, resolved idents.
 fn arm_min_type(
     arm: &FnArm<TypeVariable>,
-    module_path: Name,
+    module_path: Path,
     env: &mut Env<'_>,
     bindings: &FxHashMap<String, (DeclId, types::Type)>,
 ) -> ArmType {
@@ -340,7 +340,7 @@ fn pattern_unit_to_type(
     p: &PatternUnit<TypeVariable>,
     bindings: &mut FxHashMap<String, (DeclId, types::Type)>,
     span: Span,
-    module_path: Name,
+    module_path: Path,
     env: &mut Env<'_>,
 ) -> (types::Type, PatternUnitForRestriction) {
     use PatternUnit::*;
@@ -487,7 +487,7 @@ fn pattern_unit_to_type(
 fn pattern_to_type(
     p: &Pattern<TypeVariable>,
     span: Span,
-    module_path: Name,
+    module_path: Path,
     env: &mut Env<'_>,
     bindings: &mut FxHashMap<String, (DeclId, types::Type)>,
 ) -> (Type, (PatternUnitForRestriction, Span)) {

@@ -1,4 +1,4 @@
-use crate::ast_step1::name_id::Name;
+use crate::ast_step1::name_id::Path;
 use crate::ast_step2::imports::Imports;
 use crate::ast_step2::types::Type;
 use crate::PrintTypeOfLocalVariableForUser;
@@ -31,15 +31,15 @@ pub enum CompileError {
     },
     RecursionLimit,
     InaccessibleName {
-        path: Name,
+        path: Path,
         span: Span,
     },
     NotFound {
-        path: Name,
+        path: Path,
         span: Span,
     },
     NoOpPrecedenceDecl {
-        path: Name,
+        path: Path,
         span: Span,
     },
 }

@@ -2,7 +2,7 @@ mod padded_type_map;
 
 pub use self::padded_type_map::{PaddedTypeMap, TypePointer};
 use crate::ast_step1::decl_id::DeclId;
-use crate::ast_step1::name_id::Name;
+use crate::ast_step1::name_id::Path;
 use crate::ast_step2::{self, types, ConstructorId, TypeId};
 use crate::ast_step3::{self, DataDecl, VariableId};
 use crate::intrinsics::{
@@ -29,7 +29,7 @@ pub struct Ast {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VariableDecl<T = Type> {
-    pub name: Name,
+    pub name: Path,
     pub value: ExprWithType<T>,
     pub decl_id: DeclId,
 }
@@ -69,7 +69,7 @@ pub enum PatternUnit<T, E = ExprWithType<T>> {
     I64(String),
     Str(String),
     Constructor {
-        name: Name,
+        name: Path,
         id: ConstructorId,
     },
     Binder(String, DeclId),
@@ -94,7 +94,7 @@ struct LinkedType(BTreeSet<LinkedTypeUnit>);
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 enum LinkedTypeUnit<T = LinkedType> {
     Normal {
-        name: Name,
+        name: Path,
         id: TypeId,
         args: Vec<T>,
     },
@@ -110,7 +110,7 @@ pub struct Type(BTreeSet<TypeUnit>);
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum TypeUnit {
     Normal {
-        name: Name,
+        name: Path,
         id: TypeId,
         args: Vec<Type>,
     },

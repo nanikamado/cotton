@@ -1,6 +1,6 @@
 use super::{ConstructorId, TypeId};
 use crate::ast_step1::decl_id::DeclId;
-use crate::ast_step1::name_id::Name;
+use crate::ast_step1::name_id::Path;
 use crate::ast_step1::token_map::{TokenMap, TokenMapEntry};
 use crate::ast_step3::VariableId;
 use crate::errors::CompileError;
@@ -31,15 +31,15 @@ struct NameResult {
     accessors: FxHashSet<(DeclId, usize)>,
     data: Option<ConstructorId>,
     type_: Option<ConstOrAlias>,
-    interface: Option<Name>,
-    module: Option<Name>,
+    interface: Option<Path>,
+    module: Option<Path>,
     op_precedence: Option<(Associativity, i32)>,
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub enum ConstOrAlias {
     Const(TypeId),
-    Alias(Name),
+    Alias(Path),
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -87,21 +87,21 @@ struct OpPrecedenceDecl {
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct NameAliasEntry {
     alias: Vec<(String, Option<Span>, Option<TokenId>)>,
-    base_path: Name,
+    base_path: Path,
     is_public: bool,
 }
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct Imports {
-    name_map: FxHashMap<Name, NameEntry>,
-    wild_card_imports: FxHashMap<Name, Vec<NameAliasEntry>>,
-    type_id_to_name: FxHashMap<TypeId, Name>,
+    name_map: FxHashMap<Path, NameEntry>,
+    wild_card_imports: FxHashMap<Path, Vec<NameAliasEntry>>,
+    type_id_to_name: FxHashMap<TypeId, Path>,
 }
 
 impl Imports {
     pub fn add_variable(
         &mut self,
-        name: Name,
+        name: Path,
         variable_id: VariableId,
         is_public: bool,
     ) {
@@ -114,7 +114,7 @@ impl Imports {
 
     pub fn add_accessor(
         &mut self,
-        name: Name,
+        name: Path,
         constructor: DeclId,
         field: usize,
         is_public: bool,
@@ -129,7 +129,7 @@ impl Imports {
 
     pub fn add_op_precedence(
         &mut self,
-        name: Name,
+        name: Path,
         associativity: Associativity,
         precedence: i32,
         is_public: bool,
@@ -147,7 +147,7 @@ impl Imports {
 
     pub fn add_data(
         &mut self,
-        name: Name,
+        name: Path,
         constructor_id: ConstructorId,
         is_public: bool,
     ) {
@@ -161,7 +161,7 @@ impl Imports {
         });
     }
 
-    pub fn add_type(&mut self, name: Name, type_id: TypeId, is_public: bool) {
+    pub fn add_type(&mut self, name: Path, type_id: TypeId, is_public: bool) {
         let a = self.name_map.entry(name).or_default();
         if a.type_.is_some() {
             panic!("Type with the same name cannot be declared more than once.")
@@ -173,7 +173,7 @@ impl Imports {
         });
     }
 
-    pub fn add_type_alias(&mut self, name: Name, is_public: bool) {
+    pub fn add_type_alias(&mut self, name: Path, is_public: bool) {
         let a = self.name_map.entry(name).or_default();
         if a.type_.is_some() {
             panic!("Type with the same name cannot be declared more than once.")
@@ -184,7 +184,7 @@ impl Imports {
         });
     }
 
-    pub fn add_interface(&mut self, name: Name, is_public: bool) {
+    pub fn add_interface(&mut self, name: Path, is_public: bool) {
         let a = self.name_map.entry(name).or_default();
         if a.type_.is_some() {
             panic!("Type with the same name cannot be declared more than once.")
@@ -192,7 +192,7 @@ impl Imports {
         a.interface = Some(InterfaceDecl { is_public });
     }
 
-    pub fn add_module(&mut self, name: Name, is_public: bool) {
+    pub fn add_module(&mut self, name: Path, is_public: bool) {
         let a = self.name_map.entry(name).or_default();
         if a.module.is_some() {
             panic!(
@@ -204,8 +204,8 @@ impl Imports {
 
     pub fn insert_name_alias(
         &mut self,
-        from: Name,
-        to_base_path: Name,
+        from: Path,
+        to_base_path: Path,
         to: Vec<(String, Option<Span>, Option<TokenId>)>,
         is_public: bool,
     ) {
@@ -220,8 +220,8 @@ impl Imports {
 
     pub fn insert_wild_card_import(
         &mut self,
-        from: Name,
-        to_base_path: Name,
+        from: Path,
+        to_base_path: Path,
         to: Vec<(String, Option<Span>, Option<TokenId>)>,
         is_public: bool,
     ) {
@@ -235,22 +235,22 @@ impl Imports {
             });
     }
 
-    pub fn exists(&self, name: Name) -> bool {
+    pub fn exists(&self, name: Path) -> bool {
         self.name_map.contains_key(&name)
     }
 
     #[allow(clippy::too_many_arguments)]
     fn get_true_names_rec(
         &mut self,
-        scope: Name,
-        path: Name,
+        scope: Path,
+        path: Path,
         name_str: &str,
         span: Option<Span>,
         token_map: &mut TokenMap,
-        visited: &FxHashSet<Name>,
+        visited: &FxHashSet<Path>,
         true_names: &mut NameResult,
     ) -> Result<(), CompileError> {
-        let name = Name::from_str(path, name_str);
+        let name = Path::from_str(path, name_str);
         if visited.contains(&name) {
             return Err(CompileError::NotFound {
                 path: name,
@@ -374,14 +374,14 @@ impl Imports {
     #[allow(clippy::too_many_arguments)]
     fn get_module(
         &mut self,
-        scope: Name,
-        base_path: Name,
+        scope: Path,
+        base_path: Path,
         name: &str,
         _token_id: Option<TokenId>,
         span: Option<Span>,
         token_map: &mut TokenMap,
-        visited: &FxHashSet<Name>,
-    ) -> Result<Name, CompileError> {
+        visited: &FxHashSet<Path>,
+    ) -> Result<Path, CompileError> {
         let mut ns = Default::default();
         self.get_true_names_rec(
             scope,
@@ -394,7 +394,7 @@ impl Imports {
         )?;
         ns.module.map(Ok).unwrap_or_else(|| {
             Err(CompileError::NotFound {
-                path: Name::from_str(base_path, name),
+                path: Path::from_str(base_path, name),
                 span: span.unwrap(),
             })
         })
@@ -402,18 +402,18 @@ impl Imports {
 
     pub fn get_module_with_path(
         &mut self,
-        scope: Name,
-        mut base_path: Name,
+        scope: Path,
+        mut base_path: Path,
         mut path: &[(&str, Option<Span>, Option<TokenId>)],
         token_map: &mut TokenMap,
-        visited: &FxHashSet<Name>,
-    ) -> Result<Name, CompileError> {
+        visited: &FxHashSet<Path>,
+    ) -> Result<Path, CompileError> {
         if path.is_empty() {
             Ok(base_path)
         } else {
             if path[0].0 == "pkg" {
                 token_map.insert(path[0].2, TokenMapEntry::KeyWord);
-                base_path = Name::pkg_root();
+                base_path = Path::pkg_root();
                 path = &path[1..];
             }
             for (name, span, token_id) in path {
@@ -434,11 +434,11 @@ impl Imports {
     #[allow(clippy::too_many_arguments)]
     fn get_true_names_with_path_rec(
         &mut self,
-        scope: Name,
-        mut base_path: Name,
+        scope: Path,
+        mut base_path: Path,
         mut path: &[(&str, Option<Span>, Option<TokenId>)],
         token_map: &mut TokenMap,
-        visited: &FxHashSet<Name>,
+        visited: &FxHashSet<Path>,
         true_names: &mut NameResult,
     ) -> Result<(), CompileError> {
         if path.is_empty() {
@@ -448,7 +448,7 @@ impl Imports {
         } else {
             if path[0].0 == "pkg" {
                 token_map.insert(path[0].2, TokenMapEntry::KeyWord);
-                base_path = Name::pkg_root();
+                base_path = Path::pkg_root();
                 path = &path[1..];
             }
             for (name, span, token_id) in path.iter().take(path.len() - 1) {
@@ -478,11 +478,11 @@ impl Imports {
 
     fn get_names(
         &mut self,
-        scope: Name,
-        base_path: Name,
+        scope: Path,
+        base_path: Path,
         path: &[(&str, Option<Span>, Option<TokenId>)],
         token_map: &mut TokenMap,
-    ) -> Result<(NameResult, Name, Option<Span>, Option<TokenId>), CompileError>
+    ) -> Result<(NameResult, Path, Option<Span>, Option<TokenId>), CompileError>
     {
         let visited = Default::default();
         let base_path = self.get_module_with_path(
@@ -503,16 +503,16 @@ impl Imports {
             &FxHashSet::default(),
             &mut ns,
         )?;
-        Ok((ns, Name::from_str(base_path, name), span.clone(), *token_id))
+        Ok((ns, Path::from_str(base_path, name), span.clone(), *token_id))
     }
 
     pub fn get_constructor(
         &mut self,
-        scope: Name,
-        base_path: Name,
+        scope: Path,
+        base_path: Path,
         path: &[(&str, Option<Span>, Option<TokenId>)],
         token_map: &mut TokenMap,
-    ) -> Result<(Name, ConstructorId), CompileError> {
+    ) -> Result<(Path, ConstructorId), CompileError> {
         let (n, path, span, token_id) =
             self.get_names(scope, base_path, path, token_map)?;
         n.data
@@ -528,8 +528,8 @@ impl Imports {
 
     pub fn get_type(
         &mut self,
-        scope: Name,
-        base_path: Name,
+        scope: Path,
+        base_path: Path,
         name: &str,
         span: Option<Span>,
         token_map: &mut TokenMap,
@@ -545,18 +545,18 @@ impl Imports {
             &mut ns,
         )?;
         ns.type_.ok_or_else(|| CompileError::NotFound {
-            path: Name::from_str(base_path, name),
+            path: Path::from_str(base_path, name),
             span: span.unwrap(),
         })
     }
 
     pub fn get_interface(
         &mut self,
-        scope: Name,
-        base_path: Name,
+        scope: Path,
+        base_path: Path,
         path: &[(&str, Option<Span>, Option<TokenId>)],
         token_map: &mut TokenMap,
-    ) -> Result<Name, CompileError> {
+    ) -> Result<Path, CompileError> {
         let (n, path, span, token_id) =
             self.get_names(scope, base_path, path, token_map)?;
         n.interface
@@ -572,8 +572,8 @@ impl Imports {
 
     pub fn get_op_precedence(
         &mut self,
-        scope: Name,
-        base_path: Name,
+        scope: Path,
+        base_path: Path,
         name: &str,
         span: Option<Span>,
         token_map: &mut TokenMap,
@@ -594,9 +594,9 @@ impl Imports {
             &mut ns,
         )?;
         ns.op_precedence.ok_or_else(|| {
-            Name::from_str(base_path, name);
+            Path::from_str(base_path, name);
             CompileError::NoOpPrecedenceDecl {
-                path: Name::from_str(base_path, name),
+                path: Path::from_str(base_path, name),
                 span: span.unwrap(),
             }
         })
@@ -604,8 +604,8 @@ impl Imports {
 
     pub fn get_variables(
         &mut self,
-        scope: Name,
-        path: Name,
+        scope: Path,
+        path: Path,
         name: &str,
         span: Option<Span>,
         token_map: &mut TokenMap,
@@ -631,7 +631,7 @@ impl Imports {
         );
         if names.is_empty() {
             Err(CompileError::NotFound {
-                path: Name::from_str(path, name),
+                path: Path::from_str(path, name),
                 span: span.unwrap(),
             })
         } else {
@@ -641,8 +641,8 @@ impl Imports {
 
     pub fn get_variables_with_path(
         &mut self,
-        scope: Name,
-        base_path: Name,
+        scope: Path,
+        base_path: Path,
         path: &[(&str, Option<Span>, Option<TokenId>)],
         token_map: &mut TokenMap,
         candidates_from_implicit_parameters: &FxHashMap<&str, Vec<DeclId>>,
@@ -672,8 +672,8 @@ impl Imports {
 
     pub fn get_accessor_with_path(
         &mut self,
-        scope: Name,
-        base_path: Name,
+        scope: Path,
+        base_path: Path,
         path: &[(&str, Option<Span>, Option<TokenId>)],
         constructor_id: DeclId,
         token_map: &mut TokenMap,
@@ -734,33 +734,33 @@ impl Default for Imports {
         };
         for v in IntrinsicVariable::iter() {
             imports.add_variable(
-                Name::from_str_intrinsic(v.to_str()),
+                Path::from_str_intrinsic(v.to_str()),
                 VariableId::IntrinsicVariable(v),
                 true,
             );
         }
         for v in IntrinsicConstructor::iter() {
             imports.add_data(
-                Name::from_str_intrinsic(v.to_str()),
+                Path::from_str_intrinsic(v.to_str()),
                 ConstructorId::Intrinsic(v),
                 true,
             );
             imports.add_variable(
-                Name::from_str_intrinsic(v.to_str()),
+                Path::from_str_intrinsic(v.to_str()),
                 VariableId::IntrinsicConstructor(v),
                 true,
             );
         }
         for (name, id) in INTRINSIC_TYPES.iter() {
             imports.add_type(
-                Name::from_str_intrinsic(name),
+                Path::from_str_intrinsic(name),
                 TypeId::Intrinsic(*id),
                 true,
             );
         }
         for (name, (associativity, precedence)) in OP_PRECEDENCE.iter() {
             imports.add_op_precedence(
-                Name::from_str_intrinsic(name),
+                Path::from_str_intrinsic(name),
                 *associativity,
                 *precedence,
                 true,

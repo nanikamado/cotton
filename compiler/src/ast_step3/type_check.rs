@@ -8,7 +8,7 @@ pub use self::simplify::{
 use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::ident_id::IdentId;
 use crate::ast_step1::merge_span;
-use crate::ast_step1::name_id::Name;
+use crate::ast_step1::name_id::Path;
 use crate::ast_step1::token_map::TokenMap;
 use crate::ast_step2::imports::Imports;
 use crate::ast_step2::types::{
@@ -102,7 +102,7 @@ pub fn type_check(
             type_annotation: None,
             resolved_idents: Default::default(),
             decl_id: VariableId::IntrinsicVariable(v),
-            name: Name::from_str_intrinsic(v.to_str()),
+            name: Path::from_str_intrinsic(v.to_str()),
             fixed_parameters: Default::default(),
         });
     }
@@ -112,7 +112,7 @@ pub fn type_check(
             type_annotation: None,
             resolved_idents: Default::default(),
             decl_id: VariableId::IntrinsicConstructor(v),
-            name: Name::from_str_intrinsic(v.to_str()),
+            name: Path::from_str_intrinsic(v.to_str()),
             fixed_parameters: Default::default(),
         });
     }
@@ -331,7 +331,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
 pub struct ResolvedIdent {
     pub variable_id: VariableId,
-    pub implicit_args: Vec<(Name, Type, IdentId)>,
+    pub implicit_args: Vec<(Path, Type, IdentId)>,
 }
 
 pub type Resolved = Vec<(IdentId, ResolvedIdent)>;
@@ -342,8 +342,8 @@ struct Toplevel {
     type_annotation: Option<Type>,
     resolved_idents: FxHashMap<IdentId, VariableId>,
     decl_id: VariableId,
-    name: Name,
-    fixed_parameters: FxHashMap<TypeUnit, Name>,
+    name: Path,
+    fixed_parameters: FxHashMap<TypeUnit, Path>,
 }
 
 type TypesOfLocalDeclsVec = Vec<(VariableId, ast_step2::types::Type)>;
@@ -351,7 +351,7 @@ type TypesOfLocalDeclsVec = Vec<(VariableId, ast_step2::types::Type)>;
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct GlobalVariableType {
     pub t: Type,
-    pub fixed_parameters: FxHashMap<TypeUnit, Name>,
+    pub fixed_parameters: FxHashMap<TypeUnit, Path>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -877,7 +877,7 @@ struct SatisfiedType<T> {
     type_of_satisfied_variable: Type,
     id_of_satisfied_variable: VariableId,
     type_of_improved_decl: T,
-    implicit_args: Vec<(Name, Type, IdentId)>,
+    implicit_args: Vec<(Path, Type, IdentId)>,
     map: TypeVariableMap,
     number_of_variable_requirements_added: usize,
 }
@@ -972,7 +972,7 @@ fn find_satisfied_types<T: TypeConstructor>(
                         for (interface_v_name_str, interface_v_t) in
                             variable_requirements
                         {
-                            let simple_name = Name::from_str(
+                            let simple_name = Path::from_str(
                                 req.module_path,
                                 &interface_v_name_str,
                             );
@@ -1330,7 +1330,7 @@ fn accessor_type(d: &DataDecl, i: usize) -> TypeUnit {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VariableRequirement {
     pub name: Vec<VariableId>,
-    pub module_path: Name,
+    pub module_path: Path,
     pub required_type: Type,
     pub ident: IdentId,
     pub span: Span,

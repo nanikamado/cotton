@@ -1047,7 +1047,7 @@ impl TypeWithEnv {
 
 #[cfg(test)]
 mod tests {
-    use crate::ast_step1::name_id::Name;
+    use crate::ast_step1::name_id::Path;
     use crate::{ast_step1, ast_step2, combine_with_prelude, Imports};
     use stripmargin::StripMargin;
 
@@ -1067,7 +1067,7 @@ mod tests {
         let t = ast
             .variable_decl
             .iter()
-            .find(|d| d.name == Name::from_str(Name::pkg_root(), "test1"))
+            .find(|d| d.name == Path::from_str(Path::pkg_root(), "test1"))
             .unwrap()
             .type_annotation
             .clone()

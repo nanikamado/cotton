@@ -10,7 +10,7 @@ mod run_js;
 mod rust_backend;
 
 use ast_step1::ident_id::IdentId;
-use ast_step1::name_id::Name;
+use ast_step1::name_id::Path;
 use ast_step1::token_map::{TokenMap, TokenMapEntry};
 pub use ast_step2::imports::Imports;
 pub use ast_step2::type_display::{
@@ -150,7 +150,7 @@ pub fn combine_with_prelude(ast: parser::Ast) -> parser::Ast {
 
 pub enum TokenKind {
     GlobalVariable(VariableId, Option<GlobalVariableType>),
-    LocalVariable(VariableId, (Type, FxHashMap<TypeUnit, Name>)),
+    LocalVariable(VariableId, (Type, FxHashMap<TypeUnit, Path>)),
     Constructor(Option<GlobalVariableType>),
     Type,
     Interface,

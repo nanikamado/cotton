@@ -8,7 +8,7 @@ pub use self::type_check::{
 use self::type_check::{type_check, TypeCheckResult};
 use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::ident_id::IdentId;
-use crate::ast_step1::name_id::Name;
+use crate::ast_step1::name_id::Path;
 use crate::ast_step1::token_map::TokenMap;
 use crate::ast_step2::imports::Imports;
 use crate::ast_step2::types::{Type, TypeConstructor, TypeUnit, TypeVariable};
@@ -30,7 +30,7 @@ pub struct Ast<'a> {
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct VariableDecl<'a> {
-    pub name: Name,
+    pub name: Path,
     pub value: ExprWithType<'a>,
     pub decl_id: DeclId,
 }
@@ -60,7 +60,7 @@ pub struct FnArm<'a> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DataDecl {
-    pub name: Name,
+    pub name: Path,
     pub field_len: usize,
     pub decl_id: DeclId,
 }

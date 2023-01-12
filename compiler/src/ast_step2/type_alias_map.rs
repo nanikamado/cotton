@@ -1,7 +1,7 @@
 use super::imports::Imports;
 use super::types::{Type, TypeUnit, TypeVariable};
 use super::{Env, ModulePath};
-use crate::ast_step1::name_id::Name;
+use crate::ast_step1::name_id::Path;
 use crate::ast_step1::token_map::{TokenMap, TokenMapEntry};
 use crate::ast_step1::{self, TypeAliasDecl};
 use crate::ast_step2::type_to_type;
@@ -18,14 +18,14 @@ enum AliasComputation {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct TypeAliasMap<'a>(FxHashMap<Name, AliasEntry<'a>>);
+pub struct TypeAliasMap<'a>(FxHashMap<Path, AliasEntry<'a>>);
 
 #[derive(Debug, Clone)]
 struct AliasEntry<'a> {
     type_: ast_step1::Type<'a>,
     type_variables: ast_step1::Forall<'a>,
     alias_computation: AliasComputation,
-    base_path: Name,
+    base_path: Path,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,8 +38,8 @@ pub enum SearchMode {
 impl<'a> Env<'a, '_> {
     pub fn get_type_from_alias(
         &mut self,
-        name: (Name, Option<TokenId>),
-        type_variable_names: &FxHashMap<Name, TypeVariable>,
+        name: (Path, Option<TokenId>),
+        type_variable_names: &FxHashMap<Path, TypeVariable>,
         search_type: SearchMode,
     ) -> Result<Option<Type>, CompileError> {
         if let Some(t) = type_variable_names.get(&name.0) {
@@ -55,7 +55,7 @@ impl<'a> Env<'a, '_> {
                 Some(t)
             }
             (_, _) => {
-                let mut type_variable_names: FxHashMap<Name, TypeVariable> =
+                let mut type_variable_names: FxHashMap<Path, TypeVariable> =
                     type_variable_names
                         .clone()
                         .into_iter()
@@ -92,7 +92,7 @@ impl<'a> Env<'a, '_> {
                             );
                         }
                         type_variable_names
-                            .insert(Name::from_str(alias.base_path, s.0), v);
+                            .insert(Path::from_str(alias.base_path, s.0), v);
                         v
                     })
                     .collect_vec();
@@ -146,7 +146,7 @@ impl<'a> TypeAliasMap<'a> {
     ) {
         self.0.extend(type_alias_decls.iter().map(|a| {
             token_map.insert(a.name.2, TokenMapEntry::TypeAlias);
-            let name = Name::from_str(module_path, a.name.0);
+            let name = Path::from_str(module_path, a.name.0);
             imports.add_type_alias(name, a.is_public);
             (
                 name,

@@ -1,5 +1,5 @@
 use super::{LinkedType, LinkedTypeUnit, Type};
-use crate::ast_step1::name_id::Name;
+use crate::ast_step1::name_id::Path;
 use crate::ast_step2::{get_type_name, TypeId};
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
@@ -12,7 +12,7 @@ pub struct TypePointer(usize);
 
 #[derive(Debug, PartialEq, Clone)]
 struct NormalType {
-    name: Name,
+    name: Path,
     args: Vec<TypePointer>,
 }
 
