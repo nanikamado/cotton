@@ -228,7 +228,12 @@ fn single_condition(
             );
         }
         Binder(name, decl_id) => {
-            write!(condition, "&&(${decl_id}${name}={arg},true)").unwrap();
+            write!(
+                condition,
+                "&&(${decl_id}${}={arg},true)",
+                convert_name(name)
+            )
+            .unwrap();
         }
         Underscore => (),
     }
@@ -250,7 +255,7 @@ fn bindings(pattern: &[Pattern]) -> Vec<(String, DeclId, &Type)> {
         if p.patterns.len() == 1 {
             match &p.patterns[0] {
                 PatternUnit::Binder(a, id) => {
-                    vec![(a.to_string(), *id, &p.type_)]
+                    vec![(convert_name(a), *id, &p.type_)]
                 }
                 PatternUnit::TypeRestriction(p, _) => _bindings_unit(p),
                 PatternUnit::Apply {

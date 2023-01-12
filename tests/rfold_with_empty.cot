@@ -17,20 +17,20 @@ rfold_with_empty : List[A] -> (B -> A -> B) -> B forall { A, B : Empty } =
     | Nil, _ => empty
     | h /\ t, f => t.rfold_with_empty(f).f(h)
 
-local_append : List[A] -> List[A] -> List[A] forall { A } =
-    | h /\ t, l => h /\ t.local_append(l)
+append' : List[A] -> List[A] -> List[A] forall { A } =
+    | h /\ t, l => h /\ t.append'(l)
     | Nil, l => l
 
-local_append : I64 -> I64 -> I64 = (+)
+append' : I64 -> I64 -> I64 = (+)
 
-local_append : String -> String -> String = (<>)
+append' : String -> String -> String = (<>)
 
-interface local_append {
-    local_append : Self -> Self -> Self
+interface Append {
+    append' : Self -> Self -> Self
 }
 
-concat : List[A] -> A forall { A : Empty & local_append } =
-    | l => l.rfold_with_empty(| a, b => b.local_append(a))
+concat : List[A] -> A forall { A : Empty & Append } =
+    | l => l.rfold_with_empty(| a, b => b.append'(a))
 
 main : () -> () =
     | () => do

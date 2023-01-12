@@ -1,18 +1,18 @@
-data Nil_
+data Nil'
 data A /=\ B forall { A, B }
 
 infixr 5 /=\
 
-type List = Nil_ | A /=\ List[A] forall { A }
+type List = Nil' | A /=\ List[A] forall { A }
 
 list_to_string_rec : List[A] -> String forall { A : ToString } =
-    | Nil_ => ""
+    | Nil' => ""
     | h /=\ t => ", " <> h.to_string <> t.list_to_string_rec
 
 to_string : List[A] -> String forall { A : ToString } =
-    | Nil_ => "[]"
+    | Nil' => "[]"
     | h /=\ t => "[" <> h.to_string <> t.list_to_string_rec <> "]"
 
 main = | () => do
-    ((() /=\ Nil_) /=\ Nil_).to_string
+    ((() /=\ Nil') /=\ Nil').to_string
     ()

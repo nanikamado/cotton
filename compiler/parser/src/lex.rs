@@ -139,8 +139,19 @@ fn lexer(
     src_len: usize,
 ) -> impl Parser<char, Vec<(Token, Span)>, Error = Simple<char>> {
     let int = text::int(10).from_str().unwrapped().map(Token::Int);
-
-    let ident = text::ident().map(|i: String| match i.as_str() {
+    let ident =
+        filter(|c: &char| c.to_char().is_ascii_alphabetic() || *c == '_')
+            .map(Some)
+            .chain::<char, Vec<_>, _>(
+                filter(|c: &char| {
+                    c.to_char().is_ascii_alphanumeric()
+                        || *c == '_'
+                        || *c == '\''
+                })
+                .repeated(),
+            )
+            .collect();
+    let ident = ident.map(|i: String| match i.as_str() {
         "case" => Token::Case,
         "do" => Token::Do,
         "forall" => Token::Forall,
