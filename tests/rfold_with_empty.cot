@@ -9,8 +9,9 @@ empty : List[A] forall { A } = Nil
 empty : String = ""
 empty : I64 = 0
 
-interface Empty where
+interface Empty {
     empty : Self
+}
 
 rfold_with_empty : List[A] -> (B -> A -> B) -> B forall { A, B : Empty } =
     | Nil, _ => empty
@@ -24,8 +25,9 @@ local_append : I64 -> I64 -> I64 = (+)
 
 local_append : String -> String -> String = (<>)
 
-interface local_append where
+interface local_append {
     local_append : Self -> Self -> Self
+}
 
 concat : List[A] -> A forall { A : Empty & local_append } =
     | l => l.rfold_with_empty(| a, b => b.local_append(a))

@@ -575,7 +575,8 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         });
     let interface_decl = just(Token::Pub)
         .or_not()
-        .then(ident.delimited_by(just(Token::Interface), just(Token::Where)))
+        .then_ignore(just(Token::Interface))
+        .then(ident)
         .then(indented(
             ident_or_op
                 .then_ignore(just(Token::Colon))

@@ -1,9 +1,3 @@
-interface ToString where
-    to_string : Self -> String
-
-interface Map where
-    map : Self[A] -> (A -> B) -> Self[B] forall { A, B }
-
 main : () -> () =
     | () => do
         do

@@ -8,8 +8,9 @@ data Fuga
 greet : Fuga -> String =
     | _ => "Fugaaaaaa"
 
-interface Greet where
+interface Greet {
     greet : Self -> String
+}
 
 greet_twice : A -> String forall { A : Greet } =
     | a => do 
