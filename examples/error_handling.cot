@@ -4,8 +4,8 @@ data Ok(A) forall { A }
 type Result = Ok[A] | Err[B] forall { A, B }
 
 to_string : Result[A, E] -> String forall { A : ToString, E : ToString } =
-    | Ok(a) => "Ok(" <> a.to_string <> ")"
-    | Err(e) => "Err(" <> e.to_string <> ")"
+    | Ok(a) => "Ok(" ++ a.to_string ++ ")"
+    | Err(e) => "Err(" ++ e.to_string ++ ")"
 
 map : Result[A, C] -> (A -> B) -> Result[B, C] forall { A, B, C } =
     | Err(a), _ => Err(a)

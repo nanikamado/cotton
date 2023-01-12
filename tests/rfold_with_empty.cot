@@ -23,7 +23,7 @@ append' : List[A] -> List[A] -> List[A] forall { A } =
 
 append' : I64 -> I64 -> I64 = (+)
 
-append' : String -> String -> String = (<>)
+append' : String -> String -> String = (++)
 
 interface Append {
     append' : Self -> Self -> Self

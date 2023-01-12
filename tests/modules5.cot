@@ -12,7 +12,7 @@ mod aaa {
 use aaa::bbb::to_string
 
 double : String -> aaa::St =
-    | a => a <> a
+    | a => a ++ a
 
 main : () -> () =
     | () => println(to_string(aaa::D1))

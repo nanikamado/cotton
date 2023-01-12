@@ -1,6 +1,6 @@
 add_one : (I64 | String) -> (I64 | String) =
     | a : I64 => a + 1
-    | a : String => a <> " one"
+    | a : String => a ++ " one"
 
 to_string : (I64 | String) -> String =
     | a : I64 => a.i64_to_string

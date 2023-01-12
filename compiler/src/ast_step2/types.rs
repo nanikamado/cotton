@@ -1141,8 +1141,8 @@ fn fmt_tuple_tail(
 ) -> std::fmt::Result {
     use TypeMatchableRef::*;
     match tuple.matchable_ref() {
-        Union(u) => write!(f, "] <> {{{}}}", u.iter().format(" | ")),
-        Empty => write!(f, "] <> ∅"),
+        Union(u) => write!(f, "] ++ {{{}}}", u.iter().format(" | ")),
+        Empty => write!(f, "] ++ ∅"),
         Tuple(a, b) => {
             write!(f, ", {}", a)?;
             fmt_tuple_tail(b, f)

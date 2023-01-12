@@ -18,7 +18,7 @@ pub enum IntrinsicVariable {
     Eq,
     PrintStr,
     I64ToString,
-    Append,
+    AppendStr,
 }
 
 impl Display for IntrinsicVariable {
@@ -39,7 +39,7 @@ impl IntrinsicVariable {
             IntrinsicVariable::Eq => "==",
             IntrinsicVariable::PrintStr => "print_str",
             IntrinsicVariable::I64ToString => "i64_to_string",
-            IntrinsicVariable::Append => "<>",
+            IntrinsicVariable::AppendStr => "append_str",
         }
     }
 
@@ -84,7 +84,7 @@ impl IntrinsicVariable {
                 .arrow(Type::intrinsic_from_str("()")),
             IntrinsicVariable::I64ToString => Type::intrinsic_from_str("I64")
                 .arrow(Type::intrinsic_from_str("String")),
-            IntrinsicVariable::Append => Type::intrinsic_from_str("String")
+            IntrinsicVariable::AppendStr => Type::intrinsic_from_str("String")
                 .arrow(
                     Type::intrinsic_from_str("String")
                         .arrow(Type::intrinsic_from_str("String")),
@@ -186,7 +186,7 @@ pub static OP_PRECEDENCE: Lazy<FxHashMap<&'static str, (Associativity, i32)>> =
             ("<", (Left, 5)),
             ("!=", (Left, 5)),
             ("==", (Left, 5)),
-            ("<>", (Left, 3)),
+            ("++", (Left, 3)),
             ("|", (Left, 2)),
             ("->", (Right, 1)),
         ]

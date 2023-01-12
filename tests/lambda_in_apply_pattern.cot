@@ -4,7 +4,7 @@ fib : I64 -> I64 =
     | n => (n - 1).fib + (n - 2).fib
 
 test : I64 -> String =
-    | a { (| x => x + a) : a } { (| x => x + a) : 30 } => a.to_string <> "!"
+    | a { (| x => x + a) : a } { (| x => x + a) : 30 } => a.to_string ++ "!"
     | a => a.to_string
 
 main : () -> () =

@@ -4,10 +4,10 @@ fib : I64 -> I64 =
     | n => (n - 1).fib + (n - 2).fib
 
 test : I64 -> String =
-    | n { fib: m { fib: 21 } } => "n == " <> n.to_string
-        <> ", m == " <> m.to_string
-        <> ", m.fib == " <> m.fib.to_string
-    | n => "n == " <> n.to_string
+    | n { fib: m { fib: 21 } } => "n == " ++ n.to_string
+        ++ ", m == " ++ m.to_string
+        ++ ", m.fib == " ++ m.fib.to_string
+    | n => "n == " ++ n.to_string
 
 main : () -> () =
     | () => do

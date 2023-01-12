@@ -14,7 +14,7 @@ greet : Fuga -> String =
     | _ => "Fugaaaaaa"
 
 greet_twice : A -> String forall { A : aaa::Greet } =
-    | a => a.greet <> a.greet
+    | a => a.greet ++ a.greet
 
 main : () -> () =
     | () => do

@@ -88,7 +88,7 @@ static PRIMITIVES_DEF: Lazy<FxHashMap<IntrinsicVariable, &'static str>> =
             (Percent, "a => b => a % b"),
             (Neq, "a => b => $$bool(a !== b)"),
             (Eq, "a => b => $$bool(a === b)"),
-            (Append, "a => b => a + b"),
+            (AppendStr, "a => b => a + b"),
         ]
         .iter()
         .copied()

@@ -10,7 +10,7 @@ mod aaa {
 use aaa::bbb::to_string
 
 double : String -> String =
-    | a => a <> a
+    | a => a ++ a
 
 main : () -> () =
     | () => aaa::D1.to_string.println_str

@@ -16,7 +16,7 @@ main : () -> () =
         l = (D1 /\ D2 /\ Nil)
         ls = ((do (l? /\ l? /\ l? /\ l? /\ l? /\ l? /\ Nil) /\ Nil) : List[List[D1 | D2]])
         ls.map(
-            | l : Palindrome => (l.to_string <> " palindrome!").println
+            | l : Palindrome => (l.to_string ++ " palindrome!").println
             | l => l.println
         )
         ()
