@@ -415,6 +415,15 @@ impl Imports {
                 token_map.insert(path[0].2, TokenMapEntry::KeyWord);
                 base_path = Path::pkg_root();
                 path = &path[1..];
+            } else if path[0].0 == "super" {
+                token_map.insert(path[0].2, TokenMapEntry::KeyWord);
+                base_path = base_path
+                    .split()
+                    .ok_or(CompileError::TooManySuper {
+                        span: path[0].1.clone().unwrap(),
+                    })?
+                    .0;
+                path = &path[1..];
             }
             for (name, span, token_id) in path {
                 base_path = self.get_module(
@@ -435,8 +444,8 @@ impl Imports {
     fn get_true_names_with_path_rec(
         &mut self,
         scope: Path,
-        mut base_path: Path,
-        mut path: &[(&str, Option<Span>, Option<TokenId>)],
+        base_path: Path,
+        path: &[(&str, Option<Span>, Option<TokenId>)],
         token_map: &mut TokenMap,
         visited: &FxHashSet<Path>,
         true_names: &mut NameResult,
@@ -446,22 +455,13 @@ impl Imports {
             true_names.module = Some(base_path);
             Ok(())
         } else {
-            if path[0].0 == "pkg" {
-                token_map.insert(path[0].2, TokenMapEntry::KeyWord);
-                base_path = Path::pkg_root();
-                path = &path[1..];
-            }
-            for (name, span, token_id) in path.iter().take(path.len() - 1) {
-                base_path = self.get_module(
-                    scope,
-                    base_path,
-                    name,
-                    *token_id,
-                    span.clone(),
-                    token_map,
-                    visited,
-                )?;
-            }
+            let base_path = self.get_module_with_path(
+                scope,
+                base_path,
+                &path[..path.len() - 1],
+                token_map,
+                visited,
+            )?;
             let (name, span, _token_id) = path.last().unwrap();
             self.get_true_names_rec(
                 scope,

@@ -1,7 +1,16 @@
 mod aaa {
-    pub f : I64 -> I64 =
-        | a => a + a
+    pub data D1
+
+    pub mod bbb {
+        use super::D1
+        pub to_string : D1 -> String = | _ => pkg::double("D1")
+    }
 }
 
+use aaa::bbb::to_string
+
+double : String -> String =
+    | a => a ++ a
+
 main : () -> () =
-    | () => println(i64_to_string(aaa::f(2)))
+    | () => aaa::D1.to_string.println_str

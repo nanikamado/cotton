@@ -360,27 +360,12 @@ fn literal_pattern_fail() {
 
 #[test]
 fn modules() {
-    test_examples("modules.cot", "4\n");
+    test_examples("modules.cot", "D1D1\n");
 }
 
 #[test]
 fn modules2() {
-    test_test("modules2.cot").stdout("4\n").success();
-}
-
-#[test]
-fn modules3() {
-    test_test("modules3.cot").stdout("D1\n").success();
-}
-
-#[test]
-fn modules4() {
-    test_test("modules4.cot").stdout("D1D1\n").success();
-}
-
-#[test]
-fn modules5() {
-    test_test("modules5.cot").stdout("D1D1\n").success();
+    test_test("modules2.cot").stdout("D1D1\n").success();
 }
 
 #[test]

@@ -42,6 +42,9 @@ pub enum CompileError {
         path: Path,
         span: Span,
     },
+    TooManySuper {
+        span: Span,
+    },
 }
 
 impl CompileError {
@@ -176,6 +179,17 @@ impl CompileError {
                             "`{:?}` exists but is inaccessible from outside.",
                             path
                         ));
+                report.finish().write((filename, Source::from(src)), w)?;
+                Ok(())
+            }
+            CompileError::TooManySuper { span } => {
+                let report =
+                    Report::build(ReportKind::Error, filename, span.start)
+                        .with_label(
+                            Label::new((filename, span)).with_message(
+                                "there are too many super keywords",
+                            ),
+                        );
                 report.finish().write((filename, Source::from(src)), w)?;
                 Ok(())
             }
