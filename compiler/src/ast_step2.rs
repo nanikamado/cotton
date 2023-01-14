@@ -44,7 +44,7 @@ pub enum TypeId {
 pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl>,
-    pub entry_point: DeclId,
+    pub entry_point: Option<DeclId>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -264,8 +264,7 @@ impl<'a> Ast<'a> {
         let entry_point = variable_decls
             .iter()
             .find(|d| d.name == Path::from_str(Path::pkg_root(), "main"))
-            .unwrap_or_else(|| panic!("entry point not found"))
-            .decl_id;
+            .map(|d| d.decl_id);
         Ok(Self {
             variable_decl: variable_decls,
             data_decl: data_decls,

@@ -23,7 +23,7 @@ use fxhash::FxHashMap;
 pub struct Ast<'a> {
     pub variable_decl: Vec<VariableDecl<'a>>,
     pub data_decl: Vec<DataDecl>,
-    pub entry_point: DeclId,
+    pub entry_point: Option<DeclId>,
     pub types_of_global_decls: FxHashMap<VariableId, GlobalVariableType>,
     pub types_of_local_decls: FxHashMap<VariableId, LocalVariableType>,
 }

@@ -165,15 +165,18 @@ impl Ast {
             memo.intrinsic_variables
                 .insert(VariableId::IntrinsicConstructor(d), p);
         }
+        let entry_point = ast
+            .entry_point
+            .unwrap_or_else(|| panic!("entry point not found"));
         memo.get_type_global(
-            VariableId::Global(ast.entry_point),
+            VariableId::Global(entry_point),
             &Default::default(),
         );
         let map = memo.type_map;
         Self {
             variable_decl: memo.global_variables_done,
             data_decl: ast.data_decl,
-            entry_point: ast.entry_point,
+            entry_point,
             map,
         }
     }
