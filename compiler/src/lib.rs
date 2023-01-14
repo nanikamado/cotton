@@ -175,6 +175,40 @@ pub fn get_token_map(
         .0
         .into_iter()
         .map(|(id, t)| {
+            fn variable_id_to_token_kind(
+                variable_id: VariableId,
+                ast: &ast_step3::Ast,
+            ) -> TokenKind {
+                use VariableId::*;
+                match variable_id {
+                    IntrinsicConstructor(_) => TokenKind::Type,
+                    Constructor(_) => TokenKind::Constructor(
+                        ast.types_of_global_decls.get(&variable_id).cloned(),
+                    ),
+                    Global(_) | IntrinsicVariable(_) | FieldAccessor { .. } => {
+                        TokenKind::GlobalVariable(
+                            variable_id,
+                            ast.types_of_global_decls
+                                .get(&variable_id)
+                                .cloned(),
+                        )
+                    }
+                    Local(_) => {
+                        let LocalVariableType { t, toplevel } =
+                            &ast.types_of_local_decls[&variable_id];
+                        TokenKind::LocalVariable(
+                            variable_id,
+                            (
+                                t.clone(),
+                                ast.types_of_global_decls
+                                    [&VariableId::Global(*toplevel)]
+                                    .fixed_parameters
+                                    .clone(),
+                            ),
+                        )
+                    }
+                }
+            }
             let t = match t {
                 TokenMapEntry::Decl(decl_id) => {
                     if let Some(t) = ast
@@ -200,39 +234,12 @@ pub fn get_token_map(
                         )
                     }
                 }
+                TokenMapEntry::ResolvedIdent(variable_id) => {
+                    variable_id_to_token_kind(variable_id, &ast)
+                }
                 TokenMapEntry::Ident(ident_id) => {
                     let r = resolved_idents.get(&ident_id).unwrap();
-                    use VariableId::*;
-                    match r.variable_id {
-                        IntrinsicConstructor(_) => TokenKind::Type,
-                        Constructor(_) => TokenKind::Constructor(
-                            ast.types_of_global_decls
-                                .get(&r.variable_id)
-                                .cloned(),
-                        ),
-                        Global(_)
-                        | IntrinsicVariable(_)
-                        | FieldAccessor { .. } => TokenKind::GlobalVariable(
-                            r.variable_id,
-                            ast.types_of_global_decls
-                                .get(&r.variable_id)
-                                .cloned(),
-                        ),
-                        Local(_) => {
-                            let LocalVariableType { t, toplevel } =
-                                &ast.types_of_local_decls[&r.variable_id];
-                            TokenKind::LocalVariable(
-                                r.variable_id,
-                                (
-                                    t.clone(),
-                                    ast.types_of_global_decls
-                                        [&VariableId::Global(*toplevel)]
-                                        .fixed_parameters
-                                        .clone(),
-                                ),
-                            )
-                        }
-                    }
+                    variable_id_to_token_kind(r.variable_id, &ast)
                 }
                 TokenMapEntry::VariableDeclInInterface(t) => {
                     TokenKind::VariableDeclInInterface(GlobalVariableType {

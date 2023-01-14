@@ -2,6 +2,7 @@ use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::ident_id::IdentId;
 use crate::ast_step2::types::Type;
 use crate::ast_step2::{ConstructorId, TypeId};
+use crate::ast_step3::VariableId;
 use fxhash::FxHashMap;
 use parser::token_id::TokenId;
 
@@ -10,6 +11,7 @@ pub enum TokenMapEntry {
     Decl(DeclId),
     DataDecl(DeclId),
     Ident(IdentId),
+    ResolvedIdent(VariableId),
     TypeId(TypeId),
     TypeAlias,
     Constructor(ConstructorId),

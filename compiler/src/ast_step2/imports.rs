@@ -444,7 +444,7 @@ impl Imports {
             token_map,
             visited,
         )?;
-        let (name, span, _token_id) = path.last().unwrap();
+        let (name, span, token_id) = path.last().unwrap();
         self.get_true_names_rec(
             scope,
             base_path,
@@ -454,6 +454,23 @@ impl Imports {
             visited,
             true_names,
         )?;
+        if let Some(t) = &true_names.type_ {
+            match t {
+                ConstOrAlias::Const(t) => {
+                    token_map.insert(*token_id, TokenMapEntry::TypeId(*t));
+                }
+                ConstOrAlias::Alias(_) => {
+                    token_map.insert(*token_id, TokenMapEntry::TypeAlias);
+                }
+            }
+        } else if !true_names.variables.is_empty() {
+            token_map.insert(
+                *token_id,
+                TokenMapEntry::ResolvedIdent(
+                    *true_names.variables.iter().next().unwrap(),
+                ),
+            );
+        }
         Ok(())
     }
 
