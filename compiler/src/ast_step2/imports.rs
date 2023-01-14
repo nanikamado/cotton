@@ -86,7 +86,7 @@ struct OpPrecedenceDecl {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct NameAliasEntry {
-    alias: Vec<(String, Option<Span>, Option<TokenId>)>,
+    alias: Vec<parser::StringWithId>,
     base_path: Path,
     is_public: bool,
 }
@@ -206,7 +206,7 @@ impl Imports {
         &mut self,
         from: Path,
         to_base_path: Path,
-        to: Vec<(String, Option<Span>, Option<TokenId>)>,
+        to: Vec<parser::StringWithId>,
         is_public: bool,
     ) {
         self.name_map.entry(from).or_default().true_names.push(
@@ -222,7 +222,7 @@ impl Imports {
         &mut self,
         from: Path,
         to_base_path: Path,
-        to: Vec<(String, Option<Span>, Option<TokenId>)>,
+        to: Vec<parser::StringWithId>,
         is_public: bool,
     ) {
         self.wild_card_imports
@@ -271,10 +271,7 @@ impl Imports {
                 let m = self.get_module_with_path(
                     scope,
                     a.base_path,
-                    &a.alias
-                        .iter()
-                        .map(|(a, b, c)| (a.as_str(), b.clone(), *c))
-                        .collect_vec(),
+                    &a.alias,
                     token_map,
                     &visited,
                 )?;
@@ -298,13 +295,7 @@ impl Imports {
                     self.get_true_names_with_path_rec(
                         scope,
                         name_alias_entry.base_path,
-                        &name_alias_entry
-                            .alias
-                            .iter()
-                            .map(|(s, span, token_id)| {
-                                (s.as_str(), span.clone(), *token_id)
-                            })
-                            .collect_vec(),
+                        &name_alias_entry.alias,
                         token_map,
                         &visited,
                         &mut ns,
@@ -404,18 +395,14 @@ impl Imports {
         &mut self,
         scope: Path,
         mut base_path: Path,
-        mut path: &[(&str, Option<Span>, Option<TokenId>)],
+        mut path: &[parser::StringWithId],
         token_map: &mut TokenMap,
         visited: &FxHashSet<Path>,
     ) -> Result<Path, CompileError> {
         if path.is_empty() {
             Ok(base_path)
         } else {
-            if path[0].0 == "pkg" {
-                token_map.insert(path[0].2, TokenMapEntry::KeyWord);
-                base_path = Path::pkg_root();
-                path = &path[1..];
-            } else if path[0].0 == "super" {
+            if path[0].0 == "super" {
                 token_map.insert(path[0].2, TokenMapEntry::KeyWord);
                 base_path = base_path
                     .split()
@@ -445,42 +432,36 @@ impl Imports {
         &mut self,
         scope: Path,
         base_path: Path,
-        path: &[(&str, Option<Span>, Option<TokenId>)],
+        path: &[parser::StringWithId],
         token_map: &mut TokenMap,
         visited: &FxHashSet<Path>,
         true_names: &mut NameResult,
     ) -> Result<(), CompileError> {
-        if path.is_empty() {
-            debug_assert!(true_names.module.is_none());
-            true_names.module = Some(base_path);
-            Ok(())
-        } else {
-            let base_path = self.get_module_with_path(
-                scope,
-                base_path,
-                &path[..path.len() - 1],
-                token_map,
-                visited,
-            )?;
-            let (name, span, _token_id) = path.last().unwrap();
-            self.get_true_names_rec(
-                scope,
-                base_path,
-                name,
-                span.clone(),
-                token_map,
-                visited,
-                true_names,
-            )?;
-            Ok(())
-        }
+        let base_path = self.get_module_with_path(
+            scope,
+            base_path,
+            &path[..path.len() - 1],
+            token_map,
+            visited,
+        )?;
+        let (name, span, _token_id) = path.last().unwrap();
+        self.get_true_names_rec(
+            scope,
+            base_path,
+            name,
+            span.clone(),
+            token_map,
+            visited,
+            true_names,
+        )?;
+        Ok(())
     }
 
     fn get_names(
         &mut self,
         scope: Path,
         base_path: Path,
-        path: &[(&str, Option<Span>, Option<TokenId>)],
+        path: &[parser::StringWithId],
         token_map: &mut TokenMap,
     ) -> Result<(NameResult, Path, Option<Span>, Option<TokenId>), CompileError>
     {
@@ -510,7 +491,7 @@ impl Imports {
         &mut self,
         scope: Path,
         base_path: Path,
-        path: &[(&str, Option<Span>, Option<TokenId>)],
+        path: &[parser::StringWithId],
         token_map: &mut TokenMap,
     ) -> Result<(Path, ConstructorId), CompileError> {
         let (n, path, span, token_id) =
@@ -554,7 +535,7 @@ impl Imports {
         &mut self,
         scope: Path,
         base_path: Path,
-        path: &[(&str, Option<Span>, Option<TokenId>)],
+        path: &[parser::StringWithId],
         token_map: &mut TokenMap,
     ) -> Result<Path, CompileError> {
         let (n, path, span, token_id) =
@@ -643,7 +624,7 @@ impl Imports {
         &mut self,
         scope: Path,
         base_path: Path,
-        path: &[(&str, Option<Span>, Option<TokenId>)],
+        path: &[parser::StringWithId],
         token_map: &mut TokenMap,
         candidates_from_implicit_parameters: &FxHashMap<&str, Vec<DeclId>>,
     ) -> Result<Vec<VariableId>, CompileError> {
@@ -651,7 +632,7 @@ impl Imports {
             self.get_names(scope, base_path, path, token_map)?;
         let mut names = n.variables;
         if path.len() == 1 {
-            let n = path.last().unwrap().0;
+            let n = path.last().unwrap().0.as_str();
             names.extend(
                 candidates_from_implicit_parameters
                     .get(n)
@@ -674,7 +655,7 @@ impl Imports {
         &mut self,
         scope: Path,
         base_path: Path,
-        path: &[(&str, Option<Span>, Option<TokenId>)],
+        path: &[parser::StringWithId],
         constructor_id: DeclId,
         token_map: &mut TokenMap,
     ) -> Result<Option<usize>, CompileError> {

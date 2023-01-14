@@ -4,8 +4,8 @@ mod aaa {
     pub type St = String
 
     pub mod bbb {
-        use pkg::aaa::D1
-        pub to_string : D1 -> String = | _ => pkg::double("D1")
+        use ::aaa::D1
+        pub to_string : D1 -> String = | _ => ::double("D1")
     }
 }
 

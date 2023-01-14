@@ -2,7 +2,7 @@ mod aaa {
     pub data D1
 
     pub mod bbb {
-        use pkg::aaa::to_string
+        use ::aaa::to_string
     }
 
     pub to_string : D1 -> String = | _ => "D1"

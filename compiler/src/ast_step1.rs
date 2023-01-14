@@ -14,8 +14,8 @@ use index_list::{Index, IndexList};
 use itertools::Itertools;
 use parser::token_id::TokenId;
 use parser::{
-    self, Associativity, ExprSuffixOp, OpPrecedenceDecl, PatternApply, Span,
-    TypeApply,
+    self, Associativity, ExprSuffixOp, Forall, OpPrecedenceDecl, PatternApply,
+    Span, TypeApply,
 };
 use std::collections::BTreeMap;
 use std::fmt::Debug;
@@ -35,14 +35,9 @@ pub struct Ast<'a> {
 type StrWithId<'a> = (&'a str, Option<Span>, Option<TokenId>);
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Forall<'a> {
-    pub type_variables: Vec<(StrWithId<'a>, Vec<Vec<StrWithId<'a>>>)>,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VariableDecl<'a> {
     pub name: Path,
-    pub type_annotation: Option<(Type<'a>, Forall<'a>, Span)>,
+    pub type_annotation: Option<(Type<'a>, &'a Forall, Span)>,
     pub value: ExprWithSpan<'a>,
     pub span: Span,
     pub is_public: bool,
@@ -51,7 +46,7 @@ pub struct VariableDecl<'a> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Type<'a> {
-    pub path: Vec<StrWithId<'a>>,
+    pub path: &'a parser::Path,
     pub args: Vec<Type<'a>>,
 }
 
@@ -59,7 +54,7 @@ pub struct Type<'a> {
 pub struct DataDecl<'a> {
     pub name: Path,
     pub fields: Vec<Field<'a>>,
-    pub type_variables: Forall<'a>,
+    pub type_variables: &'a Forall,
     pub decl_id: DeclId,
     pub is_public: bool,
 }
@@ -74,14 +69,14 @@ pub struct Field<'a> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct TypeAliasDecl<'a> {
     pub name: StrWithId<'a>,
-    pub body: (Type<'a>, Forall<'a>),
+    pub body: (Type<'a>, &'a Forall),
     pub is_public: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct InterfaceDecl<'a> {
     pub name: StrWithId<'a>,
-    pub variables: Vec<(StrWithId<'a>, Type<'a>, Forall<'a>)>,
+    pub variables: Vec<(StrWithId<'a>, Type<'a>, &'a Forall)>,
     pub is_public: bool,
 }
 
@@ -93,17 +88,17 @@ pub enum Expr<'a> {
     Number(&'a str),
     StrLiteral(&'a str),
     Ident {
-        path: Vec<StrWithId<'a>>,
+        path: &'a parser::Path,
     },
     Record {
-        path: Vec<StrWithId<'a>>,
+        path: &'a parser::Path,
         fields: Vec<(StrWithId<'a>, Expr<'a>)>,
     },
     Decl(Box<VariableDecl<'a>>),
     Call(Box<ExprWithSpan<'a>>, Box<ExprWithSpan<'a>>),
     Do(Vec<ExprWithSpan<'a>>),
     Question(Box<ExprWithSpan<'a>>, Span),
-    TypeAnnotation(Box<ExprWithSpan<'a>>, Type<'a>, Forall<'a>),
+    TypeAnnotation(Box<ExprWithSpan<'a>>, Type<'a>, &'a Forall),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -117,12 +112,12 @@ pub enum Pattern<'a> {
     Number(&'a str),
     StrLiteral(&'a str),
     Constructor {
-        path: Vec<StrWithId<'a>>,
+        path: &'a parser::Path,
         args: Vec<Pattern<'a>>,
     },
     Binder(StrWithId<'a>),
     Underscore,
-    TypeRestriction(Box<Pattern<'a>>, Type<'a>, Forall<'a>),
+    TypeRestriction(Box<Pattern<'a>>, Type<'a>, &'a Forall),
     Apply(Box<Pattern<'a>>, Vec<ApplyPattern<'a>>),
 }
 
@@ -139,7 +134,7 @@ where
     T: ApplySuffixOp<'a>,
 {
     Operand(T),
-    Operator(StrWithId<'a>, Associativity, i32, Span),
+    Operator(&'a parser::Path, Associativity, i32, Span),
     Apply(&'a <T as ApplySuffixOp<'a>>::Op),
 }
 
@@ -154,7 +149,7 @@ pub struct Module<'a> {
 pub struct UseDecl<'a> {
     pub is_public: bool,
     pub name: StrWithId<'a>,
-    pub path: Vec<StrWithId<'a>>,
+    pub path: &'a parser::Path,
     pub span: Span,
 }
 
@@ -163,7 +158,7 @@ pub trait InfixOpCall {
 }
 
 pub trait IdentFromStr<'a> {
-    fn ident_from_str(s: Vec<StrWithId<'a>>) -> Self;
+    fn ident_from_str(s: &'a parser::Path) -> Self;
 }
 
 pub trait AddArgument {
@@ -171,7 +166,7 @@ pub trait AddArgument {
 }
 
 impl<'a> IdentFromStr<'a> for Type<'a> {
-    fn ident_from_str(s: Vec<StrWithId<'a>>) -> Self {
+    fn ident_from_str(s: &'a parser::Path) -> Self {
         Self {
             args: Vec::new(),
             path: s,
@@ -187,7 +182,7 @@ impl<'a> AddArgument for (Type<'a>, Span) {
 }
 
 impl<'a> IdentFromStr<'a> for Expr<'a> {
-    fn ident_from_str(name: Vec<StrWithId<'a>>) -> Self {
+    fn ident_from_str(name: &'a parser::Path) -> Self {
         Self::Ident { path: name }
     }
 }
@@ -204,7 +199,7 @@ impl<'a> AddArgument for ExprWithSpan<'a> {
 }
 
 impl<'a> IdentFromStr<'a> for Pattern<'a> {
-    fn ident_from_str(name: Vec<StrWithId<'a>>) -> Self {
+    fn ident_from_str(name: &'a parser::Path) -> Self {
         Self::Constructor {
             path: name,
             args: Vec::new(),
@@ -347,7 +342,7 @@ impl<'a> Ast<'a> {
                                 },
                             )
                             .collect(),
-                        type_variables: (&a.type_variables).into(),
+                        type_variables: &a.type_variables,
                         decl_id,
                         is_public: a.is_public,
                     });
@@ -419,7 +414,7 @@ impl<'a> Ast<'a> {
                                 module_path,
                             )?
                             .0,
-                            (&a.body.1).into(),
+                            &a.body.1,
                         ),
                         is_public: a.is_public,
                     })
@@ -447,7 +442,7 @@ impl<'a> Ast<'a> {
                                         module_path,
                                     )?
                                     .0,
-                                    forall.into(),
+                                    forall,
                                 ))
                             })
                             .try_collect()?,
@@ -491,9 +486,16 @@ impl<'a> Ast<'a> {
                 parser::Decl::Interface(_) => (),
                 parser::Decl::Use { path, is_public } => {
                     imports.insert_name_alias(
-                        Path::from_str(module_path, &path.last().unwrap().0),
-                        module_path,
-                        path.clone(),
+                        Path::from_str(
+                            module_path,
+                            &path.path.last().unwrap().0,
+                        ),
+                        if path.from_root {
+                            Path::pkg_root()
+                        } else {
+                            module_path
+                        },
+                        path.path.clone(),
                         *is_public,
                     );
                 }
@@ -533,30 +535,6 @@ impl<'a> Ast<'a> {
     }
 }
 
-impl<'a> From<&'a parser::Forall> for Forall<'a> {
-    fn from(parser::Forall { type_variables }: &'a parser::Forall) -> Self {
-        Forall {
-            type_variables: type_variables
-                .iter()
-                .map(|((name, span, id), ts)| {
-                    (
-                        (name.as_str(), span.clone(), *id),
-                        ts.iter()
-                            .map(|path| {
-                                path.iter()
-                                    .map(|(n, span, id)| {
-                                        (n.as_str(), span.clone(), *id)
-                                    })
-                                    .collect()
-                            })
-                            .collect(),
-                    )
-                })
-                .collect(),
-        }
-    }
-}
-
 fn expr<'a>(
     e: &'a parser::Expr,
     env: &mut Env,
@@ -566,10 +544,7 @@ fn expr<'a>(
     if let Some((annotation, forall)) = &e.1 {
         let (t, _span) = fold_op_sequence(annotation, env, module_path)?;
         let span = value.1.clone();
-        Ok((
-            Expr::TypeAnnotation(Box::new(value), t, forall.into()),
-            span,
-        ))
+        Ok((Expr::TypeAnnotation(Box::new(value), t, forall), span))
     } else {
         Ok(value)
     }
@@ -589,7 +564,7 @@ fn variable_decl<'a>(
             .as_ref()
             .map(|(s, forall)| {
                 let (t, span) = fold_op_sequence(s, env, module_path)?;
-                Ok((t, forall.into(), span))
+                Ok((t, forall, span))
             })
             .transpose()?,
         value: expr(&v.expr, env, module_path)?,
@@ -618,7 +593,7 @@ where
             match sequence.get_mut(i_prev).unwrap() {
                 OpSequenceUnit::Operand(e1) => {
                     if let OpSequenceUnit::Operand(e2) = s_i_next.unwrap() {
-                        *e1 = (T::ident_from_str(vec![name]), name_span)
+                        *e1 = (T::ident_from_str(name), name_span)
                             .add_argument(e1.clone())
                             .add_argument(e2);
                     } else {
@@ -730,12 +705,7 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::TypeUnit, &'a Span) {
             parser::TypeUnit::Ident { path } => Ok((
                 Type {
                     args: Vec::new(),
-                    path: path
-                        .iter()
-                        .map(|(name, span, id)| {
-                            (name.as_str(), span.clone(), *id)
-                        })
-                        .collect(),
+                    path,
                 },
                 self.1.clone(),
             )),
@@ -770,11 +740,11 @@ where
                 let (ass, p) = env.imports.get_op_precedence(
                     module_path,
                     module_path,
-                    &a.0,
+                    &a.path.last().unwrap().0,
                     Some(span.clone()),
                     env.token_map,
                 )?;
-                Ok(Operator((&a.0, a.1.clone(), a.2), ass, p, span.clone()))
+                Ok(Operator(a, ass, p, span.clone()))
             }
             parser::OpSequenceUnit::Apply(a) => Ok(Apply(a)),
         })
@@ -847,12 +817,7 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::ExprUnit, &'a Span) {
             ),
             parser::ExprUnit::Int(a) => Number(a),
             parser::ExprUnit::Str(a) => StrLiteral(a),
-            parser::ExprUnit::Ident { path } => Ident {
-                path: path
-                    .iter()
-                    .map(|name| (name.0.as_str(), name.1.clone(), name.2))
-                    .collect(),
-            },
+            parser::ExprUnit::Ident { path } => Ident { path },
             parser::ExprUnit::VariableDecl(a) => {
                 Decl(Box::new(variable_decl(a, env, module_path)?))
             }
@@ -862,10 +827,7 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::ExprUnit, &'a Span) {
                 .map(|e| expr(e, env, module_path))
                 .try_collect()?),
             parser::ExprUnit::Record { path, fields } => Record {
-                path: path
-                    .iter()
-                    .map(|name| (name.0.as_str(), name.1.clone(), name.2))
-                    .collect(),
+                path,
                 fields: fields
                     .iter()
                     .map(|(f, e)| {
@@ -908,14 +870,12 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::PatternUnit, &'a Span) {
             parser::PatternUnit::Int(a) => Pattern::Number(a),
             parser::PatternUnit::Str(a) => Pattern::StrLiteral(a),
             parser::PatternUnit::Ident(path, ps) => {
-                if env.constructors.contains(path.last().unwrap().0.as_str()) {
+                if env
+                    .constructors
+                    .contains(path.path.last().unwrap().0.as_str())
+                {
                     Pattern::Constructor {
-                        path: path
-                            .iter()
-                            .map(|name| {
-                                (name.0.as_str(), name.1.clone(), name.2)
-                            })
-                            .collect(),
+                        path,
                         args: ps
                             .iter()
                             .map(|p| {
@@ -925,8 +885,9 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::PatternUnit, &'a Span) {
                     }
                 } else {
                     assert!(ps.is_empty());
-                    debug_assert_eq!(path.len(), 1);
-                    let name = &path[0];
+                    debug_assert!(!path.from_root);
+                    debug_assert_eq!(path.path.len(), 1);
+                    let name = &path.path[0];
                     Pattern::Binder((&name.0, name.1.clone(), name.2))
                 }
             }
@@ -935,7 +896,7 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::PatternUnit, &'a Span) {
                 Pattern::TypeRestriction(
                     Box::new(fold_op_sequence(p, env, module_path)?.0),
                     fold_op_sequence(t, env, module_path)?.0,
-                    forall.into(),
+                    forall,
                 )
             }
             parser::PatternUnit::Apply(pre_pattern, applications) => {

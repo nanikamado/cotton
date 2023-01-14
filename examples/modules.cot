@@ -3,7 +3,7 @@ mod aaa {
 
     pub mod bbb {
         use super::D1
-        pub to_string : D1 -> String = | _ => pkg::double("D1")
+        pub to_string : D1 -> String = | _ => ::double("D1")
     }
 }
 

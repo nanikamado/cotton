@@ -6,7 +6,7 @@ use chumsky::{Error, Stream};
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Forall {
-    pub type_variables: Vec<(StringWithId, Vec<Vec<StringWithId>>)>,
+    pub type_variables: Vec<(StringWithId, Vec<Path>)>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -21,7 +21,7 @@ pub struct VariableDecl {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum OpSequenceUnit<T, U> {
     Operand(T),
-    Op(StringWithId, Span),
+    Op(Path, Span),
     Apply(U),
 }
 
@@ -36,15 +36,21 @@ pub type Expr = (
     Option<(Type, Forall)>,
 );
 
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub struct Path {
+    pub from_root: bool,
+    pub path: Vec<StringWithId>,
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ExprUnit {
     Int(String),
     Str(String),
     Ident {
-        path: Vec<StringWithId>,
+        path: Path,
     },
     Record {
-        path: Vec<StringWithId>,
+        path: Path,
         fields: Vec<(StringWithId, Expr)>,
     },
     Case(Vec<FnArm>),
@@ -55,7 +61,7 @@ pub enum ExprUnit {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum TypeUnit {
-    Ident { path: Vec<StringWithId> },
+    Ident { path: Path },
     Paren(Type),
 }
 
@@ -69,7 +75,7 @@ pub type Type = Vec<OpSequenceUnit<(TypeUnit, Span), TypeApply>>;
 pub enum PatternUnit {
     Int(String),
     Str(String),
-    Ident(Vec<StringWithId>, Vec<Pattern>),
+    Ident(Path, Vec<Pattern>),
     Underscore,
     TypeRestriction(Box<Pattern>, Type, Forall),
     Apply(Box<(PatternUnit, Span)>, Vec<ApplyPattern>),
@@ -148,7 +154,7 @@ pub enum Decl {
         is_public: bool,
     },
     Use {
-        path: Vec<(String, Option<Span>, Option<TokenId>)>,
+        path: Path,
         is_public: bool,
     },
 }
@@ -185,10 +191,18 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         just(Token::Paren('(')).or(just(Token::OpenParenWithoutPad));
     let ident_or_op =
         ident.or(op.delimited_by(open_paren.clone(), just(Token::Paren(')'))));
-    let ident_with_path = ident
-        .then_ignore(just(Token::ColonColon))
-        .repeated()
-        .chain(ident_or_op.clone());
+    let ident_with_path = just(Token::ColonColon)
+        .or_not()
+        .then(
+            ident
+                .then_ignore(just(Token::ColonColon))
+                .repeated()
+                .chain(ident_or_op.clone()),
+        )
+        .map(|(root_no_not, path)| Path {
+            from_root: root_no_not.is_some(),
+            path,
+        });
     let forall = just(Token::Forall)
         .ignore_then(indented(
             ident
@@ -235,7 +249,14 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                     .map_with_span(|((o, o_token, o_span), e), span: Span| {
                         vec![
                             OpSequenceUnit::Op(
-                                (o, Some(o_span.clone()), o_token),
+                                Path {
+                                    from_root: false,
+                                    path: vec![(
+                                        o,
+                                        Some(o_span.clone()),
+                                        o_token,
+                                    )],
+                                },
                                 o_span,
                             ),
                             OpSequenceUnit::Operand((e, span)),
@@ -311,7 +332,13 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                             .then(pattern_unit.clone())
                             .map(|((s, s_span), (e, e_span))| {
                                 vec![
-                                    OpSequenceUnit::Op(s, s_span),
+                                    OpSequenceUnit::Op(
+                                        Path {
+                                            from_root: false,
+                                            path: vec![s],
+                                        },
+                                        s_span,
+                                    ),
                                     OpSequenceUnit::Operand((e, e_span)),
                                 ]
                             })
@@ -429,7 +456,13 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                         )
                         .map(|((name, s_span), (e, e_span))| {
                             vec![
-                                OpSequenceUnit::Op(name, s_span),
+                                OpSequenceUnit::Op(
+                                    Path {
+                                        from_root: false,
+                                        path: vec![name],
+                                    },
+                                    s_span,
+                                ),
                                 OpSequenceUnit::Operand((e, e_span)),
                             ]
                         })

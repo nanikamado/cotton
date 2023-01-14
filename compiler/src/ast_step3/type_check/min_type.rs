@@ -15,12 +15,11 @@ use crate::ast_step2::{
 use crate::errors::CompileError;
 use fxhash::FxHashMap;
 use itertools::Itertools;
-use parser::token_id::TokenId;
 use parser::Span;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct VariableRequirement {
-    pub name: Vec<(String, Option<Span>, Option<TokenId>)>,
+    pub name: parser::Path,
     pub module_path: Path,
     pub required_type: Type,
     pub ident: IdentId,
@@ -65,11 +64,12 @@ pub fn min_type_with_env(
             .map(|r| {
                 let name = imports.get_variables_with_path(
                     r.module_path,
-                    r.module_path,
-                    &r.name
-                        .iter()
-                        .map(|(a, b, c)| (a.as_str(), b.clone(), *c))
-                        .collect_vec(),
+                    if r.name.from_root {
+                        Path::pkg_root()
+                    } else {
+                        r.module_path
+                    },
+                    &r.name.path,
                     token_map,
                     candidates_from_implicit_parameters,
                 )?;
@@ -178,10 +178,7 @@ fn min_type_with_env_rec(
             let t: Type = TypeUnit::Variable(*type_variable).into();
             register_requirement(
                 VariableRequirement {
-                    name: name
-                        .iter()
-                        .map(|(a, b, c)| (a.to_string(), b.clone(), *c))
-                        .collect(),
+                    name: (*name).clone(),
                     module_path,
                     required_type: t.clone(),
                     ident: *ident_id,
@@ -307,8 +304,8 @@ fn register_requirement(
     bindings: &FxHashMap<String, (DeclId, types::Type)>,
     env: &mut Env<'_>,
 ) {
-    match bindings.get(&req.name[0].0) {
-        Some(a) if req.name.len() == 1 => {
+    match bindings.get(&req.name.path[0].0) {
+        Some(a) if req.name.path.len() == 1 && !req.name.from_root => {
             env.map.insert_type(
                 env.subtype_relations,
                 a.1.clone(),

@@ -17,7 +17,6 @@ use crate::intrinsics::{IntrinsicConstructor, IntrinsicType, INTRINSIC_TYPES};
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
-use parser::token_id::TokenId;
 use parser::Span;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
@@ -157,7 +156,7 @@ pub enum Expr<'a, T> {
     Number(&'a str),
     StrLiteral(&'a str),
     Ident {
-        name: Vec<(&'a str, Option<Span>, Option<TokenId>)>,
+        name: &'a parser::Path,
         ident_id: IdentId,
     },
     ResolvedIdent {
@@ -314,10 +313,12 @@ fn collect_data_and_type_alias_decls<'a>(
         let mut type_variables = FxHashMap::default();
         for ((name, _, id), interfaces) in &d.type_variables.type_variables {
             env.token_map.insert(*id, TokenMapEntry::TypeVariable);
-            type_variables.insert(*name, TypeVariable::new());
+            type_variables.insert(name.as_str(), TypeVariable::new());
             for path in interfaces {
-                env.token_map
-                    .insert(path.last().unwrap().2, TokenMapEntry::Interface);
+                env.token_map.insert(
+                    path.path.last().unwrap().2,
+                    TokenMapEntry::Interface,
+                );
             }
         }
         env.imports.add_data(
@@ -406,7 +407,7 @@ fn collect_interface_decls<'a>(
                                     self_,
                                 ))
                                 .collect(),
-                                forall.clone(),
+                                forall,
                                 &mut Env {
                                     interface_decls: &mut Default::default(),
                                     token_map: env.token_map,
@@ -532,7 +533,7 @@ fn variable_decl<'a>(
                 let implicit_type_parameters: Vec<_> = forall
                     .type_variables
                     .iter()
-                    .map(|(name, _)| Path::from_str(module_path, name.0))
+                    .map(|(name, _)| Path::from_str(module_path, &name.0))
                     .collect();
                 let t = type_to_type_with_forall(
                     t,
@@ -599,6 +600,11 @@ fn variable_decl<'a>(
     })
 }
 
+pub static FLAT_MAP_PATH: Lazy<parser::Path> = Lazy::new(|| parser::Path {
+    from_root: false,
+    path: vec![("flat_map".to_string(), None, None)],
+});
+
 fn catch_flat_map(
     e: WithFlatMapEnv,
 ) -> Result<ExprWithTypeAndSpan<TypeVariable>, CompileError> {
@@ -627,7 +633,7 @@ fn catch_flat_map(
                             Expr::Call(
                                 Box::new((
                                     Expr::Ident {
-                                        name: vec![("flat_map", None, None)],
+                                        name: &FLAT_MAP_PATH,
                                         ident_id: IdentId::new(),
                                     },
                                     TypeVariable::new(),
@@ -689,8 +695,10 @@ fn expr<'a>(
         ast_step1::Expr::StrLiteral(s) => (Vec::new(), StrLiteral(s)),
         ast_step1::Expr::Ident { path } => {
             let ident_id = IdentId::new();
-            env.token_map
-                .insert(path.last().unwrap().2, TokenMapEntry::Ident(ident_id));
+            env.token_map.insert(
+                path.path.last().unwrap().2,
+                TokenMapEntry::Ident(ident_id),
+            );
             (
                 Vec::new(),
                 Ident {
@@ -702,12 +710,18 @@ fn expr<'a>(
         ast_step1::Expr::Record { path, fields } => {
             let (name, id) = env.imports.get_constructor(
                 module_path,
-                module_path,
-                &path,
+                if path.from_root {
+                    Path::pkg_root()
+                } else {
+                    module_path
+                },
+                &path.path,
                 env.token_map,
             )?;
-            env.token_map
-                .insert(path.last().unwrap().2, TokenMapEntry::Constructor(id));
+            env.token_map.insert(
+                path.path.last().unwrap().2,
+                TokenMapEntry::Constructor(id),
+            );
             let fields: FxHashMap<_, _> =
                 fields.into_iter().map(|((n, _, _), e)| (n, e)).collect();
             let data_decl = env.field_names[&id].clone();
@@ -848,6 +862,11 @@ pub fn constructor_type(d: &DataDecl) -> TypeUnit {
     t
 }
 
+pub static UNIT_PATH: Lazy<parser::Path> = Lazy::new(|| parser::Path {
+    from_root: false,
+    path: vec![("()".to_string(), None, None)],
+});
+
 fn add_expr_in_do<'a>(
     e: ast_step1::ExprWithSpan<'a>,
     module_path: ModulePath,
@@ -864,7 +883,7 @@ fn add_expr_in_do<'a>(
                     vec![
                         (
                             Expr::Ident {
-                                name: vec![("()", None, None)],
+                                name: &UNIT_PATH,
                                 ident_id: IdentId::new(),
                             },
                             TypeVariable::new(),
@@ -980,12 +999,18 @@ fn pattern<'a>(
         ast_step1::Pattern::Constructor { path, args } => {
             let (name, id) = env.imports.get_constructor(
                 module_path,
-                module_path,
-                &path,
+                if path.from_root {
+                    Path::pkg_root()
+                } else {
+                    module_path
+                },
+                &path.path,
                 env.token_map,
             )?;
-            env.token_map
-                .insert(path.last().unwrap().2, TokenMapEntry::Constructor(id));
+            env.token_map.insert(
+                path.path.last().unwrap().2,
+                TokenMapEntry::Constructor(id),
+            );
             Constructor {
                 name,
                 id,
@@ -1042,8 +1067,12 @@ fn pattern<'a>(
                                 if let Some(field) =
                                     env.imports.get_accessor_with_path(
                                         module_path,
-                                        module_path,
-                                        path,
+                                        if path.from_root {
+                                            Path::pkg_root()
+                                        } else {
+                                            module_path
+                                        },
+                                        &path.path,
                                         *constructor_id,
                                         env.token_map,
                                     )?
@@ -1113,7 +1142,7 @@ fn type_to_type(
     search_type: SearchMode,
     env: &mut Env<'_, '_>,
 ) -> Result<Type, CompileError> {
-    match (t.path.len(), t.path.last().unwrap().0) {
+    match (t.path.path.len(), t.path.path.last().unwrap().0.as_str()) {
         (1, "|") => Ok(t
             .args
             .iter()
@@ -1150,12 +1179,16 @@ fn type_to_type(
         _ => {
             let base_path = env.imports.get_module_with_path(
                 module_path,
-                module_path,
-                &t.path[..t.path.len() - 1],
+                if t.path.from_root {
+                    Path::pkg_root()
+                } else {
+                    module_path
+                },
+                &t.path.path[..t.path.path.len() - 1],
                 env.token_map,
                 &Default::default(),
             )?;
-            let (name, span, token_id) = t.path.last().unwrap();
+            let (name, span, token_id) = t.path.path.last().unwrap();
             let path = Path::from_str(base_path, name);
             if let Some(n) = type_variable_names.get(&path) {
                 env.token_map.insert(*token_id, TokenMapEntry::TypeVariable);
@@ -1200,7 +1233,7 @@ fn type_to_type(
                             tuple = TypeUnit::Tuple(a, tuple).into();
                         }
                         env.token_map.insert(
-                            t.path.last().unwrap().2,
+                            t.path.path.last().unwrap().2,
                             TokenMapEntry::TypeId(id),
                         );
                         Ok(TypeUnit::Tuple(
@@ -1244,19 +1277,23 @@ fn type_to_type_with_forall(
     t: ast_step1::Type,
     module_path: ModulePath,
     mut type_variable_names: FxHashMap<Path, TypeVariable>,
-    forall: ast_step1::Forall,
+    forall: &parser::Forall,
     env: &mut Env<'_, '_>,
 ) -> Result<Type, CompileError> {
     let mut variable_requirements = Vec::new();
     let mut type_parameters = Vec::new();
-    for (s, interface_names) in forall.type_variables {
+    for (s, interface_names) in &forall.type_variables {
         env.token_map.insert(s.2, TokenMapEntry::TypeVariable);
         let v = TypeVariable::new();
         for path in interface_names {
             let name = env.imports.get_interface(
                 module_path,
-                module_path,
-                &path,
+                if path.from_root {
+                    Path::pkg_root()
+                } else {
+                    module_path
+                },
+                &path.path,
                 env.token_map,
             )?;
             for (name, t, self_) in &env.interface_decls[&name] {
@@ -1268,7 +1305,7 @@ fn type_to_type_with_forall(
             }
         }
         type_parameters.push(v);
-        type_variable_names.insert(Path::from_str(module_path, s.0), v);
+        type_variable_names.insert(Path::from_str(module_path, &s.0), v);
     }
     let mut t = type_to_type(
         &t,

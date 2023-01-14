@@ -185,7 +185,7 @@ fn expr<'a>(
         ast_step2::Expr::Ident { name, ident_id } => {
             let resolved_item = resolved_idents[&ident_id].clone();
             get_expr_from_resolved_ident(
-                name.last().unwrap().0.to_string(),
+                name.path.last().unwrap().0.to_string(),
                 &resolved_item,
                 map.find(t),
                 resolved_idents,

@@ -10,6 +10,7 @@ use crate::errors::CompileError;
 use fxhash::FxHashMap;
 use itertools::Itertools;
 use parser::token_id::TokenId;
+use parser::Forall;
 
 #[derive(Debug, Clone)]
 enum AliasComputation {
@@ -23,7 +24,7 @@ pub struct TypeAliasMap<'a>(FxHashMap<Path, AliasEntry<'a>>);
 #[derive(Debug, Clone)]
 struct AliasEntry<'a> {
     type_: ast_step1::Type<'a>,
-    type_variables: ast_step1::Forall<'a>,
+    type_variables: &'a Forall,
     alias_computation: AliasComputation,
     base_path: Path,
 }
@@ -87,12 +88,12 @@ impl<'a> Env<'a, '_> {
                         self.token_map.insert(s.2, TokenMapEntry::TypeVariable);
                         for path in interfaces {
                             self.token_map.insert(
-                                path.last().unwrap().2,
+                                path.path.last().unwrap().2,
                                 TokenMapEntry::Interface,
                             );
                         }
                         type_variable_names
-                            .insert(Path::from_str(alias.base_path, s.0), v);
+                            .insert(Path::from_str(alias.base_path, &s.0), v);
                         v
                     })
                     .collect_vec();
@@ -152,7 +153,7 @@ impl<'a> TypeAliasMap<'a> {
                 name,
                 AliasEntry {
                     type_: a.body.0.clone(),
-                    type_variables: a.body.1.clone(),
+                    type_variables: a.body.1,
                     alias_computation: AliasComputation::NotUnaliased,
                     base_path: module_path,
                 },
