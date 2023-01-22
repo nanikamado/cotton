@@ -1,5 +1,5 @@
 use super::simplify::{DataDecl, Env};
-use super::{unwrap_recursive_alias, TypeVariableMap};
+use super::{simplify_subtype_rel, unwrap_recursive_alias, TypeVariableMap};
 use crate::ast_step2::types::{
     unwrap_or_clone, Type, TypeConstructor, TypeMatchable, TypeMatchableRef,
     TypeUnit, TypeVariable,
@@ -436,15 +436,30 @@ fn close_type_unit(
                                     subtype_relations,
                                     span.clone(),
                                 )?;
-                                subtype_relations.insert((
+                                let r = simplify_subtype_rel(
                                     b.clone(),
                                     field_t.clone(),
-                                    RelOrigin {
-                                        left: b.clone(),
-                                        right: field_t.clone(),
+                                    None,
+                                )
+                                .map_err(|reason| {
+                                    CompileError::NotSubtypeOf {
+                                        sub_type: b.clone(),
+                                        super_type: field_t.clone(),
+                                        reason,
                                         span: span.clone(),
-                                    },
-                                ));
+                                    }
+                                })?;
+                                for (r0, r1) in r {
+                                    subtype_relations.insert((
+                                        r0,
+                                        r1,
+                                        RelOrigin {
+                                            left: b.clone(),
+                                            right: field_t.clone(),
+                                            span: span.clone(),
+                                        },
+                                    ));
+                                }
                             }
                             ts.union_in_place(
                                 TypeUnit::Tuple(
