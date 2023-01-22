@@ -241,6 +241,7 @@ fn lexer(
             ":" => Token::Colon,
             _ => Token::Op(op, TokenId::new()),
         }));
+    let comment = just("//").then(take_until(just('\n'))).padded();
 
     let line_ws = filter(|c: &char| c.is_inline_whitespace());
 
@@ -252,7 +253,8 @@ fn lexer(
             .map_with_span(|tok, span| (tok, span)))
         .or(line_ws.repeated().ignore_then(
             choice((int, str, paren, op, ident))
-                .map_with_span(|tok, span| (tok, span)),
+                .map_with_span(|tok, span| (tok, span))
+                .padded_by(comment.repeated()),
         ));
 
     semantic_indentation(tt, Token::Indent, Token::Dedent, src_len)
