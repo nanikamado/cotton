@@ -1,8 +1,11 @@
+use super::match_operand::MatchOperand;
+use super::simplify::DataDecl;
 use super::{
     Resolved, ResolvedIdent, TypeVariableMap, TypesOfLocalDeclsVec, VariableId,
 };
 use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::ident_id::IdentId;
+use crate::ast_step1::merge_span;
 use crate::ast_step1::name_id::Path;
 use crate::ast_step1::token_map::TokenMap;
 use crate::ast_step2::imports::Imports;
@@ -10,9 +13,13 @@ use crate::ast_step2::types::{self, Type, TypeUnit, TypeVariable};
 use crate::ast_step2::{
     self, Expr, ExprWithTypeAndSpan, FnArm, Pattern, PatternRestriction,
     PatternRestrictions, PatternUnit, PatternUnitForRestriction, RelOrigin,
-    SubtypeRelations,
+    SubtypeRelations, TypeId,
+};
+use crate::ast_step3::type_check::match_operand::{
+    close_type, MatchOperandUnit,
 };
 use crate::errors::CompileError;
+use crate::intrinsics::IntrinsicType;
 use fxhash::FxHashMap;
 use itertools::Itertools;
 use parser::Span;
@@ -35,6 +42,7 @@ pub fn min_type_with_env(
     imports: &mut Imports,
     token_map: &mut TokenMap,
     candidates_from_implicit_parameters: &FxHashMap<&str, Vec<DeclId>>,
+    data_decls: &FxHashMap<TypeId, DataDecl>,
 ) -> Result<
     (ast_step2::TypeWithEnv, Resolved, TypesOfLocalDeclsVec),
     CompileError,
@@ -54,9 +62,10 @@ pub fn min_type_with_env(
             types_of_decls: &mut types_of_local_decls,
             map,
             variable_requirements: &mut req,
+            data_decls,
         },
         &Default::default(),
-    );
+    )?;
     let t = ast_step2::TypeWithEnv {
         constructor: t,
         variable_requirements: req
@@ -104,6 +113,7 @@ struct Env<'a> {
     types_of_decls: &'a mut TypesOfLocalDeclsVec,
     map: &'a mut TypeVariableMap,
     variable_requirements: &'a mut Vec<VariableRequirement>,
+    data_decls: &'a FxHashMap<TypeId, DataDecl>,
 }
 
 fn min_type_with_env_rec(
@@ -111,32 +121,47 @@ fn min_type_with_env_rec(
     module_path: Path,
     env: &mut Env<'_>,
     bindings: &FxHashMap<String, (DeclId, types::Type)>,
-) -> Type {
+) -> Result<Type, CompileError> {
     match expr {
         Expr::Lambda(arms) => {
             let mut arm_types = Vec::new();
             let mut restrictions = Vec::new();
+            let mut pattern_span = None;
             for arm in arms {
-                let t = arm_min_type(arm, module_path, env, bindings);
+                let t = arm_min_type(arm, module_path, env, bindings)?;
                 arm_types.push(t.arm_types);
+                let s = t
+                    .restrictions
+                    .iter()
+                    .map(|(_, s)| s.clone())
+                    .reduce(|acc, s| merge_span(&acc, &s))
+                    .unwrap();
+                pattern_span = Some(
+                    pattern_span
+                        .map(|span| merge_span(&span, &s))
+                        .unwrap_or_else(|| s.clone()),
+                );
                 restrictions.push(t.restrictions);
             }
             let arg_len = arm_types.iter().map(Vec::len).min().unwrap() - 1;
-            let mut arm_types =
-                arm_types.into_iter().map(Vec::into_iter).collect_vec();
-            let arg_types: Vec<Type> = (0..arg_len)
-                .map(|_| {
-                    let _t: Type = arm_types
-                        .iter_mut()
-                        .flat_map(|arm_type| arm_type.next().unwrap())
-                        .collect();
-                    TypeUnit::new_variable().into()
-                })
+            let mut arg_types = Type::default();
+            let arg_type_vs: Vec<Type> = (0..arg_len)
+                .map(|_| TypeUnit::new_variable().into())
                 .collect();
-            let rtn_type: Type =
-                arm_types.into_iter().flat_map(types_to_fn_type).collect();
+            let mut rtn_type: Type = Type::default();
+            for mut args in arm_types {
+                let return_types = args.split_off(arg_len);
+                arg_types = arg_types.union_unit(args.into_iter().rev().fold(
+                    TypeUnit::Const {
+                        id: TypeId::Intrinsic(IntrinsicType::Unit),
+                    },
+                    |acc, arg| TypeUnit::Tuple(arg, acc.into()),
+                ));
+                rtn_type
+                    .union_in_place(types_to_fn_type(return_types.into_iter()));
+            }
             let constructor: Type = types_to_fn_type(
-                arg_types
+                arg_type_vs
                     .clone()
                     .into_iter()
                     .chain(std::iter::once(rtn_type)),
@@ -149,8 +174,19 @@ fn min_type_with_env_rec(
                     (r, span.unwrap())
                 })
                 .collect();
+            let argument_tuple =
+                Type::argument_tuple_from_arguments(arg_type_vs);
+            env.subtype_relations.insert((
+                argument_tuple.clone(),
+                arg_types.clone(),
+                RelOrigin {
+                    left: argument_tuple.clone(),
+                    right: arg_types,
+                    span: pattern_span.unwrap(),
+                },
+            ));
             env.pattern_restrictions.push(PatternRestriction {
-                type_: Type::argument_tuple_from_arguments(arg_types),
+                type_: argument_tuple,
                 pattern: restrictions,
                 span: span.clone(),
                 allow_inexhaustive: false,
@@ -160,19 +196,19 @@ fn min_type_with_env_rec(
                 *type_variable,
                 constructor.clone(),
             );
-            constructor
+            Ok(constructor)
         }
         Expr::Number(_) => {
             let t = Type::intrinsic_from_str("I64");
             env.map
                 .insert(env.subtype_relations, *type_variable, t.clone());
-            t
+            Ok(t)
         }
         Expr::StrLiteral(_) => {
             let t = Type::intrinsic_from_str("String");
             env.map
                 .insert(env.subtype_relations, *type_variable, t.clone());
-            t
+            Ok(t)
         }
         Expr::Ident { name, ident_id } => {
             let t: Type = TypeUnit::Variable(*type_variable).into();
@@ -189,7 +225,7 @@ fn min_type_with_env_rec(
                 bindings,
                 env,
             );
-            t
+            Ok(t)
         }
         Expr::ResolvedIdent { type_, .. } => {
             env.map.insert(
@@ -197,11 +233,11 @@ fn min_type_with_env_rec(
                 *type_variable,
                 type_.clone(),
             );
-            type_.clone()
+            Ok(type_.clone())
         }
         Expr::Call(f, a) => {
-            let f_t = min_type_with_env_rec(f, module_path, env, bindings);
-            let a_t = min_type_with_env_rec(a, module_path, env, bindings);
+            let f_t = min_type_with_env_rec(f, module_path, env, bindings)?;
+            let a_t = min_type_with_env_rec(a, module_path, env, bindings)?;
             let b: types::Type = TypeUnit::Variable(*type_variable).into();
             let c: types::Type = TypeUnit::new_variable().into();
             // c -> b
@@ -225,20 +261,20 @@ fn min_type_with_env_rec(
                     span: a.2.clone(),
                 },
             ));
-            b
+            Ok(b)
         }
         Expr::Do(es) => {
             let t = es
                 .iter()
                 .map(|e| min_type_with_env_rec(e, module_path, env, bindings))
-                .collect::<Vec<_>>();
+                .try_collect::<_, Vec<_>, _>()?;
             let t = t.last().unwrap().clone();
             env.map
                 .insert(env.subtype_relations, *type_variable, t.clone());
-            t
+            Ok(t)
         }
         Expr::TypeAnnotation(e, annotation) => {
-            let t = min_type_with_env_rec(e, module_path, env, bindings);
+            let t = min_type_with_env_rec(e, module_path, env, bindings)?;
             env.subtype_relations.insert((
                 t.clone(),
                 annotation.clone(),
@@ -248,7 +284,7 @@ fn min_type_with_env_rec(
                     span: span.clone(),
                 },
             ));
-            annotation.clone()
+            Ok(annotation.clone())
         }
     }
 }
@@ -274,29 +310,29 @@ fn arm_min_type(
     module_path: Path,
     env: &mut Env<'_>,
     bindings: &FxHashMap<String, (DeclId, types::Type)>,
-) -> ArmType {
+) -> Result<ArmType, CompileError> {
     let mut bindings = bindings.clone();
-    let (mut ts, restrictions): (Vec<_>, Vec<_>) = arm
-        .pattern
-        .iter()
-        .map(|(p, span)| {
-            let (t, rest) = pattern_to_type(
-                p,
-                span.clone(),
-                module_path,
-                env,
-                &mut bindings,
-            );
-            (t, rest)
-        })
-        .multiunzip();
+    let mut ts = Vec::new();
+    let mut restrictions = Vec::new();
+    for (p, span) in &arm.pattern {
+        let (t, r) =
+            pattern_to_type(p, span.clone(), module_path, env, &mut bindings)?;
+        ts.push(close_type(
+            t,
+            env.data_decls,
+            env.map,
+            env.subtype_relations,
+            span.clone(),
+        )?);
+        restrictions.push(r);
+    }
     let body_type =
-        min_type_with_env_rec(&arm.expr, module_path, env, &bindings);
+        min_type_with_env_rec(&arm.expr, module_path, env, &bindings)?;
     ts.push(body_type);
-    ArmType {
+    Ok(ArmType {
         arm_types: ts,
         restrictions,
-    }
+    })
 }
 
 fn register_requirement(
@@ -333,41 +369,46 @@ fn register_requirement(
     }
 }
 
+/// Returns tuple of
+/// - Largest type containing only values that the pattern can accept.
+/// - PatternUnitForRestriction, which is a clone of a pattern
+/// that is intended to be used in the type system.
 fn pattern_unit_to_type(
     p: &PatternUnit<TypeVariable>,
     bindings: &mut FxHashMap<String, (DeclId, types::Type)>,
     span: Span,
     module_path: Path,
     env: &mut Env<'_>,
-) -> (types::Type, PatternUnitForRestriction) {
+) -> Result<(MatchOperand, PatternUnitForRestriction), CompileError> {
     use PatternUnit::*;
     match p {
-        I64(_) => (
-            Type::intrinsic_from_str("I64"),
-            PatternUnitForRestriction::I64,
-        ),
-        Str(_) => (
-            Type::intrinsic_from_str("String"),
-            PatternUnitForRestriction::Str,
-        ),
+        I64(_) => Ok((MatchOperand::default(), PatternUnitForRestriction::I64)),
+        Str(_) => Ok((MatchOperand::default(), PatternUnitForRestriction::Str)),
         Constructor { id, args, .. } => {
-            let (types, pattern_restrictions): (Vec<_>, Vec<_>) = args
-                .iter()
-                .map(|p| {
-                    let (t, res) = pattern_to_type(
-                        p,
-                        span.clone(),
-                        module_path,
-                        env,
-                        bindings,
-                    );
-                    (t, res)
-                })
-                .multiunzip();
-            (
-                TypeUnit::Tuple(
-                    TypeUnit::Const { id: (*id).into() }.into(),
-                    Type::argument_tuple_from_arguments(types),
+            let mut types = Vec::new();
+            let mut pattern_restrictions = Vec::new();
+            match id {
+                ast_step2::ConstructorId::DeclId(_) => {
+                    for (p, span) in args {
+                        let (p_match_operand, p) = pattern_to_type(
+                            p,
+                            span.clone(),
+                            module_path,
+                            env,
+                            bindings,
+                        )?;
+                        types.push(p_match_operand);
+                        pattern_restrictions.push(p);
+                    }
+                }
+                ast_step2::ConstructorId::Intrinsic(_) => {
+                    debug_assert!(args.is_empty());
+                }
+            }
+            Ok((
+                MatchOperandUnit::Tuple(
+                    MatchOperandUnit::Const((*id).into()).into(),
+                    MatchOperand::argument_tuple_from_arguments(types),
                 )
                 .into(),
                 PatternUnitForRestriction::Tuple(
@@ -379,42 +420,42 @@ fn pattern_unit_to_type(
                     .0
                     .into(),
                 ),
-            )
+            ))
         }
-        Binder(name, decl_id, t) => {
-            let t = Type::from(TypeUnit::Variable(*t));
-            bindings.insert(name.to_string(), (*decl_id, t.clone()));
+        Binder(name, decl_id, v) => {
+            let t = TypeUnit::Variable(*v);
+            bindings.insert(name.to_string(), (*decl_id, t.clone().into()));
             env.types_of_decls
-                .push((VariableId::Local(*decl_id), t.clone()));
-            (t.clone(), PatternUnitForRestriction::Binder(t, *decl_id))
+                .push((VariableId::Local(*decl_id), t.clone().into()));
+            Ok((
+                MatchOperandUnit::Unmatchable(t.clone()).into(),
+                PatternUnitForRestriction::Binder(t.into(), *decl_id),
+            ))
         }
-        ResolvedBinder(decl_id, t) => (
-            TypeUnit::Variable(*t).into(),
+        ResolvedBinder(decl_id, t) => Ok((
+            MatchOperandUnit::Unmatchable(TypeUnit::Variable(*t)).into(),
             PatternUnitForRestriction::Binder(
                 TypeUnit::Variable(*t).into(),
                 *decl_id,
             ),
-        ),
+        )),
         Underscore => {
-            let v = TypeVariable::new();
-            (
-                TypeUnit::Variable(v).into(),
-                PatternUnitForRestriction::Binder(
-                    TypeUnit::Variable(v).into(),
-                    DeclId::new(),
-                ),
-            )
+            let v = TypeUnit::new_variable();
+            Ok((
+                MatchOperandUnit::Unmatchable(v.clone()).into(),
+                PatternUnitForRestriction::Binder(v.into(), DeclId::new()),
+            ))
         }
         TypeRestriction(p, t) => {
             let (_, (pattern_restriction, _span)) =
-                pattern_to_type(p, span, module_path, env, bindings);
-            (
-                t.clone(),
+                pattern_to_type(p, span, module_path, env, bindings)?;
+            Ok((
+                MatchOperand::not_computed_from_type(t.clone()),
                 PatternUnitForRestriction::TypeRestriction(
                     Box::new(pattern_restriction),
                     t.clone(),
                 ),
-            )
+            ))
         }
         Apply(pre_pattern, applications) => {
             let (t, (pattern_restriction, _)) = pattern_to_type(
@@ -423,7 +464,7 @@ fn pattern_unit_to_type(
                 module_path,
                 env,
                 bindings,
-            );
+            )?;
             let mut all_post_patterns_are_bind = true;
             for a in applications {
                 let function_t = min_type_with_env_rec(
@@ -431,15 +472,15 @@ fn pattern_unit_to_type(
                     module_path,
                     env,
                     bindings,
-                );
-                let post_pattern_t = Type::from(TypeUnit::new_variable());
-                let (_, r) = pattern_to_type(
+                )?;
+                let post_pattern_v = Type::from(TypeUnit::new_variable());
+                let (_post_pattern_match_operand, r) = pattern_to_type(
                     &a.post_pattern,
                     span.clone(),
                     module_path,
                     env,
                     bindings,
-                );
+                )?;
                 if !matches!(r.0, PatternUnitForRestriction::Binder(_, _)) {
                     all_post_patterns_are_bind = false;
                 }
@@ -447,16 +488,25 @@ fn pattern_unit_to_type(
                     PatternUnitForRestriction::argument_tuple_from_arguments(
                         vec![r],
                     );
+                let span = span.unwrap();
                 env.pattern_restrictions.push(PatternRestriction {
                     type_: Type::argument_tuple_from_arguments(vec![
-                        post_pattern_t.clone(),
+                        post_pattern_v.clone(),
                     ]),
-                    pattern: vec![(r, span.clone().unwrap())],
-                    span: span.unwrap(),
+                    pattern: vec![(r, span.clone())],
+                    span: span.clone(),
                     allow_inexhaustive: true,
                 });
-                let function_t_expected =
-                    Type::from(TypeUnit::Fn(t.clone(), post_pattern_t));
+                let function_t_expected = Type::from(TypeUnit::Fn(
+                    close_type(
+                        t.clone(),
+                        env.data_decls,
+                        env.map,
+                        env.subtype_relations,
+                        span.clone(),
+                    )?,
+                    post_pattern_v,
+                ));
                 env.subtype_relations.insert((
                     function_t.clone(),
                     function_t_expected.clone(),
@@ -467,7 +517,7 @@ fn pattern_unit_to_type(
                     },
                 ));
             }
-            (
+            Ok((
                 t,
                 if all_post_patterns_are_bind {
                     pattern_restriction
@@ -476,7 +526,7 @@ fn pattern_unit_to_type(
                         pattern_restriction,
                     ))
                 },
-            )
+            ))
         }
     }
 }
@@ -487,13 +537,18 @@ fn pattern_to_type(
     module_path: Path,
     env: &mut Env<'_>,
     bindings: &mut FxHashMap<String, (DeclId, types::Type)>,
-) -> (Type, (PatternUnitForRestriction, Span)) {
+) -> Result<(MatchOperand, (PatternUnitForRestriction, Span)), CompileError> {
     if p.0.len() >= 2 {
         unimplemented!()
     }
     let mut ps = p.0.iter();
     let first_p = ps.next().unwrap();
-    let (t, pattern) =
-        pattern_unit_to_type(first_p, bindings, span.clone(), module_path, env);
-    (t, (pattern, span))
+    let (t, pattern) = pattern_unit_to_type(
+        first_p,
+        bindings,
+        span.clone(),
+        module_path,
+        env,
+    )?;
+    Ok((t, (pattern, span)))
 }

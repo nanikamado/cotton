@@ -1,26 +1,23 @@
 data E
-data T(C, N, T1, T2) forall { C, N, T1, T2 }
-
+data T(Color, N, RBTree[N], RBTree[N]) forall { N }
 data R
 data B
 
 type Color = R | B
+type RBTree = E | T[A] forall { A }
 
-type RBTree = E | T[Color, A, RBTree[A], RBTree[A]] forall { A }
-type NonEmptyRBTree = T[Color, A, RBTree[A], RBTree[A]] forall { A }
-
-insert : RBTree[I64] -> I64 -> NonEmptyRBTree[I64] =
+insert : RBTree[I64] -> I64 -> T[I64] =
     | t, x => t.insert_rec(x).
-        | T(_, x, a, b) => T(B, x, a, b)
+        | T(c, x, a, b) => T(B, x, a, b)
 
-insert_rec : RBTree[I64] -> I64 -> NonEmptyRBTree[I64] =
+insert_rec : RBTree[I64] -> I64 -> T[I64] =
     | E, x => T(R, x, E, E)
     | T(color, y, a, b), x => (x < y /\ y < x).
         | True /\ _ => T(color, y, a.insert_rec(x), b).balance
         | _ /\ True => T(color, y, a, b.insert_rec(x)).balance
         | _ => T(B, y, a, b)
 
-balance : NonEmptyRBTree[I64] -> NonEmptyRBTree[I64] =
+balance : T[I64] -> T[I64] =
     | T(B, u, T(R, v, T(R, w, t1, t2), t3), t4) =>
         T(R, v, T(B, w, t1, t2), T(B, u, t3, t4))
     | T(B, u, T(R, v, t1, T(R, w, t2, t3)), t4) =>

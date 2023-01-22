@@ -124,7 +124,7 @@ pub struct DataDecl {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Field {
     pub name: StringWithId,
-    pub type_: StringWithId,
+    pub type_: Type,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -220,7 +220,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 .map(|(n, t)| (n, t.unwrap_or_default()))
                 .collect(),
         });
-    let type_ = recursive(|type_| {
+    let type_without_forall = recursive(|type_| {
         let type_unit = ident_with_path
             .clone()
             .map(|path| TypeUnit::Ident { path })
@@ -270,14 +270,24 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 [vec![OpSequenceUnit::Operand((e, e_span))], oes].concat()
             })
     });
-    let type_ = type_.then(forall.clone().or_not()).map(|(t, forall)| {
-        (
-            t,
-            forall.unwrap_or_else(|| Forall {
-                type_variables: Vec::new(),
-            }),
-        )
-    });
+    let type_unit = ident_with_path
+        .clone()
+        .map(|path| TypeUnit::Ident { path })
+        .or(type_without_forall
+            .clone()
+            .delimited_by(open_paren.clone(), just(Token::Paren(')')))
+            .map(TypeUnit::Paren));
+    let type_ = type_without_forall
+        .clone()
+        .then(forall.clone().or_not())
+        .map(|(t, forall)| {
+            (
+                t,
+                forall.unwrap_or_else(|| Forall {
+                    type_variables: Vec::new(),
+                }),
+            )
+        });
     let variable_decl = recursive(|variable_decl| {
         let expr = recursive(|expr_without_type_annotation| {
             let expr = expr_without_type_annotation
@@ -519,7 +529,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         );
     let data_decl_normal = ident
         .then(
-            ident_or_op
+            type_without_forall
                 .clone()
                 .separated_by(just(Token::Comma))
                 .allow_trailing()
@@ -536,9 +546,9 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 .into_iter()
                 .flatten()
                 .enumerate()
-                .map(|(i, a)| Field {
+                .map(|(i, type_)| Field {
                     name: (format!("_{i}"), None, None),
-                    type_: a,
+                    type_,
                 })
                 .collect(),
             type_variables: forall.unwrap_or_default(),
@@ -548,7 +558,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         .then(indented(
             ident
                 .then_ignore(just(Token::Colon))
-                .then(ident)
+                .then(type_without_forall.clone())
                 .separated_by(just(Token::Comma))
                 .allow_trailing(),
         ))
@@ -562,23 +572,27 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
             type_variables: forall.unwrap_or_default(),
             is_public: false,
         });
-    let data_decl_infix = ident.then(op).then(ident).then(forall.or_not()).map(
-        |(((ident1, name), ident2), forall)| DataDecl {
+    let data_decl_infix = type_unit
+        .clone()
+        .map_with_span(|t, s| (t, s))
+        .then(op)
+        .then(type_unit.map_with_span(|t, s| (t, s)))
+        .then(forall.or_not())
+        .map(|(((ident1, name), ident2), forall)| DataDecl {
             name,
             fields: vec![
                 Field {
                     name: ("_0".to_string(), None, None),
-                    type_: ident1,
+                    type_: vec![OpSequenceUnit::Operand(ident1)],
                 },
                 Field {
                     name: ("_1".to_string(), None, None),
-                    type_: ident2,
+                    type_: vec![OpSequenceUnit::Operand(ident2)],
                 },
             ],
             type_variables: forall.unwrap_or_default(),
             is_public: false,
-        },
-    );
+        });
     let data_decl = just(Token::Pub)
         .or_not()
         .then_ignore(just(Token::Data))

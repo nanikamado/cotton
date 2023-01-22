@@ -1,11 +1,11 @@
 data E
 data T {
     value: A,
-    left: B,
-    right: C
-} forall { A, B, C }
+    left: Tree[A],
+    right: Tree[A],
+} forall { A }
 
-type Tree = E | T[A, Tree[A], Tree[A]] forall { A }
+type Tree = E | T[A] forall { A }
 
 identity = | a => a
 

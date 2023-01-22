@@ -2,10 +2,11 @@ use crate::ast_step2::types::{
     merge_vec, unwrap_or_clone, Type, TypeConstructor, TypeMatchable,
     TypeMatchableRef, TypeUnit, TypeVariable,
 };
-use crate::ast_step2::{RelOrigin, SubtypeRelations, TypeId, TypeWithEnv};
+use crate::ast_step2::{RelOrigin, TypeId, TypeWithEnv};
 use crate::ast_step3::type_check::unwrap_recursive_alias;
 use crate::errors::NotSubtypeReason;
 use crate::intrinsics::INTRINSIC_TYPES;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 impl TypeUnit {
@@ -21,7 +22,7 @@ impl TypeUnit {
                 let s = body.all_type_variables_vec();
                 s.into_iter().filter(|d| !d.is_recursive_index()).collect()
             }
-            TypeUnit::Const { .. } => Vec::new(),
+            TypeUnit::Const { .. } | TypeUnit::Any => Vec::new(),
             TypeUnit::Tuple(a, b) => a
                 .all_type_variables_vec()
                 .into_iter()
@@ -84,7 +85,7 @@ impl TypeUnit {
                 let t = (Self::RecursiveAlias { body }).into();
                 (t, updated)
             }
-            Self::Const { id } => (Self::Const { id }.into(), false),
+            a @ (Self::Const { .. } | Self::Any) => (a.into(), false),
             Self::Tuple(a, b) => {
                 let (a, updated1) = a.replace_num_with_update_flag(
                     from,
@@ -146,7 +147,7 @@ impl TypeUnit {
                     .collect();
                 let subtype_relations = subtype_relations
                     .into_iter()
-                    .map(|(a, b, origin)| {
+                    .map(|(a, b)| {
                         let (a, u_) = a.replace_num_with_update_flag(
                             from,
                             to,
@@ -159,7 +160,7 @@ impl TypeUnit {
                             recursive_alias_depth,
                         );
                         u |= u_;
-                        (a, b, origin)
+                        (a, b)
                     })
                     .collect();
                 (
@@ -232,6 +233,7 @@ impl TypeUnit {
                 variable_requirements,
                 subtype_relations,
             },
+            TypeUnit::Any => Any,
         }
     }
 
@@ -283,7 +285,9 @@ impl TypeUnit {
                 );
                 (Self::Tuple(a, b), u1 || u2)
             }
-            t @ (Self::Variable(_) | Self::Const { .. }) => (t, false),
+            t @ (Self::Variable(_) | Self::Const { .. } | Self::Any) => {
+                (t, false)
+            }
             Self::TypeLevelFn(f) => {
                 let (f, u) = f.replace_type_union_with_update_flag(
                     from,
@@ -351,7 +355,7 @@ impl TypeUnit {
             Self::Variable(n) => *n == variable_num,
             Self::RecursiveAlias { body } => body
                 .contains_variable(variable_num.increment_recursive_index(1)),
-            Self::Const { .. } => false,
+            Self::Const { .. } | Self::Any => false,
             Self::Tuple(a, b) => {
                 a.contains_variable(variable_num)
                     || b.contains_variable(variable_num)
@@ -393,16 +397,26 @@ impl TypeUnit {
                     TypeUnit::Tuple(a1_in, a2_in).into(),
                 )
             }
+            (a, TypeUnit::Any) => (Type::default(), a.into()),
+            (TypeUnit::Any, a) => (TypeUnit::Any.into(), a.clone().into()),
             (a, b) if a == *b => (Type::default(), a.into()),
             (t, _) => (t.into(), Type::default()),
         }
     }
 
-    fn split_slow(self, other: &Self) -> (Type, Type) {
-        match (self, other) {
+    pub fn split_slow(
+        self,
+        other: &Self,
+        visited: &mut BTreeMap<(TypeUnit, TypeUnit), Option<(Type, Type)>>,
+    ) -> (Type, Type) {
+        if let Some(a) = visited.get(&(self.clone(), other.clone())) {
+            return a.clone().unwrap();
+        }
+        visited.insert((self.clone(), other.clone()), None);
+        let r = match (self.clone(), other.clone()) {
             (TypeUnit::Fn(a1, a2), TypeUnit::Fn(b1, b2)) => {
-                if b1.clone().is_subtype_of(a1.clone()) {
-                    let (a2_out, a2_in) = a2.split_slow(b2);
+                if b1.is_subtype_of(a1.clone()) {
+                    let (a2_out, a2_in) = a2.split_slow(&b2, visited);
                     (
                         TypeUnit::Fn(a1.clone(), a2_out).into(),
                         TypeUnit::Fn(a1, a2_in).into(),
@@ -412,8 +426,8 @@ impl TypeUnit {
                 }
             }
             (TypeUnit::Tuple(a1, a2), TypeUnit::Tuple(b1, b2)) => {
-                let (a1_out, a1_in) = a1.split_slow(b1);
-                let (a2_out, a2_in) = a2.split_slow(b2);
+                let (a1_out, a1_in) = a1.split_slow(&b1, visited);
+                let (a2_out, a2_in) = a2.split_slow(&b2, visited);
                 (
                     Type::default()
                         .union_unit(TypeUnit::Tuple(
@@ -424,9 +438,20 @@ impl TypeUnit {
                     TypeUnit::Tuple(a1_in, a2_in).into(),
                 )
             }
-            (a, b) if a == *b => (Type::default(), a.into()),
+            (a, TypeUnit::Any) => (Type::default(), a.into()),
+            (a, b) if a == b => (Type::default(), a.into()),
+            (t, _)
+                if t.is_non_polymorphic_recursive_fn_apply()
+                    && other.is_wrapped_by_const() =>
+            {
+                t.unwrap_recursive_fn_apply()
+                    .0
+                    .split_unit_slow(other, visited)
+            }
             (t, _) => (t.into(), Type::default()),
-        }
+        };
+        visited.insert((self, other.clone()), Some(r.clone()));
+        r
     }
 
     pub fn remove_disjoint_part(
@@ -435,12 +460,17 @@ impl TypeUnit {
     ) -> (Type, Type, Option<NotSubtypeReason>) {
         match (self, other) {
             (
-                t @ (TypeUnit::Variable(_) | TypeUnit::RecursiveAlias { .. }),
+                t @ (TypeUnit::Variable(_)
+                | TypeUnit::RecursiveAlias { .. }
+                | TypeUnit::Any),
                 _,
             )
-            | (t, TypeUnit::Variable(_) | TypeUnit::RecursiveAlias { .. }) => {
-                (Type::default(), t.into(), None)
-            }
+            | (
+                t,
+                TypeUnit::Variable(_)
+                | TypeUnit::RecursiveAlias { .. }
+                | TypeUnit::Any,
+            ) => (Type::default(), t.into(), None),
             (
                 TypeUnit::TypeLevelApply { f: t_f, a: t_a },
                 TypeUnit::TypeLevelApply { f: other_f, .. },
@@ -484,15 +514,10 @@ impl TypeUnit {
                     }),
                 )
             }
-            (TypeUnit::TypeLevelApply { f, a }, _)
-                if matches!(
-                    f.matchable_ref(),
-                    TypeMatchableRef::RecursiveAlias { .. }
-                ) =>
-            {
-                f.type_level_function_apply_strong(a)
-                    .remove_disjoint_part_unit(other)
-            }
+            (t, _) if t.is_non_polymorphic_recursive_fn_apply() => t
+                .unwrap_recursive_fn_apply()
+                .0
+                .remove_disjoint_part_unit(other),
             (TypeUnit::TypeLevelApply { f, a }, _)
                 if matches!(
                     f.matchable_ref(),
@@ -633,7 +658,9 @@ impl TypeUnit {
                 a.contains_broken_index(recursive_alias_depth)
                     || b.contains_broken_index(recursive_alias_depth)
             }
-            TypeUnit::Variable(TypeVariable::Normal(_)) => false,
+            TypeUnit::Variable(TypeVariable::Normal(_))
+            | TypeUnit::Const { .. }
+            | TypeUnit::Any => false,
             TypeUnit::Variable(TypeVariable::RecursiveIndex(d)) => {
                 *d >= recursive_alias_depth
             }
@@ -650,7 +677,6 @@ impl TypeUnit {
             TypeUnit::Restrictions { t, .. } => {
                 t.contains_broken_index(recursive_alias_depth)
             }
-            TypeUnit::Const { .. } => false,
             TypeUnit::Tuple(a, b) => {
                 a.contains_broken_index(recursive_alias_depth)
                     || b.contains_broken_index(recursive_alias_depth)
@@ -668,7 +694,9 @@ impl TypeUnit {
             TypeUnit::RecursiveAlias { body: a } | TypeUnit::TypeLevelFn(a) => {
                 a.contains_restriction()
             }
-            TypeUnit::Variable(_) | TypeUnit::Const { .. } => false,
+            TypeUnit::Variable(_) | TypeUnit::Const { .. } | TypeUnit::Any => {
+                false
+            }
             TypeUnit::Restrictions { .. } => true,
         }
     }
@@ -677,7 +705,7 @@ impl TypeUnit {
         use TypeUnit::*;
         match self {
             Fn(_, _) | Tuple(_, _) | Const { .. } => true,
-            Variable(_) | Restrictions { .. } => false,
+            Variable(_) | Restrictions { .. } | Any => false,
             RecursiveAlias { body: a }
             | TypeLevelFn(a)
             | TypeLevelApply { f: a, .. } => a.is_wrapped_by_const(),
@@ -692,6 +720,60 @@ impl TypeUnit {
                 TypeMatchableRef::RecursiveAlias { .. }
             )
         )
+    }
+
+    pub fn is_non_polymorphic_recursive_fn_apply(&self) -> bool {
+        fn contains_non_polymorphic_point_unit(
+            t: &TypeUnit,
+            depth: usize,
+        ) -> bool {
+            match t {
+                TypeUnit::Fn(a, b) | TypeUnit::Tuple(a, b) => {
+                    contains_non_polymorphic_point(a, depth)
+                        || contains_non_polymorphic_point(b, depth)
+                }
+                TypeUnit::Variable(_)
+                | TypeUnit::Const { .. }
+                | TypeUnit::Any => false,
+                TypeUnit::RecursiveAlias { body: a }
+                | TypeUnit::TypeLevelFn(a) => {
+                    contains_non_polymorphic_point(a, depth + 1)
+                }
+                TypeUnit::TypeLevelApply { f, a } => {
+                    !matches!(
+                        a.matchable_ref(),
+                        TypeMatchableRef::Variable(
+                            TypeVariable::RecursiveIndex(d)
+                        )if d == depth
+                    ) && f.contains_variable(TypeVariable::RecursiveIndex(
+                        depth + 1,
+                    ))
+                }
+                TypeUnit::Restrictions { t, .. } => {
+                    contains_non_polymorphic_point(t, depth)
+                }
+            }
+        }
+        fn contains_non_polymorphic_point(t: &Type, depth: usize) -> bool {
+            t.iter()
+                .any(|t| contains_non_polymorphic_point_unit(t, depth))
+        }
+        if let TypeUnit::TypeLevelApply { f, .. } = self {
+            if let TypeMatchableRef::RecursiveAlias { body } = f.matchable_ref()
+            {
+                if let TypeMatchableRef::TypeLevelFn(body) =
+                    body.matchable_ref()
+                {
+                    !contains_non_polymorphic_point(body, 0)
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        }
     }
 
     pub fn unwrap_recursive_fn_apply(self) -> (Type, bool) {
@@ -719,7 +801,9 @@ impl TypeUnit {
                 a.contains_recursion()
             }
             TypeUnit::RecursiveAlias { .. } => true,
-            TypeUnit::Const { .. } | TypeUnit::Variable(_) => false,
+            TypeUnit::Const { .. } | TypeUnit::Variable(_) | TypeUnit::Any => {
+                false
+            }
         }
     }
 }
@@ -791,10 +875,10 @@ impl Type {
         self,
         other: Self,
     ) -> (Self, Self, Self) {
-        let (a, b) = self.split(&other);
-        let (c, b_) = other.split(&b);
-        debug_assert_eq!(b, b_);
-        (a, b, c)
+        let (maybe_only_in_self, intersection) = self.split(&other);
+        let (maybe_only_in_other, b_) = other.split(&intersection);
+        debug_assert_eq!(intersection, b_);
+        (maybe_only_in_self, intersection, maybe_only_in_other)
     }
 
     pub fn split(self, other: &Self) -> (Self, Self) {
@@ -808,12 +892,16 @@ impl Type {
         (out, in_)
     }
 
-    pub fn split_slow(self, other: &Self) -> (Self, Self) {
+    pub fn split_slow(
+        self,
+        other: &Self,
+        visited: &mut BTreeMap<(TypeUnit, TypeUnit), Option<(Type, Type)>>,
+    ) -> (Self, Self) {
         let mut in_ = Type::default();
         let mut out = self;
         for t in other.iter() {
             let i;
-            (out, i) = out.split_unit_slow(t);
+            (out, i) = out.split_unit_slow(t, visited);
             in_.union_in_place(i);
         }
         (out, in_)
@@ -830,15 +918,19 @@ impl Type {
         (out, in_)
     }
 
-    pub fn split_unit_slow(self, other: &TypeUnit) -> (Self, Self) {
+    pub fn split_unit_slow(
+        self,
+        other: &TypeUnit,
+        visited: &mut BTreeMap<(TypeUnit, TypeUnit), Option<(Type, Type)>>,
+    ) -> (Self, Self) {
         if !self.contains_recursion() && other.is_recursive_fn_apply() {
-            return self
-                .split_slow(&other.clone().unwrap_recursive_fn_apply().0);
+            let other = other.clone().unwrap_recursive_fn_apply().0;
+            return self.split_slow(&other, visited);
         }
         let mut in_ = Type::default();
         let mut out = Type::default();
         for t in self {
-            let (o, i) = unwrap_or_clone(t).split_slow(other);
+            let (o, i) = unwrap_or_clone(t).split_slow(other, visited);
             in_.union_in_place(i);
             out.union_in_place(o);
         }
@@ -971,7 +1063,8 @@ impl Type {
             | TypeMatchableRef::Tuple(_, _)
             | TypeMatchableRef::Union(_)
             | TypeMatchableRef::Variable(_)
-            | TypeMatchableRef::Empty => false,
+            | TypeMatchableRef::Empty
+            | TypeMatchableRef::Any => false,
         }
     }
 
@@ -979,14 +1072,17 @@ impl Type {
         self.iter().all(|t| t.is_wrapped_by_const())
     }
 
+    pub fn is_non_polymorphic_recursive_fn_apply(&self) -> bool {
+        self.len() == 1
+            && self
+                .iter()
+                .next()
+                .unwrap()
+                .is_non_polymorphic_recursive_fn_apply()
+    }
+
     pub fn is_recursive_fn_apply(&self) -> bool {
-        matches!(
-            self.matchable_ref(),
-            TypeMatchableRef::TypeLevelApply { f, .. } if matches!(
-                f.matchable_ref(),
-                TypeMatchableRef::RecursiveAlias { .. }
-            )
-        )
+        self.len() == 1 && self.iter().next().unwrap().is_recursive_fn_apply()
     }
 
     pub fn unwrap_recursive_fn_apply(self) -> (Self, bool) {
@@ -1013,35 +1109,19 @@ impl TypeWithEnv {
         &mut self,
         value: (Type, Type, RelOrigin),
     ) {
-        let mut additional_subtype_rel = SubtypeRelations::default();
         let a = match value.0.matchable() {
-            TypeMatchable::Restrictions {
-                t,
-                variable_requirements: _,
-                subtype_relations,
-            } => {
-                additional_subtype_rel.extend(subtype_relations);
-                // self.variable_requirements
-                //     .append(&mut variable_requirements);
-                t
+            TypeMatchable::Restrictions { .. } => {
+                panic!();
             }
             a => a.into(),
         };
         let b = match value.1.matchable() {
-            TypeMatchable::Restrictions {
-                t,
-                variable_requirements: _,
-                subtype_relations,
-            } => {
-                additional_subtype_rel.extend(subtype_relations);
-                // self.variable_requirements
-                //     .append(&mut variable_requirements);
-                t
+            TypeMatchable::Restrictions { .. } => {
+                panic!();
             }
             b => b.into(),
         };
         self.subtype_relations.insert((a, b, value.2));
-        self.subtype_relations.extend(additional_subtype_rel);
     }
 }
 

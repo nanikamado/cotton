@@ -61,7 +61,7 @@ pub struct DataDecl<'a> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Field<'a> {
-    pub type_: StrWithId<'a>,
+    pub type_: Type<'a>,
     pub name: Path,
     pub is_public: bool,
 }
@@ -113,7 +113,7 @@ pub enum Pattern<'a> {
     StrLiteral(&'a str),
     Constructor {
         path: &'a parser::Path,
-        args: Vec<Pattern<'a>>,
+        args: Vec<(Pattern<'a>, Span)>,
     },
     Binder(StrWithId<'a>),
     Underscore,
@@ -124,7 +124,7 @@ pub enum Pattern<'a> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ApplyPattern<'a> {
     pub function: ExprWithSpan<'a>,
-    pub post_pattern: Pattern<'a>,
+    pub post_pattern: (Pattern<'a>, Span),
 }
 
 #[derive(Debug, Clone)]
@@ -214,10 +214,11 @@ impl AddArgument for (Pattern<'_>, Span) {
             mut args,
         } = self.0
         {
-            args.push(arg.0);
+            let span = arg.1.clone();
+            args.push(arg);
             (
                 Pattern::Constructor { path: name, args },
-                merge_span(&self.1, &arg.1),
+                merge_span(&self.1, &span),
             )
         } else {
             panic!()
@@ -331,17 +332,24 @@ impl<'a> Ast<'a> {
                         fields: a
                             .fields
                             .iter()
-                            .map(
-                                |parser::Field {
-                                     type_: (t, span, id),
-                                     name,
-                                 }| Field {
-                                    type_: (t.as_str(), span.clone(), *id),
+                            .map(|parser::Field { type_: t, name }| {
+                                let (t, _span) = fold_op_sequence(
+                                    t,
+                                    &mut Env {
+                                        constructors,
+                                        module_path,
+                                        token_map,
+                                        imports,
+                                    },
+                                    module_path,
+                                )?;
+                                Ok(Field {
+                                    type_: t,
                                     name: Path::from_str(module_path, &name.0),
                                     is_public: true,
-                                },
-                            )
-                            .collect(),
+                                })
+                            })
+                            .try_collect()?,
                         type_variables: &a.type_variables,
                         decl_id,
                         is_public: a.is_public,
@@ -878,9 +886,7 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::PatternUnit, &'a Span) {
                         path,
                         args: ps
                             .iter()
-                            .map(|p| {
-                                Ok(fold_op_sequence(p, env, module_path)?.0)
-                            })
+                            .map(|p| fold_op_sequence(p, env, module_path))
                             .try_collect()?,
                     }
                 } else {
@@ -915,8 +921,7 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::PatternUnit, &'a Span) {
                                     &a.post_pattern,
                                     env,
                                     module_path,
-                                )?
-                                .0,
+                                )?,
                             })
                         })
                         .try_collect()?,

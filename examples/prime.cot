@@ -3,7 +3,7 @@
 
 infixr 0 $
 
-data A .. B forall { A, B }
+data A .. A forall { A }
 
 infixl 4 ..
 

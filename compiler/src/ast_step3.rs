@@ -320,8 +320,11 @@ fn normalize_types_in_pattern_unit<'a>(
                 id,
                 args: args
                     .into_iter()
-                    .map(|p| {
-                        normalize_types_in_pattern(p, resolved_idents, map)
+                    .map(|(p, span)| {
+                        (
+                            normalize_types_in_pattern(p, resolved_idents, map),
+                            span,
+                        )
                     })
                     .collect(),
             }

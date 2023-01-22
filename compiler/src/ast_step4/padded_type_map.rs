@@ -106,7 +106,7 @@ impl PaddedTypeMap {
             t.normals.insert(
                 id,
                 NormalType {
-                    name: get_type_name(id),
+                    name: get_type_name(id).unwrap(),
                     args,
                 },
             );

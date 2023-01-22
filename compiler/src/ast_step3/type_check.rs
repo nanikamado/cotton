@@ -1,9 +1,10 @@
+pub mod match_operand;
 mod min_type;
 mod simplify;
 
 use self::min_type::min_type_with_env;
 pub use self::simplify::{
-    simplify_subtype_rel, unwrap_recursive_alias, TypeVariableMap,
+    simplify_subtype_rel, unwrap_recursive_alias, Env, TypeVariableMap,
 };
 use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::ident_id::IdentId;
@@ -16,8 +17,8 @@ use crate::ast_step2::types::{
     TypeUnit, TypeVariable,
 };
 use crate::ast_step2::{
-    self, Ast, DataDecl, PatternRestrictions, PatternUnitForRestriction,
-    RelOrigin, SubtypeRelations, TypeId,
+    self, constructor_type, Ast, DataDecl, PatternRestrictions,
+    PatternUnitForRestriction, RelOrigin, SubtypeRelations, TypeId,
 };
 use crate::errors::CompileError;
 use crate::intrinsics::{
@@ -106,6 +107,7 @@ pub fn type_check(
             fixed_parameters: Default::default(),
         });
     }
+    let mut data_decls = FxHashMap::default();
     for v in IntrinsicConstructor::iter() {
         toplevels.push(Toplevel {
             type_with_env: v.to_type().clone().into(),
@@ -117,7 +119,16 @@ pub fn type_check(
         });
     }
     for d in &ast.data_decl {
-        let d_type: types::Type = constructor_type(d).into();
+        data_decls.insert(
+            TypeId::DeclId(d.decl_id),
+            simplify::DataDecl {
+                type_parameter_len: d.type_parameter_len,
+                constructed_type: d.constructed_type.clone(),
+                fields: d.fields.clone(),
+                decl_id: d.decl_id,
+            },
+        );
+        let d_type: types::Type = constructor_type(d);
         toplevels.push(Toplevel {
             type_with_env: d_type.into(),
             type_annotation: None,
@@ -141,6 +152,7 @@ pub fn type_check(
             });
         }
     }
+    let mut env = Env { data_decls };
     let mut resolved_idents = Vec::new();
     let mut map = TypeVariableMap::default();
     let mut types_of_local_decls = Vec::new();
@@ -176,6 +188,7 @@ pub fn type_check(
             imports,
             token_map,
             &candidates_from_implicit_parameters_str,
+            &env.data_decls,
         )?;
         resolved_idents.extend(resolved);
         types_of_local_decls.extend(
@@ -209,6 +222,7 @@ pub fn type_check(
                 already_considered_relations: t.already_considered_relations,
                 fn_apply_dummies: t.fn_apply_dummies,
             },
+            &mut env,
         )?;
         toplevels.push(Toplevel {
             type_with_env: type_with_env.into(),
@@ -238,6 +252,7 @@ pub fn type_check(
         imports,
         &mut map,
         &candidates_from_implicit_parameters,
+        &mut env,
     )?;
     // TODO: check _rel
     for (ident_id, ResolvedIdent { variable_id, .. }) in
@@ -379,6 +394,7 @@ fn resolve_names(
     imports: &mut Imports,
     map: &mut TypeVariableMap,
     candidates_from_implicit_parameters: &FxHashMap<VariableId, Candidate>,
+    env: &mut Env,
 ) -> Result<(Resolved, TypesOfGlobalDeclsVec, SubtypeRelations), CompileError> {
     let mut toplevel_graph = Graph::<Toplevel, ()>::new();
     for t in toplevels {
@@ -422,6 +438,7 @@ fn resolve_names(
             candidates_from_implicit_parameters,
             imports,
             map,
+            env,
         )?;
         resolved_idents.append(&mut resolved.0);
         rel = rel.merge(resolved.2);
@@ -494,6 +511,30 @@ impl Type {
         }
     }
 
+    fn argument_vecs_from_argument_tuple(self) -> Vec<Vec<Self>> {
+        use TypeUnit::*;
+        self.into_iter()
+            .flat_map(|t| match unwrap_or_clone(t) {
+                Const { id, .. }
+                    if id == TypeId::Intrinsic(IntrinsicType::Unit) =>
+                {
+                    vec![Vec::new()]
+                }
+                Tuple(a1, a2) => a2
+                    .argument_vecs_from_argument_tuple()
+                    .into_iter()
+                    .map(|mut args| {
+                        args.insert(0, a1.clone());
+                        args
+                    })
+                    .collect(),
+                t => {
+                    panic!("expected Tuple or Unit but got {}", Type::from(t))
+                }
+            })
+            .collect()
+    }
+
     pub fn arguments_from_argument_tuple_ref(&self) -> Vec<&Self> {
         use TypeMatchableRef::*;
         match self.matchable_ref() {
@@ -561,21 +602,6 @@ impl PatternUnitForRestriction {
                 .collect(),
             Const { id, .. }
                 if id == TypeId::Intrinsic(IntrinsicType::Unit) =>
-            {
-                Vec::new()
-            }
-            _ => panic!(),
-        }
-    }
-
-    fn arguments_from_argument_tuple_ref(&self) -> Vec<&Self> {
-        use PatternUnitForRestriction::*;
-        match self {
-            Tuple(a1, a2) => std::iter::once(&**a1)
-                .chain(a2.arguments_from_argument_tuple_ref())
-                .collect(),
-            Const { id, .. }
-                if *id == TypeId::Intrinsic(IntrinsicType::Unit) =>
             {
                 Vec::new()
             }
@@ -698,6 +724,7 @@ fn resolve_scc(
     candidates_from_implicit_parameters: &FxHashMap<VariableId, Candidate>,
     imports: &mut Imports,
     map: &mut TypeVariableMap,
+    env: &mut Env,
 ) -> Result<(Resolved, Vec<Type>, SubtypeRelations), CompileError> {
     // Merge the declarations in a scc to treat them as if they are one declaration,
     let mut resolved_idents = Vec::new();
@@ -761,6 +788,7 @@ fn resolve_scc(
         map,
         &mut resolved_idents,
         imports,
+        env,
     )?;
     let variable_requirements = scc_type.variable_requirements;
     let subtype_relation = scc_type.subtype_relations.clone();
@@ -789,11 +817,12 @@ fn resolve_scc(
                             .clone(),
                         fn_apply_dummies: scc_type.fn_apply_dummies.clone(),
                     },
+                    env,
                 )
                 .unwrap();
                 debug_assert_eq!(
                     t,
-                    simplify::simplify_type(map, t.clone()).unwrap()
+                    simplify::simplify_type(map, t.clone(), env).unwrap()
                 );
                 // TODO: check remaining pattern_restrictions
                 let vs = t
@@ -816,7 +845,11 @@ fn resolve_scc(
                         TypeUnit::Restrictions {
                             t: t.constructor,
                             variable_requirements: Vec::new(),
-                            subtype_relations: t.subtype_relations,
+                            subtype_relations: t
+                                .subtype_relations
+                                .into_iter()
+                                .map(|(a, b, _)| (a, b))
+                                .collect(),
                         }
                         .into()
                     };
@@ -927,6 +960,7 @@ impl<'b, F: FnMut(usize) -> Candidate + Copy + 'b> CandidateProvider<'b, F> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn find_satisfied_types<T: TypeConstructor>(
     req: &VariableRequirement,
     type_of_unresolved_decl: &ast_step2::TypeWithEnv<T>,
@@ -937,6 +971,7 @@ fn find_satisfied_types<T: TypeConstructor>(
     map: &TypeVariableMap,
     resolved_implicit_args: &mut Vec<(IdentId, ResolvedIdent)>,
     imports: &mut Imports,
+    env: &mut Env,
 ) -> (
     Vec<SatisfiedType<ast_step2::TypeWithEnv<T>>>,
     Vec<CompileError>,
@@ -1036,7 +1071,19 @@ fn find_satisfied_types<T: TypeConstructor>(
                                 );
                             }
                         }
-                        t.subtype_relations.extend(subtype_relations);
+                        t.subtype_relations.extend(
+                            subtype_relations.into_iter().map(|(a, b)| {
+                                (
+                                    a.clone(),
+                                    b.clone(),
+                                    RelOrigin {
+                                        left: a,
+                                        right: b,
+                                        span: req.span.clone(),
+                                    },
+                                )
+                            }),
+                        );
                         constructor
                     }
                     t => t.into(),
@@ -1099,7 +1146,7 @@ fn find_satisfied_types<T: TypeConstructor>(
                 let t = if no_type_check {
                     Ok(t)
                 } else {
-                    simplify::simplify_type(&mut map, t)
+                    simplify::simplify_type(&mut map, t, env)
                 };
                 match t {
                     Ok(mut t) => {
@@ -1116,6 +1163,7 @@ fn find_satisfied_types<T: TypeConstructor>(
                                 &mut map,
                                 resolved_implicit_args,
                                 imports,
+                                env,
                             )?;
                         }
                         Ok(SatisfiedType {
@@ -1183,7 +1231,7 @@ fn replace_fn_apply(t: Type, dummies: &mut BTreeMap<Type, Type>) -> Type {
                 subtype_relations,
             }
             .into(),
-            a @ (Variable(_) | Const { .. }) => a.into(),
+            a @ (Variable(_) | Const { .. } | Any) => a.into(),
             Tuple(a, b) => Tuple(
                 replace_fn_apply(a, dummies),
                 replace_fn_apply(b, dummies),
@@ -1235,6 +1283,7 @@ fn resolve_requirements_in_type_with_env(
     map: &mut TypeVariableMap,
     resolved_idents: &mut Vec<(IdentId, ResolvedIdent)>,
     imports: &mut Imports,
+    env: &mut Env,
 ) -> Result<(), CompileError> {
     while resolve_num > 0 {
         resolve_num -= 1;
@@ -1257,6 +1306,7 @@ fn resolve_requirements_in_type_with_env(
             map,
             resolved_idents,
             imports,
+            env,
         );
         debug_assert_eq!(req.name.len(), satisfied.len() + es.len());
         let satisfied = get_one_satisfied(satisfied, es, req.name, req.span)?;
@@ -1272,59 +1322,15 @@ fn resolve_requirements_in_type_with_env(
         resolve_num += satisfied.number_of_variable_requirements_added;
     }
     *type_of_unresolved_decl =
-        simplify::simplify_type(map, type_of_unresolved_decl.clone())?;
+        simplify::simplify_type(map, type_of_unresolved_decl.clone(), env)?;
     Ok(())
 }
 
-fn constructor_type(d: &DataDecl) -> TypeUnit {
-    let fields: Vec<_> = d
-        .fields
-        .iter()
-        .enumerate()
-        .map(|(i, _t)| {
-            TypeUnit::Variable(TypeVariable::RecursiveIndex(i)).into()
-        })
-        .collect();
-    let mut t = TypeUnit::Tuple(
-        TypeUnit::Const {
-            id: TypeId::DeclId(d.decl_id),
-        }
-        .into(),
-        Type::argument_tuple_from_arguments(fields.clone()),
-    );
-    for field in fields.into_iter().rev() {
-        t = TypeUnit::Fn(field, t.into())
-    }
-    for _ in 0..d.fields.len() {
-        t = TypeUnit::TypeLevelFn(t.into())
-    }
-    t
-}
-
 fn accessor_type(d: &DataDecl, i: usize) -> TypeUnit {
-    let fields: Vec<_> = d
-        .fields
-        .iter()
-        .enumerate()
-        .map(|(i, _t)| {
-            TypeUnit::Variable(TypeVariable::RecursiveIndex(i)).into()
-        })
-        .collect();
-    let t = TypeUnit::Tuple(
-        TypeUnit::Const {
-            id: TypeId::DeclId(d.decl_id),
-        }
-        .into(),
-        Type::argument_tuple_from_arguments(fields),
-    );
-    let mut t = TypeUnit::Fn(
-        t.into(),
-        TypeUnit::Variable(TypeVariable::RecursiveIndex(i)).into(),
-    );
-    for _ in 0..d.fields.len() {
-        t = TypeUnit::TypeLevelFn(t.into())
-    }
-    t
+    (0..d.type_parameter_len).fold(
+        TypeUnit::Fn(d.constructed_type.clone(), d.fields[i].type_.clone()),
+        |t, _| TypeUnit::TypeLevelFn(t.into()),
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
