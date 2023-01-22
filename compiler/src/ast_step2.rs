@@ -893,56 +893,42 @@ fn add_expr_in_do<'a>(
         (ast_step1::Expr::Decl(d), d_span) => {
             let d = variable_decl(*d, module_path, env, type_variable_names)?;
             if es.is_empty() {
-                Ok((
-                    vec![
-                        (
-                            Expr::Ident {
-                                name: &UNIT_PATH,
-                                ident_id: IdentId::new(),
-                            },
-                            TypeVariable::new(),
-                            d_span.clone(),
-                        ),
-                        catch_flat_map(WithFlatMapEnv {
-                            value: d.value.value,
-                            env: d.env,
-                        })?,
-                    ],
-                    d_span,
-                ))
-            } else {
-                es.reverse();
-                let l = Expr::Lambda(vec![FnArm {
-                    pattern: vec![(
-                        PatternUnit::Binder(
-                            d.value.name.to_string(),
-                            d.value.decl_id,
-                            TypeVariable::new(),
-                        )
-                        .into(),
-                        d.value.span,
-                    )],
-                    expr: (Expr::Do(es), TypeVariable::new(), es_span.clone()),
-                }]);
-                Ok((
-                    vec![catch_flat_map(WithFlatMapEnv {
-                        value: (
-                            Expr::Call(
-                                Box::new((
-                                    l,
-                                    TypeVariable::new(),
-                                    d_span.clone(),
-                                )),
-                                Box::new(d.value.value),
-                            ),
-                            TypeVariable::new(),
-                            d_span.clone(),
-                        ),
-                        env: d.env,
-                    })?],
-                    merge_span(&es_span, &d_span),
-                ))
+                es = vec![(
+                    Expr::Ident {
+                        name: &UNIT_PATH,
+                        ident_id: IdentId::new(),
+                    },
+                    TypeVariable::new(),
+                    d_span.clone(),
+                )];
             }
+            es.reverse();
+            let l = Expr::Lambda(vec![FnArm {
+                pattern: vec![(
+                    PatternUnit::Binder(
+                        d.value.name.to_string(),
+                        d.value.decl_id,
+                        TypeVariable::new(),
+                    )
+                    .into(),
+                    d.value.span,
+                )],
+                expr: (Expr::Do(es), TypeVariable::new(), es_span.clone()),
+            }]);
+            Ok((
+                vec![catch_flat_map(WithFlatMapEnv {
+                    value: (
+                        Expr::Call(
+                            Box::new((l, TypeVariable::new(), d_span.clone())),
+                            Box::new(d.value.value),
+                        ),
+                        TypeVariable::new(),
+                        d_span.clone(),
+                    ),
+                    env: d.env,
+                })?],
+                merge_span(&es_span, &d_span),
+            ))
         }
         e => {
             let e_span = e.1.clone();
