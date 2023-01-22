@@ -49,7 +49,7 @@ pub struct Ast<'a> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Field {
-    pub type_: TypeVariable,
+    pub type_: Type,
     pub name: Path,
 }
 
@@ -57,11 +57,12 @@ pub struct Field {
 pub struct DataDecl {
     pub name: Path,
     pub fields: Vec<Field>,
-    pub type_variable_decls: Vec<(TypeVariable, Path)>,
     pub decl_id: DeclId,
+    pub type_parameter_len: usize,
+    pub constructed_type: Type,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub struct RelOrigin {
     pub left: Type,
     pub right: Type,
@@ -192,7 +193,7 @@ pub enum PatternUnit<'a, T, E = ExprWithTypeAndSpan<'a, TypeVariable>> {
     Constructor {
         name: Path,
         id: ConstructorId,
-        args: Vec<Pattern<'a, T, E>>,
+        args: Vec<(Pattern<'a, T, E>, Span)>,
     },
     Binder(String, DeclId, T),
     ResolvedBinder(DeclId, T),
@@ -234,8 +235,8 @@ static TYPE_NAMES: Lazy<RwLock<FxHashMap<TypeId, Path>>> = Lazy::new(|| {
     )
 });
 
-pub fn get_type_name(type_id: TypeId) -> Path {
-    *TYPE_NAMES.read().unwrap().get(&type_id).unwrap()
+pub fn get_type_name(type_id: TypeId) -> Option<Path> {
+    TYPE_NAMES.read().unwrap().get(&type_id).copied()
 }
 
 impl<'a> Ast<'a> {
@@ -252,7 +253,7 @@ impl<'a> Ast<'a> {
             interface_decls: &mut Default::default(),
             imports,
             data_decl_map: &mut FxHashMap::default(),
-            field_names: &mut Default::default(),
+            data_decls: &mut Default::default(),
         };
         collect_decls(
             ast,
@@ -280,7 +281,8 @@ fn collect_decls<'a>(
     variable_decls: &mut Vec<VariableDecl<'a>>,
     data_decls: &mut Vec<DataDecl>,
 ) -> Result<(), CompileError> {
-    collect_data_and_type_alias_decls(&ast, module_path, data_decls, env)?;
+    collect_data_and_type_alias_decls(&ast, module_path, env)?;
+    collect_interface_decls(&ast, module_path, data_decls, env)?;
     env.data_decl_map
         .extend(data_decls.iter().map(|d| (d.name, d.decl_id)));
     {
@@ -290,7 +292,6 @@ fn collect_decls<'a>(
                 .map(|d| (TypeId::DeclId(d.decl_id), d.name)),
         );
     }
-    collect_interface_decls(&ast, module_path, env)?;
     collect_variable_decls(ast, module_path, variable_decls, env)?;
     Ok(())
 }
@@ -298,7 +299,6 @@ fn collect_decls<'a>(
 fn collect_data_and_type_alias_decls<'a>(
     ast: &ast_step1::Ast<'a>,
     module_path: ModulePath,
-    data_decls: &mut Vec<DataDecl>,
     env: &mut Env<'_, 'a>,
 ) -> Result<(), CompileError> {
     for d in &ast.variable_decl {
@@ -308,11 +308,9 @@ fn collect_data_and_type_alias_decls<'a>(
             d.is_public,
         );
     }
-    data_decls.extend(ast.data_decl.iter().map(|d| {
-        let mut type_variables = FxHashMap::default();
-        for ((name, _, id), interfaces) in &d.type_variables.type_variables {
+    for d in &ast.data_decl {
+        for ((_, _, id), interfaces) in &d.type_variables.type_variables {
             env.token_map.insert(*id, TokenMapEntry::TypeVariable);
-            type_variables.insert(name.as_str(), TypeVariable::new());
             for path in interfaces {
                 env.token_map.insert(
                     path.path.last().unwrap().2,
@@ -343,30 +341,7 @@ fn collect_data_and_type_alias_decls<'a>(
             );
             env.imports.add_accessor(f.name, d.decl_id, i, f.is_public);
         }
-        let d = DataDecl {
-            name: d.name,
-            fields: d
-                .fields
-                .iter()
-                .map(|f| {
-                    env.token_map
-                        .insert(f.type_.2, TokenMapEntry::TypeVariable);
-                    Field {
-                        type_: type_variables[f.type_.0],
-                        name: f.name,
-                    }
-                })
-                .collect(),
-            decl_id: d.decl_id,
-            type_variable_decls: type_variables
-                .into_iter()
-                .map(|(n, v)| (v, Path::from_str(module_path, n)))
-                .collect(),
-        };
-        env.field_names
-            .insert(ConstructorId::DeclId(d.decl_id), d.clone());
-        d
-    }));
+    }
     env.type_alias_map.add_decls(
         &ast.type_alias_decl,
         env.token_map,
@@ -375,7 +350,7 @@ fn collect_data_and_type_alias_decls<'a>(
     );
     for m in &ast.modules {
         env.imports.add_module(m.name, m.is_public);
-        collect_data_and_type_alias_decls(&m.ast, m.name, data_decls, env)?
+        collect_data_and_type_alias_decls(&m.ast, m.name, env)?
     }
     Ok(())
 }
@@ -383,8 +358,52 @@ fn collect_data_and_type_alias_decls<'a>(
 fn collect_interface_decls<'a>(
     ast: &ast_step1::Ast<'a>,
     module_path: ModulePath,
+    data_decls: &mut Vec<DataDecl>,
     env: &mut Env<'a, '_>,
 ) -> Result<(), CompileError> {
+    for d in &ast.data_decl {
+        let mut type_variables = FxHashMap::default();
+        let mut args = vec![TypeUnit::Const {
+            id: TypeId::DeclId(d.decl_id),
+        }
+        .into()];
+        for (i, ((name, _, _), _)) in
+            d.type_variables.type_variables.iter().enumerate()
+        {
+            let v = TypeVariable::RecursiveIndex(i);
+            type_variables.insert(Path::from_str(module_path, name), v);
+            args.push(Type::from(TypeUnit::Variable(v)));
+        }
+        let constructed_type: Type =
+            Type::argument_tuple_from_arguments(args.clone());
+        let fields = d
+            .fields
+            .iter()
+            .map(|f| {
+                let type_ = type_to_type(
+                    &f.type_,
+                    module_path,
+                    &type_variables,
+                    SearchMode::Normal,
+                    env,
+                )?;
+                Ok(Field {
+                    type_,
+                    name: f.name,
+                })
+            })
+            .try_collect()?;
+        let d = DataDecl {
+            name: d.name,
+            fields,
+            decl_id: d.decl_id,
+            type_parameter_len: d.type_variables.type_variables.len(),
+            constructed_type,
+        };
+        env.data_decls
+            .insert(ConstructorId::DeclId(d.decl_id), d.clone());
+        data_decls.push(d);
+    }
     env.interface_decls.extend(
         ast.interface_decl
             .iter()
@@ -413,7 +432,7 @@ fn collect_interface_decls<'a>(
                                     type_alias_map: env.type_alias_map,
                                     imports: env.imports,
                                     data_decl_map: env.data_decl_map,
-                                    field_names: env.field_names,
+                                    data_decls: env.data_decls,
                                 },
                             )?;
                             env.token_map.insert(
@@ -430,7 +449,7 @@ fn collect_interface_decls<'a>(
             .try_collect::<_, Vec<_>, _>()?,
     );
     for m in &ast.modules {
-        collect_interface_decls(&m.ast, m.name, env)?;
+        collect_interface_decls(&m.ast, m.name, data_decls, env)?;
     }
     Ok(())
 }
@@ -442,7 +461,7 @@ struct Env<'a, 'b> {
         &'a mut FxHashMap<Path, Vec<(&'a str, Type, TypeVariable)>>,
     imports: &'a mut Imports,
     data_decl_map: &'a mut FxHashMap<Path, DeclId>,
-    field_names: &'a mut FxHashMap<ConstructorId, DataDecl>,
+    data_decls: &'a mut FxHashMap<ConstructorId, DataDecl>,
 }
 
 fn collect_variable_decls<'a>(
@@ -498,7 +517,13 @@ impl Display for TypeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TypeId::FixedVariable(decl_id) => write!(f, "c{}", decl_id),
-            id => write!(f, "{}", get_type_name(*id)),
+            id => {
+                if let Some(n) = get_type_name(*id) {
+                    write!(f, "{}", n)
+                } else {
+                    write!(f, "{:?}(name not available)", id)
+                }
+            }
         }
     }
 }
@@ -723,13 +748,13 @@ fn expr<'a>(
             );
             let fields: FxHashMap<_, _> =
                 fields.into_iter().map(|((n, _, _), e)| (n, e)).collect();
-            let data_decl = env.field_names[&id].clone();
+            let data_decl = env.data_decls[&id].clone();
             let ConstructorId::DeclId(id) = id else {
                 panic!()
             };
             let mut e: Expr<_> = Expr::ResolvedIdent {
                 variable_id: VariableId::Constructor(id),
-                type_: constructor_type(&data_decl).into(),
+                type_: constructor_type(&data_decl).remove_parameters().0,
                 name: Some(name),
             };
             let mut v = Vec::new();
@@ -840,25 +865,15 @@ fn expr<'a>(
     })
 }
 
-pub fn constructor_type(d: &DataDecl) -> TypeUnit {
-    let fields: Vec<_> = d
+pub fn constructor_type(d: &DataDecl) -> Type {
+    let t = d
         .fields
         .iter()
-        .enumerate()
-        .map(|(_, _t)| TypeUnit::Variable(TypeVariable::new()).into())
         .rev()
-        .collect();
-    let mut t = TypeUnit::Tuple(
-        TypeUnit::Const {
-            id: TypeId::DeclId(d.decl_id),
-        }
-        .into(),
-        Type::argument_tuple_from_arguments(fields.clone()),
-    );
-    for field in fields.into_iter().rev() {
-        t = TypeUnit::Fn(field, t.into())
-    }
-    t
+        .fold(d.constructed_type.clone(), |t, f| {
+            TypeUnit::Fn(f.type_.clone(), t).into()
+        });
+    (0..d.type_parameter_len).fold(t, |t, _| TypeUnit::TypeLevelFn(t).into())
 }
 
 pub static UNIT_PATH: Lazy<parser::Path> = Lazy::new(|| parser::Path {
@@ -961,7 +976,16 @@ fn fn_arm<'a>(
             .pattern
             .into_iter()
             .map(|(p, span)| {
-                Ok((pattern(p, module_path, type_variable_names, env)?, span))
+                Ok((
+                    pattern(
+                        p,
+                        span.clone(),
+                        module_path,
+                        type_variable_names,
+                        env,
+                    )?,
+                    span,
+                ))
             })
             .try_collect()?,
         expr: catch_flat_map(expr(
@@ -987,6 +1011,7 @@ impl Path {
 
 fn pattern<'a>(
     p: ast_step1::Pattern<'a>,
+    span: Span,
     module_path: ModulePath,
     type_variable_names: &FxHashMap<Path, TypeVariable>,
     env: &mut Env<'_, '_>,
@@ -1015,8 +1040,17 @@ fn pattern<'a>(
                 id,
                 args: args
                     .into_iter()
-                    .map(|arg| {
-                        pattern(arg, module_path, type_variable_names, env)
+                    .map(|(arg, span)| {
+                        Ok((
+                            pattern(
+                                arg,
+                                span.clone(),
+                                module_path,
+                                type_variable_names,
+                                env,
+                            )?,
+                            span,
+                        ))
                     })
                     .try_collect()?,
             }
@@ -1036,12 +1070,17 @@ fn pattern<'a>(
                 forall,
                 env,
             )?;
-            let p = pattern(*p, module_path, type_variable_names, env)?;
+            let p = pattern(*p, span, module_path, type_variable_names, env)?;
             TypeRestriction(p, t).into()
         }
         ast_step1::Pattern::Apply(pre_pattern, applications) => {
-            let mut pre_pattern =
-                pattern(*pre_pattern, module_path, type_variable_names, env)?;
+            let mut pre_pattern = pattern(
+                *pre_pattern,
+                span.clone(),
+                module_path,
+                type_variable_names,
+                env,
+            )?;
             let mut functions;
             if pre_pattern.0.len() == 1 {
                 match &mut pre_pattern.0[0] {
@@ -1053,7 +1092,7 @@ fn pattern<'a>(
                         let mut new_args =
                             vec![
                                 None;
-                                env.field_names
+                                env.data_decls
                                     [&ConstructorId::DeclId(*constructor_id)]
                                     .fields
                                     .len()
@@ -1077,12 +1116,16 @@ fn pattern<'a>(
                                     )?
                                 {
                                     debug_assert!(new_args[field].is_none());
-                                    new_args[field] = Some(pattern(
-                                        a.post_pattern,
-                                        module_path,
-                                        type_variable_names,
-                                        env,
-                                    )?);
+                                    new_args[field] = Some((
+                                        pattern(
+                                            a.post_pattern.0,
+                                            a.post_pattern.1.clone(),
+                                            module_path,
+                                            type_variable_names,
+                                            env,
+                                        )?,
+                                        a.post_pattern.1,
+                                    ));
                                 } else {
                                     functions.push(a);
                                 }
@@ -1090,9 +1133,12 @@ fn pattern<'a>(
                                 functions.push(a);
                             }
                         }
-                        args.extend(new_args.into_iter().map(|a| {
+                        args.extend(new_args.into_iter().map(move |a| {
                             a.unwrap_or_else(|| {
-                                Pattern(vec![PatternUnit::Underscore])
+                                (
+                                    Pattern(vec![PatternUnit::Underscore]),
+                                    span.clone(),
+                                )
                             })
                         }));
                     }
@@ -1119,7 +1165,8 @@ fn pattern<'a>(
                                     env,
                                 )?)?,
                                 post_pattern: pattern(
-                                    a.post_pattern,
+                                    a.post_pattern.0,
+                                    a.post_pattern.1,
                                     module_path,
                                     type_variable_names,
                                     env,

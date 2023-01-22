@@ -105,6 +105,7 @@ fn fmt_type_unit_with_env(
         TypeUnit::Variable(TypeVariable::Normal(_)) => {
             ("_".to_string(), Single)
         }
+        TypeUnit::Any => ("Any".to_string(), Single),
         TypeUnit::Variable(d) => (d.to_string(), Single),
         TypeUnit::RecursiveAlias { body } => (
             format!(
@@ -183,8 +184,11 @@ fn fmt_type_unit_with_env(
             subtype_relations,
         } => (
             format!(
-                "{} where {{{subtype_relations}, {}}}",
+                "{} where {{{}, {}}}",
                 t,
+                subtype_relations.iter().format_with(",\n", |(a, b), f| f(
+                    &format_args!("{a} < {b}")
+                )),
                 variable_requirements.iter().format_with(
                     ",\n",
                     |(name, t), f| f(&format_args!("?{} : {}", name, t))

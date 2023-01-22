@@ -1,6 +1,6 @@
 pub use self::type_type::Type;
 pub use self::type_unit::{TypeUnit, TypeVariable};
-use super::{SubtypeRelations, TypeWithEnv};
+use super::TypeWithEnv;
 use crate::ast_step2::TypeId;
 use crate::ast_step3::simplify_subtype_rel;
 use crate::intrinsics::{IntrinsicType, INTRINSIC_TYPES};
@@ -27,12 +27,13 @@ pub enum TypeMatchable {
     Restrictions {
         t: Type,
         variable_requirements: Vec<(String, Type)>,
-        subtype_relations: SubtypeRelations,
+        subtype_relations: BTreeSet<(Type, Type)>,
     },
     Const {
         id: TypeId,
     },
     Tuple(Type, Type),
+    Any,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -52,18 +53,20 @@ pub enum TypeMatchableRef<'b> {
     Restrictions {
         t: &'b Type,
         variable_requirements: &'b Vec<(String, Type)>,
-        subtype_relations: &'b SubtypeRelations,
+        subtype_relations: &'b BTreeSet<(Type, Type)>,
     },
     Const {
         id: TypeId,
     },
     Tuple(&'b Type, &'b Type),
+    Any,
 }
 
 mod type_unit {
     use super::Type;
-    use crate::ast_step2::{SubtypeRelations, TypeId};
+    use crate::ast_step2::TypeId;
     use std::cell::Cell;
+    use std::collections::BTreeSet;
     use std::fmt::{Debug, Display};
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -90,12 +93,13 @@ mod type_unit {
         Restrictions {
             t: Type,
             variable_requirements: Vec<(String, Type)>,
-            subtype_relations: SubtypeRelations,
+            subtype_relations: BTreeSet<(Type, Type)>,
         },
         Const {
             id: TypeId,
         },
         Tuple(Type, Type),
+        Any,
     }
 
     impl Default for TypeVariable {
@@ -190,7 +194,6 @@ mod type_unit {
 mod type_type {
     use super::{TypeMatchable, TypeMatchableRef, TypeUnit};
     use crate::ast_step2::types::unwrap_or_clone;
-    use crate::ast_step2::SubtypeRelations;
     use crate::ast_step3::simplify_subtype_rel;
     use smallvec::SmallVec;
     use std::collections::BTreeSet;
@@ -250,6 +253,7 @@ mod type_type {
                     },
                     TypeUnit::Const { id } => Const { id },
                     TypeUnit::Tuple(a, b) => Tuple(a, b),
+                    TypeUnit::Any => Any,
                 },
                 _ => TypeMatchable::Union(self),
             }
@@ -280,6 +284,7 @@ mod type_type {
                         variable_requirements,
                         subtype_relations,
                     },
+                    TypeUnit::Any => Any,
                 },
                 _ => Union(self),
             }
@@ -478,7 +483,8 @@ mod type_type {
                 | TypeUnit::Const { .. }
                 | TypeUnit::Variable(_)
                 | TypeUnit::TypeLevelFn(_)
-                | TypeUnit::TypeLevelApply { .. } => false,
+                | TypeUnit::TypeLevelApply { .. }
+                | TypeUnit::Any => false,
             }
         }
 
@@ -533,38 +539,27 @@ mod type_type {
                         })
                         .collect(),
                     subtype_relations: subtype_relations
-                        .increment_recursive_index(greater_than_or_equal_to, n),
+                        .into_iter()
+                        .map(|(a, b)| {
+                            (
+                                a.increment_recursive_index(
+                                    greater_than_or_equal_to,
+                                    n,
+                                ),
+                                b.increment_recursive_index(
+                                    greater_than_or_equal_to,
+                                    n,
+                                ),
+                            )
+                        })
+                        .collect(),
                 },
-                TypeUnit::Const { id } => TypeUnit::Const { id },
+                a @ (TypeUnit::Const { .. } | TypeUnit::Any) => a,
                 TypeUnit::Tuple(a, b) => TypeUnit::Tuple(
                     a.increment_recursive_index(greater_than_or_equal_to, n),
                     b.increment_recursive_index(greater_than_or_equal_to, n),
                 ),
             }
-        }
-    }
-
-    impl SubtypeRelations {
-        fn increment_recursive_index(
-            self,
-            greater_than_or_equal_to: usize,
-            n: i32,
-        ) -> Self {
-            self.into_iter()
-                .map(|(a, b, origin)| {
-                    (
-                        a.increment_recursive_index(
-                            greater_than_or_equal_to,
-                            n,
-                        ),
-                        b.increment_recursive_index(
-                            greater_than_or_equal_to,
-                            n,
-                        ),
-                        origin,
-                    )
-                })
-                .collect()
         }
     }
 }
@@ -653,6 +648,7 @@ impl From<TypeMatchable> for Type {
                 subtype_relations,
             }
             .into(),
+            TypeMatchable::Any => TypeUnit::Any.into(),
         }
     }
 }
@@ -802,7 +798,9 @@ impl TypeConstructor for Type {
                 vs.remove(&TypeVariable::RecursiveIndex(0));
                 vs.into_iter().collect()
             }
-            TypeMatchableRef::Const { .. } => Vec::new(),
+            TypeMatchableRef::Const { .. } | TypeMatchableRef::Any => {
+                Vec::new()
+            }
             TypeMatchableRef::Tuple(a, b) => merge_vec(
                 a.covariant_type_variables(),
                 b.covariant_type_variables(),
@@ -834,9 +832,9 @@ impl TypeConstructor for Type {
                 .iter()
                 .map(|c| Type::from(c.clone()).contravariant_type_variables())
                 .concat(),
-            TypeMatchableRef::Variable(_) | TypeMatchableRef::Empty => {
-                Default::default()
-            }
+            TypeMatchableRef::Variable(_)
+            | TypeMatchableRef::Empty
+            | TypeMatchableRef::Any => Default::default(),
             TypeMatchableRef::RecursiveAlias { body } => {
                 let mut vs: FxHashSet<_> =
                     body.contravariant_type_variables().into_iter().collect();
@@ -967,9 +965,10 @@ impl TypeUnit {
             TypeUnit::Fn(a, r) => {
                 [a, r].iter().find_map(|a| a.find_recursive_alias())
             }
-            TypeUnit::Variable(_) => None,
+            TypeUnit::Const { .. } | TypeUnit::Variable(_) | TypeUnit::Any => {
+                None
+            }
             TypeUnit::RecursiveAlias { body } => Some(body),
-            TypeUnit::Const { .. } => None,
             TypeUnit::Tuple(a, b) => {
                 [a, b].iter().find_map(|a| a.find_recursive_alias())
             }
@@ -1024,13 +1023,17 @@ impl Display for Type {
             } => {
                 write!(
                     f,
-                    "{t} where {{{subtype_relations}, {}}}",
+                    "{t} where {{{}, {}}}",
+                    subtype_relations.iter().format_with(",\n", |(a, b), f| f(
+                        &format_args!("{a} < {b}")
+                    )),
                     variable_requirements.iter().format_with(
                         ",\n",
                         |(name, t), f| f(&format_args!("?{} : {}", name, t))
                     )
                 )
             }
+            Any => write!(f, "Any"),
         }
     }
 }
@@ -1069,6 +1072,7 @@ impl std::fmt::Debug for TypeUnit {
                 "{t:?} where {{{subtype_relations:?}, {:?}}}",
                 variable_requirements.iter().format(",\n")
             ),
+            Any => write!(f, "Any"),
         }
     }
 }
@@ -1098,12 +1102,16 @@ impl Display for TypeUnit {
                 subtype_relations,
             } => write!(
                 f,
-                "{t} where {{{subtype_relations}, {}}}",
+                "{t} where {{{}, {}}}",
+                subtype_relations.iter().format_with(",\n", |(a, b), f| f(
+                    &format_args!("{a} < {b}")
+                )),
                 variable_requirements.iter().format_with(
                     ",\n",
                     |(name, t), f| f(&format_args!("?{} : {}", name, t))
                 )
             ),
+            Any => write!(f, "Any"),
         }
     }
 }

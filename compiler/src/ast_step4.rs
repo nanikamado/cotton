@@ -492,7 +492,7 @@ impl<'b> VariableMemo<'b> {
                 } => {
                     let args = args
                         .iter()
-                        .map(|pattern| {
+                        .map(|(pattern, _span)| {
                             let p = self.type_map.new_pointer();
                             self.unify_type_with_pattern(
                                 p,
@@ -717,7 +717,8 @@ fn unify_type_with_ast_sep2_type(
             | Variable(_)
             | TypeLevelApply { .. }
             | TypeLevelFn(_)
-            | Restrictions { .. } => {
+            | Restrictions { .. }
+            | Any => {
                 unimplemented!()
             }
         }

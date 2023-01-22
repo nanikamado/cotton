@@ -449,3 +449,8 @@ fn shadow_wildcard_import() {
         .stdout("[[a]]\n")
         .success();
 }
+
+#[test]
+fn typed_field_fail() {
+    test_test("typed_field_fail.cot").code(1);
+}

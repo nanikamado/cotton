@@ -89,6 +89,9 @@ impl types::Type {
                         );
                         cs.push(c);
                     }
+                    types::TypeUnit::Any => {
+                        cs.push(r#"{type:"any"}"#.to_string());
+                    }
                     types::TypeUnit::Variable(
                         TypeVariable::RecursiveIndex(n),
                     ) => {

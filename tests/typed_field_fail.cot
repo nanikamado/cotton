@@ -1,0 +1,14 @@
+data E
+data T {
+    value: A,
+    left: Tree[A],
+    right: Tree[A],
+} forall { A }
+
+type Tree = E | T[A] forall { A }
+
+test : Tree[I64] -> Bool =
+    | E => False
+    | T { value: v, left: l, right: True } => True
+
+main = | () => ()
