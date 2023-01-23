@@ -1668,7 +1668,7 @@ fn possible_weakest(
         if pattern_restriction
             .pattern
             .iter()
-            .any(|p| p.0.contravariant_type_variables().contains(&t))
+            .any(|p| p.0.all_type_variables().contains(&t))
             || pattern_restriction.allow_inexhaustive
                 && pattern_restriction
                     .type_
@@ -1826,7 +1826,7 @@ fn possible_strongest(
         if pattern_restriction
             .pattern
             .iter()
-            .any(|p| p.0.covariant_type_variables().contains(&t))
+            .any(|p| p.0.all_type_variables().contains(&t))
             || pattern_restriction.allow_inexhaustive
                 && pattern_restriction
                     .type_
