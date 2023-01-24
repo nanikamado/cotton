@@ -1237,6 +1237,7 @@ fn replace_fn_apply(t: Type, dummies: &mut BTreeMap<Type, Type>) -> Type {
                 replace_fn_apply(b, dummies),
             )
             .into(),
+            Variance(v, t) => Variance(v, replace_fn_apply(t, dummies)).into(),
         }
     }
     t.into_iter()

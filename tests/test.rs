@@ -454,3 +454,13 @@ fn shadow_wildcard_import() {
 fn typed_field_fail() {
     test_test("typed_field_fail.cot").code(1);
 }
+
+#[test]
+fn variance_fail() {
+    test_test("variance_fail.cot").code(1);
+}
+
+#[test]
+fn variance() {
+    test_test("variance.cot").stdout("True\n").success();
+}

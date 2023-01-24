@@ -1,7 +1,7 @@
 pub use self::type_type::Type;
-pub use self::type_unit::{TypeUnit, TypeVariable};
+pub use self::type_unit::{TypeUnit, TypeVariable, Variance};
 use super::TypeWithEnv;
-use crate::ast_step2::TypeId;
+use crate::ast_step2::{types, TypeId};
 use crate::ast_step3::simplify_subtype_rel;
 use crate::intrinsics::{IntrinsicType, INTRINSIC_TYPES};
 use fxhash::FxHashSet;
@@ -34,6 +34,7 @@ pub enum TypeMatchable {
     },
     Tuple(Type, Type),
     Any,
+    Variance(Variance, Type),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -60,6 +61,7 @@ pub enum TypeMatchableRef<'b> {
     },
     Tuple(&'b Type, &'b Type),
     Any,
+    Variance(Variance, &'b Type),
 }
 
 mod type_unit {
@@ -76,6 +78,12 @@ mod type_unit {
     pub enum TypeVariable {
         Normal(TypeVariableInner),
         RecursiveIndex(usize),
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+    pub enum Variance {
+        Contravariant,
+        Invariant,
     }
 
     #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -100,6 +108,7 @@ mod type_unit {
         },
         Tuple(Type, Type),
         Any,
+        Variance(Variance, Type),
     }
 
     impl Default for TypeVariable {
@@ -254,6 +263,7 @@ mod type_type {
                     TypeUnit::Const { id } => Const { id },
                     TypeUnit::Tuple(a, b) => Tuple(a, b),
                     TypeUnit::Any => Any,
+                    TypeUnit::Variance(v, t) => Variance(v, t),
                 },
                 _ => TypeMatchable::Union(self),
             }
@@ -285,6 +295,7 @@ mod type_type {
                         subtype_relations,
                     },
                     TypeUnit::Any => Any,
+                    TypeUnit::Variance(v, t) => Variance(*v, t),
                 },
                 _ => Union(self),
             }
@@ -484,7 +495,8 @@ mod type_type {
                 | TypeUnit::Variable(_)
                 | TypeUnit::TypeLevelFn(_)
                 | TypeUnit::TypeLevelApply { .. }
-                | TypeUnit::Any => false,
+                | TypeUnit::Any
+                | TypeUnit::Variance(_, _) => false,
             }
         }
 
@@ -497,6 +509,10 @@ mod type_type {
                 TypeUnit::Fn(a, b) => TypeUnit::Fn(
                     a.increment_recursive_index(greater_than_or_equal_to, n),
                     b.increment_recursive_index(greater_than_or_equal_to, n),
+                ),
+                TypeUnit::Variance(v, t) => TypeUnit::Variance(
+                    v,
+                    t.increment_recursive_index(greater_than_or_equal_to, n),
                 ),
                 TypeUnit::Variable(v) => {
                     TypeUnit::Variable(v.increment_recursive_index_with_bound(
@@ -649,6 +665,7 @@ impl From<TypeMatchable> for Type {
             }
             .into(),
             TypeMatchable::Any => TypeUnit::Any.into(),
+            TypeMatchable::Variance(v, t) => TypeUnit::Variance(v, t).into(),
         }
     }
 }
@@ -798,7 +815,9 @@ impl TypeConstructor for Type {
                 vs.remove(&TypeVariable::RecursiveIndex(0));
                 vs.into_iter().collect()
             }
-            TypeMatchableRef::Const { .. } | TypeMatchableRef::Any => {
+            TypeMatchableRef::Const { .. }
+            | TypeMatchableRef::Any
+            | TypeMatchableRef::Variance(Variance::Contravariant, _) => {
                 Vec::new()
             }
             TypeMatchableRef::Tuple(a, b) => merge_vec(
@@ -819,6 +838,9 @@ impl TypeConstructor for Type {
                 .flat_map(|(_, t)| t.contravariant_type_variables())
                 .chain(t.covariant_type_variables())
                 .collect(),
+            TypeMatchableRef::Variance(Variance::Invariant, t) => {
+                t.covariant_type_variables()
+            }
         }
     }
 
@@ -863,6 +885,7 @@ impl TypeConstructor for Type {
                 .flat_map(|(_, t)| t.covariant_type_variables())
                 .chain(t.contravariant_type_variables())
                 .collect(),
+            TypeMatchableRef::Variance(_, t) => t.covariant_type_variables(),
         }
     }
 
@@ -974,7 +997,9 @@ impl TypeUnit {
             }
             TypeUnit::TypeLevelFn(f) => f.find_recursive_alias(),
             TypeUnit::TypeLevelApply { f: _, a } => a.find_recursive_alias(),
-            TypeUnit::Restrictions { t, .. } => t.find_recursive_alias(),
+            TypeUnit::Restrictions { t, .. } | TypeUnit::Variance(_, t) => {
+                t.find_recursive_alias()
+            }
         }
     }
 }
@@ -985,6 +1010,7 @@ pub fn unwrap_or_clone<T: Clone>(this: Rc<T>) -> T {
 
 impl Display for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use types::Variance::*;
         use TypeMatchableRef::*;
         match self.matchable_ref() {
             Fn(arg, rtn) => {
@@ -1034,6 +1060,8 @@ impl Display for Type {
                 )
             }
             Any => write!(f, "Any"),
+            Variance(Contravariant, t) => write!(f, "↑{t}"),
+            Variance(Invariant, t) => write!(f, "={t}"),
         }
     }
 }
@@ -1046,6 +1074,7 @@ impl std::fmt::Debug for Type {
 
 impl std::fmt::Debug for TypeUnit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use types::Variance::*;
         use TypeUnit::*;
         match self {
             Fn(arg, rtn) => {
@@ -1073,12 +1102,15 @@ impl std::fmt::Debug for TypeUnit {
                 variable_requirements.iter().format(",\n")
             ),
             Any => write!(f, "Any"),
+            Variance(Contravariant, t) => write!(f, "↑{t}"),
+            Variance(Invariant, t) => write!(f, "={t}"),
         }
     }
 }
 
 impl Display for TypeUnit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use types::Variance::*;
         use TypeUnit::*;
         match self {
             Fn(arg, rtn) => {
@@ -1112,6 +1144,8 @@ impl Display for TypeUnit {
                 )
             ),
             Any => write!(f, "Any"),
+            Variance(Contravariant, t) => write!(f, "↑{t}"),
+            Variance(Invariant, t) => write!(f, "={t}"),
         }
     }
 }
