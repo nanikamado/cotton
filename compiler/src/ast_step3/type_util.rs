@@ -37,7 +37,9 @@ impl TypeUnit {
                 f.all_type_variables_vec(),
                 a.all_type_variables_vec(),
             ),
-            TypeUnit::Restrictions { t, .. } => t.all_type_variables_vec(),
+            TypeUnit::Restrictions { t, .. } | TypeUnit::Variance(_, t) => {
+                t.all_type_variables_vec()
+            }
         }
     }
 
@@ -173,6 +175,14 @@ impl TypeUnit {
                     u,
                 )
             }
+            Self::Variance(v, t) => {
+                let (t, u) = t.replace_num_with_update_flag(
+                    from,
+                    to,
+                    recursive_alias_depth,
+                );
+                (Self::Variance(v, t).into(), u)
+            }
         }
     }
 
@@ -234,6 +244,7 @@ impl TypeUnit {
                 subtype_relations,
             },
             TypeUnit::Any => Any,
+            TypeUnit::Variance(v, t) => Variance(*v, t),
         }
     }
 
@@ -343,6 +354,14 @@ impl TypeUnit {
                     u,
                 )
             }
+            Self::Variance(v, t) => {
+                let (t, u) = t.replace_type_union_with_update_flag(
+                    from,
+                    to,
+                    recursive_alias_depth,
+                );
+                (Self::Variance(v, t), u)
+            }
         }
     }
 
@@ -367,7 +386,9 @@ impl TypeUnit {
                 f.contains_variable(variable_num)
                     || a.contains_variable(variable_num)
             }
-            Self::Restrictions { t, .. } => t.contains_variable(variable_num),
+            Self::Restrictions { t, .. } | Self::Variance(_, t) => {
+                t.contains_variable(variable_num)
+            }
         }
     }
 
@@ -674,7 +695,7 @@ impl TypeUnit {
                 f.contains_broken_index(recursive_alias_depth)
                     || a.contains_broken_index(recursive_alias_depth)
             }
-            TypeUnit::Restrictions { t, .. } => {
+            TypeUnit::Restrictions { t, .. } | TypeUnit::Variance(_, t) => {
                 t.contains_broken_index(recursive_alias_depth)
             }
             TypeUnit::Tuple(a, b) => {
@@ -691,9 +712,9 @@ impl TypeUnit {
             | TypeUnit::TypeLevelApply { f: b, a } => {
                 a.contains_restriction() || b.contains_restriction()
             }
-            TypeUnit::RecursiveAlias { body: a } | TypeUnit::TypeLevelFn(a) => {
-                a.contains_restriction()
-            }
+            TypeUnit::RecursiveAlias { body: a }
+            | TypeUnit::TypeLevelFn(a)
+            | TypeUnit::Variance(_, a) => a.contains_restriction(),
             TypeUnit::Variable(_) | TypeUnit::Const { .. } | TypeUnit::Any => {
                 false
             }
@@ -709,6 +730,7 @@ impl TypeUnit {
             RecursiveAlias { body: a }
             | TypeLevelFn(a)
             | TypeLevelApply { f: a, .. } => a.is_wrapped_by_const(),
+            Variance(_, _) => panic!(),
         }
     }
 
@@ -736,7 +758,8 @@ impl TypeUnit {
                 | TypeUnit::Const { .. }
                 | TypeUnit::Any => false,
                 TypeUnit::RecursiveAlias { body: a }
-                | TypeUnit::TypeLevelFn(a) => {
+                | TypeUnit::TypeLevelFn(a)
+                | TypeUnit::Variance(_, a) => {
                     contains_non_polymorphic_point(a, depth + 1)
                 }
                 TypeUnit::TypeLevelApply { f, a } => {
@@ -797,9 +820,9 @@ impl TypeUnit {
             | TypeUnit::Tuple(a, b) => {
                 a.contains_recursion() || b.contains_recursion()
             }
-            TypeUnit::Restrictions { t: a, .. } | TypeUnit::TypeLevelFn(a) => {
-                a.contains_recursion()
-            }
+            TypeUnit::Restrictions { t: a, .. }
+            | TypeUnit::TypeLevelFn(a)
+            | TypeUnit::Variance(_, a) => a.contains_recursion(),
             TypeUnit::RecursiveAlias { .. } => true,
             TypeUnit::Const { .. } | TypeUnit::Variable(_) | TypeUnit::Any => {
                 false
@@ -1065,6 +1088,7 @@ impl Type {
             | TypeMatchableRef::Variable(_)
             | TypeMatchableRef::Empty
             | TypeMatchableRef::Any => false,
+            TypeMatchableRef::Variance(_, _) => panic!(),
         }
     }
 

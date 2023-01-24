@@ -11,6 +11,7 @@ use crate::ast_step1::ident_id::IdentId;
 use crate::ast_step1::name_id::Path;
 use crate::ast_step1::token_map::{TokenMap, TokenMapEntry};
 use crate::ast_step1::{self, merge_span};
+use crate::ast_step2::types::unwrap_or_clone;
 use crate::ast_step3::{VariableId, VariableRequirement};
 use crate::errors::CompileError;
 use crate::intrinsics::{IntrinsicConstructor, IntrinsicType, INTRINSIC_TYPES};
@@ -245,30 +246,42 @@ impl<'a> Ast<'a> {
         token_map: &mut TokenMap,
         imports: &mut Imports,
     ) -> Result<Self, CompileError> {
-        let mut data_decls = Vec::new();
         let mut variable_decls = Vec::new();
+        let mut data_decls = Default::default();
+        let mut type_parameter_map = Default::default();
         let mut env = Env {
             token_map,
             type_alias_map: &mut TypeAliasMap::default(),
             interface_decls: &mut Default::default(),
             imports,
             data_decl_map: &mut FxHashMap::default(),
-            data_decls: &mut Default::default(),
+            data_decls: &mut data_decls,
+            type_parameter_map: &mut type_parameter_map,
         };
-        collect_decls(
-            ast,
-            Path::root(),
-            &mut env,
-            &mut variable_decls,
-            &mut data_decls,
-        )?;
+        collect_decls(ast, Path::root(), &mut env, &mut variable_decls)?;
         let entry_point = variable_decls
             .iter()
             .find(|d| d.name == Path::from_str(Path::pkg_root(), "main"))
             .map(|d| d.decl_id);
         Ok(Self {
             variable_decl: variable_decls,
-            data_decl: data_decls,
+            data_decl: data_decls
+                .into_values()
+                .map(|mut d| {
+                    d.fields = d
+                        .fields
+                        .into_iter()
+                        .map(|mut f| {
+                            f.type_ = add_variance_to_type(
+                                f.type_,
+                                &type_parameter_map,
+                            );
+                            f
+                        })
+                        .collect();
+                    d
+                })
+                .collect(),
             entry_point,
         })
     }
@@ -279,17 +292,17 @@ fn collect_decls<'a>(
     module_path: ModulePath,
     env: &mut Env<'_, 'a>,
     variable_decls: &mut Vec<VariableDecl<'a>>,
-    data_decls: &mut Vec<DataDecl>,
 ) -> Result<(), CompileError> {
     collect_data_and_type_alias_decls(&ast, module_path, env)?;
-    collect_interface_decls(&ast, module_path, data_decls, env)?;
+    debug_assert!(env.data_decl_map.is_empty());
+    collect_interface_decls(&ast, module_path, env)?;
     env.data_decl_map
-        .extend(data_decls.iter().map(|d| (d.name, d.decl_id)));
+        .extend(env.data_decls.iter().map(|(_, d)| (d.name, d.decl_id)));
     {
         TYPE_NAMES.write().unwrap().extend(
-            data_decls
+            env.data_decls
                 .iter()
-                .map(|d| (TypeId::DeclId(d.decl_id), d.name)),
+                .map(|(_, d)| (TypeId::DeclId(d.decl_id), d.name)),
         );
     }
     collect_variable_decls(ast, module_path, variable_decls, env)?;
@@ -358,25 +371,17 @@ fn collect_data_and_type_alias_decls<'a>(
 fn collect_interface_decls<'a>(
     ast: &ast_step1::Ast<'a>,
     module_path: ModulePath,
-    data_decls: &mut Vec<DataDecl>,
     env: &mut Env<'a, '_>,
 ) -> Result<(), CompileError> {
     for d in &ast.data_decl {
         let mut type_variables = FxHashMap::default();
-        let mut args = vec![TypeUnit::Const {
-            id: TypeId::DeclId(d.decl_id),
-        }
-        .into()];
         for (i, ((name, _, _), _)) in
             d.type_variables.type_variables.iter().enumerate()
         {
             let v = TypeVariable::RecursiveIndex(i);
             type_variables.insert(Path::from_str(module_path, name), v);
-            args.push(Type::from(TypeUnit::Variable(v)));
         }
-        let constructed_type: Type =
-            Type::argument_tuple_from_arguments(args.clone());
-        let fields = d
+        let fields: Vec<_> = d
             .fields
             .iter()
             .map(|f| {
@@ -393,16 +398,73 @@ fn collect_interface_decls<'a>(
                 })
             })
             .try_collect()?;
+        let covariant_candidates: FxHashSet<_> = fields
+            .iter()
+            .flat_map(|v| v.type_.covariant_type_variables())
+            .map(|v| {
+                if let TypeVariable::RecursiveIndex(i) = v {
+                    i
+                } else {
+                    panic!()
+                }
+            })
+            .collect();
+        let contravariant_candidates: FxHashSet<_> = fields
+            .iter()
+            .flat_map(|v| v.type_.contravariant_type_variables())
+            .map(|v| {
+                if let TypeVariable::RecursiveIndex(i) = v {
+                    i
+                } else {
+                    panic!()
+                }
+            })
+            .collect();
+        let type_parameters = (0..d.type_variables.type_variables.len())
+            .map(|i| {
+                if contravariant_candidates.contains(&i) {
+                    if covariant_candidates.contains(&i) {
+                        TypeUnit::Variance(
+                            types::Variance::Invariant,
+                            TypeUnit::Variable(TypeVariable::RecursiveIndex(i))
+                                .into(),
+                        )
+                    } else {
+                        TypeUnit::Variance(
+                            types::Variance::Contravariant,
+                            TypeUnit::Variable(TypeVariable::RecursiveIndex(i))
+                                .into(),
+                        )
+                    }
+                } else {
+                    TypeUnit::Variable(TypeVariable::RecursiveIndex(i))
+                }
+            })
+            .collect_vec();
+        let constructed_type = type_parameters.iter().rev().fold(
+            TypeUnit::Const {
+                id: TypeId::Intrinsic(IntrinsicType::Unit),
+            }
+            .into(),
+            |acc, v| TypeUnit::Tuple(v.clone().into(), acc).into(),
+        );
+        env.type_parameter_map
+            .insert(d.decl_id, type_parameters.clone());
         let d = DataDecl {
             name: d.name,
             fields,
             decl_id: d.decl_id,
-            type_parameter_len: d.type_variables.type_variables.len(),
-            constructed_type,
+            type_parameter_len: type_parameters.len(),
+            constructed_type: TypeUnit::Tuple(
+                TypeUnit::Const {
+                    id: TypeId::DeclId(d.decl_id),
+                }
+                .into(),
+                constructed_type,
+            )
+            .into(),
         };
-        env.data_decls
-            .insert(ConstructorId::DeclId(d.decl_id), d.clone());
-        data_decls.push(d);
+        env.data_decls.insert(ConstructorId::DeclId(d.decl_id), d);
     }
     env.interface_decls.extend(
         ast.interface_decl
@@ -433,6 +495,7 @@ fn collect_interface_decls<'a>(
                                     imports: env.imports,
                                     data_decl_map: env.data_decl_map,
                                     data_decls: env.data_decls,
+                                    type_parameter_map: env.type_parameter_map,
                                 },
                             )?;
                             env.token_map.insert(
@@ -449,9 +512,124 @@ fn collect_interface_decls<'a>(
             .try_collect::<_, Vec<_>, _>()?,
     );
     for m in &ast.modules {
-        collect_interface_decls(&m.ast, m.name, data_decls, env)?;
+        collect_interface_decls(&m.ast, m.name, env)?;
     }
     Ok(())
+}
+
+fn add_variance_to_type(
+    t: Type,
+    type_parameter_map: &FxHashMap<DeclId, Vec<TypeUnit>>,
+) -> Type {
+    fn add_variance_to_type_unit(
+        t: TypeUnit,
+        type_parameter_map: &FxHashMap<DeclId, Vec<TypeUnit>>,
+    ) -> TypeUnit {
+        use TypeUnit::*;
+        match t {
+            Fn(a, b) => Fn(
+                add_variance_to_type(a, type_parameter_map),
+                add_variance_to_type(b, type_parameter_map),
+            ),
+            RecursiveAlias { body } => RecursiveAlias {
+                body: add_variance_to_type(body, type_parameter_map),
+            },
+            TypeLevelFn(a) => {
+                TypeLevelFn(add_variance_to_type(a, type_parameter_map))
+            }
+            TypeLevelApply { f, a } => TypeLevelApply {
+                f: add_variance_to_type(f, type_parameter_map),
+                a: add_variance_to_type(a, type_parameter_map),
+            },
+            Restrictions {
+                t,
+                variable_requirements,
+                subtype_relations,
+            } => Restrictions {
+                t: add_variance_to_type(t, type_parameter_map),
+                variable_requirements: variable_requirements
+                    .into_iter()
+                    .map(|(s, t)| {
+                        (s, add_variance_to_type(t, type_parameter_map))
+                    })
+                    .collect(),
+                subtype_relations: subtype_relations
+                    .into_iter()
+                    .map(|(a, b)| {
+                        (
+                            add_variance_to_type(a, type_parameter_map),
+                            add_variance_to_type(b, type_parameter_map),
+                        )
+                    })
+                    .collect(),
+            },
+            t @ (Const { .. } | Variable(_) | Any) => t,
+            Tuple(a, b) => match a.matchable_ref() {
+                types::TypeMatchableRef::Const {
+                    id: TypeId::DeclId(id),
+                } => Tuple(
+                    a,
+                    add_variance_to_tuple(
+                        b,
+                        &type_parameter_map[&id],
+                        type_parameter_map,
+                    ),
+                ),
+                _ => Tuple(
+                    add_variance_to_type(a, type_parameter_map),
+                    add_variance_to_type(b, type_parameter_map),
+                ),
+            },
+            Variance(_, _) => panic!(),
+        }
+    }
+    fn add_variance_to_tuple_unit(
+        t: TypeUnit,
+        type_parameters: &[TypeUnit],
+        type_parameter_map: &FxHashMap<DeclId, Vec<TypeUnit>>,
+    ) -> TypeUnit {
+        match t {
+            t @ TypeUnit::Const {
+                id: TypeId::Intrinsic(IntrinsicType::Unit),
+            } => t,
+            TypeUnit::Tuple(a, b) => {
+                let a = add_variance_to_type(a, type_parameter_map);
+                let a = match type_parameters[0] {
+                    TypeUnit::Variance(v, _) => TypeUnit::Variance(v, a).into(),
+                    _ => a,
+                };
+                TypeUnit::Tuple(
+                    a,
+                    add_variance_to_tuple(
+                        b,
+                        &type_parameters[1..],
+                        type_parameter_map,
+                    ),
+                )
+            }
+            _ => panic!(),
+        }
+    }
+    fn add_variance_to_tuple(
+        t: Type,
+        type_parameters: &[TypeUnit],
+        type_parameter_map: &FxHashMap<DeclId, Vec<TypeUnit>>,
+    ) -> Type {
+        t.into_iter()
+            .map(|t| {
+                add_variance_to_tuple_unit(
+                    unwrap_or_clone(t),
+                    type_parameters,
+                    type_parameter_map,
+                )
+            })
+            .collect()
+    }
+    t.into_iter()
+        .map(|t| {
+            add_variance_to_type_unit(unwrap_or_clone(t), type_parameter_map)
+        })
+        .collect()
 }
 
 struct Env<'a, 'b> {
@@ -462,6 +640,7 @@ struct Env<'a, 'b> {
     imports: &'a mut Imports,
     data_decl_map: &'a mut FxHashMap<Path, DeclId>,
     data_decls: &'a mut FxHashMap<ConstructorId, DataDecl>,
+    type_parameter_map: &'a mut FxHashMap<DeclId, Vec<TypeUnit>>,
 }
 
 fn collect_variable_decls<'a>(
@@ -559,13 +738,16 @@ fn variable_decl<'a>(
                     .iter()
                     .map(|(name, _)| Path::from_str(module_path, &name.0))
                     .collect();
-                let t = type_to_type_with_forall(
-                    t,
-                    module_path,
-                    type_variable_names.clone(),
-                    forall,
-                    env,
-                )?;
+                let t = add_variance_to_type(
+                    type_to_type_with_forall(
+                        t,
+                        module_path,
+                        type_variable_names.clone(),
+                        forall,
+                        env,
+                    )?,
+                    env.type_parameter_map,
+                );
                 let mut fixed_parameter_names = FxHashMap::default();
                 let (mut fixed_t, parameters) = t.clone().remove_parameters();
                 for (p, name) in parameters
@@ -849,13 +1031,16 @@ fn expr<'a>(
         }
         ast_step1::Expr::TypeAnnotation(e, t, forall) => {
             let e = expr(*e, module_path, type_variable_names, env)?;
-            let t = type_to_type_with_forall(
-                t,
-                module_path,
-                type_variable_names.clone(),
-                forall,
-                env,
-            )?;
+            let t = add_variance_to_type(
+                type_to_type_with_forall(
+                    t,
+                    module_path,
+                    type_variable_names.clone(),
+                    forall,
+                    env,
+                )?,
+                env.type_parameter_map,
+            );
             (e.env, Expr::TypeAnnotation(Box::new(e.value), t))
         }
     };
@@ -1049,13 +1234,16 @@ fn pattern<'a>(
         }
         ast_step1::Pattern::Underscore => Underscore.into(),
         ast_step1::Pattern::TypeRestriction(p, t, forall) => {
-            let t = type_to_type_with_forall(
-                t,
-                module_path,
-                Default::default(),
-                forall,
-                env,
-            )?;
+            let t = add_variance_to_type(
+                type_to_type_with_forall(
+                    t,
+                    module_path,
+                    Default::default(),
+                    forall,
+                    env,
+                )?,
+                env.type_parameter_map,
+            );
             let p = pattern(*p, span, module_path, type_variable_names, env)?;
             TypeRestriction(p, t).into()
         }
@@ -1589,7 +1777,7 @@ pub fn collect_tuple_rev(tuple: &Type) -> Vec<Vec<&Type>> {
                 id: TypeId::Intrinsic(IntrinsicType::Unit),
                 ..
             } => vec![Vec::new()],
-            _ => panic!(),
+            _ => panic!("{tuple} is not a tuple or unit"),
         })
         .collect()
 }

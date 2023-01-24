@@ -84,6 +84,7 @@ fn fmt_type_unit_with_env(
     imports: &Imports,
     type_variable_decls: &FxHashMap<TypeUnit, Path>,
 ) -> (String, OperatorContext) {
+    use crate::ast_step2::types::Variance::*;
     use OperatorContext::*;
     if let Some(s) = type_variable_decls.get(t) {
         return (s.to_string(), Single);
@@ -196,6 +197,30 @@ fn fmt_type_unit_with_env(
             ),
             OtherOperator,
         ),
+        TypeUnit::Variance(Contravariant, t) => {
+            let (t, context) =
+                fmt_type_with_env(t, imports, type_variable_decls);
+            (
+                if context != Single {
+                    format!("↑({t})")
+                } else {
+                    format!("↑{t}")
+                },
+                Single,
+            )
+        }
+        TypeUnit::Variance(Invariant, t) => {
+            let (t, context) =
+                fmt_type_with_env(t, imports, type_variable_decls);
+            (
+                if context != Single {
+                    format!("=({t})")
+                } else {
+                    format!("={t}")
+                },
+                Single,
+            )
+        }
     }
 }
 

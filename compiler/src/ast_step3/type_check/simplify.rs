@@ -108,6 +108,9 @@ impl TypeVariableMap {
                 }
                 .into(),
                 TypeUnit::Any => TypeUnit::Any.into(),
+                TypeUnit::Variance(v, t) => {
+                    TypeUnit::Variance(v, self.normalize_type(t)).into()
+                }
             })
             .collect::<Type>()
             .into_iter()
@@ -1150,6 +1153,7 @@ pub fn simplify_subtype_rel(
             right: sup.clone(),
             reasons: Vec::new(),
         };
+        use ast_step2::types::Variance::*;
         use TypeMatchable::*;
         match (sub.clone().matchable(), sup.clone().matchable()) {
             (_, Any) => Ok(Vec::new()),
@@ -1195,6 +1199,38 @@ pub fn simplify_subtype_rel(
                 } else {
                     Err(single_reason)
                 }
+            }
+            (Variance(Invariant, a), Variance(Invariant, b)) => {
+                let r1 = simplify_subtype_rel_rec(
+                    a.clone(),
+                    b.clone(),
+                    already_considered_relations.as_deref_mut(),
+                    loop_limit,
+                )
+                .map_err(add_reason)?;
+                let r2 = simplify_subtype_rel_rec(
+                    b,
+                    a,
+                    already_considered_relations.as_deref_mut(),
+                    loop_limit,
+                )
+                .map_err(add_reason)?;
+                Ok(merge_vec(r1, r2))
+            }
+            (Variance(Contravariant, a), Variance(Contravariant, b)) => {
+                let r = simplify_subtype_rel_rec(
+                    b,
+                    a,
+                    already_considered_relations.as_deref_mut(),
+                    loop_limit,
+                )
+                .map_err(add_reason)?;
+                Ok(r)
+            }
+            (Variance(_, _), a) | (a, Variance(_, _))
+                if Type::from(a.clone()).is_wrapped_by_const() =>
+            {
+                panic!("{sub} < {sup}")
             }
             (Fn(_, _), Tuple { .. } | Const { .. })
             | (Tuple { .. } | Const { .. }, Fn(_, _))

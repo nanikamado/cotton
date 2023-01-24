@@ -1,0 +1,10 @@
+data FnWrapper(A -> B) forall { A, B }
+
+a : FnWrapper[True, True] = FnWrapper(| True => True)
+
+b : FnWrapper[True | False, True] -> True = | f => f._0(False)
+
+main : () -> () =
+    | _ => do
+        a.b.println
+

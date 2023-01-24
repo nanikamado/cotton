@@ -232,6 +232,15 @@ impl types::Type {
                             cs.push(c);
                         }
                     }
+                    types::TypeUnit::Variance(_, t) => {
+                        let (c, r) = type_to_js_obj_rec(t, indexable_entries);
+                        cs.push(c);
+                        recursive_point_accessor =
+                            merge_recursive_point_accessors(
+                                recursive_point_accessor,
+                                r,
+                            );
+                    }
                 }
             }
             (

@@ -718,7 +718,8 @@ fn unify_type_with_ast_sep2_type(
             | TypeLevelApply { .. }
             | TypeLevelFn(_)
             | Restrictions { .. }
-            | Any => {
+            | Any
+            | Variance(_, _) => {
                 unimplemented!()
             }
         }

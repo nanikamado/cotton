@@ -410,10 +410,10 @@ fn close_type_unit(
                 match a.0[0] {
                     MatchOperandUnit::Const(id @ TypeId::DeclId(_)) => {
                         let data_decl = &data_decls[&id];
-                        let parameter_len = data_decl.type_parameter_len;
                         let mut ts = Type::default();
                         for b in b.argument_vecs_from_argument_tuple() {
-                            let parameter_table = (0..parameter_len)
+                            let parameter_table = (0..data_decl
+                                .type_parameter_len)
                                 .map(|_| TypeVariable::new())
                                 .collect_vec();
                             for (b, mut field_t) in b.into_iter().zip_eq(
