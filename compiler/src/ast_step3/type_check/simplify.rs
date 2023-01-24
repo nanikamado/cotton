@@ -212,9 +212,6 @@ impl TypeVariableMap {
                 );
                 (v, TypeUnit::RecursiveAlias { body: key }.into())
             }
-            // (Variable(_), _) | (_, Variable(_)) => {
-            //     panic!("recursion is not allowed.",)
-            // }
             (
                 TypeLevelApply { f: a_f, a: a_a },
                 TypeLevelApply { f: b_f, a: b_a },
