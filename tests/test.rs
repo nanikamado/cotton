@@ -369,6 +369,13 @@ fn modules2() {
 }
 
 #[test]
+fn modules3() {
+    test_test("modules3.cot")
+        .stdout("HogeeeeeeHogeeeeee\nFugaaaaaaFugaaaaaa\n")
+        .success();
+}
+
+#[test]
 fn modules_fail() {
     test_test("modules_fail.cot").code(1);
 }

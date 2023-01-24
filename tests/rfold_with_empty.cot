@@ -1,7 +1,7 @@
 data E
-data T(A, B, C) forall { A, B, C }
+data T(A, Tree[A], Tree[A]) forall { A }
 
-type Tree = E | T[A, Tree[A], Tree[A]] forall { A }
+type Tree = E | T[A] forall { A }
 
 empty : Bool = False
 empty : Tree[A] forall { A } = E
