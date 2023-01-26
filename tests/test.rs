@@ -468,6 +468,11 @@ fn variance_fail() {
 }
 
 #[test]
+fn variance_fail2() {
+    test_test("variance_fail2.cot").code(1);
+}
+
+#[test]
 fn variance() {
-    test_test("variance.cot").stdout("True\n").success();
+    test_test("variance.cot").stdout("").success();
 }

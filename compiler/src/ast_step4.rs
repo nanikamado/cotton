@@ -3,6 +3,7 @@ mod padded_type_map;
 pub use self::padded_type_map::{PaddedTypeMap, TypePointer};
 use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::name_id::Path;
+use crate::ast_step2::types::TypeMatchableRef;
 use crate::ast_step2::{self, types, ConstructorId, TypeId};
 use crate::ast_step3::{self, DataDecl, VariableId};
 use crate::intrinsics::{
@@ -695,31 +696,44 @@ fn unify_type_with_ast_sep2_type(
     for t in t.iter() {
         use ast_step2::types::TypeUnit::*;
         match &**t {
-            Fn(a, b) => {
-                let (p_a, p_b) = map.get_fn(p);
-                unify_type_with_ast_sep2_type(a, p_a, map);
-                unify_type_with_ast_sep2_type(b, p_b, map);
-            }
             Tuple(a, b) => {
-                let len = tuple_len(b);
-                let args = (0..len).map(|_| map.new_pointer()).collect_vec();
-                for a in a.iter() {
-                    if let Const { id } = &**a {
-                        unify_type_with_tuple(b, &args, map);
-                        map.insert_normal(p, *id, args.clone());
-                    } else {
+                if matches!(
+                    a.matchable_ref(),
+                    types::TypeMatchableRef::Const {
+                        id: TypeId::Intrinsic(IntrinsicType::Fn)
+                    }
+                ) {
+                    let TypeMatchableRef::Tuple(a, b) = b.matchable_ref() else {
                         panic!()
+                    };
+                    let TypeMatchableRef::Tuple(b, _) = b.matchable_ref() else {
+                        panic!()
+                    };
+                    let (p_a, p_b) = map.get_fn(p);
+                    unify_type_with_ast_sep2_type(a, p_a, map);
+                    unify_type_with_ast_sep2_type(b, p_b, map);
+                } else {
+                    let len = tuple_len(b);
+                    let args =
+                        (0..len).map(|_| map.new_pointer()).collect_vec();
+                    for a in a.iter() {
+                        if let Const { id } = &**a {
+                            unify_type_with_tuple(b, &args, map);
+                            map.insert_normal(p, *id, args.clone());
+                        } else {
+                            panic!()
+                        }
                     }
                 }
             }
+            Variance(_, t) => unify_type_with_ast_sep2_type(t, p, map),
             Const { .. }
             | RecursiveAlias { .. }
             | Variable(_)
             | TypeLevelApply { .. }
             | TypeLevelFn(_)
             | Restrictions { .. }
-            | Any
-            | Variance(_, _) => {
+            | Any => {
                 unimplemented!()
             }
         }

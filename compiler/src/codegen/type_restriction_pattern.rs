@@ -65,23 +65,6 @@ impl types::Type {
             let mut cs = Vec::new();
             for t in t.iter() {
                 match &**t {
-                    types::TypeUnit::Fn(a, b) => {
-                        let (a, mut r1) =
-                            type_to_js_obj_rec(a, indexable_entries);
-                        add_all(&mut r1, 0);
-                        let (b, mut r2) =
-                            type_to_js_obj_rec(b, indexable_entries);
-                        add_all(&mut r2, 1);
-                        let mut r = merge_recursive_point_accessors(r1, r2);
-                        let c = format!(r#"{{type:"fn",0:{},1:{}}}"#, a, b);
-                        add_all(&mut r, cs.len() as u8);
-                        recursive_point_accessor =
-                            merge_recursive_point_accessors(
-                                recursive_point_accessor,
-                                r,
-                            );
-                        cs.push(c);
-                    }
                     types::TypeUnit::Variable(TypeVariable::Normal(v)) => {
                         let c = format!(
                             r#"{{type:"variable",0:{}}}"#,

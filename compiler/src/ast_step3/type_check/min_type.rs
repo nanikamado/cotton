@@ -241,7 +241,7 @@ fn min_type_with_env_rec(
             let b: types::Type = TypeUnit::Variable(*type_variable).into();
             let c: types::Type = TypeUnit::new_variable().into();
             // c -> b
-            let cb_fn: Type = TypeUnit::Fn(c.clone(), b.clone()).into();
+            let cb_fn = Type::arrow(c.clone(), b.clone());
             env.map.insert_type(
                 env.subtype_relations,
                 f_t.clone(),
@@ -293,7 +293,7 @@ fn types_to_fn_type(types: impl DoubleEndedIterator<Item = Type>) -> Type {
     let mut ts = types.rev();
     let mut r = ts.next().unwrap();
     for t in ts {
-        r = TypeUnit::Fn(t, r).into()
+        r = Type::arrow(t, r)
     }
     r
 }
@@ -497,7 +497,7 @@ fn pattern_unit_to_type(
                     span: span.clone(),
                     allow_inexhaustive: true,
                 });
-                let function_t_expected = Type::from(TypeUnit::Fn(
+                let function_t_expected = Type::arrow(
                     close_type(
                         t.clone(),
                         env.data_decls,
@@ -506,7 +506,7 @@ fn pattern_unit_to_type(
                         span.clone(),
                     )?,
                     post_pattern_v,
-                ));
+                );
                 env.subtype_relations.insert((
                     function_t.clone(),
                     function_t_expected.clone(),

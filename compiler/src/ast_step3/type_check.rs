@@ -1210,10 +1210,6 @@ fn replace_fn_apply(t: Type, dummies: &mut BTreeMap<Type, Type>) -> Type {
                     new_t
                 }
             }
-            Fn(a, b) => {
-                Fn(replace_fn_apply(a, dummies), replace_fn_apply(b, dummies))
-                    .into()
-            }
             RecursiveAlias { body } => RecursiveAlias { body }.into(),
             TypeLevelFn(a) => TypeLevelFn(a).into(),
             TypeLevelApply { f, a } => TypeLevelApply {
@@ -1329,7 +1325,7 @@ fn resolve_requirements_in_type_with_env(
 
 fn accessor_type(d: &DataDecl, i: usize) -> TypeUnit {
     (0..d.type_parameter_len).fold(
-        TypeUnit::Fn(d.constructed_type.clone(), d.fields[i].type_.clone()),
+        TypeUnit::arrow(d.constructed_type.clone(), d.fields[i].type_.clone()),
         |t, _| TypeUnit::TypeLevelFn(t.into()),
     )
 }

@@ -1,19 +1,14 @@
 ($) : (a -> b) -> a -> b forall {a, b} =
     | f, a => f(a)
 
-infixr 0 $
+data FnWrapperA(A -> (), Option[FnWrapperA[A]]) forall { A }
 
-data FnWrapper(A -> B) forall { A, B }
+a : FnWrapperA[True | False] = FnWrapperA(| _ => (), None)
 
-a : FnWrapper[True | False, True] = FnWrapper $
-    | True => True
-    | False => True
+b : FnWrapperA[True] -> () = | f => f._0(True)
 
-b : FnWrapper[True, True] -> True = | f => f._0(True)
-
-c : FnWrapper[FnWrapper[True | False, True], True] -> True = | f => f._0(a)
+c : FnWrapperA[FnWrapperA[True | False]] -> () = | f => f._0(a)
 
 main : () -> () =
     | _ => do
-        b.FnWrapper.c.println
-
+        b.FnWrapperA(None).c

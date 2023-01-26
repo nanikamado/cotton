@@ -53,11 +53,6 @@ impl TypeVariableMap {
         let tus: Vec<_> = t
             .into_iter()
             .flat_map(|tu| match unwrap_or_clone(tu) {
-                TypeUnit::Fn(arg, rtn) => TypeUnit::Fn(
-                    self.normalize_type(arg),
-                    self.normalize_type(rtn),
-                )
-                .into(),
                 TypeUnit::Variable(v) => self.find(v),
                 TypeUnit::RecursiveAlias { body } => {
                     let body = self.normalize_type(body);
@@ -230,17 +225,6 @@ impl TypeVariableMap {
                     origin,
                     log,
                 );
-                return;
-            }
-            (Fn(a1, b1), Fn(a2, b2)) => {
-                self._insert_type(
-                    subtype,
-                    a2.clone(),
-                    a1.clone(),
-                    origin.clone(),
-                    log,
-                );
-                self._insert_type(subtype, b1.clone(), b2.clone(), origin, log);
                 return;
             }
             (Tuple(a1, b1), Tuple(a2, b2)) => {
@@ -1154,23 +1138,6 @@ pub fn simplify_subtype_rel(
         use TypeMatchable::*;
         match (sub.clone().matchable(), sup.clone().matchable()) {
             (_, Any) => Ok(Vec::new()),
-            (Fn(a1, r1), Fn(a2, r2)) => {
-                let a = simplify_subtype_rel_rec(
-                    a2,
-                    a1,
-                    already_considered_relations.as_deref_mut(),
-                    loop_limit,
-                )
-                .map_err(add_reason)?;
-                let r = simplify_subtype_rel_rec(
-                    r1,
-                    r2,
-                    already_considered_relations.as_deref_mut(),
-                    loop_limit,
-                )
-                .map_err(add_reason)?;
-                Ok(merge_vec(a, r))
-            }
             (Tuple(a1, b1), Tuple(a2, b2)) => {
                 let mut r = simplify_subtype_rel_rec(
                     a1,
@@ -1229,13 +1196,9 @@ pub fn simplify_subtype_rel(
             {
                 panic!("{sub} < {sup}")
             }
-            (Fn(_, _), Tuple { .. } | Const { .. })
-            | (Tuple { .. } | Const { .. }, Fn(_, _))
-            | (Tuple(..), Const { .. })
+            (Tuple(..), Const { .. })
             | (Const { .. }, Tuple(..))
-            | (Fn(_, _) | Tuple { .. } | Const { .. }, Empty) => {
-                Err(single_reason)
-            }
+            | (Tuple { .. } | Const { .. }, Empty) => Err(single_reason),
             (_, Empty) if sub.is_wrapped_by_const() => Err(single_reason),
             (Any, _) if sup.is_wrapped_by_const() => Err(single_reason),
             (Union(cs), b) => Ok(cs
@@ -1537,7 +1500,6 @@ pub fn simplify_subtype_rel_with_unwrapping(
             (
                 RecursiveAlias { body },
                 b @ (Tuple { .. }
-                | Fn(_, _)
                 | Union(_)
                 | RecursiveAlias { .. }
                 | Const { .. }
@@ -1778,11 +1740,9 @@ impl From<&PatternUnitForRestriction> for MatchOperand {
 }
 
 fn type_intersection(a: Type, b: Type) -> Option<Type> {
+    use ast_step2::types::Variance::*;
     use TypeMatchable::*;
     match (a.matchable(), b.matchable()) {
-        (Tuple { .. }, Fn(_, _)) | (Fn(_, _), Tuple { .. }) => {
-            Some(TypeMatchable::Empty.into())
-        }
         (Tuple(a1, b1), Tuple(a2, b2)) => Some(
             TypeUnit::Tuple(
                 type_intersection(a1, a2)?,
@@ -1790,14 +1750,10 @@ fn type_intersection(a: Type, b: Type) -> Option<Type> {
             )
             .into(),
         ),
-        (Fn(a1, r1), Fn(a2, r2)) => Some(
-            TypeUnit::Fn(
-                a1.into_iter().chain(a2.into_iter()).collect(),
-                type_intersection(r1, r2)?,
-            )
-            .into(),
-        ),
         (Any, a) | (a, Any) => Some(a.into()),
+        (Variance(Contravariant, a), Variance(Contravariant, b)) => {
+            Some(Variance(Contravariant, a.union(b)).into())
+        }
         (a, b) => {
             let a: Type = a.into();
             let b: Type = b.into();
@@ -2471,19 +2427,6 @@ fn replace_type_test0() {
     );
 }
 
-#[test]
-fn replace_type_test1() {
-    use TypeUnit::*;
-    let zero = TypeVariable::new();
-    let one = TypeVariable::new();
-    let two = TypeVariable::new();
-    assert_eq!(
-        Fn(Variable(zero).into(), Variable(two).into())
-            .replace_num(zero, &Variable(one).into()),
-        Fn(Variable(one).into(), Variable(two).into()).into()
-    );
-}
-
 fn try_eq_sub<T: TypeConstructor>(
     map: &mut TypeVariableMap,
     t: &mut TypeWithEnv<T>,
@@ -2706,7 +2649,7 @@ mod tests {
         };
         let mut map: TypeVariableMap = Default::default();
         let st = simplify_type(&mut map, t, &mut Env::default()).unwrap();
-        assert_eq!(format!("{}", st), "I64 -> [{:String | :I64}] forall {\n}");
+        assert_eq!(format!("{}", st), "-I64 -> [{:String | :I64}] forall {\n}");
     }
 
     #[test]

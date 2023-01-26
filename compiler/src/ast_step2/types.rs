@@ -12,7 +12,6 @@ use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeMatchable {
-    Fn(Type, Type),
     Union(Type),
     Variable(TypeVariable),
     Empty,
@@ -39,7 +38,6 @@ pub enum TypeMatchable {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeMatchableRef<'b> {
-    Fn(&'b Type, &'b Type),
     Union(&'b Type),
     Variable(TypeVariable),
     Empty,
@@ -88,7 +86,6 @@ mod type_unit {
 
     #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub enum TypeUnit {
-        Fn(Type, Type),
         Variable(TypeVariable),
         RecursiveAlias {
             body: Type,
@@ -242,7 +239,6 @@ mod type_type {
             match self.0.len() {
                 0 => Empty,
                 1 => match unwrap_or_clone(self.0.pop().unwrap()) {
-                    TypeUnit::Fn(arg, ret) => Fn(arg, ret),
                     TypeUnit::Variable(i) => Variable(i),
                     TypeUnit::RecursiveAlias { body } => {
                         RecursiveAlias { body }
@@ -274,7 +270,6 @@ mod type_type {
             match self.0.len() {
                 0 => Empty,
                 1 => match &**self.0.first().unwrap() {
-                    TypeUnit::Fn(arg, ret) => Fn(arg, ret),
                     TypeUnit::Variable(i) => Variable(*i),
                     TypeUnit::RecursiveAlias { body } => {
                         RecursiveAlias { body }
@@ -448,13 +443,6 @@ mod type_type {
                         (Some(a), None, Some(b))
                     }
                 }
-                (Fn(a1, a2), Fn(b1, b2)) => {
-                    if a1 == b1 {
-                        (None, Some(Fn(a1, a2.union(b2))), None)
-                    } else {
-                        (Some(Fn(a1, a2)), None, Some(Fn(b1, b2)))
-                    }
-                }
                 (a @ RecursiveAlias { .. }, b) => {
                     let r = simplify_subtype_rel(
                         b.clone().into(),
@@ -487,9 +475,9 @@ mod type_type {
 
         pub fn contains_empty_in_covariant_candidate(&self) -> bool {
             match self {
-                TypeUnit::Fn(_, a) => a.is_empty(),
+                TypeUnit::Variance(super::Variance::Invariant, a)
+                | TypeUnit::RecursiveAlias { body: a } => a.is_empty(),
                 TypeUnit::Tuple(a, b) => a.is_empty() || b.is_empty(),
-                TypeUnit::RecursiveAlias { body } => body.is_empty(),
                 TypeUnit::Restrictions { .. }
                 | TypeUnit::Const { .. }
                 | TypeUnit::Variable(_)
@@ -506,10 +494,6 @@ mod type_type {
             n: i32,
         ) -> Self {
             match self {
-                TypeUnit::Fn(a, b) => TypeUnit::Fn(
-                    a.increment_recursive_index(greater_than_or_equal_to, n),
-                    b.increment_recursive_index(greater_than_or_equal_to, n),
-                ),
                 TypeUnit::Variance(v, t) => TypeUnit::Variance(
                     v,
                     t.increment_recursive_index(greater_than_or_equal_to, n),
@@ -641,7 +625,6 @@ impl FromIterator<Rc<TypeUnit>> for Type {
 impl From<TypeMatchable> for Type {
     fn from(m: TypeMatchable) -> Self {
         match m {
-            TypeMatchable::Fn(a, b) => TypeUnit::Fn(a, b).into(),
             TypeMatchable::Union(u) => u,
             TypeMatchable::Variable(i) => TypeUnit::Variable(i).into(),
             TypeMatchable::Empty => Default::default(),
@@ -797,10 +780,6 @@ impl TypeConstructor for Type {
 
     fn covariant_type_variables(&self) -> Vec<TypeVariable> {
         match self.matchable_ref() {
-            TypeMatchableRef::Fn(a, r) => merge_vec(
-                r.covariant_type_variables(),
-                a.contravariant_type_variables(),
-            ),
             TypeMatchableRef::Union(cs) => cs
                 .iter()
                 .map(|c| Type::from(c.clone()).covariant_type_variables())
@@ -815,9 +794,7 @@ impl TypeConstructor for Type {
                 vs.remove(&TypeVariable::RecursiveIndex(0));
                 vs.into_iter().collect()
             }
-            TypeMatchableRef::Const { .. }
-            | TypeMatchableRef::Any
-            | TypeMatchableRef::Variance(Variance::Contravariant, _) => {
+            TypeMatchableRef::Const { .. } | TypeMatchableRef::Any => {
                 Vec::new()
             }
             TypeMatchableRef::Tuple(a, b) => merge_vec(
@@ -838,18 +815,18 @@ impl TypeConstructor for Type {
                 .flat_map(|(_, t)| t.contravariant_type_variables())
                 .chain(t.covariant_type_variables())
                 .collect(),
-            TypeMatchableRef::Variance(Variance::Invariant, t) => {
-                t.covariant_type_variables()
+            TypeMatchableRef::Variance(Variance::Invariant, t) => merge_vec(
+                t.covariant_type_variables(),
+                t.contravariant_type_variables(),
+            ),
+            TypeMatchableRef::Variance(Variance::Contravariant, t) => {
+                t.contravariant_type_variables()
             }
         }
     }
 
     fn contravariant_type_variables(&self) -> Vec<TypeVariable> {
         match self.matchable_ref() {
-            TypeMatchableRef::Fn(a, r) => merge_vec(
-                a.covariant_type_variables(),
-                r.contravariant_type_variables(),
-            ),
             TypeMatchableRef::Union(cs) => cs
                 .iter()
                 .map(|c| Type::from(c.clone()).contravariant_type_variables())
@@ -885,7 +862,13 @@ impl TypeConstructor for Type {
                 .flat_map(|(_, t)| t.covariant_type_variables())
                 .chain(t.contravariant_type_variables())
                 .collect(),
-            TypeMatchableRef::Variance(_, t) => t.covariant_type_variables(),
+            TypeMatchableRef::Variance(Variance::Contravariant, t) => {
+                t.covariant_type_variables()
+            }
+            TypeMatchableRef::Variance(Variance::Invariant, t) => merge_vec(
+                t.covariant_type_variables(),
+                t.contravariant_type_variables(),
+            ),
         }
     }
 
@@ -985,9 +968,6 @@ pub trait TypeConstructor:
 impl TypeUnit {
     fn find_recursive_alias(&self) -> Option<&Type> {
         match self {
-            TypeUnit::Fn(a, r) => {
-                [a, r].iter().find_map(|a| a.find_recursive_alias())
-            }
             TypeUnit::Const { .. } | TypeUnit::Variable(_) | TypeUnit::Any => {
                 None
             }
@@ -1013,19 +993,12 @@ impl Display for Type {
         use types::Variance::*;
         use TypeMatchableRef::*;
         match self.matchable_ref() {
-            Fn(arg, rtn) => {
-                if let Fn(_, _) = arg.matchable_ref() {
-                    write!(f, "({}) -> {}", arg, rtn)
-                } else {
-                    write!(f, "{} -> {}", arg, rtn)
-                }
-            }
             Union(a) => write!(
                 f,
                 "{{{}}}",
                 a.iter()
                     .map(|t| {
-                        if let TypeUnit::Fn(_, _) = **t {
+                        if t.is_function() {
                             format!("({})", t)
                         } else {
                             format!("{}", t)
@@ -1060,7 +1033,7 @@ impl Display for Type {
                 )
             }
             Any => write!(f, "Any"),
-            Variance(Contravariant, t) => write!(f, "↑{t}"),
+            Variance(Contravariant, t) => write!(f, "-{t}"),
             Variance(Invariant, t) => write!(f, "={t}"),
         }
     }
@@ -1077,13 +1050,6 @@ impl std::fmt::Debug for TypeUnit {
         use types::Variance::*;
         use TypeUnit::*;
         match self {
-            Fn(arg, rtn) => {
-                if let TypeMatchableRef::Fn(_, _) = arg.matchable_ref() {
-                    write!(f, "({:?}) -> {:?}", arg, rtn)
-                } else {
-                    write!(f, "{:?} -> {:?}", arg, rtn)
-                }
-            }
             Variable(n) => write!(f, "{}", n),
             RecursiveAlias { body } => {
                 write!(f, "rec[{:?}]", *body)
@@ -1102,7 +1068,7 @@ impl std::fmt::Debug for TypeUnit {
                 variable_requirements.iter().format(",\n")
             ),
             Any => write!(f, "Any"),
-            Variance(Contravariant, t) => write!(f, "↑{t}"),
+            Variance(Contravariant, t) => write!(f, "-{t}"),
             Variance(Invariant, t) => write!(f, "={t}"),
         }
     }
@@ -1113,13 +1079,6 @@ impl Display for TypeUnit {
         use types::Variance::*;
         use TypeUnit::*;
         match self {
-            Fn(arg, rtn) => {
-                if let TypeMatchableRef::Fn(_, _) = arg.matchable_ref() {
-                    write!(f, "({}) -> {}", arg, rtn)
-                } else {
-                    write!(f, "{} -> {}", arg, rtn)
-                }
-            }
             Variable(n) => write!(f, "{}", n),
             RecursiveAlias { body } => {
                 write!(f, "rec[{}]", *body)
@@ -1144,7 +1103,7 @@ impl Display for TypeUnit {
                 )
             ),
             Any => write!(f, "Any"),
-            Variance(Contravariant, t) => write!(f, "↑{t}"),
+            Variance(Contravariant, t) => write!(f, "-{t}"),
             Variance(Invariant, t) => write!(f, "={t}"),
         }
     }
@@ -1156,20 +1115,34 @@ fn fmt_tuple(
     f: &mut std::fmt::Formatter<'_>,
 ) -> std::fmt::Result {
     if let TypeMatchableRef::Const { id: id_a } = a.matchable_ref() {
-        match b.matchable_ref() {
-            TypeMatchableRef::Const { id: id_b, .. }
-                if id_b == TypeId::Intrinsic(IntrinsicType::Unit) =>
-            {
-                write!(f, "{}", id_a)
+        if matches!(id_a, TypeId::Intrinsic(IntrinsicType::Fn)) {
+            let TypeMatchableRef::Tuple(arg, rtn) = b.matchable_ref() else {
+                panic!()
+            };
+            let TypeMatchableRef::Tuple(rtn, _) = rtn.matchable_ref() else {
+                panic!()
+            };
+            if arg.is_function() {
+                write!(f, "({}) -> {}", arg, rtn)
+            } else {
+                write!(f, "{} -> {}", arg, rtn)
             }
-            TypeMatchableRef::Tuple(h, t) => {
-                write!(f, "{}[{}", id_a, h)?;
-                fmt_tuple_tail(t, f)
+        } else {
+            match b.matchable_ref() {
+                TypeMatchableRef::Const { id: id_b, .. }
+                    if id_b == TypeId::Intrinsic(IntrinsicType::Unit) =>
+                {
+                    write!(f, "{}", id_a)
+                }
+                TypeMatchableRef::Tuple(h, t) => {
+                    write!(f, "{}[{}", id_a, h)?;
+                    fmt_tuple_tail(t, f)
+                }
+                TypeMatchableRef::Union(u) => {
+                    write!(f, "{}[{}]", id_a, u)
+                }
+                _ => panic!("expected tuple but found {}", b),
             }
-            TypeMatchableRef::Union(u) => {
-                write!(f, "{}[{}]", id_a, u)
-            }
-            _ => panic!("expected tuple but found {}", b),
         }
     } else {
         write!(f, "[{a}")?;

@@ -2,6 +2,7 @@ use super::imports::Imports;
 use super::types::{Type, TypeUnit, TypeVariable};
 use super::{collect_tuple_rev, TypeId};
 use crate::ast_step1::name_id::Path;
+use crate::ast_step2::types::{self, TypeMatchableRef};
 use crate::ast_step3::GlobalVariableType;
 use fxhash::FxHashMap;
 use itertools::Itertools;
@@ -43,7 +44,7 @@ impl Display for PrintTypeOfLocalVariableForUser<'_> {
 #[derive(Debug, PartialEq, Eq)]
 enum OperatorContext {
     Single,
-    Fn,
+    // Fn,
     Or,
     OtherOperator,
 }
@@ -90,19 +91,6 @@ fn fmt_type_unit_with_env(
         return (s.to_string(), Single);
     }
     match t {
-        TypeUnit::Fn(a, b) => {
-            let (b, b_context) =
-                fmt_type_with_env(b, imports, type_variable_decls);
-            let (a, a_context) =
-                fmt_type_with_env(a, imports, type_variable_decls);
-            let s = match (a_context, b_context) {
-                (Single, Single | Fn) => format!("{} -> {}", a, b),
-                (Single, _) => format!("{} -> ({})", a, b),
-                (_, Single | Fn) => format!("({}) -> {}", a, b),
-                _ => format!("({}) -> ({})", a, b),
-            };
-            (s, Fn)
-        }
         TypeUnit::Variable(TypeVariable::Normal(_)) => {
             ("_".to_string(), Single)
         }
@@ -125,7 +113,25 @@ fn fmt_type_unit_with_env(
             if hts.len() == 1 {
                 let (h, tuple_rev) = hts[0];
                 if let TypeUnit::Const { id } = &**h {
-                    fmt_tuple(*id, tuple_rev, imports, type_variable_decls)
+                    if *id
+                        == TypeId::Intrinsic(
+                            crate::intrinsics::IntrinsicType::Fn,
+                        )
+                    {
+                        let mut tuple_rev = tuple_rev.clone();
+                        tuple_rev[1] = if let TypeMatchableRef::Variance(
+                            types::Variance::Contravariant,
+                            t,
+                        ) = tuple_rev[1].matchable_ref()
+                        {
+                            t
+                        } else {
+                            panic!()
+                        };
+                        fmt_tuple(*id, &tuple_rev, imports, type_variable_decls)
+                    } else {
+                        fmt_tuple(*id, tuple_rev, imports, type_variable_decls)
+                    }
                 } else {
                     (
                         fmt_tuple_as_tuple(

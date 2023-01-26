@@ -1,0 +1,10 @@
+data F(A -> (), Option[F[A -> ()]]) forall { A }
+
+b : F[True | False] =
+    F(| _ => (), Some(F(| f => f(False), None)))
+c : True -> () = | True => ()
+
+main : () -> () =
+    | _ => do
+        b._1.map(| a => a._0(c) )
+        ()

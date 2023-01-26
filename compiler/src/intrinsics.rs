@@ -101,6 +101,7 @@ pub enum IntrinsicType {
     True,
     False,
     ArgumentTuple,
+    Fn,
 }
 
 pub static INTRINSIC_TYPES: Lazy<FxHashMap<&'static str, IntrinsicType>> =
@@ -111,6 +112,7 @@ pub static INTRINSIC_TYPES: Lazy<FxHashMap<&'static str, IntrinsicType>> =
             ("()", IntrinsicType::Unit),
             ("True", IntrinsicType::True),
             ("False", IntrinsicType::False),
+            ("->", IntrinsicType::Fn),
         ]
         .map(|(n, t)| (n, t))
         .iter()

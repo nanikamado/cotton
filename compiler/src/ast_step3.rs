@@ -141,7 +141,7 @@ fn variable_decl<'a>(
                     ])],
                     expr: (value, value_t.clone()),
                 }]);
-                value_t = TypeUnit::Fn(t, value_t).into();
+                value_t = Type::arrow(t, value_t);
             }
             let value = (value, value_t);
             VariableDecl {
@@ -233,7 +233,7 @@ fn get_expr_from_resolved_ident(
     let mut ts = Vec::new();
     let mut fn_t = t;
     for (_, implicit_arg_t, _) in resolved_ident.implicit_args.iter().rev() {
-        fn_t = TypeUnit::Fn(implicit_arg_t.clone(), fn_t).into();
+        fn_t = Type::arrow(implicit_arg_t.clone(), fn_t);
         ts.push(fn_t.clone());
     }
     for ((name, implicit_arg_t, resolved_ident), fn_t) in resolved_ident
