@@ -634,7 +634,7 @@ where
         }
         None => panic!("specified index is not valid."),
         Some(OpSequenceUnit::Operand(a)) => {
-            panic!("specified position is a operand {:?}", a)
+            panic!("specified position is a operand {a:?}")
         }
     }
     Ok(sequence)
@@ -765,14 +765,14 @@ where
                 if let Some(Associativity::Right) =
                     precedence_list.insert(*p, Associativity::Left)
                 {
-                    panic!("cannot mix infixl {} and infixr {}", p, p);
+                    panic!("cannot mix infixl {p} and infixr {p}");
                 }
             }
             OpSequenceUnit::Operator(_, Associativity::Right, p, _) => {
                 if let Some(Associativity::Left) =
                     precedence_list.insert(*p, Associativity::Right)
                 {
-                    panic!("cannot mix infixl {} and infixr {}", p, p);
+                    panic!("cannot mix infixl {p} and infixr {p}");
                 }
             }
             OpSequenceUnit::Operator(_, Associativity::UnaryLeft, p, _) => {

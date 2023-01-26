@@ -685,7 +685,7 @@ pub fn parse(ts: Vec<(Token, Span)>, src: &str, src_len: usize) -> Ast {
         Ok(ast) => ast,
         Err(es) => {
             for e in es {
-                let e = e.map(|c| format!("{:?}", c));
+                let e = e.map(|c| format!("{c:?}"));
                 let report =
                     Report::build(ReportKind::Error, (), e.span().start);
                 let report = match e.reason() {

@@ -202,14 +202,14 @@ impl LanguageServer for Backend {
                 self.client
                     .log_message(
                         MessageType::INFO,
-                        format!("could not compile {}.", uri),
+                        format!("could not compile {uri}."),
                     )
                     .await;
                 Ok(None)
             }
         } else {
             self.client
-                .log_message(MessageType::INFO, format!("{} not found.", uri))
+                .log_message(MessageType::INFO, format!("{uri} not found."))
                 .await;
             Ok(None)
         }

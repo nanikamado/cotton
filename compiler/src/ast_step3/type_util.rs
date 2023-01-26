@@ -1135,7 +1135,7 @@ mod tests {
             .unwrap()
             .unfixed;
         assert_eq!(
-            format!("{}", t),
+            format!("{t}"),
             r#"/\[[{:True | :False}], [{:True | :False}]]"#
         );
     }

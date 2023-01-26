@@ -59,10 +59,10 @@ fn data_decl(d: DataDecl) -> String {
         "let ${}${}={}({{name:'${}${}',{}}});",
         d.decl_id,
         name,
-        (0..d.field_len).map(|i| format!("${}=>", i)).join(""),
+        (0..d.field_len).map(|i| format!("${i}=>")).join(""),
         d.decl_id,
         name,
-        (0..d.field_len).map(|i| format!("{0}:${0}", i)).join(", "),
+        (0..d.field_len).map(|i| format!("{i}:${i}")).join(", "),
     )
 }
 
@@ -125,7 +125,7 @@ fn expr((e, t): &ExprWithType, name_count: u32) -> String {
             )
         }
         Expr::Number(a) => a.to_string(),
-        Expr::StrLiteral(a) => format!("{:?}", a),
+        Expr::StrLiteral(a) => format!("{a:?}"),
         Expr::Ident {
             name: _,
             variable_id:
@@ -188,7 +188,7 @@ fn single_condition(
     use PatternUnit::*;
     match &p.patterns[0] {
         I64(a) | Str(a) => {
-            write!(condition, "&&{}==={}", a, arg).unwrap();
+            write!(condition, "&&{a}==={arg}").unwrap();
         }
         Constructor { id, name } => {
             write!(
@@ -221,7 +221,7 @@ fn single_condition(
             let f = expr(function, name_count);
             single_condition(
                 post_pattern,
-                &format!("{}({})", f, tmp),
+                &format!("{f}({tmp})"),
                 name_count,
                 condition,
             );

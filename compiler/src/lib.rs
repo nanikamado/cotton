@@ -108,7 +108,7 @@ pub fn run(
         } else {
             let js = codegen(ast);
             if command == Command::PrintJs {
-                println!("{}", js);
+                println!("{js}");
             } else if command == Command::RunJs {
                 run_js::run(&js);
             } else {

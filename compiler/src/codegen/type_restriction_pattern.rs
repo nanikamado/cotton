@@ -84,7 +84,7 @@ impl types::Type {
                             [indexable_entries.len() - *n - 1]
                         {
                             IndexableEntityKind::RecursiveAlias => {
-                                format!(r#""should be replaced ({})""#, n)
+                                format!(r#""should be replaced ({n})""#)
                             }
                             IndexableEntityKind::TypeLevelFn => {
                                 let count = indexable_entries
@@ -94,7 +94,7 @@ impl types::Type {
                                         **a == IndexableEntityKind::TypeLevelFn
                                     })
                                     .count();
-                                format!(r#"{{type:"argument",0:{}}}"#, count)
+                                format!(r#"{{type:"argument",0:{count}}}"#)
                             }
                         };
                         cs.push(c);
@@ -159,8 +159,7 @@ impl types::Type {
                                 r,
                             );
                         cs.push(format!(
-                            r#"{{type:"type_level_apply",0:{},1:{}}}"#,
-                            f, a
+                            r#"{{type:"type_level_apply",0:{f},1:{a}}}"#
                         ));
                     }
                     types::TypeUnit::Restrictions { .. } => {
@@ -182,7 +181,7 @@ impl types::Type {
                                 )
                             }
                             Intrinsic(_) => {
-                                format!(r#""{}""#, id)
+                                format!(r#""{id}""#)
                             }
                             FixedVariable(_) => unimplemented!(),
                         };

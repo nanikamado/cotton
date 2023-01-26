@@ -66,12 +66,12 @@ impl Display for VariableId {
 impl std::fmt::Debug for VariableId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            VariableId::Global(a) => write!(f, "Global({})", a),
+            VariableId::Global(a) => write!(f, "Global({a})"),
             VariableId::IntrinsicVariable(a) => {
-                write!(f, "Intrinsic({})", a)
+                write!(f, "Intrinsic({a})")
             }
             VariableId::IntrinsicConstructor(a) => {
-                write!(f, "IntrinsicConstructor({})", a)
+                write!(f, "IntrinsicConstructor({a})")
             }
             VariableId::FieldAccessor { constructor, field } => {
                 write!(f, "FieldAccessor({constructor}, {field})")
@@ -547,7 +547,7 @@ impl Type {
                 Vec::new()
             }
             t => {
-                panic!("expected AT or Unit but got {:?}", t)
+                panic!("expected AT or Unit but got {t:?}")
             }
         }
     }

@@ -70,7 +70,7 @@ fn fmt_type_with_env(
                         fmt_type_unit_with_env(t, imports, type_variable_decls);
                     let s = match t_context {
                         OperatorContext::Single | OperatorContext::Or => t,
-                        _ => format!("({})", t),
+                        _ => format!("({t})"),
                     };
                     f(&s)
                 })
@@ -103,7 +103,7 @@ fn fmt_type_unit_with_env(
             ),
             Single,
         ),
-        TypeUnit::Const { id } => (format!(":{}", id), Single),
+        TypeUnit::Const { id } => (format!(":{id}"), Single),
         TypeUnit::Tuple(hs, ts) => {
             let ts = collect_tuple_rev(ts);
             let hts = hs
@@ -152,7 +152,7 @@ fn fmt_type_unit_with_env(
                                 fmt_tuple(*id, t, imports, type_variable_decls);
                             match t_context {
                                 Single | Or => f(&t),
-                                _ => f(&format_args!("({})", t)),
+                                _ => f(&format_args!("({t})")),
                             }
                         } else {
                             f(&fmt_tuple_as_tuple(
@@ -179,9 +179,9 @@ fn fmt_type_unit_with_env(
                 fmt_type_with_env(f, imports, type_variable_decls);
             let (a, _) = fmt_type_with_env(a, imports, type_variable_decls);
             let s = if f_context == Single {
-                format!("{}[{}]", f, a)
+                format!("{f}[{a}]")
             } else {
-                format!("({})[{}]", f, a)
+                format!("({f})[{a}]")
             };
             (s, Single)
         }
@@ -198,7 +198,7 @@ fn fmt_type_unit_with_env(
                 )),
                 variable_requirements.iter().format_with(
                     ",\n",
-                    |(name, t), f| f(&format_args!("?{} : {}", name, t))
+                    |(name, t), f| f(&format_args!("?{name} : {t}"))
                 )
             ),
             OtherOperator,
@@ -259,10 +259,10 @@ fn fmt_tuple(
                         fmt_type_with_env(t, imports, type_variable_decls);
                     match t_context {
                         Single => t,
-                        _ => format!("({})", t),
+                        _ => format!("({t})"),
                     }
                 })
-                .format(&format!(" {} ", head))
+                .format(&format!(" {head} "))
                 .to_string(),
             OtherOperator,
         )
@@ -276,7 +276,7 @@ fn fmt_tuple(
                         fmt_type_with_env(t, imports, type_variable_decls);
                     let s = match t_context {
                         Single => t,
-                        _ => format!("({})", t),
+                        _ => format!("({t})"),
                     };
                     f(&s)
                 })

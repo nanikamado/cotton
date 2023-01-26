@@ -58,7 +58,7 @@ impl CompileError {
         match self {
             CompileError::NoSuitableVariable { name, reason } => {
                 if reason.is_empty() {
-                    writeln!(w, "{} not found", name)
+                    writeln!(w, "{name} not found")
                 } else if reason.len() == 1 {
                     reason
                         .into_iter()
@@ -85,8 +85,7 @@ impl CompileError {
                     Report::build(ReportKind::Error, filename, span.start)
                         .with_label(
                             Label::new((filename, span)).with_message(format!(
-                                "cannot find `{:?}`",
-                                path
+                                "cannot find `{path:?}`"
                             )),
                         )
                         .with_message("not found in this scope");
@@ -98,8 +97,7 @@ impl CompileError {
                     Report::build(ReportKind::Error, filename, span.start)
                         .with_label(Label::new((filename, span)).with_message(
                             format!(
-                    "precedence declaration for operator `{:?}` not found",
-                    path
+                    "precedence declaration for operator `{path:?}` not found"
                 ),
                         ))
                         .with_message("no precedence declaration");
@@ -171,13 +169,11 @@ impl CompileError {
                     Report::build(ReportKind::Error, filename, span.start)
                         .with_label(
                             Label::new((filename, span)).with_message(format!(
-                                "`{:?}` is private",
-                                path
+                                "`{path:?}` is private"
                             )),
                         )
                         .with_message(format!(
-                            "`{:?}` exists but is inaccessible from outside.",
-                            path
+                            "`{path:?}` exists but is inaccessible from outside."
                         ));
                 report.finish().write((filename, Source::from(src)), w)?;
                 Ok(())

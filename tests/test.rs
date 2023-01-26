@@ -31,7 +31,7 @@ fn fizzbuzz_model() -> String {
             (0, 0) => "FizzBuzz\n".to_string(),
             (0, _) => "Fizz\n".to_string(),
             (_, 0) => "Buzz\n".to_string(),
-            _ => format!("{}\n", i),
+            _ => format!("{i}\n"),
         })
         .join("")
 }
@@ -48,7 +48,7 @@ fn helloworld() {
 
 #[test]
 fn list() {
-    test_examples("list.cot", &(0..100).map(|i| format!("{}\n", i)).join(""));
+    test_examples("list.cot", &(0..100).map(|i| format!("{i}\n")).join(""));
 }
 
 #[test]
@@ -106,7 +106,7 @@ fn list_fail() {
 
 #[test]
 fn list_without_types() {
-    let out = (0..100).map(|i| format!("{}\n", i)).join("");
+    let out = (0..100).map(|i| format!("{i}\n")).join("");
     test_test("list_without_types.cot").stdout(out).success();
 }
 

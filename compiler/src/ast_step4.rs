@@ -668,7 +668,7 @@ impl Display for TypeUnit {
         match self {
             TypeUnit::Normal { name, args, .. } => {
                 if args.is_empty() {
-                    write!(f, "{}", name)
+                    write!(f, "{name}")
                 } else {
                     write!(f, "{}[{}]", name, args.iter().format(", "))
                 }
@@ -677,12 +677,12 @@ impl Display for TypeUnit {
                 if a.0.len() == 1
                     && matches!(a.0.iter().next().unwrap(), TypeUnit::Fn(_, _))
                 {
-                    write!(f, "({}) -> {}", a, b)
+                    write!(f, "({a}) -> {b}")
                 } else {
-                    write!(f, "{} -> {}", a, b)
+                    write!(f, "{a} -> {b}")
                 }
             }
-            TypeUnit::RecursiveAlias(t) => write!(f, "rec[{}]", t),
+            TypeUnit::RecursiveAlias(t) => write!(f, "rec[{t}]"),
             TypeUnit::RecursionPoint => write!(f, "d0"),
         }
     }

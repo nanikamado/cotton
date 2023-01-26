@@ -565,12 +565,12 @@ impl From<ConstructorId> for TypeId {
 impl Display for TypeId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TypeId::FixedVariable(decl_id) => write!(f, "c{}", decl_id),
+            TypeId::FixedVariable(decl_id) => write!(f, "c{decl_id}"),
             id => {
                 if let Some(n) = get_type_name(*id) {
-                    write!(f, "{}", n)
+                    write!(f, "{n}")
                 } else {
-                    write!(f, "{:?}(name not available)", id)
+                    write!(f, "{id:?}(name not available)")
                 }
             }
         }

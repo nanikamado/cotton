@@ -87,7 +87,7 @@ fn main() {
     match fs::read_to_string(file_name) {
         Ok(source) => run(&source, file_name, command, loglevel),
         Err(e) => {
-            eprintln!("{}", e);
+            eprintln!("{e}");
             process::exit(1)
         }
     }

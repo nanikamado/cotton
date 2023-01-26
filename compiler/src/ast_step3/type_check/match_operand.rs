@@ -152,16 +152,16 @@ impl Display for MatchOperandUnit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MatchOperandUnit::Const(c) => {
-                write!(f, "Const({})", c)
+                write!(f, "Const({c})")
             }
             MatchOperandUnit::Tuple(a, b) => {
-                write!(f, "({}, {})", a, b)
+                write!(f, "({a}, {b})")
             }
             MatchOperandUnit::Unmatchable(a) => {
-                write!(f, "Unmatchable({})", a)
+                write!(f, "Unmatchable({a})")
             }
             MatchOperandUnit::NotComputed(a) => {
-                write!(f, "NotComputed({})", a)
+                write!(f, "NotComputed({a})")
             }
         }
     }
@@ -220,7 +220,7 @@ impl MatchOperand {
                     })
                     .collect(),
                 t => {
-                    panic!("expected Tuple or Unit but got {}", t)
+                    panic!("expected Tuple or Unit but got {t}")
                 }
             })
             .collect()

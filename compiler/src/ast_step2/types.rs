@@ -181,10 +181,10 @@ mod type_unit {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
                 TypeVariable::Normal(TypeVariableInner(n)) => {
-                    write!(f, "t{}", n)
+                    write!(f, "t{n}")
                 }
                 TypeVariable::RecursiveIndex(n) => {
-                    write!(f, "d{}", n)
+                    write!(f, "d{n}")
                 }
             }
         }
@@ -192,7 +192,7 @@ mod type_unit {
 
     impl Debug for TypeVariable {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            write!(f, "{}", self)
+            write!(f, "{self}")
         }
     }
 }
@@ -999,19 +999,19 @@ impl Display for Type {
                 a.iter()
                     .map(|t| {
                         if t.is_function() {
-                            format!("({})", t)
+                            format!("({t})")
                         } else {
-                            format!("{}", t)
+                            format!("{t}")
                         }
                     })
                     .join(" | ")
             ),
-            Variable(n) => write!(f, "{}", n),
+            Variable(n) => write!(f, "{n}"),
             Empty => write!(f, "∅"),
             RecursiveAlias { body } => {
                 write!(f, "rec[{}]", *body)
             }
-            Const { id } => write!(f, ":{}", id),
+            Const { id } => write!(f, ":{id}"),
             Tuple(a, b) => fmt_tuple(a, b, f),
             TypeLevelFn(_f) => write!(f, "fn[{_f}]"),
             TypeLevelApply { f: _f, a } => write!(f, "{_f}[{a}]"),
@@ -1028,7 +1028,7 @@ impl Display for Type {
                     )),
                     variable_requirements.iter().format_with(
                         ",\n",
-                        |(name, t), f| f(&format_args!("?{} : {}", name, t))
+                        |(name, t), f| f(&format_args!("?{name} : {t}"))
                     )
                 )
             }
@@ -1041,7 +1041,7 @@ impl Display for Type {
 
 impl std::fmt::Debug for Type {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self)
+        write!(f, "{self}")
     }
 }
 
@@ -1050,7 +1050,7 @@ impl std::fmt::Debug for TypeUnit {
         use types::Variance::*;
         use TypeUnit::*;
         match self {
-            Variable(n) => write!(f, "{}", n),
+            Variable(n) => write!(f, "{n}"),
             RecursiveAlias { body } => {
                 write!(f, "rec[{:?}]", *body)
             }
@@ -1079,7 +1079,7 @@ impl Display for TypeUnit {
         use types::Variance::*;
         use TypeUnit::*;
         match self {
-            Variable(n) => write!(f, "{}", n),
+            Variable(n) => write!(f, "{n}"),
             RecursiveAlias { body } => {
                 write!(f, "rec[{}]", *body)
             }
@@ -1099,7 +1099,7 @@ impl Display for TypeUnit {
                 )),
                 variable_requirements.iter().format_with(
                     ",\n",
-                    |(name, t), f| f(&format_args!("?{} : {}", name, t))
+                    |(name, t), f| f(&format_args!("?{name} : {t}"))
                 )
             ),
             Any => write!(f, "Any"),
@@ -1123,25 +1123,25 @@ fn fmt_tuple(
                 panic!()
             };
             if arg.is_function() {
-                write!(f, "({}) -> {}", arg, rtn)
+                write!(f, "({arg}) -> {rtn}")
             } else {
-                write!(f, "{} -> {}", arg, rtn)
+                write!(f, "{arg} -> {rtn}")
             }
         } else {
             match b.matchable_ref() {
                 TypeMatchableRef::Const { id: id_b, .. }
                     if id_b == TypeId::Intrinsic(IntrinsicType::Unit) =>
                 {
-                    write!(f, "{}", id_a)
+                    write!(f, "{id_a}")
                 }
                 TypeMatchableRef::Tuple(h, t) => {
-                    write!(f, "{}[{}", id_a, h)?;
+                    write!(f, "{id_a}[{h}")?;
                     fmt_tuple_tail(t, f)
                 }
                 TypeMatchableRef::Union(u) => {
-                    write!(f, "{}[{}]", id_a, u)
+                    write!(f, "{id_a}[{u}]")
                 }
-                _ => panic!("expected tuple but found {}", b),
+                _ => panic!("expected tuple but found {b}"),
             }
         }
     } else {
@@ -1159,13 +1159,13 @@ fn fmt_tuple_tail(
         Union(u) => write!(f, "] ++ {{{}}}", u.iter().format(" | ")),
         Empty => write!(f, "] ++ ∅"),
         Tuple(a, b) => {
-            write!(f, ", {}", a)?;
+            write!(f, ", {a}")?;
             fmt_tuple_tail(b, f)
         }
         Const { id, .. } if id == TypeId::Intrinsic(IntrinsicType::Unit) => {
             write!(f, "]")
         }
-        _ => panic!("expected tuple but found {}", tuple),
+        _ => panic!("expected tuple but found {tuple}"),
     }
 }
 

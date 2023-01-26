@@ -77,7 +77,7 @@ impl Display for Path {
 impl Debug for Path {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some((path, name)) = self.split() {
-            write!(f, "{:?}::{}", path, name)
+            write!(f, "{path:?}::{name}")
         } else {
             write!(f, "root")
         }

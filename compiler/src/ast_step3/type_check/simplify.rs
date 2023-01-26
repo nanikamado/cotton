@@ -345,12 +345,12 @@ impl TypeVariableMap {
                 if k == key {
                     "".to_string()
                 } else {
-                    format!("({})", key)
+                    format!("({key})")
                 },
                 if v == value {
                     "".to_string()
                 } else {
-                    format!("({})", value)
+                    format!("({value})")
                 }
             );
         }
@@ -390,12 +390,12 @@ impl TypeVariableMap {
             "{k} {} ----> {v} {}",
             match key.matchable_ref() {
                 TypeMatchableRef::Variable(key) if k == key => "".to_string(),
-                _ => format!("({})", key),
+                _ => format!("({key})"),
             },
             if v == value {
                 "".to_string()
             } else {
-                format!("({})", value)
+                format!("({value})")
             }
         );
         self._insert_type(subtype, key, value, None, true)
@@ -543,7 +543,7 @@ impl SubtypeRelations {
                     );
                     let r = match r {
                         Ok(r) => {
-                            panic!("{} < {}. ({:?})", origin_a, origin_b, r)
+                            panic!("{origin_a} < {origin_b}. ({r:?})")
                         }
                         Err(r) => r,
                     };
@@ -589,7 +589,7 @@ impl SubtypeRelations {
                         );
                         let r = match r {
                             Ok(r) => {
-                                panic!("{} < {}. ({:?})", origin_a, origin_b, r)
+                                panic!("{origin_a} < {origin_b}. ({r:?})")
                             }
                             Err(r) => r,
                         };
@@ -2104,7 +2104,7 @@ fn apply_type_to_pattern(
     if !restriction.allow_inexhaustive && !remained.is_empty() && !not_sure {
         log::debug!("missing type = {}", remained);
         Err(CompileError::InexhaustiveMatch {
-            description: format!("missing type = {}", remained),
+            description: format!("missing type = {remained}"),
             span: restriction.span.clone(),
         })
     } else {
@@ -2478,7 +2478,7 @@ impl Display for VariableRequirement {
             self.ident, self.name, self.required_type
         )?;
         for (name, _, _) in &self.local_env {
-            write!(f, "{}, ", name)?;
+            write!(f, "{name}, ")?;
         }
         Ok(())
     }
@@ -2499,7 +2499,7 @@ impl<T: TypeConstructor> Display for ast_step2::TypeWithEnv<T> {
             }
         }
         for req in &self.variable_requirements {
-            writeln!(f, "{},", req)?;
+            writeln!(f, "{req},")?;
         }
         for p in &self.pattern_restrictions {
             writeln!(
@@ -2508,7 +2508,7 @@ impl<T: TypeConstructor> Display for ast_step2::TypeWithEnv<T> {
                 p.type_.iter().map(|a| format!("{a}")).join(", "),
                 p.pattern
                     .iter()
-                    .map(|(p, _)| format!("({})", p))
+                    .map(|(p, _)| format!("({p})"))
                     .join(" | "),
                 p.span,
                 if p.allow_inexhaustive {
@@ -2525,7 +2525,7 @@ impl<T: TypeConstructor> Display for ast_step2::TypeWithEnv<T> {
                 "{}",
                 self.already_considered_relations.iter().format_with(
                     "\n",
-                    |(a, b), f| f(&format_args!("{} < {}", a, b))
+                    |(a, b), f| f(&format_args!("{a} < {b}"))
                 )
             )?;
         }
@@ -2649,7 +2649,7 @@ mod tests {
         };
         let mut map: TypeVariableMap = Default::default();
         let st = simplify_type(&mut map, t, &mut Env::default()).unwrap();
-        assert_eq!(format!("{}", st), "-I64 -> [{:String | :I64}] forall {\n}");
+        assert_eq!(format!("{st}"), "-I64 -> [{:String | :I64}] forall {\n}");
     }
 
     #[test]
