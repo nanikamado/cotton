@@ -72,15 +72,11 @@ where
         let mut requires_indent = false;
         let mut ignored_indents = vec![0];
         let mut last_span = 0..0;
-        for ((indent, ident_span), mut line) in lines {
+        for ((indent, indent_span), mut line) in lines {
             if line.is_empty() {
                 continue;
             }
-            let l = if line.len() >= 2 && line[0].0 == Token::Bar {
-                line[1].1.start - ident_span.start
-            } else {
-                indent.len()
-            };
+            let l = indent.len();
             let indent_level_delta = l as i32 - indent_level as i32;
             indent_level = l;
             match indent_level_delta.cmp(&0) {
@@ -102,16 +98,13 @@ where
                 std::cmp::Ordering::Equal => (),
                 std::cmp::Ordering::Greater => {
                     let requirers_ident_case = line[0].0 == Token::Bar;
-                    if requires_indent
-                        && requirers_ident_case
-                        && indent_level_delta >= 2
-                    {
-                        tokens.push((indent_tok.clone(), ident_span.clone()));
-                        tokens.push((indent_tok.clone(), ident_span.clone()));
-                        ignored_indents.push(indent_level_delta);
-                        ignored_indents.push(indent_level_delta - 2);
-                    } else if requires_indent || requirers_ident_case {
-                        tokens.push((indent_tok.clone(), ident_span.clone()));
+                    if requirers_ident_case {
+                        tokens.push((indent_tok.clone(), indent_span.clone()));
+                        *ignored_indents.last_mut().unwrap() +=
+                            indent_level_delta - 1;
+                        ignored_indents.push(0);
+                    } else if requires_indent {
+                        tokens.push((indent_tok.clone(), indent_span.clone()));
                         ignored_indents.push(indent_level_delta - 1);
                     } else {
                         *ignored_indents.last_mut().unwrap() +=
