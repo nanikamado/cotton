@@ -430,19 +430,20 @@ impl TypeUnit {
         self,
         other: &Self,
     ) -> (Type, Type, Option<NotSubtypeReason>) {
-        use crate::ast_step2::types::Variance::*;
         match (self, other) {
             (
                 t @ (TypeUnit::Variable(_)
                 | TypeUnit::RecursiveAlias { .. }
-                | TypeUnit::Any),
+                | TypeUnit::Any
+                | TypeUnit::Variance(_, _)),
                 _,
             )
             | (
                 t,
                 TypeUnit::Variable(_)
                 | TypeUnit::RecursiveAlias { .. }
-                | TypeUnit::Any,
+                | TypeUnit::Any
+                | TypeUnit::Variance(_, _),
             ) => (Type::default(), t.into(), None),
             (
                 TypeUnit::TypeLevelApply { f: t_f, a: t_a },
@@ -559,29 +560,6 @@ impl TypeUnit {
                     },
                 )
             }
-            (
-                TypeUnit::Variance(Contravariant, a),
-                TypeUnit::Variance(Contravariant, b),
-            ) => {
-                if b.clone().is_subtype_of(a.clone()) {
-                    (
-                        Type::default(),
-                        TypeUnit::Variance(Contravariant, a).into(),
-                        None,
-                    )
-                } else {
-                    let t: Type = TypeUnit::Variance(Contravariant, a).into();
-                    (
-                        t.clone(),
-                        Type::default(),
-                        Some(NotSubtypeReason::Disjoint {
-                            left: other.clone().into(),
-                            right: t,
-                            reasons: Vec::new(),
-                        }),
-                    )
-                }
-            }
             (t, _) => (
                 t.clone().into(),
                 Type::default(),
@@ -673,8 +651,8 @@ impl TypeUnit {
             Variable(_) | Restrictions { .. } | Any => false,
             RecursiveAlias { body: a }
             | TypeLevelFn(a)
-            | TypeLevelApply { f: a, .. } => a.is_wrapped_by_const(),
-            Variance(_, _) => panic!(),
+            | TypeLevelApply { f: a, .. }
+            | Variance(_, a) => a.is_wrapped_by_const(),
         }
     }
 
