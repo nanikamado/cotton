@@ -1026,10 +1026,11 @@ impl Display for Type {
                     subtype_relations.iter().format_with(",\n", |(a, b), f| f(
                         &format_args!("{a} < {b}")
                     )),
-                    variable_requirements.iter().format_with(
-                        ",\n",
-                        |(name, t), f| f(&format_args!("?{name} : {t}"))
-                    )
+                    variable_requirements
+                        .iter()
+                        .format_with(",\n", |(name, t), f| f(&format_args!(
+                            "?{name} : {t}"
+                        )))
                 )
             }
             Any => write!(f, "Any"),
@@ -1097,10 +1098,11 @@ impl Display for TypeUnit {
                 subtype_relations.iter().format_with(",\n", |(a, b), f| f(
                     &format_args!("{a} < {b}")
                 )),
-                variable_requirements.iter().format_with(
-                    ",\n",
-                    |(name, t), f| f(&format_args!("?{name} : {t}"))
-                )
+                variable_requirements
+                    .iter()
+                    .format_with(",\n", |(name, t), f| f(&format_args!(
+                        "?{name} : {t}"
+                    )))
             ),
             Any => write!(f, "Any"),
             Variance(Contravariant, t) => write!(f, "-{t}"),

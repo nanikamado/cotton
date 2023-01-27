@@ -2506,10 +2506,7 @@ impl<T: TypeConstructor> Display for ast_step2::TypeWithEnv<T> {
                 f,
                 "    ({}) = pat[{}] ({:?}){},",
                 p.type_.iter().map(|a| format!("{a}")).join(", "),
-                p.pattern
-                    .iter()
-                    .map(|(p, _)| format!("({p})"))
-                    .join(" | "),
+                p.pattern.iter().map(|(p, _)| format!("({p})")).join(" | "),
                 p.span,
                 if p.allow_inexhaustive {
                     format_args!(" (inexhaustive allowed)")
@@ -2523,10 +2520,11 @@ impl<T: TypeConstructor> Display for ast_step2::TypeWithEnv<T> {
             write!(
                 f,
                 "{}",
-                self.already_considered_relations.iter().format_with(
-                    "\n",
-                    |(a, b), f| f(&format_args!("{a} < {b}"))
-                )
+                self.already_considered_relations
+                    .iter()
+                    .format_with("\n", |(a, b), f| f(&format_args!(
+                        "{a} < {b}"
+                    )))
             )?;
         }
         if !self.fn_apply_dummies.is_empty() {
