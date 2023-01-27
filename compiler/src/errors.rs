@@ -165,16 +165,13 @@ impl CompileError {
                 writeln!(w, "recursion of implicit variable reached the limit.")
             }
             CompileError::InaccessibleName { path, span } => {
-                let report = Report::build(
-                    ReportKind::Error,
-                    filename,
-                    span.start,
-                )
-                .with_label(
-                    Label::new((filename, span))
-                        .with_message(format!("`{path:?}` is private")),
-                )
-                .with_message(format!(
+                let report =
+                    Report::build(ReportKind::Error, filename, span.start)
+                        .with_label(
+                            Label::new((filename, span))
+                                .with_message(format!("`{path:?}` is private")),
+                        )
+                        .with_message(format!(
                     "`{path:?}` exists but is inaccessible from outside."
                 ));
                 report.finish().write((filename, Source::from(src)), w)?;
