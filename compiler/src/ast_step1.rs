@@ -369,7 +369,7 @@ impl<'a> Ast<'a> {
                         is_public,
                     ));
                 }
-                parser::Decl::Use { .. } => {}
+                parser::Decl::Use { .. } | parser::Decl::Attribute(_) => (),
             }
         }
         let modules = modules
@@ -468,6 +468,7 @@ impl<'a> Ast<'a> {
         module_path: Path,
         imports: &mut Imports,
     ) {
+        let mut no_implicit_prelude = false;
         for d in &ast.decls {
             match d {
                 parser::Decl::Data(d) => {
@@ -507,9 +508,14 @@ impl<'a> Ast<'a> {
                         *is_public,
                     );
                 }
+                parser::Decl::Attribute(s) => {
+                    if s == "no_implicit_prelude" {
+                        no_implicit_prelude = true
+                    }
+                }
             }
         }
-        if module_path != Path::prelude() {
+        if !no_implicit_prelude {
             imports.insert_wild_card_import(
                 module_path,
                 Path::prelude(),

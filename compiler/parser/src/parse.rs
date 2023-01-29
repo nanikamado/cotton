@@ -157,6 +157,7 @@ pub enum Decl {
         path: Path,
         is_public: bool,
     },
+    Attribute(String),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -644,6 +645,12 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
             path,
             is_public: pub_or_not.is_some(),
         });
+    let attribute = just(Token::HashBang)
+        .ignore_then(
+            ident
+                .delimited_by(just(Token::Paren('[')), just(Token::Paren(']'))),
+        )
+        .map(|s| Decl::Attribute(s.0));
     recursive(|decl| {
         let mod_ = just(Token::Pub)
             .or_not()
@@ -656,13 +663,14 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 is_public: pub_or_not.is_some(),
             });
         choice((
-            variable_decl.map(Decl::Variable),
             op_precedence_decl.map(Decl::OpPrecedence),
             data_decl,
             type_alias_decl,
             interface_decl,
             mod_,
             use_decl,
+            attribute,
+            variable_decl.map(Decl::Variable),
         ))
     })
     .repeated()

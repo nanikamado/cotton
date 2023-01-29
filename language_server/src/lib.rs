@@ -313,9 +313,8 @@ fn semantic_tokens_from_src(src: &str) -> Option<(SemanticTokens, HoverMap)> {
             Assign | Bar | BArrow | Colon | ColonColon | Question => {
                 SemanticTokenType::OPERATOR
             }
-            Paren(_) | OpenParenWithoutPad | Indent | Dedent | Comma => {
-                continue
-            }
+            Paren(_) | OpenParenWithoutPad | Indent | Dedent | Comma
+            | HashBang => continue,
             Case | Do | Forall | Infixl | Infixr | Data | Type | Interface
             | Mod | Where | Pub | Use => SemanticTokenType::KEYWORD,
         };

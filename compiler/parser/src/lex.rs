@@ -33,6 +33,7 @@ pub enum Token {
     Question,
     Pub,
     Use,
+    HashBang,
 }
 
 trait RequiresIndent {
@@ -218,10 +219,7 @@ fn lexer(
         .or(filter::<_, _, Simple<char>>(|&c| {
             (GeneralCategory::of(c).is_punctuation()
                 || GeneralCategory::of(c).is_symbol())
-                && c != '"'
-                && c != '('
-                && c != ')'
-                && c != '_'
+                && !matches!(c, '"' | '(' | ')' | '{' | '}' | '[' | ']' | '_')
         })
         .repeated()
         .at_least(1)
@@ -232,6 +230,7 @@ fn lexer(
             "=" => Token::Assign,
             "::" => Token::ColonColon,
             ":" => Token::Colon,
+            "#!" => Token::HashBang,
             _ => Token::Op(op, TokenId::new()),
         }));
     let comment = just("//").then(take_until(just('\n'))).padded();
