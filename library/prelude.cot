@@ -5,6 +5,8 @@ pub infixl 10 .
 
 pub (++) : String -> String -> String = append_str
 
+pub infixl 3 ++
+
 pub println_str : String -> () =
     | a => (a ++ "\n").print_str
 

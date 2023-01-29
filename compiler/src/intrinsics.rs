@@ -188,7 +188,6 @@ pub static OP_PRECEDENCE: Lazy<FxHashMap<&'static str, (Associativity, i32)>> =
             ("<", (Left, 5)),
             ("!=", (Left, 5)),
             ("==", (Left, 5)),
-            ("++", (Left, 3)),
             ("|", (Left, 2)),
             ("->", (Right, 1)),
         ]
