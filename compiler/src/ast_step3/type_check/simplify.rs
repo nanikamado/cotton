@@ -2104,7 +2104,17 @@ fn apply_type_to_pattern(
     if !restriction.allow_inexhaustive && !remained.is_empty() && !not_sure {
         log::debug!("missing type = {}", remained);
         Err(CompileError::InexhaustiveMatch {
-            description: format!("missing type = {remained}"),
+            description: format!(
+                "missing pattern = {}",
+                remained
+                    .argument_vecs_from_argument_tuple()
+                    .iter()
+                    .format_with("|", |args, f| if args.len() == 1 {
+                        f(&format_args!("{}", args[0]))
+                    } else {
+                        f(&format_args!("({})", args.iter().format(", ")))
+                    })
+            ),
             span: restriction.span.clone(),
         })
     } else {

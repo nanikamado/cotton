@@ -1,0 +1,12 @@
+data A(I64)
+data B(String)
+data C
+
+type S = A | B | C
+
+to_string : S -> String =
+    | A(x) => x.to_string
+    | B(x) => x
+    | C => "C"
+
+main = | _ => ()

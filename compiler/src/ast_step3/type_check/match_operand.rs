@@ -152,16 +152,40 @@ impl Display for MatchOperandUnit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MatchOperandUnit::Const(c) => {
-                write!(f, "Const({c})")
+                write!(f, ":{c}")
             }
             MatchOperandUnit::Tuple(a, b) => {
-                write!(f, "({a}, {b})")
+                if a.0.len() == 1 {
+                    if let MatchOperandUnit::Const(c) = a.0[0] {
+                        write!(
+                            f,
+                            "{}",
+                            b.clone()
+                                .argument_vecs_from_argument_tuple()
+                                .iter()
+                                .format_with("|", |args, f| {
+                                    if args.is_empty() {
+                                        f(&c)
+                                    } else {
+                                        f(&format_args!(
+                                            "{c}({})",
+                                            args.iter().format(", ")
+                                        ))
+                                    }
+                                })
+                        )
+                    } else {
+                        write!(f, "{a}, {b}")
+                    }
+                } else {
+                    write!(f, "{a}, {b}")
+                }
             }
-            MatchOperandUnit::Unmatchable(a) => {
-                write!(f, "Unmatchable({a})")
+            MatchOperandUnit::Unmatchable(_) => {
+                write!(f, "_")
             }
-            MatchOperandUnit::NotComputed(a) => {
-                write!(f, "NotComputed({a})")
+            MatchOperandUnit::NotComputed(_) => {
+                write!(f, "_")
             }
         }
     }
@@ -204,7 +228,7 @@ impl MatchOperand {
         self
     }
 
-    fn argument_vecs_from_argument_tuple(self) -> Vec<Vec<Self>> {
+    pub fn argument_vecs_from_argument_tuple(self) -> Vec<Vec<Self>> {
         use MatchOperandUnit::*;
         self.into_iter()
             .flat_map(|t| match t {
@@ -219,8 +243,11 @@ impl MatchOperand {
                         args
                     })
                     .collect(),
+                NotComputed(TypeUnit::Const {
+                    id: TypeId::Intrinsic(IntrinsicType::Unit),
+                }) => vec![Vec::new()],
                 t => {
-                    panic!("expected Tuple or Unit but got {t}")
+                    panic!("expected Tuple or Unit but got {t:?}")
                 }
             })
             .collect()
@@ -328,7 +355,10 @@ pub fn disclose_type_unit(
     data_decls: &mut FxHashMap<TypeId, DataDecl>,
 ) -> MatchOperand {
     match type_ {
-        TypeUnit::Const { id } => MatchOperandUnit::Const(id).into(),
+        TypeUnit::Const { id } => {
+            debug_assert!(matches!(id, TypeId::Intrinsic(_)));
+            MatchOperandUnit::Const(id).into()
+        }
         TypeUnit::Tuple(a, b) => match a.matchable_ref() {
             TypeMatchableRef::Const {
                 id: id @ TypeId::DeclId(_),
@@ -360,6 +390,15 @@ pub fn disclose_type_unit(
                     })
                     .collect()
             }
+            TypeMatchableRef::Union(_) => a
+                .into_iter()
+                .flat_map(|a| {
+                    disclose_type_unit(
+                        TypeUnit::Tuple(a.into(), b.clone()),
+                        data_decls,
+                    )
+                })
+                .collect(),
             _ => MatchOperand::tuple(
                 MatchOperand::not_computed_from_type(a),
                 MatchOperand::not_computed_from_type(b),
