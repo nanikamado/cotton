@@ -211,7 +211,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                         .ignore_then(ident_with_path.clone().separated_by(and))
                         .or_not(),
                 )
-                .separated_by(just(Token::Comma))
+                .separated_by(just(Token::Comma).or_not())
                 .allow_trailing(),
         ))
         .map(|type_variable_names| Forall {
@@ -428,7 +428,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                         ident
                             .then_ignore(just(Token::Colon))
                             .then(expr.clone())
-                            .separated_by(just(Token::Comma))
+                            .separated_by(just(Token::Comma).or_not())
                             .allow_trailing(),
                     ))
                     .map(|(name, fields)| ExprUnit::Record {
@@ -559,7 +559,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
             ident
                 .then_ignore(just(Token::Colon))
                 .then(type_without_forall.clone())
-                .separated_by(just(Token::Comma))
+                .separated_by(just(Token::Comma).or_not())
                 .allow_trailing(),
         ))
         .then(forall.clone().or_not())
