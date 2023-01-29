@@ -620,13 +620,23 @@ impl Imports {
             &mut ns,
         )?;
         let mut names = ns.variables;
-        names.extend(
-            candidates_from_implicit_parameters
-                .get(name)
-                .into_iter()
-                .flatten()
-                .map(|d| VariableId::Local(*d)),
-        );
+        if let Some(a) = ns.data {
+            names.insert(match a {
+                ConstructorId::DeclId(d) => VariableId::Constructor(d),
+                ConstructorId::Intrinsic(d) => {
+                    VariableId::IntrinsicConstructor(d)
+                }
+            });
+        }
+        if scope == path {
+            names.extend(
+                candidates_from_implicit_parameters
+                    .get(name)
+                    .into_iter()
+                    .flatten()
+                    .map(|d| VariableId::Local(*d)),
+            );
+        }
         if names.is_empty() {
             Err(CompileError::NotFound {
                 path: Path::from_str(path, name),
@@ -645,27 +655,22 @@ impl Imports {
         token_map: &mut TokenMap,
         candidates_from_implicit_parameters: &FxHashMap<&str, Vec<DeclId>>,
     ) -> Result<Vec<VariableId>, CompileError> {
-        let (n, p, span, _) =
-            self.get_names(scope, base_path, path, token_map)?;
-        let mut names = n.variables;
-        if path.len() == 1 {
-            let n = path.last().unwrap().0.as_str();
-            names.extend(
-                candidates_from_implicit_parameters
-                    .get(n)
-                    .into_iter()
-                    .flatten()
-                    .map(|d| VariableId::Local(*d)),
-            );
-        }
-        if names.is_empty() {
-            Err(CompileError::NotFound {
-                path: p,
-                span: span.unwrap(),
-            })
-        } else {
-            Ok(names.into_iter().collect())
-        }
+        let base_path = self.get_module_with_path(
+            scope,
+            base_path,
+            &path[..path.len() - 1],
+            token_map,
+            &Default::default(),
+        )?;
+        let (name, span, _token_id) = path.last().unwrap();
+        self.get_variables(
+            scope,
+            base_path,
+            name,
+            span.clone(),
+            token_map,
+            candidates_from_implicit_parameters,
+        )
     }
 
     pub fn get_accessor_with_path(
@@ -741,11 +746,6 @@ impl Default for Imports {
             imports.add_data(
                 Path::from_str_intrinsic(v.to_str()),
                 ConstructorId::Intrinsic(v),
-                true,
-            );
-            imports.add_variable(
-                Path::from_str_intrinsic(v.to_str()),
-                VariableId::IntrinsicConstructor(v),
                 true,
             );
         }

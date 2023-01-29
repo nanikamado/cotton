@@ -344,11 +344,6 @@ fn collect_data_and_type_alias_decls<'a>(
             ConstructorId::DeclId(d.decl_id),
             d.is_public,
         );
-        env.imports.add_variable(
-            d.name,
-            VariableId::Constructor(d.decl_id),
-            d.is_public,
-        );
         env.imports
             .add_type(d.name, TypeId::DeclId(d.decl_id), d.is_public);
         for (i, f) in d.fields.iter().enumerate() {
