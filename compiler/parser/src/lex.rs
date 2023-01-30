@@ -1,5 +1,6 @@
 use crate::token_id::TokenId;
 use chumsky::prelude::*;
+use chumsky::primitive::OrderedContainer;
 use chumsky::text::{newline, Character};
 use std::iter;
 use unic_ucd_category::GeneralCategory;
@@ -59,15 +60,17 @@ fn semantic_indentation<'a, C, T>(
 where
     C: Character + Eq + core::hash::Hash + 'a,
     T: Parser<C, (Token, Span), Error = Simple<C>> + Clone + 'a,
+    &'a str: OrderedContainer<C>,
 {
     let line_ws = filter(|c: &C| c.is_inline_whitespace());
+    let comment = just("//").then(take_until(text::newline())).ignored();
     let line = token.repeated().then_ignore(line_ws.repeated());
     let lines = line_ws
         .repeated()
         .map_with_span(|token, span| (token, span))
         .then(line)
-        .separated_by(newline())
-        .padded();
+        .separated_by(newline().or(comment).repeated().at_least(1))
+        .allow_leading();
     lines.map(move |lines| {
         let mut tokens: Vec<(Token, Span)> = Vec::new();
         let mut indent_level = 0;
@@ -235,20 +238,15 @@ fn lexer(
             "#!" => Token::HashBang,
             _ => Token::Op(op, TokenId::new()),
         }));
-    let comment = just("//").then(take_until(just('\n'))).padded();
-
-    let line_ws = filter(|c: &char| c.is_inline_whitespace());
-
+    let line_ws = filter(|c: &char| c.is_inline_whitespace()).repeated();
     let tt = line_ws
-        .repeated()
         .ignore_then(unit.map_with_span(|tok, span| (tok, span)))
         .or(just('(')
             .map(|_| Token::OpenParenWithoutPad)
             .map_with_span(|tok, span| (tok, span)))
-        .or(line_ws.repeated().ignore_then(
+        .or(line_ws.ignore_then(
             choice((int, str, paren, op, ident))
-                .map_with_span(|tok, span| (tok, span))
-                .padded_by(comment.repeated()),
+                .map_with_span(|tok, span| (tok, span)),
         ));
 
     semantic_indentation(tt, Token::Indent, Token::Dedent, src_len)
