@@ -156,6 +156,7 @@ pub enum Decl {
     Use {
         path: Path,
         is_public: bool,
+        wild_card: bool,
     },
     Attribute(String),
 }
@@ -439,7 +440,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 ident_with_path.clone().map(|path| ExprUnit::Ident { path }),
                 lambda.map(|a| ExprUnit::Case(vec![a])),
                 expr.clone()
-                    .delimited_by(open_paren, just(Token::Paren(')')))
+                    .delimited_by(open_paren.clone(), just(Token::Paren(')')))
                     .map(ExprUnit::Paren),
             ));
             let apply = expr
@@ -623,6 +624,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         .then(ident)
         .then(indented(
             ident_or_op
+                .clone()
                 .then_ignore(just(Token::Colon))
                 .then(type_)
                 .repeated(),
@@ -640,11 +642,47 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
     let use_decl = just(Token::Pub)
         .or_not()
         .then_ignore(just(Token::Use))
-        .then(ident_with_path)
-        .map(|(pub_or_not, path)| Decl::Use {
-            path,
-            is_public: pub_or_not.is_some(),
-        });
+        .then(just(Token::ColonColon).or_not())
+        .then(
+            ident
+                .separated_by(just(Token::ColonColon))
+                .allow_leading()
+                .at_least(1),
+        )
+        .then(
+            just(Token::ColonColon)
+                .ignore_then(
+                    op.delimited_by(
+                        open_paren.clone(),
+                        just(Token::Paren(')')),
+                    ),
+                )
+                .map(Some)
+                .or(just(Token::ColonColonStr).to(None))
+                .or_not(),
+        )
+        .map(
+            |(((pub_or_not, root_no_not), mut path), op_or_star_or_name)| {
+                let mut wild_card = false;
+                match op_or_star_or_name {
+                    Some(Some(op)) => {
+                        path.push(op);
+                    }
+                    Some(None) => {
+                        wild_card = true;
+                    }
+                    _ => (),
+                }
+                Decl::Use {
+                    path: Path {
+                        from_root: root_no_not.is_some(),
+                        path,
+                    },
+                    is_public: pub_or_not.is_some(),
+                    wild_card,
+                }
+            },
+        );
     let attribute = just(Token::HashBang)
         .ignore_then(
             ident

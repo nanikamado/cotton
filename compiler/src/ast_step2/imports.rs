@@ -88,6 +88,7 @@ struct OpPrecedenceDecl {
 struct NameAliasEntry {
     alias: Vec<parser::StringWithId>,
     base_path: Path,
+    scope: Path,
     is_public: bool,
 }
 
@@ -204,6 +205,7 @@ impl Imports {
 
     pub fn insert_name_alias(
         &mut self,
+        scope: Path,
         from: Path,
         to_base_path: Path,
         to: Vec<parser::StringWithId>,
@@ -214,6 +216,7 @@ impl Imports {
                 alias: to,
                 base_path: to_base_path,
                 is_public,
+                scope,
             },
         );
     }
@@ -232,6 +235,7 @@ impl Imports {
                 alias: to,
                 base_path: to_base_path,
                 is_public,
+                scope: from,
             });
     }
 
@@ -269,7 +273,7 @@ impl Imports {
         {
             if a.is_public || path.is_same_as_or_ancestor_of(scope) {
                 let m = self.get_module_with_path(
-                    scope,
+                    a.scope,
                     a.base_path,
                     &a.alias,
                     token_map,
@@ -293,7 +297,7 @@ impl Imports {
                     || path.is_same_as_or_ancestor_of(scope)
                 {
                     self.get_true_names_with_path_rec(
-                        scope,
+                        name_alias_entry.scope,
                         name_alias_entry.base_path,
                         &name_alias_entry.alias,
                         token_map,
@@ -402,7 +406,13 @@ impl Imports {
         if path.is_empty() {
             Ok(base_path)
         } else {
-            if path[0].0 == "super" {
+            if scope == base_path && path[0].0 == "prelude" {
+                base_path = Path::prelude();
+                path = &path[1..];
+            } else if scope == base_path && path[0].0 == "intrinsic" {
+                base_path = Path::intrinsic();
+                path = &path[1..];
+            } else if path[0].0 == "super" {
                 token_map.insert(path[0].2, TokenMapEntry::KeyWord);
                 base_path = base_path
                     .split()
@@ -764,12 +774,6 @@ impl Default for Imports {
                 true,
             );
         }
-        imports.insert_wild_card_import(
-            Path::prelude(),
-            Path::intrinsic(),
-            Vec::new(),
-            true,
-        );
         imports
     }
 }

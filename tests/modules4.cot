@@ -1,0 +1,8 @@
+mod aaa {
+    pub use bbb::a
+    mod bbb {
+        pub a = | () => "a".println
+    }
+}
+
+main = | () => ().aaa::a

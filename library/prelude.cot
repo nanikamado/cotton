@@ -1,5 +1,7 @@
 #![no_implicit_prelude]
 
+pub use intrinsic::*
+
 pub (.) : A -> (A -> B) -> B forall { A, B } =
     | a, f => f(a)
 

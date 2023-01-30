@@ -376,6 +376,11 @@ fn modules3() {
 }
 
 #[test]
+fn modules4() {
+    test_test("modules4.cot").stdout("a\n").success();
+}
+
+#[test]
 fn modules_fail() {
     test_test("modules_fail.cot").code(1);
 }

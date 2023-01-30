@@ -493,12 +493,33 @@ impl<'a> Ast<'a> {
                 ),
                 parser::Decl::TypeAlias(_) => (),
                 parser::Decl::Interface(_) => (),
-                parser::Decl::Use { path, is_public } => {
+                parser::Decl::Use {
+                    path,
+                    is_public,
+                    wild_card: false,
+                } => {
                     imports.insert_name_alias(
+                        module_path,
                         Path::from_str(
                             module_path,
                             &path.path.last().unwrap().0,
                         ),
+                        if path.from_root {
+                            Path::pkg_root()
+                        } else {
+                            module_path
+                        },
+                        path.path.clone(),
+                        *is_public,
+                    );
+                }
+                parser::Decl::Use {
+                    path,
+                    is_public,
+                    wild_card: true,
+                } => {
+                    imports.insert_wild_card_import(
+                        module_path,
                         if path.from_root {
                             Path::pkg_root()
                         } else {
