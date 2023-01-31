@@ -259,8 +259,11 @@ fn lexer(
         .then_ignore(end())
 }
 
-pub fn lex(src: &str) -> (Vec<(Token, Span)>, usize) {
+#[allow(clippy::type_complexity)]
+pub fn lex(
+    src: &str,
+) -> Result<(Vec<(Token, Span)>, usize), Vec<Simple<char>>> {
     let len = src.chars().count();
-    let ts = lexer(len).parse(src).unwrap();
-    (ts, len)
+    let ts = lexer(len).parse(src)?;
+    Ok((ts, len))
 }

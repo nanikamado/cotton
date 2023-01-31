@@ -23,7 +23,7 @@ use ast_step3::{
 use codegen::codegen;
 use errors::CompileError;
 pub use fxhash::FxHashMap;
-pub use parser::parse::{parse, parse_result};
+pub use parser::parse::parse_result;
 pub use parser::token_id::TokenId;
 pub use parser::{lex, Token};
 use simplelog::{
@@ -77,8 +77,7 @@ pub fn run(
             }
         }
     }
-    let (tokens, src_len) = lex(source);
-    let ast = parser::parse::parse(tokens, source, src_len);
+    let ast = parser::parse(source);
     let ast = combine_with_prelude(ast);
     let mut imports = Imports::default();
     let (ast, mut token_map) = ast_step1::Ast::from(&ast, &mut imports)
@@ -130,8 +129,7 @@ fn to_step_3<'a>(
 
 pub fn combine_with_prelude(ast: parser::Ast) -> parser::Ast {
     let source = include_str!("../../library/prelude.cot");
-    let (tokens, src_len) = parser::lex(source);
-    let prelude_ast = parser::parse::parse(tokens, source, src_len);
+    let prelude_ast = parser::parse(source);
     parser::Ast {
         decls: vec![
             parser::Decl::Module {
