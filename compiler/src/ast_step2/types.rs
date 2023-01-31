@@ -1034,8 +1034,20 @@ impl Display for Type {
                 )
             }
             Any => write!(f, "Any"),
-            Variance(Contravariant, t) => write!(f, "-{t}"),
-            Variance(Invariant, t) => write!(f, "={t}"),
+            Variance(Contravariant, t) => {
+                if t.is_function() {
+                    write!(f, "-({t})")
+                } else {
+                    write!(f, "-{t}")
+                }
+            }
+            Variance(Invariant, t) => {
+                if t.is_function() {
+                    write!(f, "=({t})")
+                } else {
+                    write!(f, "={t}")
+                }
+            }
         }
     }
 }
@@ -1105,8 +1117,20 @@ impl Display for TypeUnit {
                     )))
             ),
             Any => write!(f, "Any"),
-            Variance(Contravariant, t) => write!(f, "-{t}"),
-            Variance(Invariant, t) => write!(f, "={t}"),
+            Variance(Contravariant, t) => {
+                if t.is_function() {
+                    write!(f, "-({t})")
+                } else {
+                    write!(f, "-{t}")
+                }
+            }
+            Variance(Invariant, t) => {
+                if t.is_function() {
+                    write!(f, "=({t})")
+                } else {
+                    write!(f, "={t}")
+                }
+            }
         }
     }
 }
