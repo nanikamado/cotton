@@ -19,6 +19,7 @@ use crate::intrinsics::{IntrinsicConstructor, IntrinsicType, INTRINSIC_TYPES};
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
+use parser::token_id::TokenId;
 use parser::Span;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
@@ -296,7 +297,14 @@ fn collect_decls<'a>(
     collect_data_and_type_alias_decls(&ast, module_path, env)?;
     debug_assert!(env.data_decl_map.is_empty());
     let mut union_of_fields = FxHashMap::default();
-    collect_interface_decls(&ast, module_path, env, &mut union_of_fields)?;
+    let mut interface_decls = Vec::new();
+    collect_interface_decls(
+        &ast,
+        module_path,
+        env,
+        &mut interface_decls,
+        &mut union_of_fields,
+    )?;
     env.data_decl_map
         .extend(env.data_decls.iter().map(|(_, d)| (d.name, d.decl_id)));
     {
@@ -307,6 +315,24 @@ fn collect_decls<'a>(
         );
     }
     let mut variance_map = VarianceMap::new(union_of_fields);
+    env.interface_decls.extend(interface_decls.into_iter().map(
+        |(name, variables)| {
+            (
+                name,
+                variables
+                    .into_iter()
+                    .map(|(name, t, v)| {
+                        let vt = variance_map.add_variance_to_type(t.clone());
+                        env.token_map.insert(
+                            name.2,
+                            TokenMapEntry::VariableDeclInInterface(vt),
+                        );
+                        (name.0, t, v)
+                    })
+                    .collect(),
+            )
+        },
+    ));
     collect_variable_decls(
         ast,
         module_path,
@@ -371,10 +397,15 @@ fn collect_data_and_type_alias_decls<'a>(
     Ok(())
 }
 
+#[allow(clippy::type_complexity)]
 fn collect_interface_decls<'a>(
     ast: &ast_step1::Ast<'a>,
     module_path: ModulePath,
     env: &mut Env<'a, '_>,
+    interface_decls: &mut Vec<(
+        Path,
+        Vec<((&'a str, Option<Span>, Option<TokenId>), Type, TypeVariable)>,
+    )>,
     union_of_fields: &mut FxHashMap<TypeId, Type>,
 ) -> Result<(), CompileError> {
     for d in &ast.data_decl {
@@ -435,52 +466,46 @@ fn collect_interface_decls<'a>(
         };
         env.data_decls.insert(ConstructorId::DeclId(d.decl_id), d);
     }
-    env.interface_decls.extend(
-        ast.interface_decl
+    for i in &ast.interface_decl {
+        env.token_map.insert(i.name.2, TokenMapEntry::Interface);
+        let name = Path::from_str(module_path, i.name.0);
+        env.imports.add_interface(name, i.is_public);
+        let variables = i
+            .variables
             .iter()
-            .map(|i| {
-                env.token_map.insert(i.name.2, TokenMapEntry::Interface);
-                let name = Path::from_str(module_path, i.name.0);
-                env.imports.add_interface(name, i.is_public);
-                Ok((
-                    name,
-                    i.variables
-                        .iter()
-                        .map(|(name, t, forall)| {
-                            let self_ = TypeVariable::new();
-                            let t = type_to_type_with_forall(
-                                t.clone(),
-                                module_path,
-                                std::iter::once((
-                                    Path::from_str(module_path, "Self"),
-                                    self_,
-                                ))
-                                .collect(),
-                                forall,
-                                &mut Env {
-                                    interface_decls: &mut Default::default(),
-                                    token_map: env.token_map,
-                                    type_alias_map: env.type_alias_map,
-                                    imports: env.imports,
-                                    data_decl_map: env.data_decl_map,
-                                    data_decls: env.data_decls,
-                                },
-                            )?;
-                            env.token_map.insert(
-                                name.2,
-                                TokenMapEntry::VariableDeclInInterface(
-                                    t.clone(),
-                                ),
-                            );
-                            Ok((name.0, t, self_))
-                        })
-                        .try_collect()?,
-                ))
+            .map(|(name, t, forall)| {
+                let self_ = TypeVariable::new();
+                let t = type_to_type_with_forall(
+                    t.clone(),
+                    module_path,
+                    std::iter::once((
+                        Path::from_str(module_path, "Self"),
+                        self_,
+                    ))
+                    .collect(),
+                    forall,
+                    &mut Env {
+                        interface_decls: &mut Default::default(),
+                        token_map: env.token_map,
+                        type_alias_map: env.type_alias_map,
+                        imports: env.imports,
+                        data_decl_map: env.data_decl_map,
+                        data_decls: env.data_decls,
+                    },
+                )?;
+                Ok((name.clone(), t, self_))
             })
-            .try_collect::<_, Vec<_>, _>()?,
-    );
+            .try_collect()?;
+        interface_decls.push((name, variables));
+    }
     for m in &ast.modules {
-        collect_interface_decls(&m.ast, m.name, env, union_of_fields)?;
+        collect_interface_decls(
+            &m.ast,
+            m.name,
+            env,
+            interface_decls,
+            union_of_fields,
+        )?;
     }
     Ok(())
 }

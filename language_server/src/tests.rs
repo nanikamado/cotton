@@ -91,3 +91,9 @@ fn red_black_tree_strongly_typed_local_type() {
         panic!()
     };
 }
+
+#[test]
+fn interface() {
+    let src = fs::read_to_string("../examples/interface.cot").unwrap();
+    semantic_tokens_from_src(&src).unwrap();
+}
