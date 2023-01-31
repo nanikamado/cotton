@@ -19,7 +19,7 @@ test : () -> () =
         (D1 /\ D2 /\ D1 /\ Nil) : Palindrome
         (D1 /\ D2 /\ D2 /\ D1 /\ Nil) : Palindrome
         (D1 /\ D2 /\ D2 /\ D2 /\ D1 /\ Nil) : Palindrome
-        (D1 /\ D2 /\ D2 /\ D2 /\ D1 /\ Nil) : Palindrome
+        (D1 /\ D2 /\ D1 /\ D2 /\ D1 /\ Nil) : Palindrome
         ()
 
 make_palindrome_rec : List[D1 | D2] -> A -> PalindromePlus[A] forall { A } =
