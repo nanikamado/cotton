@@ -62,14 +62,15 @@ where
     T: Parser<C, (Token, Span), Error = Simple<C>> + Clone + 'a,
     &'a str: OrderedContainer<C>,
 {
-    let line_ws = filter(|c: &C| c.is_inline_whitespace());
-    let comment = just("//").then(take_until(text::newline())).ignored();
-    let line = token.repeated().then_ignore(line_ws.repeated());
+    let line_ws = filter(|c: &C| c.is_inline_whitespace()).repeated();
+    let line = token.repeated();
+    let comment = just("//").then(take_until(newline().or(end()))).ignored();
     let lines = line_ws
-        .repeated()
         .map_with_span(|token, span| (token, span))
         .then(line)
-        .separated_by(newline().or(comment).repeated().at_least(1))
+        .separated_by(
+            line_ws.then(newline().or(comment)).repeated().at_least(1),
+        )
         .allow_leading();
     lines.map(move |lines| {
         let mut tokens: Vec<(Token, Span)> = Vec::new();
@@ -239,16 +240,21 @@ fn lexer(
             _ => Token::Op(op, TokenId::new()),
         }));
     let line_ws = filter(|c: &char| c.is_inline_whitespace()).repeated();
-    let tt = line_ws
-        .ignore_then(unit.map_with_span(|tok, span| (tok, span)))
-        .or(just('(')
+    let tt = choice((
+        line_ws.ignore_then(unit.map_with_span(|tok, span| (tok, span))),
+        just('(')
             .map(|_| Token::OpenParenWithoutPad)
-            .map_with_span(|tok, span| (tok, span)))
-        .or(line_ws.ignore_then(
+            .map_with_span(|tok, span| (tok, span)),
+        line_ws.ignore_then(
             choice((int, str, paren, op, ident))
                 .map_with_span(|tok, span| (tok, span)),
-        ));
-
+        ),
+    ))
+    .then_ignore(
+        line_ws
+            .then(just("//").then(take_until(newline().rewind().or(end()))))
+            .or_not(),
+    );
     semantic_indentation(tt, Token::Indent, Token::Dedent, src_len)
         .then_ignore(end())
 }

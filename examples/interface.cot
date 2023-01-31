@@ -13,7 +13,7 @@ interface Greet {
 }
 
 greet_twice : A -> String forall { A : Greet } =
-    | a => do 
+    | a => do
         a.greet ++ a.greet
 
 main : () -> () =
