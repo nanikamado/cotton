@@ -7,7 +7,7 @@ Cotton is a simple functional programming language.
 cargo install --git 'https://github.com/nanikamado/cotton.git' --features language-server
 ```
 
-## Dependencies
+### Dependencies
 - cargo
 - node
 
@@ -22,3 +22,7 @@ or
 ```
 cotton examples/helloworld.cot
 ```
+
+## Playground
+
+https://gitpod.io/#https://github.com/nanikamado/cotton-playground
