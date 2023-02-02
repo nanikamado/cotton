@@ -1,11 +1,24 @@
+# Cotton
+Cotton is a simple functional programming language.
+
+## Installing
+
+```
+cargo install --git 'https://github.com/nanikamado/cotton.git' --features language-server
+```
+
+## Dependencies
+- cargo
+- node
+
 ## Run
 
 ```
-cargo run -- examples/helloworld.cot
+cotton examples/helloworld.cot -j | node
 ```
 
-## Test
+or
 
 ```
-cargo test
+cotton examples/helloworld.cot
 ```
