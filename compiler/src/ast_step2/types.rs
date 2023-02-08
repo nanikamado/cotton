@@ -202,7 +202,6 @@ mod type_type {
     use crate::ast_step2::types::unwrap_or_clone;
     use crate::ast_step3::simplify_subtype_rel;
     use smallvec::SmallVec;
-    use std::collections::BTreeSet;
     use std::iter;
     use std::rc::Rc;
 
@@ -343,19 +342,13 @@ mod type_type {
             }
         }
 
-        pub fn insert_with_already_considered_relations(
-            &mut self,
-            other: Rc<TypeUnit>,
-            already_considered_relations: Option<BTreeSet<(Type, Type)>>,
-        ) {
+        pub fn insert(&mut self, other: Rc<TypeUnit>) {
             if other.contains_empty_in_covariant_candidate() {
                 return;
             }
             if let Some(u) = self.0.pop() {
-                let (u, t1, t2) = unwrap_or_clone(u).merge_union_with(
-                    unwrap_or_clone(other),
-                    already_considered_relations,
-                );
+                let (u, t1, t2) =
+                    unwrap_or_clone(u).merge_union(unwrap_or_clone(other));
                 if let Some(t2) = t2 {
                     self.insert(Rc::new(t2));
                 }
@@ -368,10 +361,6 @@ mod type_type {
             } else {
                 self.0.push(other);
             }
-        }
-
-        pub fn insert(&mut self, other: Rc<TypeUnit>) {
-            self.insert_with_already_considered_relations(other, None);
         }
 
         pub fn increment_recursive_index(
@@ -406,10 +395,9 @@ mod type_type {
     }
 
     impl TypeUnit {
-        pub fn merge_union_with(
+        pub fn merge_union(
             self,
             other: Self,
-            mut already_considered_relations: Option<BTreeSet<(Type, Type)>>,
         ) -> (Option<Self>, Option<Self>, Option<Self>) {
             use TypeUnit::*;
             match (self, other) {
@@ -447,7 +435,7 @@ mod type_type {
                     let r = simplify_subtype_rel(
                         b.clone().into(),
                         a.clone().into(),
-                        already_considered_relations.as_mut(),
+                        None,
                     );
                     if r.map(|r| r.is_empty()).unwrap_or(false) {
                         (None, Some(a), None)
@@ -459,7 +447,7 @@ mod type_type {
                     let r = simplify_subtype_rel(
                         a.clone().into(),
                         b.clone().into(),
-                        already_considered_relations.as_mut(),
+                        None,
                     );
                     if r.map(|r| r.is_empty()).unwrap_or(false) {
                         (None, Some(b), None)
@@ -600,10 +588,7 @@ impl FromIterator<TypeUnit> for Type {
     fn from_iter<T: IntoIterator<Item = TypeUnit>>(iter: T) -> Self {
         let mut t = Type::default();
         for u in iter.into_iter() {
-            t.insert_with_already_considered_relations(
-                Rc::new(u),
-                Some(Default::default()),
-            );
+            t.insert(Rc::new(u));
         }
         t
     }
@@ -613,10 +598,7 @@ impl FromIterator<Rc<TypeUnit>> for Type {
     fn from_iter<T: IntoIterator<Item = Rc<TypeUnit>>>(iter: T) -> Self {
         let mut t = Type::default();
         for u in iter.into_iter() {
-            t.insert_with_already_considered_relations(
-                u,
-                Some(Default::default()),
-            );
+            t.insert(u);
         }
         t
     }
@@ -772,7 +754,7 @@ impl TypeConstructor for Type {
             );
             updated |= up_;
             for u in u {
-                t.insert_with_already_considered_relations(u, None);
+                t.insert(u);
             }
         }
         (t, updated)
