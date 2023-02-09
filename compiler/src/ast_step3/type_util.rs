@@ -787,6 +787,42 @@ impl TypeUnit {
             .into(),
         )
     }
+
+    pub fn type_level_function_apply(self, arg: Type) -> Type {
+        match self {
+            TypeUnit::TypeLevelFn(f) => {
+                f.replace_index_zero_and_decrement_indices(arg)
+            }
+            TypeUnit::Tuple(head, tail) => {
+                TypeUnit::Tuple(head, tail.type_level_function_apply(arg))
+                    .into()
+            }
+            u @ TypeUnit::Const {
+                id: TypeId::Intrinsic(IntrinsicType::Unit),
+            } => TypeUnit::Tuple(arg, u.into()).into(),
+            t => TypeUnit::TypeLevelApply {
+                f: t.into(),
+                a: arg,
+            }
+            .into(),
+        }
+    }
+
+    pub fn type_level_function_apply_strong(self, arg: Type) -> Type {
+        match self {
+            TypeUnit::TypeLevelFn(f) => {
+                f.replace_index_zero_and_decrement_indices(arg)
+            }
+            TypeUnit::RecursiveAlias { body } => {
+                unwrap_recursive_alias(body).type_level_function_apply(arg)
+            }
+            t => TypeUnit::TypeLevelApply {
+                f: t.into(),
+                a: arg,
+            }
+            .into(),
+        }
+    }
 }
 
 impl Type {
@@ -957,32 +993,19 @@ impl Type {
     }
 
     pub fn type_level_function_apply(self, arg: Self) -> Self {
-        match self.matchable() {
-            TypeMatchable::TypeLevelFn(f) => {
-                f.replace_index_zero_and_decrement_indices(arg)
-            }
-            t => TypeUnit::TypeLevelApply {
-                f: t.into(),
-                a: arg,
-            }
-            .into(),
-        }
+        self.into_iter()
+            .flat_map(|t| {
+                unwrap_or_clone(t).type_level_function_apply(arg.clone())
+            })
+            .collect()
     }
 
     pub fn type_level_function_apply_strong(self, arg: Self) -> Self {
-        match self.matchable() {
-            TypeMatchable::TypeLevelFn(f) => {
-                f.replace_index_zero_and_decrement_indices(arg)
-            }
-            TypeMatchable::RecursiveAlias { body } => {
-                unwrap_recursive_alias(body).type_level_function_apply(arg)
-            }
-            t => TypeUnit::TypeLevelApply {
-                f: t.into(),
-                a: arg,
-            }
-            .into(),
-        }
+        self.into_iter()
+            .flat_map(|t| {
+                unwrap_or_clone(t).type_level_function_apply_strong(arg.clone())
+            })
+            .collect()
     }
 
     pub fn replace_index_zero_and_decrement_indices(self, t: Self) -> Self {
