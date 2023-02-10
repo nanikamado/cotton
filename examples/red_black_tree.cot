@@ -4,7 +4,7 @@ data R
 data B
 
 type Color = R | B
-type RBTree = E | T[A] forall { A }
+type RBTree = | A => E | T[A]
 
 insert : RBTree[I64] -> I64 -> T[I64] =
     | t, x => t.insert_rec(x).

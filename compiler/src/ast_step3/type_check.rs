@@ -33,7 +33,7 @@ use petgraph::graph::NodeIndex;
 use petgraph::visit::IntoNodeReferences;
 use petgraph::Graph;
 use std::cmp::Reverse;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use strum::IntoEnumIterator;
 use types::TypeConstructor;
@@ -552,25 +552,47 @@ impl Type {
         }
     }
 
-    pub fn remove_parameters(mut self) -> (Self, Vec<TypeVariable>) {
+    pub fn remove_parameters(mut self) -> RemovedParameters {
         let mut parameters = Vec::new();
+        let mut v_reqs = Vec::new();
+        let mut rels = BTreeSet::new();
         let t = loop {
             match self.matchable() {
                 TypeMatchable::TypeLevelFn(t) => {
                     let v = TypeVariable::new();
-                    self = t.replace_num(
-                        TypeVariable::RecursiveIndex(0),
-                        &TypeUnit::Variable(v).into(),
+                    self = t.replace_index_zero_and_decrement_indices(
+                        TypeUnit::Variable(v).into(),
                     );
                     parameters.push(v);
+                }
+                TypeMatchable::Restrictions {
+                    t,
+                    mut variable_requirements,
+                    subtype_relations,
+                } => {
+                    v_reqs.append(&mut variable_requirements);
+                    rels.extend(subtype_relations);
+                    self = t;
                 }
                 t => {
                     break t;
                 }
             }
         };
-        (t.into(), parameters)
+        RemovedParameters {
+            fixed_type: t.into(),
+            removed_parameters: parameters,
+            variable_requirements: v_reqs,
+            subtype_relations: rels,
+        }
     }
+}
+
+pub struct RemovedParameters {
+    pub fixed_type: Type,
+    pub removed_parameters: Vec<TypeVariable>,
+    pub variable_requirements: Vec<(String, Type)>,
+    pub subtype_relations: BTreeSet<(Type, Type)>,
 }
 
 impl PatternUnitForRestriction {
@@ -792,10 +814,11 @@ fn resolve_scc(
     )?;
     let variable_requirements = scc_type.variable_requirements;
     let subtype_relation = scc_type.subtype_relations.clone();
-    debug_assert!(
-        constructors.iter().all(|c| !c.has_annotation)
-            || subtype_relation.is_empty()
-    );
+    if !(constructors.iter().all(|c| !c.has_annotation)
+        || subtype_relation.is_empty())
+    {
+        panic!("subtype_relation = {subtype_relation}");
+    }
     Ok((
         resolved_idents,
         scc_type
@@ -995,101 +1018,94 @@ fn find_satisfied_types<T: TypeConstructor>(
                 log::debug!("req: {}", req.required_type);
                 log::debug!("~~ {:?} : {}", req.name, cand_t);
                 let mut implicit_args = Vec::new();
-                let type_args;
-                (cand_t.constructor, type_args) =
-                    cand_t.constructor.remove_parameters();
-                cand_t.constructor = match cand_t.constructor.matchable() {
-                    TypeMatchable::Restrictions {
-                        t: constructor,
-                        variable_requirements,
-                        subtype_relations,
-                    } => {
-                        for (interface_v_name_str, interface_v_t) in
-                            variable_requirements
-                        {
-                            let simple_name = Path::from_str(
-                                req.module_path,
-                                &interface_v_name_str,
-                            );
-                            let interface_v_name = imports.get_variables(
-                                req.module_path,
-                                req.module_path,
-                                &interface_v_name_str,
-                                None,
-                                &mut Default::default(),
-                                &req.additional_candidates
-                                    .iter()
-                                    .map(|(a, b)| (a.as_str(), b.clone()))
-                                    .collect(),
-                            )?;
-                            let arg = IdentId::new();
-                            implicit_args.push((
-                                simple_name,
-                                interface_v_t.clone(),
-                                arg,
-                            ));
-                            if let Some((_, decl_id, found_t)) =
-                                req.local_env.iter().find(|(name, _, _)| {
-                                    interface_v_name_str == *name
-                                })
-                            {
-                                resolved_implicit_args.push((
-                                    arg,
-                                    ResolvedIdent {
-                                        variable_id: VariableId::Local(
-                                            *decl_id,
-                                        ),
-                                        implicit_args: Default::default(),
-                                    },
-                                ));
-                                map.insert_type(
-                                    &mut t.subtype_relations,
-                                    interface_v_t.clone(),
-                                    found_t.clone(),
-                                    Some(RelOrigin {
-                                        left: interface_v_t,
-                                        right: found_t.clone(),
-                                        span: req.span.clone(),
-                                    }),
-                                );
-                            } else {
-                                cand_t.variable_requirements.push(
-                                    VariableRequirement {
-                                        name: interface_v_name,
-                                        module_path: req.module_path,
-                                        required_type: interface_v_t,
-                                        ident: arg,
-                                        local_env: req.local_env.clone(),
-                                        span: req.span.clone(),
-                                        additional_candidates: req
-                                            .additional_candidates
-                                            .clone(),
-                                        req_recursion_count: req
-                                            .req_recursion_count
-                                            + 1,
-                                    },
-                                );
-                            }
-                        }
-                        t.subtype_relations.extend(
-                            subtype_relations.into_iter().map(|(a, b)| {
-                                (
-                                    a.clone(),
-                                    b.clone(),
-                                    RelOrigin {
-                                        left: a,
-                                        right: b,
-                                        span: req.span.clone(),
-                                    },
-                                )
+                let removed_parameters = cand_t.constructor.remove_parameters();
+                cand_t.constructor = removed_parameters.fixed_type;
+                let type_args = removed_parameters.removed_parameters;
+                for (interface_v_name_str, interface_v_t) in
+                    removed_parameters.variable_requirements
+                {
+                    let simple_name =
+                        Path::from_str(req.module_path, &interface_v_name_str);
+                    let interface_v_name = imports.get_variables(
+                        req.module_path,
+                        req.module_path,
+                        &interface_v_name_str,
+                        None,
+                        &mut Default::default(),
+                        &req.additional_candidates
+                            .iter()
+                            .map(|(a, b)| (a.as_str(), b.clone()))
+                            .collect(),
+                    )?;
+                    let arg = IdentId::new();
+                    implicit_args.push((
+                        simple_name,
+                        interface_v_t.clone(),
+                        arg,
+                    ));
+                    if let Some((_, decl_id, found_t)) = req
+                        .local_env
+                        .iter()
+                        .find(|(name, _, _)| interface_v_name_str == *name)
+                    {
+                        resolved_implicit_args.push((
+                            arg,
+                            ResolvedIdent {
+                                variable_id: VariableId::Local(*decl_id),
+                                implicit_args: Default::default(),
+                            },
+                        ));
+                        map.insert_type(
+                            &mut t.subtype_relations,
+                            interface_v_t.clone(),
+                            found_t.clone(),
+                            Some(RelOrigin {
+                                left: interface_v_t,
+                                right: found_t.clone(),
+                                span: req.span.clone(),
                             }),
                         );
-                        constructor
+                    } else {
+                        cand_t.variable_requirements.push(
+                            VariableRequirement {
+                                name: interface_v_name,
+                                module_path: req.module_path,
+                                required_type: interface_v_t,
+                                ident: arg,
+                                local_env: req.local_env.clone(),
+                                span: req.span.clone(),
+                                additional_candidates: req
+                                    .additional_candidates
+                                    .clone(),
+                                req_recursion_count: req.req_recursion_count
+                                    + 1,
+                            },
+                        );
                     }
-                    t => t.into(),
-                };
-                let (required_type, ps_from_rec) =
-                    req.required_type.clone().remove_parameters();
+                }
+                t.subtype_relations.extend(
+                    removed_parameters.subtype_relations.into_iter().map(
+                        |(a, b)| {
+                            (
+                                a.clone(),
+                                b.clone(),
+                                RelOrigin {
+                                    left: a,
+                                    right: b,
+                                    span: req.span.clone(),
+                                },
+                            )
+                        },
+                    ),
+                );
+                let RemovedParameters {
+                    fixed_type: required_type,
+                    removed_parameters: ps_from_rec,
+                    variable_requirements,
+                    subtype_relations,
+                } = req.required_type.clone().remove_parameters();
+                debug_assert!(variable_requirements.is_empty());
+                debug_assert!(subtype_relations.is_empty());
                 for (a, b) in type_args.iter().zip(ps_from_rec) {
                     map.insert(
                         &mut t.subtype_relations,

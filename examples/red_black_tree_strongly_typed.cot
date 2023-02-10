@@ -6,15 +6,15 @@ data B
 
 type Color = R | B
 
-type NonEmptyRBTree = T[B, A, Node[A], Node[A]] forall { A }
-type RBTree = E | NonEmptyRBTree[A] forall { A }
-type RedNode = T[R, A, RBTree[A], RBTree[A]] forall { A }
-type Node = RBTree[A] | RedNode[A] forall { A }
-type NonEmptyNode = NonEmptyRBTree[A] | RedNode[A] forall { A }
-type NonEmptyIncompleteTree = T[Color, A, Node[A], Node[A]] forall { A }
-type Incomplete = E | T[Color, A, Node[A], Node[A]] forall { A }
-type BlanceInput = T[B, A, Incomplete[A], Node[A]] | T[B, A, Node[A], Incomplete[A]] forall { A }
-type Tree = E | T[Color, A, Tree[A], Tree[A]] forall { A }
+type NonEmptyRBTree = | A => T[B, A, Node[A], Node[A]]
+type RBTree = | A => E | NonEmptyRBTree[A]
+type RedNode = | A => T[R, A, RBTree[A], RBTree[A]]
+type Node = | A => RBTree[A] | RedNode[A]
+type NonEmptyNode = | A => NonEmptyRBTree[A] | RedNode[A]
+type NonEmptyIncompleteTree = | A => T[Color, A, Node[A], Node[A]]
+type Incomplete = | A => E | T[Color, A, Node[A], Node[A]]
+type BlanceInput = | A => T[B, A, Incomplete[A], Node[A]] | T[B, A, Node[A], Incomplete[A]]
+type Tree = | A => E | T[Color, A, Tree[A], Tree[A]]
 
 insert : Node[I64] -> I64 -> NonEmptyRBTree[I64] =
     | t, x => t.insert_rec(x).

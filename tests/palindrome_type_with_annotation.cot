@@ -5,9 +5,9 @@ to_string : (D1 | D2) -> String =
     | D1 => "D1"
     | D2 => "D2"
 
-type PalindromePlus = L | (D1 /\ L) |
+type PalindromePlus = | L => L | (D1 /\ L) |
     (D2 /\ L) | (D1 /\ PalindromePlus[D1 /\ L]) |
-    (D2 /\ PalindromePlus[D2 /\ L]) forall { L }
+    (D2 /\ PalindromePlus[D2 /\ L])
 
 type Palindrome = PalindromePlus[Nil]
 

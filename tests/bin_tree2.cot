@@ -5,7 +5,7 @@ data T {
     right: C
 } forall { A, B, C }
 
-type Tree = E | T[A, Tree[A], Tree[A]] forall { A }
+type Tree = | A => E | T[A, Tree[A], Tree[A]]
 
 contains_0 : Tree[I64] -> Bool = | a => a.contains(0)
 

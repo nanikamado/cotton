@@ -1,8 +1,8 @@
 use super::simplify::{DataDecl, Env};
 use super::{simplify_subtype_rel, unwrap_recursive_alias, TypeVariableMap};
 use crate::ast_step2::types::{
-    unwrap_or_clone, Type, TypeConstructor, TypeMatchable, TypeMatchableRef,
-    TypeUnit, TypeVariable,
+    unwrap_or_clone, Type, TypeConstructor, TypeMatchableRef, TypeUnit,
+    TypeVariable,
 };
 use crate::ast_step2::{RelOrigin, SubtypeRelations, TypeId};
 use crate::errors::CompileError;
@@ -407,20 +407,8 @@ pub fn disclose_type_unit(
         TypeUnit::RecursiveAlias { body } => {
             disclose_type(unwrap_recursive_alias(body), data_decls)
         }
-        TypeUnit::TypeLevelApply { f, a }
-            if matches!(
-                f.matchable_ref(),
-                TypeMatchableRef::RecursiveAlias { .. }
-            ) =>
-        {
-            if let TypeMatchable::RecursiveAlias { body } = f.matchable() {
-                disclose_type(
-                    unwrap_recursive_alias(body).type_level_function_apply(a),
-                    data_decls,
-                )
-            } else {
-                unreachable!()
-            }
+        t @ TypeUnit::TypeLevelApply { .. } if t.is_recursive_fn_apply() => {
+            disclose_type(t.unwrap_recursive_fn_apply().0, data_decls)
         }
         t => MatchOperandUnit::Unmatchable(t).into(),
     }

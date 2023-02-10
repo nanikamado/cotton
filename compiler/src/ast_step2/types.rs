@@ -1127,14 +1127,23 @@ fn fmt_tuple(
             let TypeMatchableRef::Tuple(arg, rtn) = b.matchable_ref() else {
                 panic!()
             };
-            let TypeMatchableRef::Tuple(rtn, _) = rtn.matchable_ref() else {
+            let TypeMatchableRef::Tuple(rtn, rest) = rtn.matchable_ref() else {
                 panic!()
             };
             if arg.is_function() {
-                write!(f, "({arg}) -> {rtn}")
+                write!(f, "({arg}) -> {rtn}")?;
             } else {
-                write!(f, "{arg} -> {rtn}")
+                write!(f, "{arg} -> {rtn}")?;
             }
+            if !matches!(
+                rest.matchable_ref(),
+                TypeMatchableRef::Const {
+                    id: TypeId::Intrinsic(IntrinsicType::Unit)
+                }
+            ) {
+                write!(f, " and ({rest})")?;
+            }
+            Ok(())
         } else {
             match b.matchable_ref() {
                 TypeMatchableRef::Const { id: id_b, .. }

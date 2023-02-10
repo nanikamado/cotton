@@ -199,7 +199,7 @@ impl TypeVariableMap {
                     |v| matches!(&**v, TypeUnit::Variable(v) if *v == key),
                 ) =>
             {
-                todo!()
+                panic!()
             }
             (Variable(key), _)
                 if !value.all_type_variables().contains(&key) =>
@@ -2385,6 +2385,7 @@ mod tests {
         apply_type_to_pattern, simplify_subtype_rel, simplify_type, Env,
         TypeVariableMap,
     };
+    use crate::ast_step3::type_check::RemovedParameters;
     use crate::{ast_step1, ast_step2, combine_with_prelude, Imports};
     use itertools::Itertools;
     use stripmargin::StripMargin;
@@ -2407,7 +2408,9 @@ mod tests {
             ast_step1::Ast::from(&ast, &mut imports).unwrap();
         let ast =
             ast_step2::Ast::from(ast, &mut token_map, &mut imports).unwrap();
-        let (req_t, _) = ast
+        let RemovedParameters {
+            fixed_type: req_t, ..
+        } = ast
             .variable_decl
             .iter()
             .find(|d| d.name == Path::from_str(Path::pkg_root(), "test"))
@@ -2417,7 +2420,9 @@ mod tests {
             .unwrap()
             .unfixed
             .remove_parameters();
-        let (dot, _) = ast
+        let RemovedParameters {
+            fixed_type: dot, ..
+        } = ast
             .variable_decl
             .iter()
             .find(|d| d.name == Path::from_str(Path::pkg_root(), "dot"))
@@ -2476,7 +2481,7 @@ mod tests {
             .clone()
             .unwrap()
             .unfixed;
-        let (t2, _) = ast
+        let RemovedParameters { fixed_type: t2, .. } = ast
             .variable_decl
             .iter()
             .find(|d| d.name == Path::from_str(Path::pkg_root(), "test2"))
