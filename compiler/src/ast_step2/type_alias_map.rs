@@ -8,9 +8,7 @@ use crate::ast_step2::type_to_type;
 use crate::ast_step2::types::TypeConstructor;
 use crate::errors::CompileError;
 use fxhash::FxHashMap;
-use itertools::Itertools;
 use parser::token_id::TokenId;
-use parser::Forall;
 
 #[derive(Debug, Clone)]
 enum AliasComputation {
@@ -24,7 +22,6 @@ pub struct TypeAliasMap<'a>(FxHashMap<Path, AliasEntry<'a>>);
 #[derive(Debug, Clone)]
 struct AliasEntry<'a> {
     type_: ast_step1::Type<'a>,
-    type_variables: &'a Forall,
     alias_computation: AliasComputation,
     base_path: Path,
 }
@@ -56,48 +53,10 @@ impl<'a> Env<'a, '_> {
                 Some(t)
             }
             (_, _) => {
-                let mut type_variable_names: FxHashMap<Path, TypeVariable> =
-                    type_variable_names
-                        .clone()
-                        .into_iter()
-                        .map(|(s, v)| {
-                            (
-                                s,
-                                v.increment_recursive_index(
-                                    1 + alias
-                                        .type_variables
-                                        .type_variables
-                                        .len()
-                                        as i32,
-                                ),
-                            )
-                        })
-                        .collect();
-                type_variable_names.insert(
-                    name.0,
-                    TypeVariable::RecursiveIndex(
-                        alias.type_variables.type_variables.len(),
-                    ),
-                );
-                let forall = alias
-                    .type_variables
-                    .type_variables
-                    .iter()
-                    .map(|(s, interfaces)| {
-                        let v = TypeVariable::new();
-                        self.token_map.insert(s.2, TokenMapEntry::TypeVariable);
-                        for path in interfaces {
-                            self.token_map.insert(
-                                path.path.last().unwrap().2,
-                                TokenMapEntry::Interface,
-                            );
-                        }
-                        type_variable_names
-                            .insert(Path::from_str(alias.base_path, &s.0), v);
-                        v
-                    })
-                    .collect_vec();
-                let mut t = type_to_type(
+                let mut type_variable_names = type_variable_names.clone();
+                let v = TypeVariable::new();
+                type_variable_names.insert(name.0, v);
+                let t = type_to_type(
                     &alias.type_,
                     alias.base_path,
                     &type_variable_names,
@@ -105,23 +64,19 @@ impl<'a> Env<'a, '_> {
                     self,
                 )?;
                 self.token_map.insert(name.1, TokenMapEntry::TypeAlias);
-                for v in forall.into_iter().rev() {
-                    t = TypeUnit::TypeLevelFn(
-                        t.replace_num(
+                let t = if t.contains_variable(v) {
+                    TypeUnit::RecursiveAlias {
+                        body: t.replace_num(
                             v,
                             &TypeUnit::Variable(TypeVariable::RecursiveIndex(
                                 0,
                             ))
                             .into(),
                         ),
-                    )
-                    .into();
-                }
-                let t = if t.contains_variable(TypeVariable::RecursiveIndex(0))
-                {
-                    TypeUnit::RecursiveAlias { body: t }.into()
+                    }
+                    .into()
                 } else {
-                    t.increment_recursive_index(0, -1)
+                    t
                 };
                 if search_type == SearchMode::Alias {
                     self.type_alias_map
@@ -152,8 +107,7 @@ impl<'a> TypeAliasMap<'a> {
             (
                 name,
                 AliasEntry {
-                    type_: a.body.0.clone(),
-                    type_variables: a.body.1,
+                    type_: a.body.clone(),
                     alias_computation: AliasComputation::NotUnaliased,
                     base_path: module_path,
                 },

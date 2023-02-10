@@ -38,7 +38,7 @@ struct NameResult {
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub enum ConstOrAlias {
-    Const(TypeId),
+    Const(TypeId, usize),
     Alias(Path),
 }
 
@@ -162,7 +162,13 @@ impl Imports {
         });
     }
 
-    pub fn add_type(&mut self, name: Path, type_id: TypeId, is_public: bool) {
+    pub fn add_type(
+        &mut self,
+        name: Path,
+        type_id: TypeId,
+        is_public: bool,
+        parameter_len: usize,
+    ) {
         let a = self.name_map.entry(name).or_default();
         if a.type_.is_some() {
             panic!("Type with the same name cannot be declared more than once.")
@@ -170,7 +176,7 @@ impl Imports {
         self.type_id_to_name.insert(type_id, name);
         a.type_ = Some(TypeDecl {
             is_public,
-            const_or_alias: ConstOrAlias::Const(type_id),
+            const_or_alias: ConstOrAlias::Const(type_id, parameter_len),
         });
     }
 
@@ -466,7 +472,7 @@ impl Imports {
         )?;
         if let Some(t) = &true_names.type_ {
             match t {
-                ConstOrAlias::Const(t) => {
+                ConstOrAlias::Const(t, _) => {
                     token_map.insert(*token_id, TokenMapEntry::TypeId(*t));
                 }
                 ConstOrAlias::Alias(_) => {
@@ -764,6 +770,7 @@ impl Default for Imports {
                 Path::from_str_intrinsic(name),
                 TypeId::Intrinsic(*id),
                 true,
+                id.parameter_len(),
             );
         }
         for (name, (associativity, precedence)) in OP_PRECEDENCE.iter() {

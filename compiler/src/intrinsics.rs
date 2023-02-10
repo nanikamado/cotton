@@ -104,6 +104,16 @@ pub enum IntrinsicType {
     Fn,
 }
 
+impl IntrinsicType {
+    pub fn parameter_len(self) -> usize {
+        if let Self::Fn = self {
+            2
+        } else {
+            0
+        }
+    }
+}
+
 pub static INTRINSIC_TYPES: Lazy<FxHashMap<&'static str, IntrinsicType>> =
     Lazy::new(|| {
         [

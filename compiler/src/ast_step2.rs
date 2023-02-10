@@ -6,7 +6,7 @@ mod variance;
 
 use self::imports::Imports;
 use self::type_alias_map::{SearchMode, TypeAliasMap};
-use self::types::{Type, TypeMatchable, TypeUnit, TypeVariable};
+use self::types::{Type, TypeUnit, TypeVariable};
 use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::ident_id::IdentId;
 use crate::ast_step1::name_id::Path;
@@ -370,8 +370,12 @@ fn collect_data_and_type_alias_decls<'a>(
             ConstructorId::DeclId(d.decl_id),
             d.is_public,
         );
-        env.imports
-            .add_type(d.name, TypeId::DeclId(d.decl_id), d.is_public);
+        env.imports.add_type(
+            d.name,
+            TypeId::DeclId(d.decl_id),
+            d.is_public,
+            d.type_variables.type_variables.len(),
+        );
         for (i, f) in d.fields.iter().enumerate() {
             env.imports.add_variable(
                 f.name,
@@ -473,17 +477,17 @@ fn collect_interface_decls<'a>(
         let variables = i
             .variables
             .iter()
-            .map(|(name, t, forall)| {
+            .map(|(name, t)| {
                 let self_ = TypeVariable::new();
-                let t = type_to_type_with_forall(
-                    t.clone(),
+                let t = type_to_type(
+                    t,
                     module_path,
-                    std::iter::once((
+                    &std::iter::once((
                         Path::from_str(module_path, "Self"),
                         self_,
                     ))
                     .collect(),
-                    forall,
+                    SearchMode::Normal,
                     &mut Env {
                         interface_decls: &mut Default::default(),
                         token_map: env.token_map,
@@ -624,23 +628,32 @@ fn variable_decl<'a>(
     let d = VariableDecl {
         type_annotation: v
             .type_annotation
-            .map(|(t, forall, span)| {
-                let implicit_type_parameters: Vec<_> = forall
-                    .type_variables
-                    .iter()
-                    .map(|(name, _)| Path::from_str(module_path, &name.0))
-                    .collect();
-                let t = variance_map.add_variance_to_type(
-                    type_to_type_with_forall(
-                        t,
-                        module_path,
-                        type_variable_names.clone(),
-                        forall,
-                        env,
-                    )?,
-                );
+            .map(|(t, span)| {
+                let mut tr = &t;
+                let mut implicit_type_parameters = Vec::new();
+                while let ast_step1::Type::Forall {
+                    parameter,
+                    restriction: _,
+                    body,
+                } = &tr
+                {
+                    implicit_type_parameters
+                        .push(Path::from_str(module_path, &parameter.0));
+                    tr = body;
+                }
+                let t = variance_map.add_variance_to_type(type_to_type(
+                    &t,
+                    module_path,
+                    type_variable_names,
+                    SearchMode::Normal,
+                    env,
+                )?);
                 let mut fixed_parameter_names = FxHashMap::default();
-                let (mut fixed_t, parameters) = t.clone().remove_parameters();
+                let r = t.clone().remove_parameters();
+                let mut fixed_t = r.fixed_type;
+                let parameters = r.removed_parameters;
+                let mut variable_requirements = r.variable_requirements;
+                let mut subtype_relations = r.subtype_relations;
                 for (p, name) in parameters
                     .into_iter()
                     .zip_eq(implicit_type_parameters.iter())
@@ -649,30 +662,30 @@ fn variable_decl<'a>(
                         id: TypeId::FixedVariable(DeclId::new()),
                     };
                     fixed_t = fixed_t.replace_num(p, &new_const.clone().into());
+                    variable_requirements = variable_requirements
+                        .into_iter()
+                        .map(|(name, t)| {
+                            (name, t.replace_num(p, &new_const.clone().into()))
+                        })
+                        .collect();
+                    subtype_relations = subtype_relations
+                        .into_iter()
+                        .map(|(a, b)| {
+                            (
+                                a.replace_num(p, &new_const.clone().into()),
+                                b.replace_num(p, &new_const.clone().into()),
+                            )
+                        })
+                        .collect();
                     fixed_parameter_names.insert(new_const, *name);
                 }
-                let variable_requirements = match fixed_t.matchable() {
-                    TypeMatchable::Restrictions {
-                        t,
-                        variable_requirements,
+                if !subtype_relations.is_empty() {
+                    fixed_t = TypeUnit::Restrictions {
+                        t: fixed_t,
+                        variable_requirements: Vec::new(),
                         subtype_relations,
-                    } => {
-                        fixed_t = if subtype_relations.is_empty() {
-                            t
-                        } else {
-                            TypeUnit::Restrictions {
-                                t,
-                                variable_requirements: Vec::new(),
-                                subtype_relations,
-                            }
-                            .into()
-                        };
-                        variable_requirements
                     }
-                    t => {
-                        fixed_t = t.into();
-                        Vec::new()
-                    }
+                    .into()
                 };
                 Ok(Annotation {
                     unfixed: t,
@@ -834,7 +847,9 @@ fn expr<'a>(
             };
             let mut e: Expr<_> = Expr::ResolvedIdent {
                 variable_id: VariableId::Constructor(id),
-                type_: constructor_type(&data_decl).remove_parameters().0,
+                type_: constructor_type(&data_decl)
+                    .remove_parameters()
+                    .fixed_type,
                 name: Some(name),
             };
             let mut v = Vec::new();
@@ -932,17 +947,16 @@ fn expr<'a>(
                 },
             )
         }
-        ast_step1::Expr::TypeAnnotation(e, t, forall) => {
+        ast_step1::Expr::TypeAnnotation(e, t) => {
             let e =
                 expr(*e, module_path, type_variable_names, env, variance_map)?;
-            let t =
-                variance_map.add_variance_to_type(type_to_type_with_forall(
-                    t,
-                    module_path,
-                    type_variable_names.clone(),
-                    forall,
-                    env,
-                )?);
+            let t = variance_map.add_variance_to_type(type_to_type(
+                &t,
+                module_path,
+                type_variable_names,
+                SearchMode::Normal,
+                env,
+            )?);
             (e.env, Expr::TypeAnnotation(Box::new(e.value), t))
         }
     };
@@ -1148,15 +1162,14 @@ fn pattern<'a>(
             Binder(name.0.to_string(), decl_id, TypeVariable::new()).into()
         }
         ast_step1::Pattern::Underscore => Underscore.into(),
-        ast_step1::Pattern::TypeRestriction(p, t, forall) => {
-            let t =
-                variance_map.add_variance_to_type(type_to_type_with_forall(
-                    t,
-                    module_path,
-                    Default::default(),
-                    forall,
-                    env,
-                )?);
+        ast_step1::Pattern::TypeRestriction(p, t) => {
+            let t = variance_map.add_variance_to_type(type_to_type(
+                &t,
+                module_path,
+                &Default::default(),
+                SearchMode::Normal,
+                env,
+            )?);
             let p = pattern(
                 *p,
                 span,
@@ -1286,91 +1299,74 @@ fn type_to_type(
     search_type: SearchMode,
     env: &mut Env<'_, '_>,
 ) -> Result<Type, CompileError> {
-    match (t.path.path.len(), t.path.path.last().unwrap().0.as_str()) {
-        (1, "|") => Ok(t
-            .args
-            .iter()
-            .map(|a| {
-                type_to_type(
-                    a,
-                    module_path,
-                    type_variable_names,
-                    search_type,
-                    env,
+    Ok(match t {
+        ast_step1::Type::Ident(p) => {
+            if p.path.len() == 1 && p.path.last().unwrap().0 == "|" {
+                TypeUnit::TypeLevelFn(
+                    TypeUnit::TypeLevelFn(
+                        Type::from(TypeUnit::Variable(
+                            TypeVariable::RecursiveIndex(0),
+                        ))
+                        .union_unit(
+                            TypeUnit::Variable(TypeVariable::RecursiveIndex(1)),
+                        ),
+                    )
+                    .into(),
                 )
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .flatten()
-            .collect()),
-        _ => {
-            let base_path = env.imports.get_module_with_path(
-                module_path,
-                if t.path.from_root {
-                    Path::pkg_root()
-                } else {
-                    module_path
-                },
-                &t.path.path[..t.path.path.len() - 1],
-                env.token_map,
-                &Default::default(),
-            )?;
-            let (name, span, token_id) = t.path.path.last().unwrap();
-            let path = Path::from_str(base_path, name);
-            if let Some(n) = type_variable_names.get(&path) {
-                env.token_map.insert(*token_id, TokenMapEntry::TypeVariable);
-                let mut new_t = Type::from(TypeUnit::Variable(*n));
-                for a in &t.args {
-                    new_t = new_t.type_level_function_apply(type_to_type(
-                        a,
-                        module_path,
-                        type_variable_names,
-                        search_type,
-                        env,
-                    )?);
-                }
-                Ok(new_t)
+                .into()
             } else {
-                let const_or_alias = env.imports.get_type(
+                let base_path = env.imports.get_module_with_path(
                     module_path,
-                    base_path,
-                    name,
-                    span.clone(),
+                    if p.from_root {
+                        Path::pkg_root()
+                    } else {
+                        module_path
+                    },
+                    &p.path[..p.path.len() - 1],
                     env.token_map,
+                    &Default::default(),
                 )?;
-                match const_or_alias {
-                    imports::ConstOrAlias::Const(id) => {
-                        let mut tuple = Type::label_from_str("()");
-                        for a in t
-                            .args
-                            .iter()
-                            .map(|a| {
-                                type_to_type(
-                                    a,
-                                    module_path,
-                                    type_variable_names,
-                                    search_type,
-                                    env,
+                let (name, span, token_id) = p.path.last().unwrap();
+                let path = Path::from_str(base_path, name);
+                if let Some(n) = type_variable_names.get(&path) {
+                    env.token_map
+                        .insert(*token_id, TokenMapEntry::TypeVariable);
+                    Type::from(TypeUnit::Variable(*n))
+                } else {
+                    let const_or_alias = env.imports.get_type(
+                        module_path,
+                        base_path,
+                        name,
+                        span.clone(),
+                        env.token_map,
+                    )?;
+                    match const_or_alias {
+                        imports::ConstOrAlias::Const(id, parameter_len) => {
+                            let mut tuple = Type::label_from_str("()");
+                            for i in 0..parameter_len {
+                                tuple = TypeUnit::Tuple(
+                                    TypeUnit::Variable(
+                                        TypeVariable::RecursiveIndex(i),
+                                    )
+                                    .into(),
+                                    tuple,
                                 )
+                                .into();
+                            }
+                            env.token_map.insert(
+                                p.path.last().unwrap().2,
+                                TokenMapEntry::TypeId(id),
+                            );
+                            let t = TypeUnit::Tuple(
+                                TypeUnit::Const { id }.into(),
+                                tuple,
+                            )
+                            .into();
+                            (0..parameter_len).fold(t, |acc, _| {
+                                TypeUnit::TypeLevelFn(acc).into()
                             })
-                            .try_collect::<_, Vec<_>, _>()?
-                            .into_iter()
-                            .rev()
-                        {
-                            tuple = TypeUnit::Tuple(a, tuple).into();
                         }
-                        env.token_map.insert(
-                            t.path.path.last().unwrap().2,
-                            TokenMapEntry::TypeId(id),
-                        );
-                        Ok(TypeUnit::Tuple(
-                            TypeUnit::Const { id }.into(),
-                            tuple,
-                        )
-                        .into())
-                    }
-                    imports::ConstOrAlias::Alias(name) => {
-                        let mut unaliased = env
+                        imports::ConstOrAlias::Alias(name) => env
                             .get_type_from_alias(
                                 (name, *token_id),
                                 type_variable_names,
@@ -1380,86 +1376,101 @@ fn type_to_type(
                                     SearchMode::AliasSub
                                 },
                             )?
-                            .unwrap();
-                        for a in &t.args {
-                            unaliased = unaliased.type_level_function_apply(
-                                type_to_type(
-                                    a,
-                                    module_path,
-                                    type_variable_names,
-                                    search_type,
-                                    env,
-                                )?,
-                            );
-                        }
-                        Ok(unaliased)
+                            .unwrap(),
                     }
                 }
             }
         }
-    }
-}
-
-fn type_to_type_with_forall(
-    t: ast_step1::Type,
-    module_path: ModulePath,
-    mut type_variable_names: FxHashMap<Path, TypeVariable>,
-    forall: &parser::Forall,
-    env: &mut Env<'_, '_>,
-) -> Result<Type, CompileError> {
-    let mut variable_requirements = Vec::new();
-    let mut type_parameters = Vec::new();
-    for (s, interface_names) in &forall.type_variables {
-        env.token_map.insert(s.2, TokenMapEntry::TypeVariable);
-        let v = TypeVariable::new();
-        for path in interface_names {
-            let name = env.imports.get_interface(
+        ast_step1::Type::Apply { f, a } => {
+            let f = type_to_type(
+                f,
                 module_path,
-                if path.from_root {
-                    Path::pkg_root()
-                } else {
-                    module_path
-                },
-                &path.path,
-                env.token_map,
+                type_variable_names,
+                search_type,
+                env,
             )?;
-            for (name, t, self_) in &env.interface_decls[&name] {
-                variable_requirements.push((
-                    *name,
-                    t.clone()
-                        .replace_num(*self_, &TypeUnit::Variable(v).into()),
-                ))
+            let a = type_to_type(
+                a,
+                module_path,
+                type_variable_names,
+                search_type,
+                env,
+            )?;
+            f.type_level_function_apply(a)
+        }
+        ast_step1::Type::Forall {
+            parameter,
+            restriction,
+            body,
+        } => {
+            env.token_map
+                .insert(parameter.2, TokenMapEntry::TypeVariable);
+            let v = TypeVariable::new();
+            let mut variable_requirements = Vec::new();
+            for path in restriction.iter() {
+                let name = env.imports.get_interface(
+                    module_path,
+                    if path.from_root {
+                        Path::pkg_root()
+                    } else {
+                        module_path
+                    },
+                    &path.path,
+                    env.token_map,
+                )?;
+                for (name, t, self_) in &env.interface_decls[&name] {
+                    variable_requirements.push((
+                        name.to_string(),
+                        t.clone()
+                            .replace_num(*self_, &TypeUnit::Variable(v).into()),
+                    ))
+                }
             }
+            let mut type_variable_names = type_variable_names.clone();
+            type_variable_names
+                .insert(Path::from_str(module_path, &parameter.0), v);
+            let body = type_to_type(
+                body,
+                module_path,
+                &type_variable_names,
+                search_type,
+                env,
+            )?;
+            let body = if variable_requirements.is_empty() {
+                body
+            } else {
+                TypeUnit::Restrictions {
+                    t: body,
+                    variable_requirements,
+                    subtype_relations: Default::default(),
+                }
+                .into()
+            };
+            TypeUnit::TypeLevelFn(body.replace_num(
+                v,
+                &TypeUnit::Variable(TypeVariable::RecursiveIndex(0)).into(),
+            ))
+            .into()
         }
-        type_parameters.push(v);
-        type_variable_names.insert(Path::from_str(module_path, &s.0), v);
-    }
-    let mut t = type_to_type(
-        &t,
-        module_path,
-        &type_variable_names,
-        SearchMode::Normal,
-        env,
-    )?;
-    if !variable_requirements.is_empty() {
-        t = TypeUnit::Restrictions {
-            t,
-            variable_requirements: variable_requirements
-                .into_iter()
-                .map(|(name, t)| (name.to_string(), t))
-                .collect(),
-            subtype_relations: Default::default(),
+        ast_step1::Type::Fn { parameter, body } => {
+            let mut type_variable_names = type_variable_names.clone();
+            let v = TypeVariable::new();
+            type_variable_names
+                .insert(Path::from_str(module_path, &parameter.0), v);
+            let body = type_to_type(
+                body,
+                module_path,
+                &type_variable_names,
+                search_type,
+                env,
+            )?;
+            TypeUnit::TypeLevelFn(body.replace_num(
+                v,
+                &TypeUnit::Variable(TypeVariable::RecursiveIndex(0)).into(),
+            ))
+            .into()
         }
-        .into();
-    }
-    for p in type_parameters.into_iter().rev() {
-        t = t.replace_num(
-            p,
-            &TypeUnit::Variable(TypeVariable::RecursiveIndex(0)).into(),
-        );
-        t = TypeUnit::TypeLevelFn(t).into();
-    }
-    Ok(t)
+    })
 }
 
 impl std::fmt::Display for ConstructorId {

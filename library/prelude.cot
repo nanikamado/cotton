@@ -39,7 +39,7 @@ pub to_string : String -> String = | a => a
 
 pub data None
 pub data Some(A) forall { A }
-pub type Option = None | Some[A] forall { A }
+pub type Option = | A => None | Some[A]
 
 pub to_string : Option[A] -> String forall { A : ToString } =
     | None => "None"
@@ -57,7 +57,7 @@ pub flatten : Option[Option[A]] -> Option[A] forall { A } =
 
 pub data Err(A) forall { A }
 pub data Ok(A) forall { A }
-pub type Result = Ok[A] | Err[B] forall { A, B }
+pub type Result = | A, B => Ok[A] | Err[B]
 
 pub to_string : Result[A, E] -> String forall { A : ToString, E : ToString } =
     | Ok(a) => "Ok(" ++ a.to_string ++ ")"
@@ -75,7 +75,7 @@ pub flatten : Result[Result[A, E], E] -> Result[A, E] forall { A, E } =
 pub data Nil
 pub data A /\ B forall { A, B }
 pub infixr 3 /\
-pub type List = Nil | A /\ List[A] forall { A }
+pub type List = | A => Nil | A /\ List[A]
 
 list_to_string_rec : List[A] -> String forall { A : ToString } =
     | Nil => ""

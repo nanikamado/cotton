@@ -5,7 +5,7 @@ data T {
     right: Tree[A],
 } forall { A }
 
-type Tree = E | T[A] forall { A }
+type Tree = | A => E | T[A]
 
 identity = | a => a
 

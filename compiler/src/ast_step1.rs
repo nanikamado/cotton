@@ -37,7 +37,7 @@ type StrWithId<'a> = (&'a str, Option<Span>, Option<TokenId>);
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VariableDecl<'a> {
     pub name: Path,
-    pub type_annotation: Option<(Type<'a>, &'a Forall, Span)>,
+    pub type_annotation: Option<(Type<'a>, Span)>,
     pub value: ExprWithSpan<'a>,
     pub span: Span,
     pub is_public: bool,
@@ -45,9 +45,21 @@ pub struct VariableDecl<'a> {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Type<'a> {
-    pub path: &'a parser::Path,
-    pub args: Vec<Type<'a>>,
+pub enum Type<'a> {
+    Ident(&'a parser::Path),
+    Apply {
+        f: Box<Type<'a>>,
+        a: Box<Type<'a>>,
+    },
+    Forall {
+        parameter: parser::StringWithId,
+        restriction: &'a [parser::Path],
+        body: Box<Type<'a>>,
+    },
+    Fn {
+        parameter: parser::StringWithId,
+        body: Box<Type<'a>>,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -69,14 +81,14 @@ pub struct Field<'a> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct TypeAliasDecl<'a> {
     pub name: StrWithId<'a>,
-    pub body: (Type<'a>, &'a Forall),
+    pub body: Type<'a>,
     pub is_public: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct InterfaceDecl<'a> {
     pub name: StrWithId<'a>,
-    pub variables: Vec<(StrWithId<'a>, Type<'a>, &'a Forall)>,
+    pub variables: Vec<(StrWithId<'a>, Type<'a>)>,
     pub is_public: bool,
 }
 
@@ -98,7 +110,7 @@ pub enum Expr<'a> {
     Call(Box<ExprWithSpan<'a>>, Box<ExprWithSpan<'a>>),
     Do(Vec<ExprWithSpan<'a>>),
     Question(Box<ExprWithSpan<'a>>, Span),
-    TypeAnnotation(Box<ExprWithSpan<'a>>, Type<'a>, &'a Forall),
+    TypeAnnotation(Box<ExprWithSpan<'a>>, Type<'a>),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -117,7 +129,7 @@ pub enum Pattern<'a> {
     },
     Binder(StrWithId<'a>),
     Underscore,
-    TypeRestriction(Box<Pattern<'a>>, Type<'a>, &'a Forall),
+    TypeRestriction(Box<Pattern<'a>>, Type<'a>),
     Apply(Box<Pattern<'a>>, Vec<ApplyPattern<'a>>),
 }
 
@@ -167,17 +179,19 @@ pub trait AddArgument {
 
 impl<'a> IdentFromStr<'a> for Type<'a> {
     fn ident_from_str(s: &'a parser::Path) -> Self {
-        Self {
-            args: Vec::new(),
-            path: s,
-        }
+        Self::Ident(s)
     }
 }
 
 impl<'a> AddArgument for (Type<'a>, Span) {
-    fn add_argument(mut self, arg: Self) -> Self {
-        self.0.args.push(arg.0);
-        self
+    fn add_argument(self, arg: Self) -> Self {
+        (
+            Type::Apply {
+                f: Box::new(self.0),
+                a: Box::new(arg.0),
+            },
+            merge_span(&self.1, &arg.1),
+        )
     }
 }
 
@@ -410,20 +424,17 @@ impl<'a> Ast<'a> {
                 .map(|a| {
                     Ok(TypeAliasDecl {
                         name: (&a.name.0, a.name.1.clone(), a.name.2),
-                        body: (
-                            fold_op_sequence(
-                                &a.body.0,
-                                &mut Env {
-                                    constructors,
-                                    module_path,
-                                    token_map,
-                                    imports,
-                                },
+                        body: fold_op_sequence(
+                            &a.body,
+                            &mut Env {
+                                constructors,
                                 module_path,
-                            )?
-                            .0,
-                            &a.body.1,
-                        ),
+                                token_map,
+                                imports,
+                            },
+                            module_path,
+                        )?
+                        .0,
                         is_public: a.is_public,
                     })
                 })
@@ -436,7 +447,7 @@ impl<'a> Ast<'a> {
                         variables: a
                             .variables
                             .iter()
-                            .map(|((name, span, id), t, forall)| {
+                            .map(|((name, span, id), t)| {
                                 Ok((
                                     (name.as_str(), span.clone(), *id),
                                     fold_op_sequence(
@@ -450,7 +461,6 @@ impl<'a> Ast<'a> {
                                         module_path,
                                     )?
                                     .0,
-                                    forall,
                                 ))
                             })
                             .try_collect()?,
@@ -576,10 +586,10 @@ fn expr<'a>(
     module_path: Path,
 ) -> Result<ExprWithSpan<'a>, CompileError> {
     let value = fold_op_sequence(&e.0, env, module_path)?;
-    if let Some((annotation, forall)) = &e.1 {
+    if let Some(annotation) = &e.1 {
         let (t, _span) = fold_op_sequence(annotation, env, module_path)?;
         let span = value.1.clone();
-        Ok((Expr::TypeAnnotation(Box::new(value), t, forall), span))
+        Ok((Expr::TypeAnnotation(Box::new(value), t), span))
     } else {
         Ok(value)
     }
@@ -597,10 +607,7 @@ fn variable_decl<'a>(
         type_annotation: v
             .type_annotation
             .as_ref()
-            .map(|(s, forall)| {
-                let (t, span) = fold_op_sequence(s, env, module_path)?;
-                Ok((t, forall, span))
-            })
+            .map(|s| fold_op_sequence(s, env, module_path))
             .transpose()?,
         value: expr(&v.expr, env, module_path)?,
         span: v.span.clone(),
@@ -736,16 +743,28 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::TypeUnit, &'a Span) {
         env: &mut Env,
         module_path: Path,
     ) -> Result<Self::T, CompileError> {
-        match self.0 {
-            parser::TypeUnit::Ident { path } => Ok((
-                Type {
-                    args: Vec::new(),
-                    path,
+        Ok((
+            match self.0 {
+                parser::TypeUnit::Ident { path } => Type::Ident(path),
+                parser::TypeUnit::Paren(s) => {
+                    fold_op_sequence(s, env, module_path)?.0
+                }
+                parser::TypeUnit::Forall {
+                    body,
+                    parameter,
+                    restriction,
+                } => Type::Forall {
+                    body: Box::new(fold_op_sequence(body, env, module_path)?.0),
+                    parameter: parameter.clone(),
+                    restriction,
                 },
-                self.1.clone(),
-            )),
-            parser::TypeUnit::Paren(s) => fold_op_sequence(s, env, module_path),
-        }
+                parser::TypeUnit::Fn(parameter, body) => Type::Fn {
+                    parameter: parameter.clone(),
+                    body: Box::new(fold_op_sequence(body, env, module_path)?.0),
+                },
+            },
+            self.1.clone(),
+        ))
     }
 }
 
@@ -925,11 +944,10 @@ impl<'a> ConvertWithOpPrecedenceMap for (&'a parser::PatternUnit, &'a Span) {
                 }
             }
             parser::PatternUnit::Underscore => Pattern::Underscore,
-            parser::PatternUnit::TypeRestriction(p, t, forall) => {
+            parser::PatternUnit::TypeRestriction(p, t) => {
                 Pattern::TypeRestriction(
                     Box::new(fold_op_sequence(p, env, module_path)?.0),
                     fold_op_sequence(t, env, module_path)?.0,
-                    forall,
                 )
             }
             parser::PatternUnit::Apply(pre_pattern, applications) => {

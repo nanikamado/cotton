@@ -11,7 +11,7 @@ pub struct Forall {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VariableDecl {
     pub name: StringWithId,
-    pub type_annotation: Option<(Type, Forall)>,
+    pub type_annotation: Option<Type>,
     pub expr: Expr,
     pub span: Span,
     pub is_public: bool,
@@ -32,7 +32,7 @@ pub enum ExprSuffixOp {
 
 pub type Expr = (
     Vec<OpSequenceUnit<(ExprUnit, Span), ExprSuffixOp>>,
-    Option<(Type, Forall)>,
+    Option<Type>,
 );
 
 #[derive(Debug, PartialEq, Eq, Clone, Hash)]
@@ -60,8 +60,16 @@ pub enum ExprUnit {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum TypeUnit {
-    Ident { path: Path },
+    Ident {
+        path: Path,
+    },
     Paren(Type),
+    Forall {
+        body: Type,
+        restriction: Vec<Path>,
+        parameter: StringWithId,
+    },
+    Fn(StringWithId, Type),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -76,7 +84,7 @@ pub enum PatternUnit {
     Str(String),
     Ident(Path, Vec<Pattern>),
     Underscore,
-    TypeRestriction(Box<Pattern>, Type, Forall),
+    TypeRestriction(Box<Pattern>, Type),
     Apply(Box<(PatternUnit, Span)>, Vec<ApplyPattern>),
 }
 
@@ -129,14 +137,14 @@ pub struct Field {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct TypeAliasDecl {
     pub name: StringWithId,
-    pub body: (Type, Forall),
+    pub body: Type,
     pub is_public: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct InterfaceDecl {
     pub name: StringWithId,
-    pub variables: Vec<(StringWithId, Type, Forall)>,
+    pub variables: Vec<(StringWithId, Type)>,
     pub is_public: bool,
 }
 
@@ -221,7 +229,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 .map(|(n, t)| (n, t.unwrap_or_default()))
                 .collect(),
         });
-    let type_without_forall = recursive(|type_| {
+    let type_ = recursive(|type_| {
         let type_unit = ident_with_path
             .clone()
             .map(|path| TypeUnit::Ident { path })
@@ -230,6 +238,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                 .delimited_by(open_paren.clone(), just(Token::Paren(')')))
                 .map(TypeUnit::Paren));
         let apply = type_
+            .clone()
             .separated_by(just(Token::Comma))
             .at_least(1)
             .allow_trailing()
@@ -239,61 +248,85 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                     .map(|e| OpSequenceUnit::Apply(TypeApply(e)))
                     .collect()
             });
-        type_unit
-            .clone()
-            .map_with_span(|t, s: Span| (t, s))
-            .then(
-                op.map(|(s, span, id)| (s, id, span.unwrap()))
-                    .or(just(Token::Bar)
-                        .map_with_span(|_, span| ("|".to_string(), None, span)))
-                    .then(type_unit.clone())
-                    .map_with_span(|((o, o_token, o_span), e), span: Span| {
-                        vec![
-                            OpSequenceUnit::Op(
-                                Path {
-                                    from_root: false,
-                                    path: vec![(
-                                        o,
-                                        Some(o_span.clone()),
-                                        o_token,
-                                    )],
-                                },
-                                o_span,
-                            ),
-                            OpSequenceUnit::Operand((e, span)),
-                        ]
-                    })
-                    .or(apply)
-                    .repeated()
-                    .flatten(),
-            )
-            .map(|((e, e_span), oes)| {
-                [vec![OpSequenceUnit::Operand((e, e_span))], oes].concat()
+        just(Token::Bar)
+            .ignore_then(ident.separated_by(just(Token::Comma)).at_least(1))
+            .then_ignore(just(Token::BArrow))
+            .then(type_)
+            .map_with_span(|(is, body), span: Span| {
+                is.into_iter().rev().fold(body, |acc, i| {
+                    vec![OpSequenceUnit::Operand((
+                        TypeUnit::Fn(i, acc),
+                        span.clone(),
+                    ))]
+                })
             })
+            .or(type_unit
+                .clone()
+                .map_with_span(|t, s: Span| (t, s))
+                .then(
+                    op.map(|(s, span, id)| (s, id, span.unwrap()))
+                        .or(just(Token::Bar).map_with_span(|_, span| {
+                            ("|".to_string(), None, span)
+                        }))
+                        .then(type_unit.clone())
+                        .map_with_span(
+                            |((o, o_token, o_span), e), span: Span| {
+                                vec![
+                                    OpSequenceUnit::Op(
+                                        Path {
+                                            from_root: false,
+                                            path: vec![(
+                                                o,
+                                                Some(o_span.clone()),
+                                                o_token,
+                                            )],
+                                        },
+                                        o_span,
+                                    ),
+                                    OpSequenceUnit::Operand((e, span)),
+                                ]
+                            },
+                        )
+                        .or(apply)
+                        .repeated()
+                        .flatten(),
+                )
+                .map(|((e, e_span), oes)| {
+                    [vec![OpSequenceUnit::Operand((e, e_span))], oes].concat()
+                }))
     });
     let type_unit = ident_with_path
         .clone()
         .map(|path| TypeUnit::Ident { path })
-        .or(type_without_forall
+        .or(type_
             .clone()
             .delimited_by(open_paren.clone(), just(Token::Paren(')')))
             .map(TypeUnit::Paren));
-    let type_ = type_without_forall
+    let type_with_forall = type_
         .clone()
-        .then(forall.clone().or_not())
-        .map(|(t, forall)| {
-            (
-                t,
-                forall.unwrap_or_else(|| Forall {
-                    type_variables: Vec::new(),
-                }),
-            )
+        .then(forall.clone().repeated())
+        .map_with_span(|(t, forall), span: Span| {
+            forall
+                .into_iter()
+                .flat_map(|a| a.type_variables.into_iter().rev())
+                .fold(t, |t, (parameter, restriction)| {
+                    vec![OpSequenceUnit::Operand((
+                        TypeUnit::Forall {
+                            body: t,
+                            restriction,
+                            parameter,
+                        },
+                        span.clone(),
+                    ))]
+                })
         });
     let variable_decl = recursive(|variable_decl| {
         let expr = recursive(|expr_without_type_annotation| {
-            let expr = expr_without_type_annotation
-                .clone()
-                .then(just(Token::Colon).ignore_then(type_.clone()).or_not());
+            let expr = expr_without_type_annotation.clone().then(
+                just(Token::Colon)
+                    .ignore_then(type_with_forall.clone())
+                    .or_not(),
+            );
             let pattern = recursive(|pattern| {
                 let constructor_pattern = ident_with_path
                     .clone()
@@ -372,16 +405,13 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                                 oes,
                             ]
                             .concat();
-                            if let Some((
-                                (type_restriction, forall),
-                                _type_span,
-                            )) = type_annotation
+                            if let Some((type_restriction, _type_span)) =
+                                type_annotation
                             {
                                 vec![OpSequenceUnit::Operand((
                                     PatternUnit::TypeRestriction(
                                         Box::new(p),
                                         type_restriction,
-                                        forall,
                                     ),
                                     whole_span,
                                 ))]
@@ -490,11 +520,19 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
                     [vec![OpSequenceUnit::Operand(e)], oes].concat()
                 })
         })
-        .then(just(Token::Colon).ignore_then(type_.clone()).or_not());
+        .then(
+            just(Token::Colon)
+                .ignore_then(type_with_forall.clone())
+                .or_not(),
+        );
         just(Token::Pub)
             .or_not()
             .then(ident_or_op.clone())
-            .then(just(Token::Colon).ignore_then(type_.clone()).or_not())
+            .then(
+                just(Token::Colon)
+                    .ignore_then(type_with_forall.clone())
+                    .or_not(),
+            )
             .then_ignore(just(Token::Assign))
             .then(expr)
             .map_with_span(
@@ -530,7 +568,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         );
     let data_decl_normal = ident
         .then(
-            type_without_forall
+            type_
                 .clone()
                 .separated_by(just(Token::Comma))
                 .allow_trailing()
@@ -559,7 +597,7 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
         .then(indented(
             ident
                 .then_ignore(just(Token::Colon))
-                .then(type_without_forall.clone())
+                .then(type_.clone())
                 .separated_by(just(Token::Comma).or_not())
                 .allow_trailing(),
         ))
@@ -625,16 +663,13 @@ fn parser() -> impl Parser<Token, Vec<Decl>, Error = Simple<Token>> {
             ident_or_op
                 .clone()
                 .then_ignore(just(Token::Colon))
-                .then(type_)
+                .then(type_with_forall)
                 .repeated(),
         ))
-        .map(|((pub_or_not, name), vs)| {
+        .map(|((pub_or_not, name), variables)| {
             Decl::Interface(InterfaceDecl {
                 name,
-                variables: vs
-                    .into_iter()
-                    .map(|(n, (t, forall))| (n, t, forall))
-                    .collect(),
+                variables,
                 is_public: pub_or_not.is_some(),
             })
         });
