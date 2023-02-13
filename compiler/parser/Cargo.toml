@@ -5,5 +5,5 @@ edition = "2021"
 
 [dependencies]
 unic-ucd-category = "0.9.0"
-chumsky = { git = "https://github.com/zesterer/chumsky", rev = "43449ba1b49e6659a02c4e1e93f2084680ed6fa4" }
+chumsky = "0.9.0"
 ariadne = "0.1.5"
