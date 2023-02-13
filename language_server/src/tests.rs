@@ -48,7 +48,7 @@ fn red_black_tree_local_type() {
     };
 }
 
-const NODE: &str = "rec[fn[\
+const NODE: &str = "rec[∀[\
     E \
     | T[R, d0, (E | T[B, d0, d1[d0], d1[d0]]), (E | T[B, d0, d1[d0], d1[d0]])] \
     | T[B, d0, d1[d0], d1[d0]]]]";

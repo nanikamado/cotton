@@ -6,6 +6,7 @@ use crate::ast_step2::types::{self, TypeMatchableRef};
 use crate::ast_step3::GlobalVariableType;
 use fxhash::FxHashMap;
 use itertools::Itertools;
+use parser::Associativity;
 use std::fmt::Display;
 
 pub struct PrintTypeOfGlobalVariableForUser<'a> {
@@ -44,9 +45,8 @@ impl Display for PrintTypeOfLocalVariableForUser<'_> {
 #[derive(Debug, PartialEq, Eq)]
 enum OperatorContext {
     Single,
-    // Fn,
     Or,
-    OtherOperator,
+    Operator(Associativity, i32),
 }
 
 fn fmt_type_with_env(
@@ -169,7 +169,7 @@ fn fmt_type_unit_with_env(
         }
         TypeUnit::TypeLevelFn(f) => (
             format!(
-                "fn[{}]",
+                "∀[{}]",
                 fmt_type_with_env(f, imports, type_variable_decls).0
             ),
             Single,
@@ -202,7 +202,7 @@ fn fmt_type_unit_with_env(
                         "?{name} : {t}"
                     )))
             ),
-            OtherOperator,
+            Operator(Associativity::UnaryLeft, 0),
         ),
         TypeUnit::Variance(Contravariant, t) => {
             let (t, context) =
@@ -249,24 +249,26 @@ fn fmt_tuple(
             ),
             Single,
         )
-    } else if imports.get_op_precedence_from_type_id(head).is_some() {
+    } else if let Some((assoc, p)) =
+        imports.get_op_precedence_from_type_id(head)
+    {
         debug_assert_eq!(tuple_rev.len(), 2);
-        (
-            tuple_rev
-                .iter()
-                .rev()
-                .map(|t| {
-                    let (t, t_context) =
-                        fmt_type_with_env(t, imports, type_variable_decls);
-                    match t_context {
-                        Single => t,
-                        _ => format!("({t})"),
-                    }
-                })
-                .format(&format!(" {head} "))
-                .to_string(),
-            OtherOperator,
-        )
+        let context = Operator(assoc, p);
+        let (t, t_context) =
+            fmt_type_with_env(tuple_rev[1], imports, type_variable_decls);
+        let left = match t_context {
+            Single => t,
+            _ if assoc == Associativity::Left && t_context == context => t,
+            _ => format!("({t})"),
+        };
+        let (t, t_context) =
+            fmt_type_with_env(tuple_rev[0], imports, type_variable_decls);
+        let right = match t_context {
+            Single => t,
+            _ if assoc == Associativity::Right && t_context == context => t,
+            _ => format!("({t})"),
+        };
+        (format!("{left} {head} {right}"), context)
     } else {
         (
             format!(
