@@ -873,7 +873,7 @@ fn resolve_scc(
                         }
                         .into()
                     };
-                    for (i, v) in vs.iter().enumerate() {
+                    for (i, v) in vs.iter().rev().enumerate() {
                         t = t.replace_num(
                             *v,
                             &TypeUnit::Variable(TypeVariable::RecursiveIndex(
