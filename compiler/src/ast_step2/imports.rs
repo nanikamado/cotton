@@ -2,7 +2,7 @@ use super::{ConstructorId, TypeId};
 use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::name_id::Path;
 use crate::ast_step1::token_map::{TokenMap, TokenMapEntry};
-use crate::ast_step3::VariableId;
+use crate::ast_step3::{VariableId, VariableIdInScope};
 use crate::errors::CompileError;
 use crate::intrinsics::{
     IntrinsicConstructor, IntrinsicVariable, INTRINSIC_TYPES, OP_PRECEDENCE,
@@ -28,8 +28,9 @@ struct NameEntry {
 #[derive(Debug, Default)]
 struct NameResult {
     variables: FxHashSet<VariableId>,
+    variables_imported_by_wild_card: FxHashSet<VariableId>,
     accessors: FxHashSet<(DeclId, usize)>,
-    data: Option<ConstructorId>,
+    data: Option<(ConstructorId, bool /* imported_by_wild_card */)>,
     type_: Option<ConstOrAlias>,
     interface: Option<Path>,
     module: Option<Path>,
@@ -326,7 +327,7 @@ impl Imports {
             if let Some(d) = &name_entry.data {
                 if d.is_public || path.is_same_as_or_ancestor_of(scope) {
                     debug_assert!(ns.data.is_none());
-                    ns.data = Some(d.constructor_id);
+                    ns.data = Some((d.constructor_id, true));
                 }
             }
             if let Some(d) = &name_entry.type_ {
@@ -354,7 +355,10 @@ impl Imports {
                 }
             }
         }
-        ns.variables.extend(ns_from_wild_cards.variables);
+        ns.variables_imported_by_wild_card
+            .extend(ns_from_wild_cards.variables);
+        ns.variables_imported_by_wild_card
+            .extend(ns_from_wild_cards.variables_imported_by_wild_card);
         ns.accessors.extend(ns_from_wild_cards.accessors);
         ns.data.set_if_none(ns_from_wild_cards.data);
         ns.type_.set_if_none(ns_from_wild_cards.type_);
@@ -363,6 +367,9 @@ impl Imports {
         ns.op_precedence
             .set_if_none(ns_from_wild_cards.op_precedence);
         true_names.variables.extend(ns.variables);
+        true_names
+            .variables_imported_by_wild_card
+            .extend(ns.variables_imported_by_wild_card);
         true_names.accessors.extend(ns.accessors);
         true_names.data.set(ns.data);
         true_names.type_.set(ns.type_);
@@ -530,7 +537,7 @@ impl Imports {
         let (n, path, span, token_id) =
             self.get_names(scope, base_path, path, token_map)?;
         n.data
-            .map(|id| {
+            .map(|(id, _)| {
                 token_map.insert(token_id, TokenMapEntry::Constructor(id));
                 (path, id)
             })
@@ -624,7 +631,7 @@ impl Imports {
         span: Option<Span>,
         token_map: &mut TokenMap,
         candidates_from_implicit_parameters: &FxHashMap<&str, Vec<DeclId>>,
-    ) -> Result<Vec<VariableId>, CompileError> {
+    ) -> Result<Vec<VariableIdInScope>, CompileError> {
         let mut ns = Default::default();
         self.get_true_names_rec(
             scope,
@@ -635,13 +642,30 @@ impl Imports {
             &FxHashSet::default(),
             &mut ns,
         )?;
-        let mut names = ns.variables;
-        if let Some(a) = ns.data {
-            names.insert(match a {
+        let mut names: FxHashSet<VariableIdInScope> = ns
+            .variables
+            .into_iter()
+            .map(|v| VariableIdInScope {
+                variable_id: v,
+                imported_by_wild_card: false,
+            })
+            .chain(ns.variables_imported_by_wild_card.into_iter().map(|v| {
+                VariableIdInScope {
+                    variable_id: v,
+                    imported_by_wild_card: true,
+                }
+            }))
+            .collect();
+        if let Some((a, imported_by_wild_card)) = ns.data {
+            let a = match a {
                 ConstructorId::DeclId(d) => VariableId::Constructor(d),
                 ConstructorId::Intrinsic(d) => {
                     VariableId::IntrinsicConstructor(d)
                 }
+            };
+            names.insert(VariableIdInScope {
+                variable_id: a,
+                imported_by_wild_card,
             });
         }
         if scope == path {
@@ -650,7 +674,10 @@ impl Imports {
                     .get(name)
                     .into_iter()
                     .flatten()
-                    .map(|d| VariableId::Local(*d)),
+                    .map(|d| VariableIdInScope {
+                        variable_id: VariableId::Local(*d),
+                        imported_by_wild_card: false,
+                    }),
             );
         }
         if names.is_empty() {
@@ -670,7 +697,7 @@ impl Imports {
         path: &[parser::StringWithId],
         token_map: &mut TokenMap,
         candidates_from_implicit_parameters: &FxHashMap<&str, Vec<DeclId>>,
-    ) -> Result<Vec<VariableId>, CompileError> {
+    ) -> Result<Vec<VariableIdInScope>, CompileError> {
         let base_path = self.get_module_with_path(
             scope,
             base_path,

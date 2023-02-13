@@ -121,7 +121,7 @@ pub struct PatternRestriction {
 pub type PatternRestrictions = Vec<PatternRestriction>;
 type ModulePath = Path;
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Hash)]
 pub struct TypeWithEnv<T = Type>
 where
     T: TypeConstructor,

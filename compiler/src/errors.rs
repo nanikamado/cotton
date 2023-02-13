@@ -12,8 +12,8 @@ use std::io::Write;
 #[derive(Debug, PartialEq, Eq)]
 pub enum CompileError {
     NoSuitableVariable {
-        name: String,
         reason: Vec<CompileError>,
+        span: Span,
     },
     ManyCandidates {
         satisfied: Vec<(Type, String)>,
@@ -56,9 +56,18 @@ impl CompileError {
         imports: &Imports,
     ) -> std::io::Result<()> {
         match self {
-            CompileError::NoSuitableVariable { name, reason } => {
+            CompileError::NoSuitableVariable { reason, span } => {
                 if reason.is_empty() {
-                    writeln!(w, "{name} not found")
+                    let report =
+                        Report::build(ReportKind::Error, filename, span.start)
+                            .with_label(
+                                Label::new((filename, span)).with_message(
+                                    "cannot find this variable in this scope"
+                                        .to_string(),
+                                ),
+                            );
+                    report.finish().write((filename, Source::from(src)), w)?;
+                    Ok(())
                 } else if reason.len() == 1 {
                     reason
                         .into_iter()
@@ -66,12 +75,19 @@ impl CompileError {
                         .unwrap()
                         .write(src, w, filename, imports)
                 } else {
+                    let m = "cannot find suitable definition for this variable"
+                        .to_string();
+                    let report =
+                        Report::build(ReportKind::Error, filename, span.start)
+                            .with_label(
+                                Label::new((filename, span)).with_message(m),
+                            );
+                    report
+                        .finish()
+                        .write((filename, Source::from(src)), &mut *w)?;
                     writeln!(
                         w,
-                        "Can not find suitable variable for {}. \
-                        There are {} candidates \
-                        but no one could be used because:",
-                        name,
+                        "There are {} candidates but no one could be used because:",
                         reason.len(),
                     )?;
                     for r in reason {

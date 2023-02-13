@@ -414,7 +414,10 @@ fn resolve_names(
                 .iter()
                 .flat_map(|req| {
                     req.name.iter().flat_map(|name| {
-                        toplevel_map.get(name).into_iter().flatten()
+                        toplevel_map
+                            .get(&name.variable_id)
+                            .into_iter()
+                            .flatten()
                     })
                 })
                 .map(move |to| (*to, from))
@@ -897,7 +900,7 @@ struct Difficulty {
 }
 
 fn difficulty_of_resolving(
-    req_name: &[VariableId],
+    req_name: &[VariableIdInScope],
     span_start: usize,
     resolved_variable_map: CandidateProvider,
 ) -> Difficulty {
@@ -947,42 +950,74 @@ struct CandidateProvider<'a> {
     candidates_from_implicit_parameters: &'a FxHashMap<VariableId, Candidate>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct VariableIdInScope {
+    pub variable_id: VariableId,
+    pub imported_by_wild_card: bool,
+}
+
 impl<'a> CandidateProvider<'a> {
     fn get_candidates(
         self,
-        req_name: &'a [VariableId],
+        req_name: &'a [VariableIdInScope],
     ) -> impl Iterator<Item = Candidate> + 'a {
-        req_name.iter().map(move |n| {
-            if let Some(c) = self.normal_map.get(n).cloned().map(|t| {
-                let type_ = if let Some(annotation) = t.type_annotation {
-                    annotation.into()
-                } else {
-                    t.type_with_env
-                };
-                Candidate {
-                    type_,
-                    variable_id: t.decl_id,
-                }
-            }) {
-                c
-            } else if let Some(c) =
-                self.candidates_from_implicit_parameters.get(n)
-            {
-                c.clone()
-            } else if let Some(c) = self.scc_map.get(n) {
-                Candidate {
-                    type_: if let Some(annotation) =
+        let mut candidates: FxHashMap<
+            ast_step2::TypeWithEnv,
+            (Vec<VariableId>, bool),
+        > = FxHashMap::default();
+        for n in req_name {
+            let (t, v) =
+                if let Some(t) = self.normal_map.get(&n.variable_id).cloned() {
+                    let type_ = if let Some(annotation) = t.type_annotation {
+                        annotation.into()
+                    } else {
+                        t.type_with_env
+                    };
+                    (type_, t.decl_id)
+                } else if let Some(c) =
+                    self.candidates_from_implicit_parameters.get(&n.variable_id)
+                {
+                    (c.type_.clone(), c.variable_id)
+                } else if let Some(c) = self.scc_map.get(&n.variable_id) {
+                    let type_ = if let Some(annotation) =
                         &self.toplevels_in_scc[*c].type_annotation
                     {
                         annotation.clone().into()
                     } else {
                         self.constructors[*c].type_.clone().into()
-                    },
-                    variable_id: self.toplevels_in_scc[*c].decl_id,
+                    };
+                    (type_, self.toplevels_in_scc[*c].decl_id)
+                } else {
+                    panic!()
+                };
+            match (
+                candidates
+                    .get(&t)
+                    .map(|(_, wild_card)| *wild_card)
+                    .unwrap_or(true),
+                n.imported_by_wild_card,
+            ) {
+                (false, true) => (),
+                (true, false) => {
+                    let c = candidates.entry(t).or_default();
+                    c.0.clear();
+                    c.0.push(v);
+                    c.1 = false;
                 }
-            } else {
-                panic!()
+                _ => {
+                    let c = candidates.entry(t).or_default();
+                    c.0.push(v);
+                    c.1 = n.imported_by_wild_card;
+                }
             }
+        }
+        candidates.into_iter().flat_map(|(t, (i, _))| {
+            i.into_iter()
+                .map(|i| Candidate {
+                    type_: t.clone(),
+                    variable_id: i,
+                })
+                .collect_vec()
         })
     }
 }
@@ -1262,13 +1297,12 @@ fn replace_fn_apply(t: Type, dummies: &mut BTreeMap<Type, Type>) -> Type {
 fn get_one_satisfied<T: Display>(
     satisfied: Vec<SatisfiedType<T>>,
     es: Vec<CompileError>,
-    variable_name: Vec<VariableId>,
     span_of_req: Span,
 ) -> Result<SatisfiedType<T>, CompileError> {
     match satisfied.len() {
         0 => Err(CompileError::NoSuitableVariable {
-            name: format!("{variable_name:?}"),
             reason: es,
+            span: span_of_req,
         }),
         1 => Ok(satisfied.into_iter().next().unwrap()),
         _ => Err(CompileError::ManyCandidates {
@@ -1321,8 +1355,7 @@ fn resolve_requirements_in_type_with_env(
             imports,
             env,
         );
-        debug_assert_eq!(req.name.len(), satisfied.len() + es.len());
-        let satisfied = get_one_satisfied(satisfied, es, req.name, req.span)?;
+        let satisfied = get_one_satisfied(satisfied, es, req.span)?;
         resolved_idents.push((
             req.ident,
             ResolvedIdent {
@@ -1346,14 +1379,14 @@ fn accessor_type(d: &DataDecl, i: usize) -> TypeUnit {
     )
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VariableRequirement {
-    pub name: Vec<VariableId>,
+    pub name: Vec<VariableIdInScope>,
     pub module_path: Path,
     pub required_type: Type,
     pub ident: IdentId,
     pub span: Span,
     pub local_env: Vec<(String, DeclId, Type)>,
-    pub additional_candidates: FxHashMap<String, Vec<DeclId>>,
+    pub additional_candidates: BTreeMap<String, Vec<DeclId>>,
     pub req_recursion_count: usize,
 }
