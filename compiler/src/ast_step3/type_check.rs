@@ -775,16 +775,10 @@ fn resolve_scc(
     }
     let candidates_provider = CandidateProvider {
         scc_map: &scc_map,
-        f: |j| Candidate {
-            type_: if let Some(annotation) = &scc[j].type_annotation {
-                annotation.clone().into()
-            } else {
-                constructors[j].type_.clone().into()
-            },
-            variable_id: scc[j].decl_id,
-        },
         normal_map: resolved_variable_map,
         candidates_from_implicit_parameters,
+        toplevels_in_scc: &scc,
+        constructors: &constructors,
     };
     // The order of resolving is important.
     // Requirements that are easier to solve should be solved earlier.
@@ -902,10 +896,10 @@ struct Difficulty {
     start: usize,
 }
 
-fn difficulty_of_resolving<F: FnMut(usize) -> Candidate + Copy>(
+fn difficulty_of_resolving(
     req_name: &[VariableId],
     span_start: usize,
-    resolved_variable_map: CandidateProvider<'_, F>,
+    resolved_variable_map: CandidateProvider,
 ) -> Difficulty {
     Difficulty {
         multiple_candidates: resolved_variable_map
@@ -945,18 +939,19 @@ pub struct Candidate {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct CandidateProvider<'b, F: FnMut(usize) -> Candidate> {
-    scc_map: &'b FxHashMap<VariableId, usize>,
-    f: F,
-    normal_map: &'b FxHashMap<VariableId, Toplevel>,
-    candidates_from_implicit_parameters: &'b FxHashMap<VariableId, Candidate>,
+struct CandidateProvider<'a> {
+    scc_map: &'a FxHashMap<VariableId, usize>,
+    constructors: &'a [SingleTypeConstructor],
+    toplevels_in_scc: &'a [Toplevel],
+    normal_map: &'a FxHashMap<VariableId, Toplevel>,
+    candidates_from_implicit_parameters: &'a FxHashMap<VariableId, Candidate>,
 }
 
-impl<'b, F: FnMut(usize) -> Candidate + Copy + 'b> CandidateProvider<'b, F> {
+impl<'a> CandidateProvider<'a> {
     fn get_candidates(
-        mut self,
-        req_name: &'b [VariableId],
-    ) -> impl Iterator<Item = Candidate> + 'b {
+        self,
+        req_name: &'a [VariableId],
+    ) -> impl Iterator<Item = Candidate> + 'a {
         req_name.iter().map(move |n| {
             if let Some(c) = self.normal_map.get(n).cloned().map(|t| {
                 let type_ = if let Some(annotation) = t.type_annotation {
@@ -975,7 +970,16 @@ impl<'b, F: FnMut(usize) -> Candidate + Copy + 'b> CandidateProvider<'b, F> {
             {
                 c.clone()
             } else if let Some(c) = self.scc_map.get(n) {
-                (self.f)(*c)
+                Candidate {
+                    type_: if let Some(annotation) =
+                        &self.toplevels_in_scc[*c].type_annotation
+                    {
+                        annotation.clone().into()
+                    } else {
+                        self.constructors[*c].type_.clone().into()
+                    },
+                    variable_id: self.toplevels_in_scc[*c].decl_id,
+                }
             } else {
                 panic!()
             }
@@ -988,9 +992,7 @@ fn find_satisfied_types<T: TypeConstructor>(
     req: &VariableRequirement,
     type_of_unresolved_decl: &ast_step2::TypeWithEnv<T>,
     no_type_check: bool,
-    resolved_variable_map: CandidateProvider<
-        impl FnMut(usize) -> Candidate + Copy,
-    >,
+    resolved_variable_map: CandidateProvider,
     map: &TypeVariableMap,
     resolved_implicit_args: &mut Vec<(IdentId, ResolvedIdent)>,
     imports: &mut Imports,
@@ -1290,9 +1292,7 @@ fn get_one_satisfied<T: Display>(
 fn resolve_requirements_in_type_with_env(
     mut resolve_num: usize,
     type_of_unresolved_decl: &mut ast_step2::TypeWithEnv<impl TypeConstructor>,
-    resolved_variable_map: CandidateProvider<
-        impl FnMut(usize) -> Candidate + Copy,
-    >,
+    resolved_variable_map: CandidateProvider,
     map: &mut TypeVariableMap,
     resolved_idents: &mut Vec<(IdentId, ResolvedIdent)>,
     imports: &mut Imports,
