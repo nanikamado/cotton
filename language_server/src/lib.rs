@@ -17,9 +17,16 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 type HoverMap = Vec<Vec<Option<Hover>>>;
 
 #[derive(Debug, PartialEq, Eq)]
-enum TokenCache {
-    Cached(SemanticTokens, HoverMap),
-    Changed,
+struct TokenCache {
+    semantic_tokens: SemanticTokens,
+    hover_map: HoverMap,
+    state: TokenCacheState,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum TokenCacheState {
+    Fresh,
+    Old,
 }
 
 #[derive(Debug)]
@@ -122,8 +129,9 @@ impl LanguageServer for Backend {
                 &format!("changed {}", params.text_document.uri),
             )
             .await;
-        self.tokens
-            .insert(params.text_document.uri, TokenCache::Changed);
+        if let Some(mut t) = self.tokens.get_mut(&params.text_document.uri) {
+            t.state = TokenCacheState::Old;
+        }
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
@@ -134,9 +142,9 @@ impl LanguageServer for Backend {
             self.client
                 .log_message(MessageType::INFO, "document found")
                 .await;
-            let changed = r.value() == &TokenCache::Changed;
+            let is_old = r.value().state == TokenCacheState::Old;
             drop(r);
-            if changed {
+            if is_old {
                 self.tokens.remove(&params.text_document.uri);
                 self.client
                     .log_message(MessageType::INFO, "removed `changed`.")
@@ -174,17 +182,11 @@ impl LanguageServer for Backend {
             .log_message(MessageType::INFO, "semantic tokens requested.")
             .await;
         let uri = params.text_document.uri;
-        let cache = if let Some(r) = self.tokens.get(&uri) {
-            if let TokenCache::Cached(t, _) = r.value() {
-                Some(t.clone())
-            } else {
-                return Ok(None);
-            }
-        } else {
-            None
-        };
-        if let Some(cache) = cache {
-            Ok(Some(cache.into()))
+        if let Some(cache) = self.tokens.get(&uri) {
+            self.client
+                .log_message(MessageType::INFO, "reusing cache.")
+                .await;
+            Ok(Some(cache.value().semantic_tokens.clone().into()))
         } else if let Ok(src) = fs::read_to_string(uri.path()) {
             self.client
                 .log_message(MessageType::INFO, "compiling.")
@@ -195,8 +197,17 @@ impl LanguageServer for Backend {
             .await
             {
                 let semantic_tokens = tokens.0.clone();
-                self.tokens
-                    .insert(uri, TokenCache::Cached(tokens.0, tokens.1));
+                self.tokens.insert(
+                    uri,
+                    TokenCache {
+                        semantic_tokens: tokens.0,
+                        hover_map: tokens.1,
+                        state: TokenCacheState::Fresh,
+                    },
+                );
+                self.client
+                    .log_message(MessageType::INFO, "successfully compiled.")
+                    .await;
                 Ok(Some(semantic_tokens.into()))
             } else {
                 self.client
@@ -222,13 +233,11 @@ impl LanguageServer for Backend {
         let position = params.text_document_position_params.position;
         let url = params.text_document_position_params.text_document.uri;
         if let Some(hover_map) = self.tokens.get(&url) {
-            if let TokenCache::Cached(_, h) = hover_map.value() {
-                Ok(h.get(position.line as usize).and_then(|t| {
-                    t.get(position.character as usize).cloned()?
-                }))
-            } else {
-                Ok(None)
-            }
+            Ok(hover_map
+                .value()
+                .hover_map
+                .get(position.line as usize)
+                .and_then(|t| t.get(position.character as usize).cloned()?))
         } else {
             Ok(None)
         }
