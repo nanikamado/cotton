@@ -12,6 +12,7 @@ use itertools::Itertools;
 use once_cell::sync::Lazy;
 use std::fmt::Write;
 use stripmargin::StripMargin;
+use strum::IntoEnumIterator;
 use unic_ucd_category::GeneralCategory;
 
 pub fn codegen(ast: Ast) -> String {
@@ -24,17 +25,14 @@ pub fn codegen(ast: Ast) -> String {
         |let $field_accessor=i=>a=>a[i];
         |"#
         .strip_margin(),
-        PRIMITIVES_DEF
-            .iter()
-            .map(|(variable, def)| {
-                format!(
-                    "let ${}${}={};",
-                    variable,
-                    convert_name(variable.to_str()),
-                    def
-                )
-            })
-            .join(""),
+        IntrinsicVariable::iter()
+            .map(|v| format!(
+                "let ${}${}={};",
+                v,
+                convert_name(v.to_str()),
+                primitive_def(v)
+            ))
+            .format(""),
         PRIMITIVE_CONSTRUCTOR_DEF
             .iter()
             .map(|(variable, def)| {
@@ -75,25 +73,23 @@ fn variable_decl(d: &VariableDecl) -> String {
     )
 }
 
-static PRIMITIVES_DEF: Lazy<FxHashMap<IntrinsicVariable, &'static str>> =
-    Lazy::new(|| {
-        use IntrinsicVariable::*;
-        [
-            (I64ToString, "a => String(a)"),
-            (Lt, "a => b => $$bool(a < b)"),
-            (Minus, "a => b => a - b"),
-            (Plus, "a => b => a + b"),
-            (Multi, "a => b => a * b"),
-            (PrintStr, "a => process.stdout.write(a)"),
-            (Percent, "a => b => a % b"),
-            (Neq, "a => b => $$bool(a !== b)"),
-            (Eq, "a => b => $$bool(a === b)"),
-            (AppendStr, "a => b => a + b"),
-        ]
-        .iter()
-        .copied()
-        .collect()
-    });
+fn primitive_def(i: IntrinsicVariable) -> &'static str {
+    match i {
+        IntrinsicVariable::Minus => "a => b => a - b",
+        IntrinsicVariable::Plus => "a => b => a + b",
+        IntrinsicVariable::Percent => "a => b => a % b",
+        IntrinsicVariable::Multi => "a => b => a * b",
+        IntrinsicVariable::Div => {
+            r#"a=>b=>b===0?(()=>{throw new Error("division by zero")})():~~(a / b)"#
+        }
+        IntrinsicVariable::Lt => "a => b => $$bool(a < b)",
+        IntrinsicVariable::Neq => "a => b => $$bool(a !== b)",
+        IntrinsicVariable::Eq => "a => b => $$bool(a === b)",
+        IntrinsicVariable::PrintStr => "a => process.stdout.write(a)",
+        IntrinsicVariable::I64ToString => "a => String(a)",
+        IntrinsicVariable::AppendStr => "a => b => a + b",
+    }
+}
 
 static PRIMITIVE_CONSTRUCTOR_DEF: Lazy<
     FxHashMap<IntrinsicConstructor, &'static str>,

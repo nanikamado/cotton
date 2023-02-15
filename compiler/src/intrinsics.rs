@@ -13,6 +13,7 @@ pub enum IntrinsicVariable {
     Plus,
     Percent,
     Multi,
+    Div,
     Lt,
     Neq,
     Eq,
@@ -34,6 +35,7 @@ impl IntrinsicVariable {
             IntrinsicVariable::Plus => "+",
             IntrinsicVariable::Percent => "%",
             IntrinsicVariable::Multi => "*",
+            IntrinsicVariable::Div => "/",
             IntrinsicVariable::Lt => "<",
             IntrinsicVariable::Neq => "!=",
             IntrinsicVariable::Eq => "==",
@@ -59,6 +61,10 @@ impl IntrinsicVariable {
                         .arrow(Type::intrinsic_from_str("I64")),
                 ),
             IntrinsicVariable::Multi => Type::intrinsic_from_str("I64").arrow(
+                Type::intrinsic_from_str("I64")
+                    .arrow(Type::intrinsic_from_str("I64")),
+            ),
+            IntrinsicVariable::Div => Type::intrinsic_from_str("I64").arrow(
                 Type::intrinsic_from_str("I64")
                     .arrow(Type::intrinsic_from_str("I64")),
             ),
@@ -193,6 +199,7 @@ pub static OP_PRECEDENCE: Lazy<FxHashMap<&'static str, (Associativity, i32)>> =
         [
             ("%", (Left, 7)),
             ("*", (Left, 7)),
+            ("/", (Left, 7)),
             ("+", (Left, 6)),
             ("-", (Left, 6)),
             ("<", (Left, 5)),
