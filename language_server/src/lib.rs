@@ -26,6 +26,7 @@ struct TokenCache {
 #[derive(Debug, PartialEq, Eq)]
 enum TokenCacheState {
     Fresh,
+    Unsaved,
     Old,
 }
 
@@ -130,7 +131,7 @@ impl LanguageServer for Backend {
             )
             .await;
         if let Some(mut t) = self.tokens.get_mut(&params.text_document.uri) {
-            t.state = TokenCacheState::Old;
+            t.state = TokenCacheState::Unsaved;
         }
     }
 
@@ -138,27 +139,24 @@ impl LanguageServer for Backend {
         self.client
             .log_message(MessageType::INFO, "file saved.")
             .await;
-        if let Some(r) = self.tokens.get(&params.text_document.uri) {
+        if let Some(mut r) = self.tokens.get_mut(&params.text_document.uri) {
             self.client
                 .log_message(MessageType::INFO, "document found")
                 .await;
-            let is_old = r.value().state == TokenCacheState::Old;
-            drop(r);
-            if is_old {
-                self.tokens.remove(&params.text_document.uri);
+            let is_fresh = r.value().state == TokenCacheState::Fresh;
+            if is_fresh {
                 self.client
-                    .log_message(MessageType::INFO, "removed `changed`.")
+                    .log_message(MessageType::INFO, "already cached.")
                     .await;
+            } else {
+                r.state = TokenCacheState::Old;
+                drop(r);
                 self.client.semantic_tokens_refresh().await.unwrap();
                 self.client
                     .log_message(
                         MessageType::INFO,
                         "requested `semantic_tokens_refresh`.",
                     )
-                    .await;
-            } else {
-                self.client
-                    .log_message(MessageType::INFO, "already cached.")
                     .await;
             }
         } else {
@@ -183,11 +181,16 @@ impl LanguageServer for Backend {
             .await;
         let uri = params.text_document.uri;
         if let Some(cache) = self.tokens.get(&uri) {
-            self.client
-                .log_message(MessageType::INFO, "reusing cache.")
-                .await;
-            Ok(Some(cache.value().semantic_tokens.clone().into()))
-        } else if let Ok(src) = fs::read_to_string(uri.path()) {
+            if cache.state == TokenCacheState::Old {
+                drop(cache);
+            } else {
+                self.client
+                    .log_message(MessageType::INFO, "reusing cache.")
+                    .await;
+                return Ok(Some(cache.value().semantic_tokens.clone().into()));
+            }
+        }
+        if let Ok(src) = fs::read_to_string(uri.path()) {
             self.client
                 .log_message(MessageType::INFO, "compiling.")
                 .await;
@@ -216,7 +219,10 @@ impl LanguageServer for Backend {
                         format!("could not compile {uri}."),
                     )
                     .await;
-                Ok(None)
+                Ok(self
+                    .tokens
+                    .get(&uri)
+                    .map(|a| a.value().semantic_tokens.clone().into()))
             }
         } else {
             self.client
