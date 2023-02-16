@@ -476,10 +476,10 @@ impl SubtypeRelations {
     ) -> T {
         self.iter()
             .flat_map(|(a, b, _)| {
-                a.all_type_variables()
-                    .into_iter()
-                    .chain(b.all_type_variables())
+                a.all_type_variables_iter()
+                    .chain(b.all_type_variables_iter())
             })
+            .unique()
             .collect()
     }
 
@@ -816,8 +816,9 @@ fn _simplify_type<T: TypeConstructor>(
             pattern_restriction,
             pattern_restriction
                 .type_
-                .all_type_variables_vec()
-                .is_empty(),
+                .all_type_variables_iter()
+                .next()
+                .is_none(),
             env,
             map,
         )?;
@@ -870,41 +871,43 @@ fn _simplify_type<T: TypeConstructor>(
         }
         log::trace!("t{{12}} = {}", t);
         let contravariant_candidates = mk_contravariant_candidates(&t);
-        t.pattern_restrictions =
-            t.pattern_restrictions
-                .into_iter()
-                .map(|pattern_restriction| {
-                    let pattern_ts: Vec<_> =
-                        pattern_restriction
-                            .type_
-                            .arguments_from_argument_tuple()
-                            .iter()
-                            .map(|pattern_t| {
-                                if pattern_t.all_type_variables().iter().all(
-                                    |v| !contravariant_candidates.contains(v),
-                                ) {
-                                    possible_strongest_t(
-                                        pattern_t.clone(),
-                                        &t.subtype_relations,
-                                    )
-                                } else {
-                                    pattern_t.clone()
-                                }
-                            })
-                            .collect();
-                    PatternRestriction {
-                        type_: Type::argument_tuple_from_arguments(pattern_ts),
-                        ..pattern_restriction
-                    }
-                })
-                .collect();
+        t.pattern_restrictions = t
+            .pattern_restrictions
+            .into_iter()
+            .map(|pattern_restriction| {
+                let pattern_ts: Vec<_> = pattern_restriction
+                    .type_
+                    .arguments_from_argument_tuple()
+                    .iter()
+                    .map(|pattern_t| {
+                        if pattern_t
+                            .all_type_variables_iter()
+                            .unique()
+                            .all(|v| !contravariant_candidates.contains(&v))
+                        {
+                            possible_strongest_t(
+                                pattern_t.clone(),
+                                &t.subtype_relations,
+                            )
+                        } else {
+                            pattern_t.clone()
+                        }
+                    })
+                    .collect();
+                PatternRestriction {
+                    type_: Type::argument_tuple_from_arguments(pattern_ts),
+                    ..pattern_restriction
+                }
+            })
+            .collect();
         for pattern_restriction in &t.pattern_restrictions {
             let (subtype, _not_sure) = apply_type_to_pattern(
                 pattern_restriction,
                 pattern_restriction
                     .type_
-                    .all_type_variables_vec()
-                    .is_empty(),
+                    .all_type_variables_iter()
+                    .next()
+                    .is_none(),
                 env,
                 map,
             )?;
@@ -1929,7 +1932,10 @@ fn simplify_dummies<T: TypeConstructor>(
             {
                 match a.matchable() {
                     TypeMatchable::Variable(a)
-                        if b.all_type_variables_vec() == vec![a] =>
+                        if b.all_type_variables_iter()
+                            .unique()
+                            .collect_vec()
+                            == vec![a] =>
                     {
                         let b = b.replace_num(
                             a,
@@ -2259,14 +2265,19 @@ impl<T: TypeConstructor> TypeWithEnv<T> {
     fn type_variables_in_env_except_for_subtype_rel(
         &self,
     ) -> FxHashSet<TypeVariable> {
-        let mut s = self.constructor.all_type_variables();
-        for req in &self.variable_requirements {
-            s.extend(req.required_type.all_type_variables_vec())
-        }
-        for (t, _) in self.fn_apply_dummies.values() {
-            s.extend(t.all_type_variables_vec())
-        }
-        s
+        self.constructor
+            .all_type_variables_iter()
+            .chain(
+                self.variable_requirements.iter().flat_map(|req| {
+                    req.required_type.all_type_variables_iter()
+                }),
+            )
+            .chain(
+                self.fn_apply_dummies
+                    .values()
+                    .flat_map(|(t, _)| t.all_type_variables_iter()),
+            )
+            .collect()
     }
 }
 

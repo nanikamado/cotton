@@ -1613,7 +1613,7 @@ impl PatternUnitForRestriction {
             | PatternUnitForRestriction::Str
             | PatternUnitForRestriction::Const { .. } => Default::default(),
             PatternUnitForRestriction::Binder(t, _) => {
-                t.all_type_variables_vec()
+                t.all_type_variables_iter().collect()
             }
             PatternUnitForRestriction::Tuple(a, b) => a
                 .all_type_variables_vec()

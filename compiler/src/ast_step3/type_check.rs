@@ -35,6 +35,7 @@ use petgraph::Graph;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
+use std::iter::FlatMap;
 use strum::IntoEnumIterator;
 use types::TypeConstructor;
 
@@ -636,15 +637,22 @@ impl PatternUnitForRestriction {
 }
 
 impl TypeConstructor for SccTypeConstructor {
+    type VariableIterator<'a> = FlatMap<
+        std::slice::Iter<'a, SingleTypeConstructor>,
+        types::VariablesInType<'a>,
+        fn(
+            &'a SingleTypeConstructor,
+        )
+            -> <SingleTypeConstructor as TypeConstructor>::VariableIterator<'a>,
+    >;
     fn all_type_variables(&self) -> FxHashSet<TypeVariable> {
-        self.all_type_variables_vec().into_iter().collect()
+        self.all_type_variables_iter().collect()
     }
 
-    fn all_type_variables_vec(&self) -> Vec<TypeVariable> {
+    fn all_type_variables_iter(&self) -> Self::VariableIterator<'_> {
         self.0
             .iter()
-            .flat_map(TypeConstructor::all_type_variables_vec)
-            .collect()
+            .flat_map(SingleTypeConstructor::all_type_variables_iter)
     }
 
     fn replace_num(self, from: TypeVariable, to: &Type) -> Self {
@@ -847,8 +855,8 @@ fn resolve_scc(
                 // TODO: check remaining pattern_restrictions
                 let vs = t
                     .constructor
-                    .all_type_variables()
-                    .into_iter()
+                    .all_type_variables_iter()
+                    .unique()
                     .filter(|v| !v.is_recursive_index())
                     .collect_vec();
                 if vs.is_empty() {

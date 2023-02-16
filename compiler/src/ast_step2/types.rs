@@ -642,12 +642,13 @@ pub struct SingleTypeConstructor {
 }
 
 impl TypeConstructor for SingleTypeConstructor {
-    fn all_type_variables(&self) -> fxhash::FxHashSet<TypeVariable> {
+    type VariableIterator<'a> = VariablesInType<'a>;
+    fn all_type_variables(&self) -> FxHashSet<TypeVariable> {
         self.type_.all_type_variables()
     }
 
-    fn all_type_variables_vec(&self) -> Vec<TypeVariable> {
-        self.type_.all_type_variables_vec()
+    fn all_type_variables_iter(&self) -> Self::VariableIterator<'_> {
+        self.type_.all_type_variables_iter()
     }
 
     fn replace_num(mut self, from: TypeVariable, to: &type_type::Type) -> Self {
@@ -672,7 +673,7 @@ impl TypeConstructor for SingleTypeConstructor {
 
     fn covariant_type_variables(&self) -> Vec<TypeVariable> {
         if self.has_annotation {
-            self.all_type_variables().into_iter().collect()
+            self.all_type_variables_iter().unique().collect()
         } else {
             self.type_.covariant_type_variables()
         }
@@ -725,13 +726,41 @@ impl TypeConstructor for SingleTypeConstructor {
     }
 }
 
+pub struct VariablesInType<'a> {
+    unit_iter: Option<std::vec::IntoIter<TypeVariable>>,
+    units: std::slice::Iter<'a, Rc<TypeUnit>>,
+}
+
+impl<'a> Iterator for VariablesInType<'a> {
+    type Item = TypeVariable;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(i) = &mut self.unit_iter {
+            if let Some(v) = i.next() {
+                return Some(v);
+            }
+        }
+        if let Some(i) = self.units.next() {
+            self.unit_iter = Some(i.all_type_variables().into_iter());
+            self.next()
+        } else {
+            None
+        }
+    }
+}
+
 impl TypeConstructor for Type {
-    fn all_type_variables(&self) -> fxhash::FxHashSet<TypeVariable> {
-        self.all_type_variables_vec().into_iter().collect()
+    type VariableIterator<'a> = VariablesInType<'a>;
+
+    fn all_type_variables(&self) -> FxHashSet<TypeVariable> {
+        self.iter().flat_map(|t| t.all_type_variables()).collect()
     }
 
-    fn all_type_variables_vec(&self) -> Vec<TypeVariable> {
-        self.iter().flat_map(|t| t.all_type_variables()).collect()
+    fn all_type_variables_iter(&self) -> Self::VariableIterator<'_> {
+        VariablesInType {
+            unit_iter: None,
+            units: self.iter(),
+        }
     }
 
     fn replace_num(self, from: TypeVariable, to: &Self) -> Self {
@@ -923,8 +952,11 @@ pub fn merge_vec<T>(mut a: Vec<T>, mut b: Vec<T>) -> Vec<T> {
 pub trait TypeConstructor:
     Sized + std::fmt::Debug + std::fmt::Display + Eq + Clone + std::hash::Hash
 {
+    type VariableIterator<'a>: Iterator<Item = TypeVariable>
+    where
+        Self: 'a;
     fn all_type_variables(&self) -> FxHashSet<TypeVariable>;
-    fn all_type_variables_vec(&self) -> Vec<TypeVariable>;
+    fn all_type_variables_iter(&self) -> Self::VariableIterator<'_>;
     fn contains_variable(&self, v: TypeVariable) -> bool;
     fn replace_num(self, from: TypeVariable, to: &Type) -> Self;
     fn replace_num_with_update_flag(

@@ -13,27 +13,25 @@ impl TypeUnit {
     pub fn all_type_variables(&self) -> Vec<TypeVariable> {
         match self {
             TypeUnit::Variable(i) => std::iter::once(*i).collect(),
-            TypeUnit::RecursiveAlias { body } => {
-                let s = body.all_type_variables_vec();
-                s.into_iter().filter(|d| !d.is_recursive_index()).collect()
-            }
+            TypeUnit::RecursiveAlias { body } => body
+                .all_type_variables_iter()
+                .filter(|d| !d.is_recursive_index())
+                .collect(),
             TypeUnit::Const { .. } | TypeUnit::Any => Vec::new(),
             TypeUnit::Tuple(a, b) => a
-                .all_type_variables_vec()
-                .into_iter()
-                .chain(b.all_type_variables_vec().into_iter())
+                .all_type_variables_iter()
+                .chain(b.all_type_variables_iter().into_iter())
                 .collect(),
             TypeUnit::TypeLevelFn(f) => f
-                .all_type_variables_vec()
-                .into_iter()
+                .all_type_variables_iter()
                 .filter(|d| !d.is_recursive_index())
                 .collect(),
             TypeUnit::TypeLevelApply { f, a } => merge_vec(
-                f.all_type_variables_vec(),
-                a.all_type_variables_vec(),
+                f.all_type_variables_iter().collect(),
+                a.all_type_variables_iter().collect(),
             ),
             TypeUnit::Restrictions { t, .. } | TypeUnit::Variance(_, t) => {
-                t.all_type_variables_vec()
+                t.all_type_variables_iter().collect()
             }
         }
     }
