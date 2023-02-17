@@ -1,9 +1,19 @@
-flat_map : I64 -> (I64 -> ()) -> () =
-    | a, f => do
-        f(a)
-        f(a * 2)
-        f(a * 3)
-
 main : () -> () =
     | () => do
-        (1? + 100?).i64_to_string.println
+        ((do
+            Ok(Ok("ok")? ++ Ok("!")?)
+        ) : Result[String, String]).println
+        (do
+            Ok(Ok("ok")? ++ Err("!")?)
+        ).println
+
+        flat_map : I64 -> (I64 -> ()) -> () =
+            | a, f => do
+                f(a)
+                f(a * 2)
+                f(a * 3)
+        do (1? + 100?).println
+
+        flat_map : I64 -> (I64 -> I64) -> I64 =
+            | a, f => f(a + 10) + 1000
+        (do 1?? + 4).println

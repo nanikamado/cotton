@@ -4,4 +4,4 @@ fib : I64 -> I64 =
     | n => fib(n - 1) + fib(n - 2)
 
 main : () -> () =
-    | () => println(i64_to_string(fib(10)))
+    | () => 10.fib.println

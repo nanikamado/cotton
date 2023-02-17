@@ -1,6 +1,0 @@
-flat_map : I64 -> (I64 -> I64) -> I64 =
-    | a, f => f(a + 10) + 1000
-
-main : () -> () =
-    | () =>
-        (do 1?? + 4).i64_to_string.println

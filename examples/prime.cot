@@ -11,13 +11,16 @@ pop =
     | a .. b => (a < b).
         | True => (a + 1)..b /\ a
         | False => ()
+
+pop : Filter[(..)[I64], I64 -> Bool]
+    -> () | (Filter[(..)[I64], I64 -> Bool] /\ I64) =
     | Filter(l, f) => l.pop.
         | () => ()
         | l2 /\ a => a.f.
             | True => Filter(l2, f) /\ a
             | False => Filter(l2, f).pop
 
-all =
+all : (..)[I64] -> (I64 -> Bool) -> Bool =
     | i, f => i.pop.
         | () => True
         | i2 /\ a => a.f.
@@ -28,7 +31,8 @@ is_prime =
     | n => (2..n - 1).all $
         | i => n % i != 0
 
-each =
+each : Filter[(..)[I64], I64 -> Bool]
+    -> (I64 -> ()) -> () =
     | l, f => l.pop.
         | () => ()
         | l2 /\ a => do
@@ -39,7 +43,5 @@ data Filter(A, B) forall { A, B }
 
 filter = | l, f => Filter(l, f)
 
-print_i64 = | n => n.i64_to_string.println
-
-main : () -> ()
-= | () => (2..100).filter(is_prime).each(print_i64)
+main : () -> () =
+    | () => (2..100).filter(is_prime).each(println)

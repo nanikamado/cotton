@@ -42,18 +42,32 @@ fn fizzbuzz() {
 }
 
 #[test]
+fn fizzbuzz_loop() {
+    test_test("fizzbuzz_loop.cot")
+        .stdout(fizzbuzz_model())
+        .success();
+}
+
+#[test]
 fn helloworld() {
     test_examples("helloworld.cot", "Hello, world.\n");
 }
 
 #[test]
 fn list() {
-    test_examples("list.cot", &(0..100).map(|i| format!("{i}\n")).join(""));
+    test_examples("list.cot", "[100, 200, 300, 400]\n");
 }
 
 #[test]
-fn multiple_dispatch() {
-    test_examples("multiple_dispatch.cot", "Hogeeeeee\nFugaaaaaa\n");
+fn range_to_list() {
+    test_test("range_to_list.cot")
+        .stdout((0..100).map(|i| format!("{i}\n")).join(""))
+        .success();
+}
+
+#[test]
+fn overload() {
+    test_examples("overload.cot", "Hogeeeeee\nFugaaaaaa\n");
 }
 
 const PRIMES: &str = "\
@@ -90,8 +104,10 @@ fn prime() {
 }
 
 #[test]
-fn prime2() {
-    test_examples("prime2.cot", &PRIMES.strip_margin());
+fn prime_union() {
+    test_test("prime_union.cot")
+        .stdout(PRIMES.strip_margin())
+        .success();
 }
 
 #[test]
@@ -178,11 +194,6 @@ fn tuple_infer_fail() {
 }
 
 #[test]
-fn println() {
-    test_examples("println.cot", "1\n[1, 2, 3]\n");
-}
-
-#[test]
 fn flat_map() {
     test_examples(
         "flat_map.cot",
@@ -197,7 +208,9 @@ fn flat_map() {
 fn question() {
     test_examples(
         "question.cot",
-        &"101
+        &"Ok(ok!)
+        |Err(!)
+        |101
         |201
         |301
         |102
@@ -206,14 +219,10 @@ fn question() {
         |103
         |203
         |303
+        |2025
         |"
         .strip_margin(),
     );
-}
-
-#[test]
-fn question2() {
-    test_examples("question2.cot", "2025\n");
 }
 
 #[test]
@@ -236,13 +245,8 @@ fn simple_subtype_error_fail() {
 }
 
 #[test]
-fn result_println() {
-    test_examples("result_println.cot", "Ok(ok!)\nErr(!)\n");
-}
-
-#[test]
 fn nexts() {
-    test_examples("nexts.cot", "D1\n");
+    test_test("nexts.cot").stdout("D1\n").success();
 }
 
 const PALINDROME: &str = "[D1, D1, D1, D1, D1, D1] palindrome!
@@ -345,12 +349,7 @@ fn inf_implicit_req_fail() {
 
 #[test]
 fn type_pattern() {
-    test_examples("type_pattern.cot", "D1\nD2\n");
-}
-
-#[test]
-fn type_pattern_primitive() {
-    test_examples("type_pattern_primitive.cot", "2\n1 one\n");
+    test_examples("type_pattern.cot", "2\n1 one\nD1\nD2\n");
 }
 
 #[test]

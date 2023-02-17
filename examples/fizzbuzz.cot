@@ -1,10 +1,9 @@
-data Next(A) forall { A }
-data End(A) forall { A }
+(..) : I64 -> I64 -> List[I64] =
+    | a, b => (a < b).
+        | True => a /\ (a + 1..b)
+        | False => Nil
 
-loop : a -> (a -> Next[a] | End[b]) -> b forall {a, b} =
-    | init, f => init.f.
-        | Next(a) => a.loop(f)
-        | End(a) => a
+infixl 4 ..
 
 fizzbuzz : I64 -> String =
     | n => (n % 3 /\ n % 5).
@@ -14,10 +13,8 @@ fizzbuzz : I64 -> String =
         | _ /\ _ => n.i64_to_string
 
 main : () -> () =
-    | () =>
-        1.loop(
-            | 101 => End(())
-            | i => do
-                i.fizzbuzz.println
-                Next(i + 1)
+    | () => do
+        (1..101).map(
+            | i => i.fizzbuzz.println
         )
+        ()

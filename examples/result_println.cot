@@ -1,9 +1,0 @@
-main : () -> () =
-    | () => do
-        ((do
-            Ok(Ok("ok")? ++ Ok("!")?)
-        ) : Result[String, String]).println
-        (do
-            Ok(Ok("ok")? ++ Err("!")?)
-        ).println
-        ()

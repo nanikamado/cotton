@@ -4,7 +4,7 @@ use tower_lsp::lsp_types::*;
 
 #[test]
 fn prime_local_type() {
-    let src = fs::read_to_string("../examples/prime.cot").unwrap();
+    let src = fs::read_to_string("../tests/prime_union.cot").unwrap();
     let (_, hover_map) = semantic_tokens_from_src(&src).unwrap();
     if let HoverContents::Markup(c) =
         &hover_map[31][6].as_ref().unwrap().contents
