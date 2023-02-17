@@ -1156,24 +1156,36 @@ fn fmt_tuple(
 ) -> std::fmt::Result {
     if let TypeMatchableRef::Const { id: id_a } = a.matchable_ref() {
         if matches!(id_a, TypeId::Intrinsic(IntrinsicType::Fn)) {
-            let TypeMatchableRef::Tuple(arg, rtn) = b.matchable_ref() else {
-                panic!()
-            };
-            let TypeMatchableRef::Tuple(rtn, rest) = rtn.matchable_ref() else {
-                panic!()
-            };
-            if arg.is_function() {
-                write!(f, "({arg}) -> {rtn}")?;
-            } else {
-                write!(f, "{arg} -> {rtn}")?;
-            }
-            if !matches!(
-                rest.matchable_ref(),
-                TypeMatchableRef::Const {
-                    id: TypeId::Intrinsic(IntrinsicType::Unit)
+            let pairs = b.iter().map(|b|{
+                let TypeUnit::Tuple(arg, rtn) = &**b else {
+                    panic!()
+                };
+                let TypeMatchableRef::Tuple(rtn, rest) = rtn.matchable_ref() else {
+                    panic!()
+                };
+                debug_assert!(matches!(
+                    rest.matchable_ref(),
+                    TypeMatchableRef::Const {
+                        id: TypeId::Intrinsic(IntrinsicType::Unit)
+                    }
+                ));
+                (arg, rtn)
+            }) .collect_vec();
+            if pairs.len() == 1 {
+                let (arg, rtn) = pairs[0];
+                if arg.is_function() {
+                    write!(f, "({arg}) -> {rtn}")?;
+                } else {
+                    write!(f, "{arg} -> {rtn}")?;
                 }
-            ) {
-                write!(f, " and ({rest})")?;
+            } else {
+                write!(
+                    f,
+                    "[:->, {{{}}}]",
+                    pairs.iter().format_with(" | ", |(arg, rtn), f| f(
+                        &format_args!("[{arg}, {rtn}]")
+                    ))
+                )?;
             }
             Ok(())
         } else {

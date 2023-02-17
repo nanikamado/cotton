@@ -74,29 +74,30 @@ impl TypeVariableMap {
                     }
                 }
                 TypeUnit::Const { id } => TypeUnit::Const { id }.into(),
-                TypeUnit::Tuple(a, b) => {
-                    debug_assert!(if let TypeMatchableRef::Const {
+                TypeUnit::Tuple(a, bs) => {
+                    #[cfg(debug_assertions)]
+                    if let TypeMatchableRef::Const {
                         id: TypeId::Intrinsic(IntrinsicType::Fn),
                     } = a.matchable_ref()
                     {
-                        if let TypeMatchableRef::Tuple(b, _) = b.matchable_ref()
-                        {
-                            matches!(
-                                b.matchable_ref(),
-                                TypeMatchableRef::Variance(
-                                    ast_step2::types::Variance::Contravariant,
-                                    _
-                                )
-                            )
-                        } else {
-                            false
+                        for b in bs.iter() {
+                            if let TypeUnit::Tuple(b, _) = &**b
+                            {
+                                debug_assert!(matches!(
+                                    b.matchable_ref(),
+                                    TypeMatchableRef::Variance(
+                                        ast_step2::types::Variance::Contravariant,
+                                        _
+                                    )
+                                ))
+                            } else {
+                                panic!()
+                            }
                         }
-                    } else {
-                        true
-                    });
+                    };
                     TypeUnit::Tuple(
                         self.normalize_type(a),
-                        self.normalize_type(b),
+                        self.normalize_type(bs),
                     )
                     .into()
                 }
