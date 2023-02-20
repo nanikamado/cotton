@@ -210,6 +210,7 @@ pub fn type_check(
         } else {
             None
         };
+        log::debug!("name = {}", d.name);
         let type_with_env = simplify::simplify_type(
             &mut map,
             ast_step2::TypeWithEnv {

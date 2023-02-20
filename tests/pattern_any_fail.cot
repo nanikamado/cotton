@@ -1,0 +1,6 @@
+f =
+    | Some(a) => a
+    | _ => 1
+
+main : () -> () =
+    | () => println(f(Some("a")) + 1)

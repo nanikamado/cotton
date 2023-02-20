@@ -444,22 +444,25 @@ fn pattern_unit_to_type(
             env.types_of_decls
                 .push((VariableId::Local(*decl_id), t.clone().into()));
             Ok((
-                MatchOperandUnit::Unmatchable(t.clone()).into(),
+                MatchOperandUnit::Variable(*v).into(),
                 PatternUnitForRestriction::Binder(t.into(), *decl_id),
             ))
         }
-        ResolvedBinder(decl_id, t) => Ok((
-            MatchOperandUnit::Unmatchable(TypeUnit::Variable(*t)).into(),
+        ResolvedBinder(decl_id, v) => Ok((
+            MatchOperandUnit::Variable(*v).into(),
             PatternUnitForRestriction::Binder(
-                TypeUnit::Variable(*t).into(),
+                TypeUnit::Variable(*v).into(),
                 *decl_id,
             ),
         )),
         Underscore => {
-            let v = TypeUnit::new_variable();
+            let v = TypeVariable::new();
             Ok((
-                MatchOperandUnit::Unmatchable(v.clone()).into(),
-                PatternUnitForRestriction::Binder(v.into(), DeclId::new()),
+                MatchOperandUnit::Variable(v).into(),
+                PatternUnitForRestriction::Binder(
+                    TypeUnit::Variable(v).into(),
+                    DeclId::new(),
+                ),
             ))
         }
         TypeRestriction(p, t) => {

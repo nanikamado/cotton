@@ -16,7 +16,8 @@ use std::fmt::Display;
 pub enum MatchOperandUnit {
     Const(TypeId),
     Tuple(MatchOperand, MatchOperand),
-    Unmatchable(TypeUnit),
+    Any,
+    Variable(TypeVariable),
     NotComputed(TypeUnit),
 }
 
@@ -50,9 +51,10 @@ impl MatchOperandUnit {
         match self {
             Const(c) => Const(c).into(),
             Tuple(a, b) => Tuple(a.map_type(f), b.map_type(f)).into(),
-            Unmatchable(a) => f(a.into())
+            Any => Any.into(),
+            Variable(v) => f(TypeUnit::Variable(v).into())
                 .into_iter()
-                .map(|a| Unmatchable(unwrap_or_clone(a)))
+                .map(|a| NotComputed(unwrap_or_clone(a)))
                 .collect(),
             NotComputed(c) => f(c.into())
                 .into_iter()
@@ -64,9 +66,9 @@ impl MatchOperandUnit {
     fn contains_recursion(&self) -> bool {
         use MatchOperandUnit::*;
         match self {
-            Const(_) => false,
+            Const(_) | Any | Variable(_) => false,
             Tuple(a, b) => a.contains_recursion() || b.contains_recursion(),
-            Unmatchable(t) | NotComputed(t) => t.contains_recursion(),
+            NotComputed(t) => t.contains_recursion(),
         }
     }
 
@@ -76,11 +78,20 @@ impl MatchOperandUnit {
         env: &mut Env,
     ) -> (MatchOperand, MatchOperand) {
         match (self, other) {
-            (
-                MatchOperandUnit::Unmatchable(t)
-                | MatchOperandUnit::NotComputed(t),
-                _,
-            ) => {
+            (MatchOperandUnit::Variable(v), _) => {
+                if TypeUnit::Variable(v) == *other {
+                    (
+                        MatchOperand::default(),
+                        MatchOperandUnit::Variable(v).into(),
+                    )
+                } else {
+                    (
+                        MatchOperandUnit::Variable(v).into(),
+                        MatchOperand::default(),
+                    )
+                }
+            }
+            (MatchOperandUnit::NotComputed(t), _) => {
                 let (out, maybe_in, _) = t.remove_disjoint_part(other);
                 (
                     MatchOperand::not_computed_from_type(out),
@@ -126,17 +137,30 @@ impl MatchOperandUnit {
                     MatchOperand::tuple(a1_in, a2_in),
                 )
             }
-            (
-                MatchOperandUnit::NotComputed(m)
-                | MatchOperandUnit::Unmatchable(m),
-                _,
-            ) => {
+            (MatchOperandUnit::NotComputed(m), _) => {
                 let (maybe_out, in_) =
                     m.split_slow(other, &mut Default::default());
                 (
                     MatchOperand::not_computed_from_type(maybe_out),
                     MatchOperand::not_computed_from_type(in_),
                 )
+            }
+            (MatchOperandUnit::Variable(v), _) => {
+                if TypeUnit::Variable(v) == *other {
+                    (
+                        MatchOperand::default(),
+                        MatchOperand::not_computed_from_type(
+                            other.clone().into(),
+                        ),
+                    )
+                } else {
+                    (
+                        MatchOperand::not_computed_from_type(
+                            TypeUnit::Variable(v).into(),
+                        ),
+                        MatchOperand::default(),
+                    )
+                }
             }
             (MatchOperandUnit::Const(idm), TypeUnit::Const { id })
                 if idm == *id =>
@@ -181,7 +205,10 @@ impl Display for MatchOperandUnit {
                     write!(f, "{a}, {b}")
                 }
             }
-            MatchOperandUnit::Unmatchable(_) => {
+            MatchOperandUnit::Any => {
+                write!(f, "Any")
+            }
+            MatchOperandUnit::Variable(_) => {
                 write!(f, "_")
             }
             MatchOperandUnit::NotComputed(_) => {
@@ -407,10 +434,15 @@ pub fn disclose_type_unit(
         TypeUnit::RecursiveAlias { body } => {
             disclose_type(unwrap_recursive_alias(body), data_decls)
         }
+        TypeUnit::Any => MatchOperandUnit::Any.into(),
         t @ TypeUnit::TypeLevelApply { .. } if t.is_recursive_fn_apply() => {
             disclose_type(t.unwrap_recursive_fn_apply().0, data_decls)
         }
-        t => MatchOperandUnit::Unmatchable(t).into(),
+        TypeUnit::Variable(v) => MatchOperandUnit::Variable(v).into(),
+        TypeUnit::TypeLevelApply { f, a } => {
+            MatchOperand::not_computed_from_type(f.type_level_function_apply(a))
+        }
+        _ => panic!(),
     }
 }
 
@@ -557,9 +589,9 @@ fn close_type_unit(
             }
         }
         MatchOperandUnit::Const(id) => Ok(TypeUnit::Const { id }.into()),
-        MatchOperandUnit::Unmatchable(t) | MatchOperandUnit::NotComputed(t) => {
-            Ok(t.into())
-        }
+        MatchOperandUnit::Any => Ok(TypeUnit::Any.into()),
+        MatchOperandUnit::NotComputed(t) => Ok(t.into()),
+        MatchOperandUnit::Variable(v) => Ok(TypeUnit::Variable(v).into()),
     }
 }
 

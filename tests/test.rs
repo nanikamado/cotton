@@ -485,3 +485,8 @@ fn variance() {
 fn pattern() {
     test_test("pattern.cot").stdout("").success();
 }
+
+#[test]
+fn pattern_any_fail() {
+    test_test("pattern_any_fail.cot").code(1);
+}
