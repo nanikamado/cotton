@@ -382,8 +382,24 @@ fn pattern_unit_to_type(
 ) -> Result<(MatchOperand, PatternUnitForRestriction), CompileError> {
     use PatternUnit::*;
     match p {
-        I64(_) => Ok((MatchOperand::default(), PatternUnitForRestriction::I64)),
-        Str(_) => Ok((MatchOperand::default(), PatternUnitForRestriction::Str)),
+        I64(_) => Ok((
+            MatchOperand::default(),
+            PatternUnitForRestriction::Tuple(
+                Box::new(PatternUnitForRestriction::I64),
+                Box::new(PatternUnitForRestriction::Const {
+                    id: TypeId::Intrinsic(IntrinsicType::Unit),
+                }),
+            ),
+        )),
+        Str(_) => Ok((
+            MatchOperand::default(),
+            PatternUnitForRestriction::Tuple(
+                Box::new(PatternUnitForRestriction::Str),
+                Box::new(PatternUnitForRestriction::Const {
+                    id: TypeId::Intrinsic(IntrinsicType::Unit),
+                }),
+            ),
+        )),
         Constructor { id, args, .. } => {
             let mut types = Vec::new();
             let mut pattern_restrictions = Vec::new();

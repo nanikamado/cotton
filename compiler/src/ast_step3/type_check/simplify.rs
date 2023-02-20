@@ -1515,14 +1515,20 @@ impl From<&PatternUnitForRestriction> for MatchOperand {
     fn from(p: &PatternUnitForRestriction) -> Self {
         match p {
             PatternUnitForRestriction::I64 => {
-                MatchOperand::not_computed_from_type(Type::intrinsic_from_str(
-                    "I64",
-                ))
+                MatchOperand::not_computed_from_type(
+                    TypeUnit::Const {
+                        id: TypeId::Intrinsic(IntrinsicType::I64),
+                    }
+                    .into(),
+                )
             }
             PatternUnitForRestriction::Str => {
-                MatchOperand::not_computed_from_type(Type::intrinsic_from_str(
-                    "String",
-                ))
+                MatchOperand::not_computed_from_type(
+                    TypeUnit::Const {
+                        id: TypeId::Intrinsic(IntrinsicType::String),
+                    }
+                    .into(),
+                )
             }
             PatternUnitForRestriction::Binder(t, _decl_id) => {
                 MatchOperand::not_computed_from_type(t.clone())
@@ -1795,12 +1801,14 @@ fn apply_type_to_pattern(
         .collect();
     let mut subtype_rels = SubtypeRelations::default();
     let mut not_sure = false;
+    let mut has_max_remained = true;
     for (p, p_span) in &restriction.pattern {
         let TypeDestructResult {
             remained: r,
-            matched,
+            matched_type,
             bind_matched,
-            kind,
+            is_matched,
+            remained_is_max,
         } = destruct_type_by_pattern(
             remained,
             p,
@@ -1808,6 +1816,8 @@ fn apply_type_to_pattern(
             is_concrete_type,
             env,
         );
+        let has_max_remained_old = has_max_remained;
+        has_max_remained &= remained_is_max;
         let bind_matched: Vec<_> = bind_matched
             .into_iter()
             .flatten()
@@ -1862,22 +1872,20 @@ fn apply_type_to_pattern(
                 )
             })
             .collect();
-        let kind = if is_concrete_type && kind == DestructResultKind::NotSure {
-            remained.append(matched.unwrap());
-            DestructResultKind::Ok
+        let is_matched = if is_concrete_type && is_matched == Trinary::NotSure {
+            remained.append(matched_type.unwrap());
+            Trinary::Yes
         } else {
-            kind
+            is_matched
         };
-        match kind {
-            DestructResultKind::NotSure => {
+        match is_matched {
+            Trinary::NotSure => {
                 subtype_rels.extend(subtype_r);
                 not_sure = true;
             }
-            DestructResultKind::Fail => (),
-            DestructResultKind::Ok => {
-                if not_sure {
-                    subtype_rels.extend(subtype_r);
-                } else {
+            Trinary::No => (),
+            Trinary::Yes => {
+                if has_max_remained_old {
                     for (decl_id, t, span) in bind_matched {
                         map.insert_type(
                             &mut subtype_rels,
@@ -1891,6 +1899,8 @@ fn apply_type_to_pattern(
                             }),
                         );
                     }
+                } else {
+                    subtype_rels.extend(subtype_r);
                 }
             }
         }
@@ -1976,18 +1986,19 @@ fn simplify_dummies<T: TypeConstructor>(
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum DestructResultKind {
-    Ok,
+enum Trinary {
+    Yes,
     NotSure,
-    Fail,
+    No,
 }
 
 #[derive(Debug)]
 struct TypeDestructResult {
     remained: MatchOperand,
-    matched: Option<MatchOperand>,
+    matched_type: Option<MatchOperand>,
     bind_matched: Option<Vec<(DeclId, MatchOperand, Span)>>,
-    kind: DestructResultKind,
+    is_matched: Trinary,
+    remained_is_max: bool,
 }
 
 fn destruct_type_by_pattern(
@@ -2000,14 +2011,16 @@ fn destruct_type_by_pattern(
     let mut remained = MatchOperand::default();
     let mut destructed = false;
     let mut not_sure = false;
+    let mut remained_is_max = true;
     let mut matched = MatchOperand::default();
     let mut bind_matched = Vec::new();
     for tu in t {
         let TypeDestructResult {
             remained: r,
-            matched: m,
+            matched_type: m,
             bind_matched: bm,
-            kind,
+            is_matched,
+            remained_is_max: is_max,
         } = destruct_type_unit_by_pattern(
             tu,
             pattern,
@@ -2015,17 +2028,18 @@ fn destruct_type_by_pattern(
             is_concrete_type,
             env,
         );
+        remained_is_max &= is_max;
         remained.append(r);
-        match kind {
-            DestructResultKind::NotSure => {
+        match is_matched {
+            Trinary::NotSure => {
                 matched.append(m.unwrap());
                 not_sure = true;
                 if is_concrete_type {
                     bind_matched.append(&mut bm.unwrap());
                 }
             }
-            DestructResultKind::Fail => (),
-            DestructResultKind::Ok => {
+            Trinary::No => (),
+            Trinary::Yes => {
                 let mut dm = bm.unwrap();
                 matched.append(m.unwrap());
                 destructed = true;
@@ -2036,23 +2050,26 @@ fn destruct_type_by_pattern(
     if not_sure {
         TypeDestructResult {
             remained,
-            matched: Some(matched),
+            matched_type: Some(matched),
             bind_matched: Some(bind_matched),
-            kind: DestructResultKind::NotSure,
+            is_matched: Trinary::NotSure,
+            remained_is_max,
         }
     } else if destructed {
         TypeDestructResult {
             remained,
-            matched: Some(matched),
+            matched_type: Some(matched),
             bind_matched: Some(bind_matched),
-            kind: DestructResultKind::Ok,
+            is_matched: Trinary::Yes,
+            remained_is_max,
         }
     } else {
         TypeDestructResult {
             remained,
-            matched: None,
+            matched_type: None,
             bind_matched: None,
-            kind: DestructResultKind::Fail,
+            is_matched: Trinary::No,
+            remained_is_max,
         }
     }
 }
@@ -2066,13 +2083,20 @@ fn destruct_type_unit_by_pattern(
 ) -> TypeDestructResult {
     match (t, pattern) {
         (
-            t,
-            PatternUnitForRestriction::I64 | PatternUnitForRestriction::Str,
+            t @ MatchOperandUnit::Const(TypeId::Intrinsic(IntrinsicType::I64)),
+            PatternUnitForRestriction::I64,
+        )
+        | (
+            t @ MatchOperandUnit::Const(TypeId::Intrinsic(
+                IntrinsicType::String,
+            )),
+            PatternUnitForRestriction::Str,
         ) => TypeDestructResult {
             remained: t.into(),
-            matched: None,
-            bind_matched: None,
-            kind: DestructResultKind::Fail,
+            matched_type: Some(MatchOperand::default()),
+            bind_matched: Some(Vec::new()),
+            is_matched: Trinary::Yes,
+            remained_is_max: true,
         },
         (t, PatternUnitForRestriction::Apply(p)) => {
             let r = destruct_type_unit_by_pattern(
@@ -2091,9 +2115,10 @@ fn destruct_type_unit_by_pattern(
             let t = MatchOperand::from(t);
             TypeDestructResult {
                 remained: MatchOperand::default(),
-                matched: Some(t.clone()),
+                matched_type: Some(t.clone()),
                 bind_matched: Some(vec![(*decl_id, t, pattern_span)]),
-                kind: DestructResultKind::Ok,
+                is_matched: Trinary::Yes,
+                remained_is_max: true,
             }
         }
         (t, PatternUnitForRestriction::TypeRestriction(p, annotation)) => {
@@ -2109,8 +2134,8 @@ fn destruct_type_unit_by_pattern(
                 env,
             );
             r.remained.append(out);
-            if r.kind == DestructResultKind::Ok && !not_sure_is_empty {
-                r.kind = DestructResultKind::NotSure;
+            if r.is_matched == Trinary::Yes && !not_sure_is_empty {
+                r.is_matched = Trinary::NotSure;
             }
             r
         }
@@ -2126,9 +2151,10 @@ fn destruct_type_unit_by_pattern(
             PatternUnitForRestriction::Const { id: id2, .. },
         ) if id1 == *id2 => TypeDestructResult {
             remained: MatchOperand::default(),
-            matched: Some(MatchOperandUnit::Const(id1).into()),
+            matched_type: Some(MatchOperandUnit::Const(id1).into()),
             bind_matched: Some(Vec::new()),
-            kind: DestructResultKind::Ok,
+            is_matched: Trinary::Yes,
+            remained_is_max: true,
         },
         (
             MatchOperandUnit::Tuple(a1, a2),
@@ -2141,12 +2167,13 @@ fn destruct_type_unit_by_pattern(
                 is_concrete_type,
                 env,
             );
-            if r1.kind == DestructResultKind::Fail {
+            if r1.is_matched == Trinary::No {
                 TypeDestructResult {
                     remained: MatchOperand::tuple(r1.remained, a2),
-                    matched: None,
+                    matched_type: None,
                     bind_matched: None,
-                    kind: DestructResultKind::Fail,
+                    is_matched: Trinary::No,
+                    remained_is_max: true,
                 }
             } else {
                 let r2 = destruct_type_by_pattern(
@@ -2156,17 +2183,18 @@ fn destruct_type_unit_by_pattern(
                     is_concrete_type,
                     env,
                 );
-                if r2.kind == DestructResultKind::Fail {
-                    r1.remained.append(r1.matched.unwrap());
+                if r2.is_matched == Trinary::No {
+                    r1.remained.append(r1.matched_type.unwrap());
                     TypeDestructResult {
                         remained: MatchOperand::tuple(r1.remained, r2.remained),
-                        matched: None,
+                        matched_type: None,
                         bind_matched: None,
-                        kind: DestructResultKind::Fail,
+                        is_matched: Trinary::No,
+                        remained_is_max: true,
                     }
                 } else {
-                    let not_sure = r1.kind == DestructResultKind::NotSure
-                        || r2.kind == DestructResultKind::NotSure;
+                    let not_sure = r1.is_matched == Trinary::NotSure
+                        || r2.is_matched == Trinary::NotSure;
                     TypeDestructResult {
                         remained: MatchOperand::default()
                             .union(MatchOperand::tuple(
@@ -2175,42 +2203,65 @@ fn destruct_type_unit_by_pattern(
                             ))
                             .union(MatchOperand::tuple(
                                 r1.remained.clone(),
-                                r2.matched.clone().unwrap(),
+                                r2.matched_type.clone().unwrap(),
                             ))
                             .union(MatchOperand::tuple(
-                                r1.matched.clone().unwrap(),
+                                r1.matched_type.clone().unwrap(),
                                 r2.remained,
                             )),
-                        matched: Some(MatchOperand::tuple(
-                            r1.matched.unwrap(),
-                            r2.matched.unwrap(),
+                        matched_type: Some(MatchOperand::tuple(
+                            r1.matched_type.unwrap(),
+                            r2.matched_type.unwrap(),
                         )),
                         bind_matched: Some(merge_vec(
                             r1.bind_matched.unwrap(),
                             r2.bind_matched.unwrap(),
                         )),
-                        kind: if not_sure {
-                            DestructResultKind::NotSure
+                        is_matched: if not_sure {
+                            Trinary::NotSure
                         } else {
-                            DestructResultKind::Ok
+                            Trinary::Yes
                         },
+                        remained_is_max: r1.remained_is_max
+                            && r2.remained_is_max,
                     }
                 }
+            }
+        }
+        (t, PatternUnitForRestriction::Tuple(a, b))
+            if matches!(
+                **a,
+                PatternUnitForRestriction::I64 | PatternUnitForRestriction::Str
+            ) && matches!(
+                **b,
+                PatternUnitForRestriction::Const {
+                    id: TypeId::Intrinsic(IntrinsicType::Unit)
+                }
+            ) =>
+        {
+            TypeDestructResult {
+                remained: t.into(),
+                matched_type: Some(MatchOperand::default()),
+                bind_matched: Some(Vec::new()),
+                is_matched: Trinary::NotSure,
+                remained_is_max: true,
             }
         }
         (v @ MatchOperandUnit::Unmatchable(TypeUnit::Variable(_)), _) => {
             TypeDestructResult {
                 remained: Default::default(),
-                matched: Some(v.into()),
+                matched_type: Some(v.into()),
                 bind_matched: None,
-                kind: DestructResultKind::NotSure,
+                is_matched: Trinary::NotSure,
+                remained_is_max: false,
             }
         }
         (remained, _) => TypeDestructResult {
             remained: remained.into(),
-            matched: None,
+            matched_type: None,
             bind_matched: None,
-            kind: DestructResultKind::Fail,
+            is_matched: Trinary::No,
+            remained_is_max: true,
         },
     }
 }
@@ -2391,13 +2442,15 @@ mod tests {
     use crate::ast_step1::name_id::Path;
     use crate::ast_step2::types::{Type, TypeUnit, TypeVariable};
     use crate::ast_step2::{
-        PatternRestriction, PatternUnitForRestriction, RelOrigin, TypeWithEnv,
+        PatternRestriction, PatternUnitForRestriction, RelOrigin, TypeId,
+        TypeWithEnv,
     };
     use crate::ast_step3::type_check::simplify::{
         apply_type_to_pattern, simplify_subtype_rel, simplify_type, Env,
         TypeVariableMap,
     };
     use crate::ast_step3::type_check::RemovedParameters;
+    use crate::intrinsics::IntrinsicType;
     use crate::{ast_step1, ast_step2, combine_with_prelude, Imports};
     use itertools::Itertools;
     use stripmargin::StripMargin;
@@ -2514,12 +2567,18 @@ mod tests {
             Type::intrinsic_from_str("I64").union_unit(TypeUnit::Variable(v1));
         let v2 = TypeVariable::new();
         let mut map = Default::default();
-        let (r, not_sure) = apply_type_to_pattern(
+        let str_pattern = PatternUnitForRestriction::Tuple(
+            Box::new(PatternUnitForRestriction::Str),
+            Box::new(PatternUnitForRestriction::Const {
+                id: TypeId::Intrinsic(IntrinsicType::Unit),
+            }),
+        );
+        let (r, _not_sure) = apply_type_to_pattern(
             &PatternRestriction {
                 type_: Type::argument_tuple_from_arguments(vec![t1]),
                 pattern: vec![
                     PatternUnitForRestriction::argument_tuple_from_arguments(
-                        vec![(PatternUnitForRestriction::I64, 0..0)],
+                        vec![(str_pattern, 0..0)],
                     ),
                     PatternUnitForRestriction::argument_tuple_from_arguments(
                         vec![(
@@ -2543,7 +2602,69 @@ mod tests {
         )
         .unwrap();
         assert!(r.is_empty());
-        assert!(!not_sure);
         assert_eq!(map.find(v2).to_string(), format!("{{{v1} | I64}}"));
+    }
+
+    #[test]
+    fn apply_type_to_pattern_1() {
+        let v1 = TypeVariable::new();
+        let t1 = Type::intrinsic_from_str("I64");
+        let v2 = TypeVariable::new();
+        let v3 = TypeVariable::new();
+        let mut map = Default::default();
+        let mut env = Env::default();
+        let i64_pattern = PatternUnitForRestriction::Tuple(
+            Box::new(PatternUnitForRestriction::I64),
+            Box::new(PatternUnitForRestriction::Const {
+                id: TypeId::Intrinsic(IntrinsicType::Unit),
+            }),
+        );
+        let (r, not_sure) =
+            apply_type_to_pattern(
+                &PatternRestriction {
+                    type_: Type::argument_tuple_from_arguments(vec![
+                        t1.clone(),
+                        t1,
+                    ]),
+                    pattern: vec![
+                    PatternUnitForRestriction::argument_tuple_from_arguments(
+                        vec![(i64_pattern, 0..0),(
+                            PatternUnitForRestriction::Binder(
+                                TypeUnit::Variable(v1).into(),
+                                DeclId::new(),
+                            ),
+                            0..0,
+                        )],
+                    ),
+                    PatternUnitForRestriction::argument_tuple_from_arguments(
+                        vec![(
+                            PatternUnitForRestriction::Binder(
+                                TypeUnit::Variable(v2).into(),
+                                DeclId::new(),
+                            ),
+                            0..0,
+                        ),(
+                            PatternUnitForRestriction::Binder(
+                                TypeUnit::Variable(v3).into(),
+                                DeclId::new(),
+                            ),
+                            0..0,
+                        )],
+                    ),
+                ]
+                    .into_iter()
+                    .map(|(a, s)| (a, s.unwrap()))
+                    .collect_vec(),
+                    span: 0..0,
+                    allow_inexhaustive: false,
+                },
+                false,
+                &mut env,
+                &mut map,
+            )
+            .unwrap();
+        assert!(r.is_empty());
+        assert!(!not_sure);
+        assert_eq!(map.find(v1).to_string(), format!("I64"));
     }
 }
