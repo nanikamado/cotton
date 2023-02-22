@@ -3,7 +3,7 @@ data A /\ B forall { A, B }
 
 infixr 5 /\
 
-type List = Nil | A /\ List[A] forall { A }
+type List = | A => Nil | A /\ List[A]
 
 list_to_string_rec : List[A] -> String forall { A : ToString } =
     | Nil => ""

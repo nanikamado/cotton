@@ -821,6 +821,21 @@ impl TypeUnit {
             .into(),
         }
     }
+
+    pub fn is_singleton(&self) -> bool {
+        match self {
+            TypeUnit::Variable(_)
+            | TypeUnit::RecursiveAlias { .. }
+            | TypeUnit::TypeLevelFn(_)
+            | TypeUnit::TypeLevelApply { .. }
+            | TypeUnit::Any => false,
+            TypeUnit::Restrictions { t, .. } | TypeUnit::Variance(_, t) => {
+                t.is_singleton()
+            }
+            TypeUnit::Const { .. } => true,
+            TypeUnit::Tuple(a, b) => a.is_singleton() && b.is_singleton(),
+        }
+    }
 }
 
 impl Type {
@@ -1081,6 +1096,10 @@ impl Type {
 
     pub fn contains_recursion(&self) -> bool {
         self.iter().any(|t| t.contains_recursion())
+    }
+
+    pub fn is_singleton(&self) -> bool {
+        self.len() == 1 && self.iter().next().unwrap().is_singleton()
     }
 }
 

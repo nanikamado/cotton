@@ -490,3 +490,8 @@ fn pattern() {
 fn pattern_any_fail() {
     test_test("pattern_any_fail.cot").code(1);
 }
+
+#[test]
+fn pattern_any_fail2() {
+    test_test("pattern_any_fail2.cot").code(1);
+}

@@ -39,7 +39,7 @@ use std::iter::FlatMap;
 use strum::IntoEnumIterator;
 use types::TypeConstructor;
 
-const IMPLICIT_PARAMETER_RECURSION_LIMIT: usize = 10;
+const IMPLICIT_PARAMETER_RECURSION_LIMIT: usize = 4;
 
 #[derive(PartialEq, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
 pub enum VariableId {
@@ -853,6 +853,9 @@ fn resolve_scc(
                     t,
                     simplify::simplify_type(map, t.clone(), env).unwrap()
                 );
+                if !t.pattern_restrictions.is_empty() {
+                    panic!("t = {}", t);
+                }
                 // TODO: check remaining pattern_restrictions
                 let vs = t
                     .constructor
@@ -1187,7 +1190,7 @@ fn find_satisfied_types<T: TypeConstructor>(
                         span: req.span.clone(),
                     }),
                 );
-                t.subtype_relations.extend(cand_t.subtype_relations.clone());
+                t.subtype_relations.extend(cand_t.subtype_relations);
                 let implicit_parameters_len =
                     cand_t.variable_requirements.len();
                 for req in &cand_t.variable_requirements {

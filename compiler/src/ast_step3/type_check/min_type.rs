@@ -536,16 +536,16 @@ fn pattern_unit_to_type(
                     },
                 ));
             }
-            Ok((
-                t,
-                if all_post_patterns_are_bind {
-                    pattern_restriction
-                } else {
+            Ok(if all_post_patterns_are_bind {
+                (t, pattern_restriction)
+            } else {
+                (
+                    MatchOperand::default(),
                     PatternUnitForRestriction::Apply(Box::new(
                         pattern_restriction,
-                    ))
-                },
-            ))
+                    )),
+                )
+            })
         }
     }
 }
