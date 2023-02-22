@@ -1699,3 +1699,23 @@ pub fn collect_tuple_rev(tuple: &Type) -> Vec<Vec<&Type>> {
         })
         .collect()
 }
+
+impl Display for PatternRestriction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(
+            f,
+            "({}) = pat[{}] ({:?}){}",
+            self.type_.iter().map(|a| format!("{a}")).join(", "),
+            self.pattern
+                .iter()
+                .map(|(p, _)| format!("({p})"))
+                .join(" | "),
+            self.span,
+            if self.allow_inexhaustive {
+                format_args!(" (inexhaustive allowed)")
+            } else {
+                format_args!("")
+            }
+        )
+    }
+}

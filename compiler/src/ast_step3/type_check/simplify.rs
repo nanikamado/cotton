@@ -2356,18 +2356,7 @@ impl<T: TypeConstructor> Display for ast_step2::TypeWithEnv<T> {
             writeln!(f, "{req},")?;
         }
         for p in &self.pattern_restrictions {
-            writeln!(
-                f,
-                "    ({}) = pat[{}] ({:?}){},",
-                p.type_.iter().map(|a| format!("{a}")).join(", "),
-                p.pattern.iter().map(|(p, _)| format!("({p})")).join(" | "),
-                p.span,
-                if p.allow_inexhaustive {
-                    format_args!(" (inexhaustive allowed)")
-                } else {
-                    format_args!("")
-                }
-            )?;
+            writeln!(f, "    {},", p)?;
         }
         if !self.already_considered_relations.is_empty() {
             writeln!(f, "already_considered_relations:")?;
