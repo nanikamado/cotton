@@ -856,7 +856,6 @@ fn resolve_scc(
                 if !t.pattern_restrictions.is_empty() {
                     panic!("t = {}", t);
                 }
-                // TODO: check remaining pattern_restrictions
                 let vs = t
                     .constructor
                     .all_type_variables_iter()
