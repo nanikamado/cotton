@@ -25,10 +25,6 @@ pub enum CompileError {
         reason: NotSubtypeReason,
         span: Span,
     },
-    InexhaustiveMatch {
-        description: String,
-        span: Span,
-    },
     RecursionLimit,
     InaccessibleName {
         path: Path,
@@ -164,16 +160,6 @@ impl CompileError {
                             depth: 0,
                             imports,
                         });
-                report.finish().write((filename, Source::from(src)), w)?;
-                Ok(())
-            }
-            CompileError::InexhaustiveMatch { description, span } => {
-                let report =
-                    Report::build(ReportKind::Error, filename, span.start)
-                        .with_label(
-                            Label::new((filename, span))
-                                .with_message(description),
-                        );
                 report.finish().write((filename, Source::from(src)), w)?;
                 Ok(())
             }
