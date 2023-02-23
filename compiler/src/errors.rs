@@ -290,8 +290,7 @@ fn fmt_reasons(
         ),
         _ => write!(
             f,
-            "\n{} because\n{}├╮\n│* {}\n{}\n{}* and {}",
-            "│".repeat(depth + 1),
+            "\n│{0} because\n{0}├╮\n│{0}* {1}{2}\n{0}* and {3}",
             "│".repeat(depth),
             NotSubtypeReasonDisplay {
                 reason: &reasons[0],
@@ -300,8 +299,8 @@ fn fmt_reasons(
             },
             reasons[1..reasons.len() - 1]
                 .iter()
-                .format_with("\n", |r, f| f(&format_args!(
-                    "{}├╮\n{}* {}",
+                .format_with("", |r, f| f(&format_args!(
+                    "\n{}├╮\n{}* {}",
                     "│".repeat(depth),
                     "│".repeat(depth + 1),
                     NotSubtypeReasonDisplay {
@@ -310,12 +309,11 @@ fn fmt_reasons(
                         imports
                     }
                 ))),
-            "│".repeat(depth),
             NotSubtypeReasonDisplay {
                 reason: reasons.last().unwrap(),
-                depth: depth + 1,
+                depth,
                 imports
-            }
+            },
         ),
     }
 }
