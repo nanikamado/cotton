@@ -466,8 +466,24 @@ fn pattern_unit_to_type(
             ))
         }
         TypeRestriction(p, t) => {
-            let (_, (pattern_restriction, _span)) =
-                pattern_to_type(p, span, module_path, env, bindings)?;
+            let (p_t, (pattern_restriction, _span)) =
+                pattern_to_type(p, span.clone(), module_path, env, bindings)?;
+            let p_t = close_type(
+                p_t,
+                env.data_decls,
+                env.map,
+                env.subtype_relations,
+                span.clone(),
+            )?;
+            env.subtype_relations.insert((
+                p_t.clone(),
+                t.clone(),
+                RelOrigin {
+                    left: p_t,
+                    right: t.clone(),
+                    span,
+                },
+            ));
             Ok((
                 MatchOperand::not_computed_from_type(t.clone()),
                 PatternUnitForRestriction::TypeRestriction(

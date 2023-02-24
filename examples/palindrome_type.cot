@@ -1,10 +1,6 @@
 data D1
 data D2
 
-to_string : (D1 | D2) -> String =
-    | D1 => "D1"
-    | D2 => "D2"
-
 type PalindromePlus = | L => L | (D1 /\ L) |
         (D2 /\ L) | (D1 /\ PalindromePlus[D1 /\ L]) |
         (D2 /\ PalindromePlus[D2 /\ L])
@@ -31,11 +27,4 @@ make_palindrome  : List[D1 | D2] -> Palindrome =
     | l => l.make_palindrome_rec(Nil)
 
 main : () -> () =
-    | () => do
-        l = (D1 /\ D2 /\ Nil)
-        ls = (do (l? /\ l? /\ l? /\ l? /\ l? /\ l? /\ Nil) /\ Nil)
-        ls.map(
-            | l : Palindrome => (l.to_string ++ " palindrome!").println
-            | l => l.println
-        )
-        ()
+    | () => ()

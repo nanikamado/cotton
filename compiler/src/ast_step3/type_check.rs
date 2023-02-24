@@ -1214,11 +1214,9 @@ fn find_satisfied_types<T: TypeConstructor>(
                 };
                 match t {
                     Ok(mut t) => {
-                        if req.req_recursion_count
-                            == IMPLICIT_PARAMETER_RECURSION_LIMIT
-                        {
-                            return Err(CompileError::RecursionLimit);
-                        }
+                        let no_type_check = no_type_check
+                            || req.req_recursion_count
+                                >= IMPLICIT_PARAMETER_RECURSION_LIMIT;
                         if !no_type_check {
                             resolve_requirements_in_type_with_env(
                                 implicit_parameters_len,

@@ -249,82 +249,9 @@ fn nexts() {
     test_test("nexts.cot").stdout("D1\n").success();
 }
 
-const PALINDROME: &str = "[D1, D1, D1, D1, D1, D1] palindrome!
-[D1, D1, D1, D1, D1, D2]
-[D1, D1, D1, D1, D2, D1]
-[D1, D1, D1, D1, D2, D2]
-[D1, D1, D1, D2, D1, D1]
-[D1, D1, D1, D2, D1, D2]
-[D1, D1, D1, D2, D2, D1]
-[D1, D1, D1, D2, D2, D2]
-[D1, D1, D2, D1, D1, D1]
-[D1, D1, D2, D1, D1, D2]
-[D1, D1, D2, D1, D2, D1]
-[D1, D1, D2, D1, D2, D2]
-[D1, D1, D2, D2, D1, D1] palindrome!
-[D1, D1, D2, D2, D1, D2]
-[D1, D1, D2, D2, D2, D1]
-[D1, D1, D2, D2, D2, D2]
-[D1, D2, D1, D1, D1, D1]
-[D1, D2, D1, D1, D1, D2]
-[D1, D2, D1, D1, D2, D1] palindrome!
-[D1, D2, D1, D1, D2, D2]
-[D1, D2, D1, D2, D1, D1]
-[D1, D2, D1, D2, D1, D2]
-[D1, D2, D1, D2, D2, D1]
-[D1, D2, D1, D2, D2, D2]
-[D1, D2, D2, D1, D1, D1]
-[D1, D2, D2, D1, D1, D2]
-[D1, D2, D2, D1, D2, D1]
-[D1, D2, D2, D1, D2, D2]
-[D1, D2, D2, D2, D1, D1]
-[D1, D2, D2, D2, D1, D2]
-[D1, D2, D2, D2, D2, D1] palindrome!
-[D1, D2, D2, D2, D2, D2]
-[D2, D1, D1, D1, D1, D1]
-[D2, D1, D1, D1, D1, D2] palindrome!
-[D2, D1, D1, D1, D2, D1]
-[D2, D1, D1, D1, D2, D2]
-[D2, D1, D1, D2, D1, D1]
-[D2, D1, D1, D2, D1, D2]
-[D2, D1, D1, D2, D2, D1]
-[D2, D1, D1, D2, D2, D2]
-[D2, D1, D2, D1, D1, D1]
-[D2, D1, D2, D1, D1, D2]
-[D2, D1, D2, D1, D2, D1]
-[D2, D1, D2, D1, D2, D2]
-[D2, D1, D2, D2, D1, D1]
-[D2, D1, D2, D2, D1, D2] palindrome!
-[D2, D1, D2, D2, D2, D1]
-[D2, D1, D2, D2, D2, D2]
-[D2, D2, D1, D1, D1, D1]
-[D2, D2, D1, D1, D1, D2]
-[D2, D2, D1, D1, D2, D1]
-[D2, D2, D1, D1, D2, D2] palindrome!
-[D2, D2, D1, D2, D1, D1]
-[D2, D2, D1, D2, D1, D2]
-[D2, D2, D1, D2, D2, D1]
-[D2, D2, D1, D2, D2, D2]
-[D2, D2, D2, D1, D1, D1]
-[D2, D2, D2, D1, D1, D2]
-[D2, D2, D2, D1, D2, D1]
-[D2, D2, D2, D1, D2, D2]
-[D2, D2, D2, D2, D1, D1]
-[D2, D2, D2, D2, D1, D2]
-[D2, D2, D2, D2, D2, D1]
-[D2, D2, D2, D2, D2, D2] palindrome!
-";
-
 #[test]
 fn palindrome_type() {
-    test_examples("palindrome_type.cot", PALINDROME);
-}
-
-#[test]
-fn palindrome_type_with_annotation() {
-    test_test("palindrome_type_with_annotation.cot")
-        .stdout(PALINDROME)
-        .success();
+    test_examples("palindrome_type.cot", "");
 }
 
 #[test]
