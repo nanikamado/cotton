@@ -110,15 +110,19 @@ fn fmt_type_unit_with_env(
                 .iter()
                 .flat_map(|h| ts.iter().map(move |t| (h, t)))
                 .collect_vec();
-            if hts.len() == 1 {
-                let (h, tuple_rev) = hts[0];
+            fn fmt_tuple_with_id_or_as_tuple(
+                h: &std::rc::Rc<TypeUnit>,
+                tuple_rev: &[&Type],
+                imports: &Imports,
+                type_variable_decls: &FxHashMap<TypeUnit, Path>,
+            ) -> (String, OperatorContext) {
                 if let TypeUnit::Const { id } = &**h {
                     if *id
                         == TypeId::Intrinsic(
                             crate::intrinsics::IntrinsicType::Fn,
                         )
                     {
-                        let mut tuple_rev = tuple_rev.clone();
+                        let mut tuple_rev = tuple_rev.to_vec();
                         tuple_rev[1] = if let TypeMatchableRef::Variance(
                             types::Variance::Contravariant,
                             t,
@@ -143,25 +147,25 @@ fn fmt_type_unit_with_env(
                         OperatorContext::Single,
                     )
                 }
+            }
+            if hts.len() == 1 {
+                let (h, tuple_rev) = hts[0];
+                fmt_tuple_with_id_or_as_tuple(
+                    h,
+                    tuple_rev,
+                    imports,
+                    type_variable_decls,
+                )
             } else {
                 let t = format!(
                     "{}",
-                    hts.iter().format_with(" | ", |(h, t), f| {
-                        if let TypeUnit::Const { id } = &***h {
-                            let (t, t_context) =
-                                fmt_tuple(*id, t, imports, type_variable_decls);
-                            match t_context {
-                                Single | Or => f(&t),
-                                _ => f(&format_args!("({t})")),
-                            }
-                        } else {
-                            f(&fmt_tuple_as_tuple(
-                                h,
-                                t,
-                                imports,
-                                type_variable_decls,
-                            ))
-                        }
+                    hts.iter().format_with(" | ", |(h, tuple_rev), f| {
+                        f(&add_paren(fmt_tuple_with_id_or_as_tuple(
+                            h,
+                            tuple_rev,
+                            imports,
+                            type_variable_decls,
+                        )))
                     })
                 );
                 (t, Or)
@@ -175,15 +179,10 @@ fn fmt_type_unit_with_env(
             Single,
         ),
         TypeUnit::TypeLevelApply { f, a } => {
-            let (f, f_context) =
-                fmt_type_with_env(f, imports, type_variable_decls);
+            let f =
+                add_paren(fmt_type_with_env(f, imports, type_variable_decls));
             let (a, _) = fmt_type_with_env(a, imports, type_variable_decls);
-            let s = if f_context == Single {
-                format!("{f}[{a}]")
-            } else {
-                format!("({f})[{a}]")
-            };
-            (s, Single)
+            (format!("{f}[{a}]"), Single)
         }
         TypeUnit::Restrictions {
             t,
@@ -204,30 +203,28 @@ fn fmt_type_unit_with_env(
             ),
             Operator(Associativity::UnaryLeft, 0),
         ),
-        TypeUnit::Variance(Contravariant, t) => {
-            let (t, context) =
-                fmt_type_with_env(t, imports, type_variable_decls);
-            (
-                if context != Single {
-                    format!("↑({t})")
-                } else {
-                    format!("↑{t}")
-                },
-                Single,
-            )
-        }
-        TypeUnit::Variance(Invariant, t) => {
-            let (t, context) =
-                fmt_type_with_env(t, imports, type_variable_decls);
-            (
-                if context != Single {
-                    format!("=({t})")
-                } else {
-                    format!("={t}")
-                },
-                Single,
-            )
-        }
+        TypeUnit::Variance(Contravariant, t) => (
+            format!(
+                "↑{}",
+                add_paren(fmt_type_with_env(t, imports, type_variable_decls))
+            ),
+            Single,
+        ),
+        TypeUnit::Variance(Invariant, t) => (
+            format!(
+                "={}",
+                add_paren(fmt_type_with_env(t, imports, type_variable_decls))
+            ),
+            Single,
+        ),
+    }
+}
+
+fn add_paren(s: (String, OperatorContext)) -> String {
+    if s.1 != OperatorContext::Single {
+        format!("({})", s.0)
+    } else {
+        s.0
     }
 }
 
