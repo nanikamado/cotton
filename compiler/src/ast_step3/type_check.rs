@@ -210,22 +210,17 @@ pub fn type_check(
         } else {
             None
         };
-        log::debug!("name = {}", d.name);
-        let type_with_env = simplify::simplify_type(
-            &mut map,
-            ast_step2::TypeWithEnv {
-                constructor: SingleTypeConstructor {
-                    type_: t.constructor,
-                    has_annotation: type_annotation.is_some(),
-                },
-                variable_requirements: t.variable_requirements,
-                subtype_relations: t.subtype_relations,
-                pattern_restrictions: t.pattern_restrictions,
-                already_considered_relations: t.already_considered_relations,
-                fn_apply_dummies: t.fn_apply_dummies,
+        let type_with_env = ast_step2::TypeWithEnv {
+            constructor: SingleTypeConstructor {
+                type_: t.constructor,
+                has_annotation: type_annotation.is_some(),
             },
-            &mut env,
-        )?;
+            variable_requirements: t.variable_requirements,
+            subtype_relations: t.subtype_relations,
+            pattern_restrictions: t.pattern_restrictions,
+            already_considered_relations: t.already_considered_relations,
+            fn_apply_dummies: t.fn_apply_dummies,
+        };
         toplevels.push(Toplevel {
             type_with_env: type_with_env.into(),
             type_annotation,
@@ -801,7 +796,7 @@ fn resolve_scc(
             candidates_provider,
         ))
     });
-    let mut scc_type = ast_step2::TypeWithEnv {
+    let scc_type = ast_step2::TypeWithEnv {
         constructor: SccTypeConstructor(constructors.clone()),
         variable_requirements,
         subtype_relations,
@@ -809,6 +804,9 @@ fn resolve_scc(
         already_considered_relations: Default::default(),
         fn_apply_dummies: Default::default(),
     };
+    log::debug!("scc_type = {scc_type}");
+    let mut scc_type = simplify::simplify_type(map, scc_type, env)?;
+    log::debug!("scc_type simplified = {scc_type}");
     resolve_requirements_in_type_with_env(
         scc_type.variable_requirements.len(),
         &mut scc_type,
