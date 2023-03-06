@@ -1064,7 +1064,7 @@ impl Type {
     }
 
     pub fn is_wrapped_by_const(&self) -> bool {
-        self.iter().all(|t| t.is_wrapped_by_const())
+        !self.is_empty() && self.iter().all(|t| t.is_wrapped_by_const())
     }
 
     pub fn is_non_polymorphic_recursive_fn_apply(&self) -> bool {
