@@ -412,7 +412,12 @@ pub fn disclose_type_unit(
                     .flat_map(|args| {
                         debug_assert_eq!(args.len(), fields.type_parameter_len);
                         args.iter().enumerate().fold(t.clone(), |t, (i, b)| {
-                            t.replace_num(TypeVariable::RecursiveIndex(i), b)
+                            t.replace_num(
+                                TypeVariable::RecursiveIndex(
+                                    fields.type_parameter_len - 1 - i,
+                                ),
+                                b,
+                            )
                         })
                     })
                     .collect()
@@ -481,7 +486,8 @@ fn close_type_unit(
                                     .iter()
                                     .map(|f| f.type_.clone()),
                             ) {
-                                for (i, a) in parameter_table.iter().enumerate()
+                                for (i, a) in
+                                    parameter_table.iter().rev().enumerate()
                                 {
                                     field_t = field_t.replace_num(
                                         TypeVariable::RecursiveIndex(i),

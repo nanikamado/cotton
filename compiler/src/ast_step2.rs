@@ -404,7 +404,7 @@ fn collect_interface_decls<'a>(
     for d in &ast.data_decl {
         let mut type_variables = FxHashMap::default();
         for (i, ((name, _, _), _)) in
-            d.type_variables.type_variables.iter().enumerate()
+            d.type_variables.type_variables.iter().rev().enumerate()
         {
             let v = TypeVariable::RecursiveIndex(i);
             type_variables.insert(Path::from_str(module_path, name), v);
@@ -428,7 +428,7 @@ fn collect_interface_decls<'a>(
             })
             .try_collect()?;
         let type_parameter_len = d.type_variables.type_variables.len();
-        let constructed_type = (0..type_parameter_len).rev().fold(
+        let constructed_type = (0..type_parameter_len).fold(
             TypeUnit::Const {
                 id: TypeId::Intrinsic(IntrinsicType::Unit),
             }

@@ -1784,7 +1784,6 @@ pub struct Env {
 pub struct DataDecl {
     pub decl_id: DeclId,
     pub type_parameter_len: usize,
-    pub constructed_type: Type,
     pub fields: Vec<Field>,
 }
 

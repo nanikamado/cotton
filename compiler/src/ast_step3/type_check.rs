@@ -124,7 +124,6 @@ pub fn type_check(
             TypeId::DeclId(d.decl_id),
             simplify::DataDecl {
                 type_parameter_len: d.type_parameter_len,
-                constructed_type: d.constructed_type.clone(),
                 fields: d.fields.clone(),
                 decl_id: d.decl_id,
             },
