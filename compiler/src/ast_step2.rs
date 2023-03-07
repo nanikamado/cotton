@@ -7,6 +7,7 @@ mod variance;
 use self::imports::Imports;
 use self::type_alias_map::{SearchMode, TypeAliasMap};
 use self::types::{Type, TypeUnit, TypeVariable};
+use self::variance::{DummyVarianceMap, VarianceMapI};
 use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::ident_id::IdentId;
 use crate::ast_step1::name_id::Path;
@@ -19,7 +20,6 @@ use crate::intrinsics::{IntrinsicConstructor, IntrinsicType, INTRINSIC_TYPES};
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
-use parser::token_id::TokenId;
 use parser::Span;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
@@ -258,31 +258,14 @@ impl<'a> Ast<'a> {
             data_decl_map: &mut FxHashMap::default(),
             data_decls: &mut data_decls,
         };
-        let mut variance_map =
-            collect_decls(ast, Path::root(), &mut env, &mut variable_decls)?;
+        collect_decls(ast, Path::root(), &mut env, &mut variable_decls)?;
         let entry_point = variable_decls
             .iter()
             .find(|d| d.name == Path::from_str(Path::pkg_root(), "main"))
             .map(|d| d.decl_id);
         Ok(Self {
             variable_decl: variable_decls,
-            data_decl: data_decls
-                .into_values()
-                .map(|mut d| {
-                    d.fields = d
-                        .fields
-                        .into_iter()
-                        .map(|mut f| {
-                            f.type_ =
-                                variance_map.add_variance_to_type(f.type_);
-                            f
-                        })
-                        .collect();
-                    d.constructed_type =
-                        variance_map.add_variance_to_type(d.constructed_type);
-                    d
-                })
-                .collect(),
+            data_decl: data_decls.into_values().collect(),
             entry_point,
         })
     }
@@ -293,18 +276,13 @@ fn collect_decls<'a>(
     module_path: ModulePath,
     env: &mut Env<'_, 'a>,
     variable_decls: &mut Vec<VariableDecl<'a>>,
-) -> Result<VarianceMap, CompileError> {
+) -> Result<(), CompileError> {
     collect_data_and_type_alias_decls(&ast, module_path, env)?;
-    debug_assert!(env.data_decl_map.is_empty());
     let mut union_of_fields = FxHashMap::default();
-    let mut interface_decls = Vec::new();
-    collect_interface_decls(
-        &ast,
-        module_path,
-        env,
-        &mut interface_decls,
-        &mut union_of_fields,
-    )?;
+    collect_union_of_fields(&ast, module_path, env, &mut union_of_fields)?;
+    debug_assert!(env.data_decl_map.is_empty());
+    let mut variance_map = VarianceMap::new(union_of_fields);
+    collect_interface_decls(&ast, module_path, env, &mut variance_map)?;
     env.data_decl_map
         .extend(env.data_decls.iter().map(|(_, d)| (d.name, d.decl_id)));
     {
@@ -314,25 +292,6 @@ fn collect_decls<'a>(
                 .map(|(_, d)| (TypeId::DeclId(d.decl_id), d.name)),
         );
     }
-    let mut variance_map = VarianceMap::new(union_of_fields);
-    env.interface_decls.extend(interface_decls.into_iter().map(
-        |(name, variables)| {
-            (
-                name,
-                variables
-                    .into_iter()
-                    .map(|(name, t, v)| {
-                        let vt = variance_map.add_variance_to_type(t.clone());
-                        env.token_map.insert(
-                            name.2,
-                            TokenMapEntry::VariableDeclInInterface(vt),
-                        );
-                        (name.0, t, v)
-                    })
-                    .collect(),
-            )
-        },
-    ));
     collect_variable_decls(
         ast,
         module_path,
@@ -340,7 +299,7 @@ fn collect_decls<'a>(
         env,
         &mut variance_map,
     )?;
-    Ok(variance_map)
+    Ok(())
 }
 
 fn collect_data_and_type_alias_decls<'a>(
@@ -401,15 +360,10 @@ fn collect_data_and_type_alias_decls<'a>(
     Ok(())
 }
 
-#[allow(clippy::type_complexity)]
-fn collect_interface_decls<'a>(
+fn collect_union_of_fields<'a>(
     ast: &ast_step1::Ast<'a>,
     module_path: ModulePath,
     env: &mut Env<'a, '_>,
-    interface_decls: &mut Vec<(
-        Path,
-        Vec<((&'a str, Option<Span>, Option<TokenId>), Type, TypeVariable)>,
-    )>,
     union_of_fields: &mut FxHashMap<TypeId, Type>,
 ) -> Result<(), CompileError> {
     for d in &ast.data_decl {
@@ -421,6 +375,40 @@ fn collect_interface_decls<'a>(
             type_variables.insert(Path::from_str(module_path, name), v);
         }
         let mut uof = Type::default();
+        for f in &d.fields {
+            let type_ = type_to_type(
+                &f.type_,
+                module_path,
+                &type_variables,
+                SearchMode::Normal,
+                env,
+                &mut DummyVarianceMap,
+            )?;
+            uof.union_in_place(type_.clone());
+        }
+        union_of_fields.insert(TypeId::DeclId(d.decl_id), uof);
+    }
+    for m in &ast.modules {
+        collect_union_of_fields(&m.ast, m.name, env, union_of_fields)?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::type_complexity)]
+fn collect_interface_decls<'a>(
+    ast: &ast_step1::Ast<'a>,
+    module_path: ModulePath,
+    env: &mut Env<'a, '_>,
+    variance_map: &mut VarianceMap,
+) -> Result<(), CompileError> {
+    for d in &ast.data_decl {
+        let mut type_variables = FxHashMap::default();
+        for (i, ((name, _, _), _)) in
+            d.type_variables.type_variables.iter().enumerate()
+        {
+            let v = TypeVariable::RecursiveIndex(i);
+            type_variables.insert(Path::from_str(module_path, name), v);
+        }
         let fields: Vec<_> = d
             .fields
             .iter()
@@ -431,15 +419,14 @@ fn collect_interface_decls<'a>(
                     &type_variables,
                     SearchMode::Normal,
                     env,
+                    variance_map,
                 )?;
-                uof.union_in_place(type_.clone());
                 Ok(Field {
                     type_,
                     name: f.name,
                 })
             })
             .try_collect()?;
-        union_of_fields.insert(TypeId::DeclId(d.decl_id), uof);
         let type_parameter_len = d.type_variables.type_variables.len();
         let constructed_type = (0..type_parameter_len).rev().fold(
             TypeUnit::Const {
@@ -447,11 +434,25 @@ fn collect_interface_decls<'a>(
             }
             .into(),
             |acc, v| {
-                TypeUnit::Tuple(
-                    TypeUnit::Variable(TypeVariable::RecursiveIndex(v)).into(),
-                    acc,
-                )
-                .into()
+                let co = variance_map.type_has_arg_in_covariant_position(
+                    TypeId::DeclId(d.decl_id),
+                    type_parameter_len - 1 - v,
+                );
+                let contra = variance_map
+                    .type_has_arg_in_contravariant_position(
+                        TypeId::DeclId(d.decl_id),
+                        type_parameter_len - 1 - v,
+                    );
+                let a: Type =
+                    TypeUnit::Variable(TypeVariable::RecursiveIndex(v)).into();
+                let a = if contra && co {
+                    TypeUnit::Variance(types::Variance::Invariant, a).into()
+                } else if contra {
+                    TypeUnit::Variance(types::Variance::Contravariant, a).into()
+                } else {
+                    a
+                };
+                TypeUnit::Tuple(a, acc).into()
             },
         );
         let d = DataDecl {
@@ -496,20 +497,20 @@ fn collect_interface_decls<'a>(
                         data_decl_map: env.data_decl_map,
                         data_decls: env.data_decls,
                     },
+                    variance_map,
                 )?;
-                Ok((name.clone(), t, self_))
+                env.token_map.insert(
+                    name.2,
+                    TokenMapEntry::VariableDeclInInterface(t.clone()),
+                );
+                Ok((name.0, t, self_))
             })
             .try_collect()?;
-        interface_decls.push((name, variables));
+        env.interface_decls.insert(name, variables);
+        // interface_decls.push((name, variables));
     }
     for m in &ast.modules {
-        collect_interface_decls(
-            &m.ast,
-            m.name,
-            env,
-            interface_decls,
-            union_of_fields,
-        )?;
+        collect_interface_decls(&m.ast, m.name, env, variance_map)?;
     }
     Ok(())
 }
@@ -531,40 +532,35 @@ fn collect_variable_decls<'a>(
     env: &mut Env<'_, '_>,
     variance_map: &mut VarianceMap,
 ) -> Result<(), CompileError> {
-    variable_decls.extend(
-        ast.variable_decl
-            .into_iter()
-            .map(|d| -> Result<VariableDecl<'a>, CompileError> {
-                let WithFlatMapEnv {
-                    value:
-                        VariableDecl {
-                            value,
-                            name,
-                            type_annotation,
-                            decl_id,
-                            span,
-                        },
-                    env: flat_map_env,
-                } = variable_decl(
-                    d,
-                    module_path,
-                    env,
-                    &Default::default(),
-                    variance_map,
-                )?;
-                Ok(VariableDecl {
-                    value: catch_flat_map(WithFlatMapEnv {
-                        value,
-                        env: flat_map_env,
-                    })?,
+    for d in ast.variable_decl {
+        let WithFlatMapEnv {
+            value:
+                VariableDecl {
+                    value,
                     name,
                     type_annotation,
                     decl_id,
                     span,
-                })
-            })
-            .collect::<Result<Vec<_>, CompileError>>()?,
-    );
+                },
+            env: flat_map_env,
+        } = variable_decl(
+            d,
+            module_path,
+            env,
+            &Default::default(),
+            variance_map,
+        )?;
+        variable_decls.push(VariableDecl {
+            value: catch_flat_map(WithFlatMapEnv {
+                value,
+                env: flat_map_env,
+            })?,
+            name,
+            type_annotation,
+            decl_id,
+            span,
+        })
+    }
     for m in ast.modules {
         collect_variable_decls(
             m.ast,
@@ -641,13 +637,14 @@ fn variable_decl<'a>(
                         .push(Path::from_str(module_path, &parameter.0));
                     tr = body;
                 }
-                let t = variance_map.add_variance_to_type(type_to_type(
+                let t = type_to_type(
                     &t,
                     module_path,
                     type_variable_names,
                     SearchMode::Normal,
                     env,
-                )?);
+                    variance_map,
+                )?;
                 let mut fixed_parameter_names = FxHashMap::default();
                 let r = t.clone().remove_parameters();
                 let mut fixed_t = r.fixed_type;
@@ -950,13 +947,14 @@ fn expr<'a>(
         ast_step1::Expr::TypeAnnotation(e, t) => {
             let e =
                 expr(*e, module_path, type_variable_names, env, variance_map)?;
-            let t = variance_map.add_variance_to_type(type_to_type(
+            let t = type_to_type(
                 &t,
                 module_path,
                 type_variable_names,
                 SearchMode::Normal,
                 env,
-            )?);
+                variance_map,
+            )?;
             (e.env, Expr::TypeAnnotation(Box::new(e.value), t))
         }
     };
@@ -1163,13 +1161,14 @@ fn pattern<'a>(
         }
         ast_step1::Pattern::Underscore => Underscore.into(),
         ast_step1::Pattern::TypeRestriction(p, t) => {
-            let t = variance_map.add_variance_to_type(type_to_type(
+            let t = type_to_type(
                 &t,
                 module_path,
                 &Default::default(),
                 SearchMode::Normal,
                 env,
-            )?);
+                variance_map,
+            )?;
             let p = pattern(
                 *p,
                 span,
@@ -1298,6 +1297,7 @@ fn type_to_type(
     type_variable_names: &FxHashMap<Path, TypeVariable>,
     search_type: SearchMode,
     env: &mut Env<'_, '_>,
+    variance_map: &mut impl VarianceMapI,
 ) -> Result<Type, CompileError> {
     Ok(match t {
         ast_step1::Type::Ident(p) => {
@@ -1344,14 +1344,36 @@ fn type_to_type(
                         imports::ConstOrAlias::Const(id, parameter_len) => {
                             let mut tuple = Type::label_from_str("()");
                             for i in 0..parameter_len {
-                                tuple = TypeUnit::Tuple(
-                                    TypeUnit::Variable(
-                                        TypeVariable::RecursiveIndex(i),
-                                    )
-                                    .into(),
-                                    tuple,
+                                let co = variance_map
+                                    .type_has_arg_in_covariant_position(
+                                        id,
+                                        parameter_len - 1 - i,
+                                    );
+                                let contra = variance_map
+                                    .type_has_arg_in_contravariant_position(
+                                        id,
+                                        parameter_len - 1 - i,
+                                    );
+                                let a: Type = TypeUnit::Variable(
+                                    TypeVariable::RecursiveIndex(i),
                                 )
                                 .into();
+                                let a = if contra && co {
+                                    TypeUnit::Variance(
+                                        types::Variance::Invariant,
+                                        a,
+                                    )
+                                    .into()
+                                } else if contra {
+                                    TypeUnit::Variance(
+                                        types::Variance::Contravariant,
+                                        a,
+                                    )
+                                    .into()
+                                } else {
+                                    a
+                                };
+                                tuple = TypeUnit::Tuple(a, tuple).into();
                             }
                             env.token_map.insert(
                                 p.path.last().unwrap().2,
@@ -1375,6 +1397,7 @@ fn type_to_type(
                                 } else {
                                     SearchMode::AliasSub
                                 },
+                                variance_map,
                             )?
                             .unwrap(),
                     }
@@ -1388,6 +1411,7 @@ fn type_to_type(
                 type_variable_names,
                 search_type,
                 env,
+                variance_map,
             )?;
             let a = type_to_type(
                 a,
@@ -1395,6 +1419,7 @@ fn type_to_type(
                 type_variable_names,
                 search_type,
                 env,
+                variance_map,
             )?;
             f.type_level_function_apply(a)
         }
@@ -1418,7 +1443,10 @@ fn type_to_type(
                     &path.path,
                     env.token_map,
                 )?;
-                for (name, t, self_) in &env.interface_decls[&name] {
+                // TODO: assert!(env.interface_decls.contains_key(&name));
+                for (name, t, self_) in
+                    env.interface_decls.get(&name).iter().flat_map(|v| v.iter())
+                {
                     variable_requirements.push((
                         name.to_string(),
                         t.clone()
@@ -1435,6 +1463,7 @@ fn type_to_type(
                 &type_variable_names,
                 search_type,
                 env,
+                variance_map,
             )?;
             let body = if variable_requirements.is_empty() {
                 body
@@ -1463,6 +1492,7 @@ fn type_to_type(
                 &type_variable_names,
                 search_type,
                 env,
+                variance_map,
             )?;
             TypeUnit::TypeLevelFn(body.replace_num(
                 v,
@@ -1702,10 +1732,10 @@ pub fn collect_tuple_rev(tuple: &Type) -> Vec<Vec<&Type>> {
 
 impl Display for PatternRestriction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(
+        write!(
             f,
-            "({}) = pat[{}] ({:?}){}",
-            self.type_.iter().map(|a| format!("{a}")).join(", "),
+            "{} = pat[{}] ({:?}){}",
+            self.type_,
             self.pattern
                 .iter()
                 .map(|(p, _)| format!("({p})"))

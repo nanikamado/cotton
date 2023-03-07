@@ -1,5 +1,6 @@
 use super::imports::Imports;
 use super::types::{Type, TypeUnit, TypeVariable};
+use super::variance::VarianceMapI;
 use super::{Env, ModulePath};
 use crate::ast_step1::name_id::Path;
 use crate::ast_step1::token_map::{TokenMap, TokenMapEntry};
@@ -39,6 +40,7 @@ impl<'a> Env<'a, '_> {
         name: (Path, Option<TokenId>),
         type_variable_names: &FxHashMap<Path, TypeVariable>,
         search_type: SearchMode,
+        variance_map: &mut impl VarianceMapI,
     ) -> Result<Option<Type>, CompileError> {
         if let Some(t) = type_variable_names.get(&name.0) {
             self.token_map.insert(name.1, TokenMapEntry::TypeAlias);
@@ -62,6 +64,7 @@ impl<'a> Env<'a, '_> {
                     &type_variable_names,
                     search_type,
                     self,
+                    variance_map,
                 )?;
                 self.token_map.insert(name.1, TokenMapEntry::TypeAlias);
                 let t = if t.contains_variable(v) {

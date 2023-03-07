@@ -83,13 +83,15 @@ impl TypeVariableMap {
                         for b in bs.iter() {
                             if let TypeUnit::Tuple(b, _) = &**b
                             {
-                                debug_assert!(matches!(
-                                    b.matchable_ref(),
-                                    TypeMatchableRef::Variance(
-                                        ast_step2::types::Variance::Contravariant,
-                                        _
-                                    )
-                                ))
+                                for b in b.iter() {
+                                    debug_assert!(matches!(
+                                        **b,
+                                        TypeUnit::Variance(
+                                            ast_step2::types::Variance::Contravariant,
+                                            _
+                                        )
+                                    ))
+                                }
                             } else {
                                 panic!()
                             }
@@ -804,6 +806,7 @@ fn _simplify_type<T: TypeConstructor>(
     ) in t.pattern_restrictions.iter().enumerate()
     {
         if pattern.len() == 1
+            && !ts.is_empty()
             && ts
                 .clone()
                 .arguments_from_argument_tuple()
@@ -1158,11 +1161,6 @@ pub fn simplify_subtype_rel(
                 )
                 .map_err(add_reason)?;
                 Ok(r)
-            }
-            (Variance(_, _), a) | (a, Variance(_, _))
-                if Type::from(a.clone()).is_wrapped_by_const() =>
-            {
-                panic!("{sub} < {sup}")
             }
             (Tuple(..), Const { .. })
             | (Const { .. }, Tuple(..))
