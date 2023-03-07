@@ -1,7 +1,7 @@
 fib : I64 -> I64 =
     | 0 => 0
     | 1 => 1
-    | n => fib(n - 1) + fib(n - 2)
+    | n => (n - 1).fib + (n - 2).fib
 
 main : () -> () =
     | () => 10.fib.println
