@@ -983,32 +983,6 @@ fn _simplify_type<T: TypeConstructor>(
         if try_eq_sub(map, &mut t) {
             return Ok((t, true));
         }
-        log::trace!("t{{17}} = {}", t);
-        let mut r = SubtypeRelations::default();
-        for (a, b, origin) in t.subtype_relations {
-            if !matches!(a.matchable_ref(), TypeMatchableRef::Variable(_)) {
-                let (bs, vs): (Vec<_>, Vec<_>) = b
-                    .into_iter()
-                    .map(|b| {
-                        if matches!(*b, TypeUnit::Variable(_)) {
-                            Err(b)
-                        } else {
-                            Ok(b)
-                        }
-                    })
-                    .partition_result();
-                if !bs.is_empty() && !vs.is_empty() {
-                    r.insert((a, vs.into_iter().collect(), origin));
-                    t.subtype_relations = r;
-                    return Ok((t, true));
-                } else {
-                    r.insert((a, bs.into_iter().chain(vs).collect(), origin));
-                }
-            } else {
-                r.insert((a, b, origin));
-            }
-        }
-        t.subtype_relations = r;
         // let mut bounded_v = None;
         // for (a, b) in &t.subtype_relations {
         //     if let TypeMatchableRef::Variable(v) = b.matchable_ref() {
