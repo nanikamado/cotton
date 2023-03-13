@@ -20,7 +20,7 @@ impl TypeUnit {
             TypeUnit::Const { .. } | TypeUnit::Any => Vec::new(),
             TypeUnit::Tuple(a, b) => a
                 .all_type_variables_iter()
-                .chain(b.all_type_variables_iter().into_iter())
+                .chain(b.all_type_variables_iter())
                 .collect(),
             TypeUnit::TypeLevelFn(f) => f
                 .all_type_variables_iter()
