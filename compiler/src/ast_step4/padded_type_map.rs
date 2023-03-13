@@ -1,6 +1,6 @@
 use super::{LinkedType, LinkedTypeUnit, Type};
-use crate::ast_step1::name_id::Path;
-use crate::ast_step2::{get_type_name, TypeId};
+use crate::ast_step2::TypeId;
+use crate::intrinsics::IntrinsicType;
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use std::convert::TryInto;
@@ -12,13 +12,11 @@ pub struct TypePointer(usize);
 
 #[derive(Debug, PartialEq, Clone)]
 struct NormalType {
-    name: Path,
     args: Vec<TypePointer>,
 }
 
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct TypeMap {
-    function: Option<(TypePointer, TypePointer)>,
     normals: FxHashMap<TypeId, NormalType>,
 }
 
@@ -50,16 +48,6 @@ impl PaddedTypeMap {
             if let (Node::Terminal(a_t), Node::Terminal(b_t)) =
                 (&mut self.map[a.0], b_t)
             {
-                match (a_t.function, b_t.function) {
-                    (Some((a1, a2)), Some((b1, b2))) => {
-                        pairs.push((a1, b1));
-                        pairs.push((a2, b2));
-                    }
-                    (_, Some(b)) => {
-                        a_t.function = Some(b);
-                    }
-                    _ => (),
-                }
                 for (b_id, b_normal) in b_t.normals {
                     if let Some(a_normal) = a_t.normals.get(&b_id) {
                         for (a, b) in a_normal.args.iter().zip(b_normal.args) {
@@ -85,11 +73,18 @@ impl PaddedTypeMap {
         ret: TypePointer,
     ) {
         let t = self.dereference_mut(p);
-        if let Some((a, b)) = t.function {
-            self.union(a, arg);
-            self.union(b, ret);
+        if let Some(f) = t.normals.get(&TypeId::Intrinsic(IntrinsicType::Fn)) {
+            let f_0 = f.args[0];
+            let f_1 = f.args[1];
+            self.union(f_0, arg);
+            self.union(f_1, ret);
         } else {
-            t.function = Some((arg, ret));
+            t.normals.insert(
+                TypeId::Intrinsic(IntrinsicType::Fn),
+                NormalType {
+                    args: vec![arg, ret],
+                },
+            );
         }
     }
 
@@ -103,13 +98,7 @@ impl PaddedTypeMap {
         let abs = if let Some(t) = t.normals.get(&id) {
             t.args.iter().copied().zip(args).collect_vec()
         } else {
-            t.normals.insert(
-                id,
-                NormalType {
-                    name: get_type_name(id).unwrap(),
-                    args,
-                },
-            );
+            t.normals.insert(id, NormalType { args });
             return;
         };
         for (a, b) in abs {
@@ -133,7 +122,9 @@ impl PaddedTypeMap {
     pub fn get_fn(&mut self, p: TypePointer) -> (TypePointer, TypePointer) {
         let p = self.find(p);
         if let Node::Terminal(t) = &self.map[p.0] {
-            t.function
+            t.normals
+                .get(&TypeId::Intrinsic(IntrinsicType::Fn))
+                .map(|f| (f.args[0], f.args[1]))
         } else {
             panic!()
         }
@@ -186,12 +177,8 @@ impl PaddedTypeMap {
         trace.insert(p);
         let t = if let Node::Terminal(type_map) = &self.map[p.0] {
             let mut t = Vec::default();
-            if let Some((a, b)) = type_map.function {
-                t.push(LinkedTypeUnit::Fn(a, b));
-            }
             for (type_id, normal_type) in &type_map.normals {
                 let n = LinkedTypeUnit::Normal {
-                    name: normal_type.name,
                     id: *type_id,
                     args: normal_type.args.clone(),
                 };
@@ -200,13 +187,8 @@ impl PaddedTypeMap {
             LinkedType(
                 t.into_iter()
                     .map(|t| match t {
-                        LinkedTypeUnit::Fn(a, b) => LinkedTypeUnit::Fn(
-                            self.get_type_rec(a, replace_map, trace.clone()),
-                            self.get_type_rec(b, replace_map, trace.clone()),
-                        ),
-                        LinkedTypeUnit::Normal { name, id, args } => {
+                        LinkedTypeUnit::Normal { id, args } => {
                             LinkedTypeUnit::Normal {
-                                name,
                                 id,
                                 args: args
                                     .into_iter()
@@ -273,14 +255,6 @@ impl PaddedTypeMap {
         replace_map.insert(p, new_p);
         let t = self.dereference(p).clone();
         let t = Node::Terminal(TypeMap {
-            function: t.function.map(|(a, b)| {
-                let a = self.find(a);
-                let b = self.find(b);
-                (
-                    self.clone_pointer_rec(a, replace_map),
-                    self.clone_pointer_rec(b, replace_map),
-                )
-            }),
             normals: t
                 .normals
                 .iter()
@@ -288,7 +262,6 @@ impl PaddedTypeMap {
                     (
                         *id,
                         NormalType {
-                            name: t.name,
                             args: t
                                 .args
                                 .iter()

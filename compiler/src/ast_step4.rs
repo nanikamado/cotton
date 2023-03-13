@@ -94,12 +94,7 @@ struct LinkedType(BTreeSet<LinkedTypeUnit>);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 enum LinkedTypeUnit<T = LinkedType> {
-    Normal {
-        name: Path,
-        id: TypeId,
-        args: Vec<T>,
-    },
-    Fn(T, T),
+    Normal { id: TypeId, args: Vec<T> },
     RecursionPoint,
     RecursiveAlias(LinkedType),
     Pointer(TypePointer),
@@ -110,12 +105,7 @@ pub struct Type(BTreeSet<TypeUnit>);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum TypeUnit {
-    Normal {
-        name: Path,
-        id: TypeId,
-        args: Vec<Type>,
-    },
-    Fn(Type, Type),
+    Normal { id: TypeId, args: Vec<Type> },
     RecursiveAlias(Type),
     RecursionPoint,
 }
@@ -130,15 +120,12 @@ impl TryFrom<LinkedType> for Type {
                 .0
                 .into_iter()
                 .map(|t| match t {
-                    LinkedTypeUnit::Normal { name, id, args } => {
+                    LinkedTypeUnit::Normal { id, args } => {
                         let args = args
                             .into_iter()
                             .map(Type::try_from)
                             .collect::<Result<_, _>>()?;
-                        Ok(Normal { name, id, args })
-                    }
-                    LinkedTypeUnit::Fn(a, b) => {
-                        Ok(Fn(a.try_into()?, b.try_into()?))
+                        Ok(Normal { id, args })
                     }
                     LinkedTypeUnit::RecursionPoint => Ok(RecursionPoint),
                     LinkedTypeUnit::RecursiveAlias(a) => {
@@ -193,14 +180,7 @@ impl LinkedType {
                     t.extend(to.0.iter().cloned());
                     replaced = true;
                 }
-                LinkedTypeUnit::Fn(a, b) => {
-                    let (a, r) = a.replace_pointer(from, to);
-                    replaced |= r;
-                    let (b, r) = b.replace_pointer(from, to);
-                    replaced |= r;
-                    t.insert(LinkedTypeUnit::Fn(a, b));
-                }
-                LinkedTypeUnit::Normal { name, id, args } => {
+                LinkedTypeUnit::Normal { id, args } => {
                     let args = args
                         .into_iter()
                         .map(|arg| {
@@ -209,7 +189,7 @@ impl LinkedType {
                             arg
                         })
                         .collect();
-                    t.insert(LinkedTypeUnit::Normal { name, id, args });
+                    t.insert(LinkedTypeUnit::Normal { id, args });
                 }
                 LinkedTypeUnit::RecursiveAlias(u) => {
                     let (u, r) = u.replace_pointer(from, to);
@@ -666,20 +646,27 @@ impl Display for Type {
 impl Display for TypeUnit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TypeUnit::Normal { name, args, .. } => {
-                if args.is_empty() {
-                    write!(f, "{name}")
+            TypeUnit::Normal { args, id } => {
+                if *id == TypeId::Intrinsic(IntrinsicType::Fn) {
+                    let a = &args[0];
+                    let b = &args[1];
+                    if a.0.len() == 1
+                        && matches!(
+                            a.0.iter().next().unwrap(),
+                            TypeUnit::Normal {
+                                id: TypeId::Intrinsic(IntrinsicType::Fn),
+                                ..
+                            }
+                        )
+                    {
+                        write!(f, "({a}) -> {b}")
+                    } else {
+                        write!(f, "{a} -> {b}")
+                    }
+                } else if args.is_empty() {
+                    write!(f, "{id}")
                 } else {
-                    write!(f, "{}[{}]", name, args.iter().format(", "))
-                }
-            }
-            TypeUnit::Fn(a, b) => {
-                if a.0.len() == 1
-                    && matches!(a.0.iter().next().unwrap(), TypeUnit::Fn(_, _))
-                {
-                    write!(f, "({a}) -> {b}")
-                } else {
-                    write!(f, "{a} -> {b}")
+                    write!(f, "{}[{}]", id, args.iter().format(", "))
                 }
             }
             TypeUnit::RecursiveAlias(t) => write!(f, "rec[{t}]"),

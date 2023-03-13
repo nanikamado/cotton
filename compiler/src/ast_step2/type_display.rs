@@ -123,14 +123,12 @@ fn fmt_type_unit_with_env(
                         )
                     {
                         let mut tuple_rev = tuple_rev.to_vec();
-                        tuple_rev[1] = if let TypeMatchableRef::Variance(
+                        if let TypeMatchableRef::Variance(
                             types::Variance::Contravariant,
                             t,
                         ) = tuple_rev[1].matchable_ref()
                         {
-                            t
-                        } else {
-                            panic!()
+                            tuple_rev[1] = t
                         };
                         fmt_tuple(*id, &tuple_rev, imports, type_variable_decls)
                     } else {
