@@ -3,8 +3,7 @@ mod padded_type_map;
 pub use self::padded_type_map::{PaddedTypeMap, TypePointer};
 use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::name_id::Path;
-use crate::ast_step2::types::TypeMatchableRef;
-use crate::ast_step2::{self, types, ConstructorId, TypeId};
+use crate::ast_step2::{types, ConstructorId, TypeId};
 use crate::ast_step3::{self, DataDecl, VariableId};
 use crate::intrinsics::{
     IntrinsicConstructor, IntrinsicType, IntrinsicVariable,
@@ -14,7 +13,7 @@ use itertools::Itertools;
 use std::collections::BTreeSet;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::Display;
-use std::iter;
+use std::iter::{self, once};
 use strum::IntoEnumIterator;
 
 /// Difference between `ast_step3::Ast` and `ast_step4::Ast`:
@@ -98,6 +97,7 @@ enum LinkedTypeUnit<T = LinkedType> {
     RecursionPoint,
     RecursiveAlias(LinkedType),
     Pointer(TypePointer),
+    LambdaId(LambdaId),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Clone)]
@@ -106,8 +106,17 @@ pub struct Type(BTreeSet<TypeUnit>);
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum TypeUnit {
     Normal { id: TypeId, args: Vec<Type> },
+    Fn(BTreeSet<LambdaId>, Type, Type),
     RecursiveAlias(Type),
     RecursionPoint,
+    LambdaId(LambdaId),
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+pub enum LambdaId {
+    Normal(u32),
+    IntrinsicVariable(IntrinsicVariable, u32),
+    Constructor(ConstructorId, u32),
 }
 
 impl TryFrom<LinkedType> for Type {
@@ -120,6 +129,30 @@ impl TryFrom<LinkedType> for Type {
                 .0
                 .into_iter()
                 .map(|t| match t {
+                    LinkedTypeUnit::Normal {
+                        id: TypeId::Intrinsic(IntrinsicType::Fn),
+                        args,
+                    } => {
+                        debug_assert_eq!(args.len(), 3);
+                        let mut args = args.into_iter();
+                        let a = args.next().unwrap().try_into()?;
+                        let b = args.next().unwrap().try_into()?;
+                        let lambda_id = args
+                            .next()
+                            .unwrap()
+                            .0
+                            .iter()
+                            .map(|id| {
+                                if let LinkedTypeUnit::LambdaId(lambda_id) = id
+                                {
+                                    *lambda_id
+                                } else {
+                                    panic!()
+                                }
+                            })
+                            .collect();
+                        Ok(Fn(lambda_id, a, b))
+                    }
                     LinkedTypeUnit::Normal { id, args } => {
                         let args = args
                             .into_iter()
@@ -132,9 +165,22 @@ impl TryFrom<LinkedType> for Type {
                         Ok(RecursiveAlias(a.try_into()?))
                     }
                     LinkedTypeUnit::Pointer(_) => Err(()),
+                    LinkedTypeUnit::LambdaId(l) => Ok(LambdaId(l)),
                 })
                 .collect::<Result<_, _>>()?,
         ))
+    }
+}
+
+impl From<TypeUnit> for Type {
+    fn from(value: TypeUnit) -> Self {
+        Self(once(value).collect())
+    }
+}
+
+impl FromIterator<TypeUnit> for Type {
+    fn from_iter<T: IntoIterator<Item = TypeUnit>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
     }
 }
 
@@ -142,14 +188,18 @@ impl Ast {
     pub fn from(ast: ast_step3::Ast) -> Self {
         let mut memo = VariableMemo::new(ast.variable_decl, &ast.data_decl);
         for d in IntrinsicVariable::iter() {
-            let p = memo.type_map.new_pointer();
-            unify_type_with_ast_sep2_type(&d.to_type(), p, &mut memo.type_map);
+            let p = unify_type_pointer_with_type(
+                &d.to_runtime_type(),
+                &mut memo.type_map,
+            );
             memo.intrinsic_variables
                 .insert(VariableId::IntrinsicVariable(d), p);
         }
         for d in IntrinsicConstructor::iter() {
-            let p = memo.type_map.new_pointer();
-            unify_type_with_ast_sep2_type(&d.to_type(), p, &mut memo.type_map);
+            let p = unify_type_pointer_with_type(
+                &d.to_runtime_type(),
+                &mut memo.type_map,
+            );
             memo.intrinsic_variables
                 .insert(VariableId::IntrinsicConstructor(d), p);
         }
@@ -218,6 +268,7 @@ struct VariableMemo<'b> {
     pub global_variables_step4: FxHashMap<DeclId, ast_step3::VariableDecl<'b>>,
     pub global_variables_done: Vec<VariableDecl<TypePointer>>,
     pub data_decls: FxHashMap<DeclId, &'b ast_step3::DataDecl>,
+    pub lambda_number: u32,
 }
 
 impl<'b> VariableMemo<'b> {
@@ -235,6 +286,7 @@ impl<'b> VariableMemo<'b> {
                 .collect(),
             global_variables_done: Default::default(),
             data_decls: data_decls.iter().map(|d| (d.decl_id, d)).collect(),
+            lambda_number: 0,
         }
     }
 
@@ -282,10 +334,18 @@ impl<'b> VariableMemo<'b> {
     ) -> Expr<TypePointer> {
         match e {
             ast_step3::Expr::Lambda(arms) => {
+                let n = self.lambda_number;
+                self.lambda_number += 1;
                 let arms = arms
                     .into_iter()
                     .map(|arm| {
-                        self.fn_arm(arm, local_variables, type_pointer, trace)
+                        self.fn_arm(
+                            arm,
+                            local_variables,
+                            type_pointer,
+                            n,
+                            trace,
+                        )
                     })
                     .collect();
                 Expr::Lambda(arms)
@@ -312,7 +372,7 @@ impl<'b> VariableMemo<'b> {
             } => {
                 let p = make_constructor_type(
                     self.data_decls[&d].field_len,
-                    TypeId::DeclId(d),
+                    d,
                     &mut self.type_map,
                 );
                 self.type_map.union(type_pointer, p);
@@ -391,7 +451,7 @@ impl<'b> VariableMemo<'b> {
             ast_step3::Expr::Call(f, a) => {
                 let f_t = self.type_map.new_pointer();
                 let a_t = self.type_map.new_pointer();
-                let (para, ret) = self.type_map.get_fn(f_t);
+                let (para, ret, _fn_id) = self.type_map.get_fn(f_t);
                 let f = self.expr(f.0, f_t, local_variables, trace);
                 let a = self.expr(a.0, a_t, local_variables, trace);
                 self.type_map.union(a_t, para);
@@ -417,13 +477,19 @@ impl<'b> VariableMemo<'b> {
         arm: ast_step3::FnArm,
         local_variables: &FxHashMap<VariableId, TypePointer>,
         mut type_pointer: TypePointer,
+        lambda_num: u32,
         trace: &FxHashMap<VariableId, TypePointer>,
     ) -> FnArm {
         let mut local_variables = local_variables.clone();
         let mut pattern = Vec::new();
-        for p in arm.pattern {
+        for (i, p) in arm.pattern.into_iter().enumerate() {
             let arg;
-            (arg, type_pointer) = self.type_map.get_fn(type_pointer);
+            let fn_id;
+            (arg, type_pointer, fn_id) = self.type_map.get_fn(type_pointer);
+            self.type_map.insert_lambda_id(
+                fn_id,
+                LambdaId::Normal(lambda_num + i as u32),
+            );
             pattern.push(self.unify_type_with_pattern(
                 arg,
                 &p,
@@ -602,21 +668,26 @@ impl<'b> VariableMemo<'b> {
 
 fn make_constructor_type(
     field_len: usize,
-    id: TypeId,
+    id: DeclId,
     map: &mut PaddedTypeMap,
 ) -> TypePointer {
     let r = map.new_pointer();
     let mut args = Vec::new();
     let mut f = r;
-    for _ in 0..field_len {
+    for i in (0..field_len).rev() {
         let p = map.new_pointer();
         args.push(p);
         let f_old = f;
         f = map.new_pointer();
-        map.insert_function(f, p, f_old);
+        let fn_id = map.new_lambda_id_pointer();
+        map.insert_lambda_id(
+            fn_id,
+            LambdaId::Constructor(ConstructorId::DeclId(id), i as u32),
+        );
+        map.insert_function(f, p, f_old, fn_id);
     }
     args.reverse();
-    map.insert_normal(r, id, args.clone());
+    map.insert_normal(r, TypeId::DeclId(id), args.clone());
     f
 }
 
@@ -629,7 +700,8 @@ fn insert_accessor_type(
 ) {
     let args = (0..field_len).map(|_| map.new_pointer()).collect_vec();
     let t = map.new_pointer();
-    map.insert_function(p, t, args[field]);
+    let fn_id = map.new_lambda_id_pointer();
+    map.insert_function(p, t, args[field], fn_id);
     map.insert_normal(t, id, args);
 }
 
@@ -647,23 +719,8 @@ impl Display for TypeUnit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TypeUnit::Normal { args, id } => {
-                if *id == TypeId::Intrinsic(IntrinsicType::Fn) {
-                    let a = &args[0];
-                    let b = &args[1];
-                    if a.0.len() == 1
-                        && matches!(
-                            a.0.iter().next().unwrap(),
-                            TypeUnit::Normal {
-                                id: TypeId::Intrinsic(IntrinsicType::Fn),
-                                ..
-                            }
-                        )
-                    {
-                        write!(f, "({a}) -> {b}")
-                    } else {
-                        write!(f, "{a} -> {b}")
-                    }
-                } else if args.is_empty() {
+                debug_assert_ne!(*id, TypeId::Intrinsic(IntrinsicType::Fn));
+                if args.is_empty() {
                     write!(f, "{id}")
                 } else {
                     write!(f, "{}[{}]", id, args.iter().format(", "))
@@ -671,96 +728,56 @@ impl Display for TypeUnit {
             }
             TypeUnit::RecursiveAlias(t) => write!(f, "rec[{t}]"),
             TypeUnit::RecursionPoint => write!(f, "d0"),
-        }
-    }
-}
-
-fn unify_type_with_ast_sep2_type(
-    t: &ast_step2::types::Type,
-    p: TypePointer,
-    map: &mut PaddedTypeMap,
-) {
-    for t in t.iter() {
-        use ast_step2::types::TypeUnit::*;
-        match &**t {
-            Tuple(a, b) => {
-                if matches!(
-                    a.matchable_ref(),
-                    types::TypeMatchableRef::Const {
-                        id: TypeId::Intrinsic(IntrinsicType::Fn)
-                    }
-                ) {
-                    let TypeMatchableRef::Tuple(a, b) = b.matchable_ref() else {
-                        panic!()
-                    };
-                    let TypeMatchableRef::Tuple(b, _) = b.matchable_ref() else {
-                        panic!()
-                    };
-                    let (p_a, p_b) = map.get_fn(p);
-                    unify_type_with_ast_sep2_type(a, p_a, map);
-                    unify_type_with_ast_sep2_type(b, p_b, map);
-                } else {
-                    let len = tuple_len(b);
-                    let args =
-                        (0..len).map(|_| map.new_pointer()).collect_vec();
-                    for a in a.iter() {
-                        if let Const { id } = &**a {
-                            unify_type_with_tuple(b, &args, map);
-                            map.insert_normal(p, *id, args.clone());
-                        } else {
-                            panic!()
+            TypeUnit::LambdaId(_) => panic!(),
+            TypeUnit::Fn(id, a, b) => {
+                if a.0.len() == 1
+                    && matches!(
+                        a.0.iter().next().unwrap(),
+                        TypeUnit::Normal {
+                            id: TypeId::Intrinsic(IntrinsicType::Fn),
+                            ..
                         }
-                    }
+                    )
+                {
+                    write!(f, "({a}) -{id:?}-> {b}")
+                } else {
+                    write!(f, "{a} -{id:?}-> {b}")
                 }
             }
-            Variance(_, t) => unify_type_with_ast_sep2_type(t, p, map),
-            Const { .. }
-            | RecursiveAlias { .. }
-            | Variable(_)
-            | TypeLevelApply { .. }
-            | TypeLevelFn(_)
-            | Restrictions { .. }
-            | Any => {
+        }
+    }
+}
+
+fn unify_type_pointer_with_type(
+    t: &Type,
+    map: &mut PaddedTypeMap,
+) -> TypePointer {
+    let p = map.new_pointer();
+    for t in t.0.iter() {
+        use TypeUnit::*;
+        match t {
+            Normal { id, args } => {
+                let mut p_args = Vec::with_capacity(args.len());
+                for a in args {
+                    let p = unify_type_pointer_with_type(a, map);
+                    p_args.push(p);
+                }
+                map.insert_normal(p, *id, p_args);
+            }
+            LambdaId(_) => todo!(),
+            RecursionPoint | RecursiveAlias(_) => {
                 unimplemented!()
             }
+            Fn(lambda_id, a, b) => {
+                let lambda_id_p = map.new_lambda_id_pointer();
+                let a_p = unify_type_pointer_with_type(a, map);
+                let b_p = unify_type_pointer_with_type(b, map);
+                for i in lambda_id {
+                    map.insert_lambda_id(lambda_id_p, *i);
+                }
+                map.insert_function(p, a_p, b_p, lambda_id_p);
+            }
         }
     }
-}
-
-fn unify_type_with_tuple(
-    t: &ast_step2::types::Type,
-    ps: &[TypePointer],
-    map: &mut PaddedTypeMap,
-) {
-    for t in t.iter() {
-        match &**t {
-            ast_step2::types::TypeUnit::Const { id, .. }
-                if *id == TypeId::Intrinsic(IntrinsicType::Unit) =>
-            {
-                debug_assert!(ps.is_empty());
-            }
-            ast_step2::types::TypeUnit::Tuple(h, t) => {
-                unify_type_with_ast_sep2_type(h, ps[0], map);
-                unify_type_with_tuple(t, &ps[1..], map);
-            }
-            _ => panic!(),
-        }
-    }
-}
-
-fn tuple_len(tuple: &ast_step2::types::Type) -> usize {
-    use ast_step2::types::TypeUnit::*;
-    tuple
-        .iter()
-        .next()
-        .map(|t| match &**t {
-            Const { id, .. }
-                if *id == TypeId::Intrinsic(IntrinsicType::Unit) =>
-            {
-                0
-            }
-            Tuple(_, t) => 1 + tuple_len(t),
-            _ => panic!(),
-        })
-        .unwrap_or(0)
+    p
 }

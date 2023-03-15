@@ -1,4 +1,4 @@
-use super::{LinkedType, LinkedTypeUnit, Type};
+use super::{LambdaId, LinkedType, LinkedTypeUnit, Type};
 use crate::ast_step2::TypeId;
 use crate::intrinsics::IntrinsicType;
 use fxhash::{FxHashMap, FxHashSet};
@@ -21,9 +21,15 @@ pub struct TypeMap {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Node {
+enum Terminal {
+    TypeMap(TypeMap),
+    LambdaId(FxHashSet<LambdaId>),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+enum Node {
     Pointer(TypePointer),
-    Terminal(TypeMap),
+    Terminal(Terminal),
 }
 
 #[derive(Debug, Default)]
@@ -34,7 +40,15 @@ pub struct PaddedTypeMap {
 impl PaddedTypeMap {
     pub fn new_pointer(&mut self) -> TypePointer {
         let p = self.map.len();
-        self.map.push(Node::Terminal(TypeMap::default()));
+        self.map
+            .push(Node::Terminal(Terminal::TypeMap(TypeMap::default())));
+        TypePointer(p)
+    }
+
+    pub fn new_lambda_id_pointer(&mut self) -> TypePointer {
+        let p = self.map.len();
+        self.map
+            .push(Node::Terminal(Terminal::LambdaId(FxHashSet::default())));
         TypePointer(p)
     }
 
@@ -48,14 +62,24 @@ impl PaddedTypeMap {
             if let (Node::Terminal(a_t), Node::Terminal(b_t)) =
                 (&mut self.map[a.0], b_t)
             {
-                for (b_id, b_normal) in b_t.normals {
-                    if let Some(a_normal) = a_t.normals.get(&b_id) {
-                        for (a, b) in a_normal.args.iter().zip(b_normal.args) {
-                            pairs.push((*a, b));
+                match (a_t, b_t) {
+                    (Terminal::TypeMap(a_t), Terminal::TypeMap(b_t)) => {
+                        for (b_id, b_normal) in b_t.normals {
+                            if let Some(a_normal) = a_t.normals.get(&b_id) {
+                                for (a, b) in
+                                    a_normal.args.iter().zip(b_normal.args)
+                                {
+                                    pairs.push((*a, b));
+                                }
+                            } else {
+                                a_t.normals.insert(b_id, b_normal);
+                            }
                         }
-                    } else {
-                        a_t.normals.insert(b_id, b_normal);
                     }
+                    (Terminal::LambdaId(a), Terminal::LambdaId(b)) => {
+                        a.extend(b)
+                    }
+                    _ => panic!(),
                 }
             } else {
                 panic!()
@@ -71,21 +95,36 @@ impl PaddedTypeMap {
         p: TypePointer,
         arg: TypePointer,
         ret: TypePointer,
+        fn_id: TypePointer,
     ) {
+        debug_assert!(matches!(self.dereference(fn_id), Terminal::LambdaId(_)));
         let t = self.dereference_mut(p);
+        let Terminal::TypeMap(t) = t else {
+            panic!()
+        };
         if let Some(f) = t.normals.get(&TypeId::Intrinsic(IntrinsicType::Fn)) {
             let f_0 = f.args[0];
             let f_1 = f.args[1];
+            let f_2 = f.args[2];
             self.union(f_0, arg);
             self.union(f_1, ret);
+            self.union(f_2, fn_id);
         } else {
             t.normals.insert(
                 TypeId::Intrinsic(IntrinsicType::Fn),
                 NormalType {
-                    args: vec![arg, ret],
+                    args: vec![arg, ret, fn_id],
                 },
             );
         }
+    }
+
+    pub fn insert_lambda_id(&mut self, p: TypePointer, id: LambdaId) {
+        let t = self.dereference_mut(p);
+        let Terminal::LambdaId(t) = t else {
+            panic!()
+        };
+        t.insert(id);
     }
 
     pub fn insert_normal(
@@ -95,6 +134,9 @@ impl PaddedTypeMap {
         args: Vec<TypePointer>,
     ) {
         let t = self.dereference_mut(p);
+        let Terminal::TypeMap(t) = t else {
+            panic!()
+        };
         let abs = if let Some(t) = t.normals.get(&id) {
             t.args.iter().copied().zip(args).collect_vec()
         } else {
@@ -119,20 +161,24 @@ impl PaddedTypeMap {
         next_p
     }
 
-    pub fn get_fn(&mut self, p: TypePointer) -> (TypePointer, TypePointer) {
+    pub fn get_fn(
+        &mut self,
+        p: TypePointer,
+    ) -> (TypePointer, TypePointer, TypePointer) {
         let p = self.find(p);
-        if let Node::Terminal(t) = &self.map[p.0] {
+        if let Node::Terminal(Terminal::TypeMap(t)) = &self.map[p.0] {
             t.normals
                 .get(&TypeId::Intrinsic(IntrinsicType::Fn))
-                .map(|f| (f.args[0], f.args[1]))
+                .map(|f| (f.args[0], f.args[1], f.args[2]))
         } else {
             panic!()
         }
         .unwrap_or_else(|| {
             let a = self.new_pointer();
             let b = self.new_pointer();
-            self.insert_function(p, a, b);
-            (a, b)
+            let fn_id = self.new_lambda_id_pointer();
+            self.insert_function(p, a, b, fn_id);
+            (a, b, fn_id)
         })
     }
 
@@ -175,41 +221,34 @@ impl PaddedTypeMap {
             );
         }
         trace.insert(p);
-        let t = if let Node::Terminal(type_map) = &self.map[p.0] {
-            let mut t = Vec::default();
-            for (type_id, normal_type) in &type_map.normals {
-                let n = LinkedTypeUnit::Normal {
-                    id: *type_id,
-                    args: normal_type.args.clone(),
-                };
-                t.push(n);
+        let t = match &self.map[p.0] {
+            Node::Terminal(Terminal::TypeMap(type_map)) => {
+                let mut t = Vec::default();
+                for (type_id, normal_type) in &type_map.normals {
+                    t.push((*type_id, normal_type.args.clone()));
+                }
+                LinkedType(
+                    t.into_iter()
+                        .map(|(id, args)| LinkedTypeUnit::Normal {
+                            id,
+                            args: args
+                                .into_iter()
+                                .map(|t| {
+                                    self.get_type_rec(
+                                        t,
+                                        replace_map,
+                                        trace.clone(),
+                                    )
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                )
             }
-            LinkedType(
-                t.into_iter()
-                    .map(|t| match t {
-                        LinkedTypeUnit::Normal { id, args } => {
-                            LinkedTypeUnit::Normal {
-                                id,
-                                args: args
-                                    .into_iter()
-                                    .map(|t| {
-                                        self.get_type_rec(
-                                            t,
-                                            replace_map,
-                                            trace.clone(),
-                                        )
-                                    })
-                                    .collect(),
-                            }
-                        }
-                        LinkedTypeUnit::RecursiveAlias(_)
-                        | LinkedTypeUnit::RecursionPoint
-                        | LinkedTypeUnit::Pointer(_) => panic!(),
-                    })
-                    .collect(),
-            )
-        } else {
-            panic!()
+            Node::Terminal(Terminal::LambdaId(id)) => LinkedType(
+                id.iter().map(|id| LinkedTypeUnit::LambdaId(*id)).collect(),
+            ),
+            Node::Pointer(_) => panic!(),
         };
         let (t, replaced) =
             t.replace_pointer(p, &LinkedTypeUnit::RecursionPoint.into());
@@ -220,7 +259,7 @@ impl PaddedTypeMap {
         }
     }
 
-    fn dereference(&mut self, p: TypePointer) -> &TypeMap {
+    fn dereference(&mut self, p: TypePointer) -> &Terminal {
         let p = self.find(p);
         if let Node::Terminal(t) = &self.map[p.0] {
             t
@@ -229,7 +268,7 @@ impl PaddedTypeMap {
         }
     }
 
-    fn dereference_mut(&mut self, p: TypePointer) -> &mut TypeMap {
+    fn dereference_mut(&mut self, p: TypePointer) -> &mut Terminal {
         let p = self.find(p);
         if let Node::Terminal(t) = &mut self.map[p.0] {
             t
@@ -254,28 +293,31 @@ impl PaddedTypeMap {
         let new_p = self.new_pointer();
         replace_map.insert(p, new_p);
         let t = self.dereference(p).clone();
-        let t = Node::Terminal(TypeMap {
-            normals: t
-                .normals
-                .iter()
-                .map(|(id, t)| {
-                    (
-                        *id,
-                        NormalType {
-                            args: t
-                                .args
-                                .iter()
-                                .map(|p| {
-                                    let p = self.find(*p);
-                                    self.clone_pointer_rec(p, replace_map)
-                                })
-                                .collect(),
-                        },
-                    )
-                })
-                .collect(),
-        });
-        self.map[new_p.0] = t;
+        let t = match t {
+            Terminal::TypeMap(t) => Terminal::TypeMap(TypeMap {
+                normals: t
+                    .normals
+                    .iter()
+                    .map(|(id, t)| {
+                        (
+                            *id,
+                            NormalType {
+                                args: t
+                                    .args
+                                    .iter()
+                                    .map(|p| {
+                                        let p = self.find(*p);
+                                        self.clone_pointer_rec(p, replace_map)
+                                    })
+                                    .collect(),
+                            },
+                        )
+                    })
+                    .collect(),
+            }),
+            Terminal::LambdaId(t) => Terminal::LambdaId(t),
+        };
+        self.map[new_p.0] = Node::Terminal(t);
         new_p
     }
 }

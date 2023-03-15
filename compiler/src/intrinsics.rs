@@ -1,8 +1,11 @@
 use crate::ast_step2::types::Type;
+use crate::ast_step2::TypeId;
+use crate::ast_step4;
 use fxhash::FxHashMap;
 use once_cell::sync::Lazy;
 use parser::Associativity;
 use std::fmt::Display;
+use std::iter::once;
 use strum::EnumIter;
 
 #[derive(
@@ -28,6 +31,13 @@ impl Display for IntrinsicVariable {
     }
 }
 
+const fn runtime_intrinsic_type(i: IntrinsicType) -> ast_step4::TypeUnit {
+    ast_step4::TypeUnit::Normal {
+        id: TypeId::Intrinsic(i),
+        args: Vec::new(),
+    }
+}
+
 impl IntrinsicVariable {
     pub fn to_str(self) -> &'static str {
         match self {
@@ -47,40 +57,17 @@ impl IntrinsicVariable {
 
     pub fn to_type(self) -> Type {
         match self {
-            IntrinsicVariable::Minus => Type::intrinsic_from_str("I64").arrow(
+            IntrinsicVariable::Minus
+            | IntrinsicVariable::Plus
+            | IntrinsicVariable::Percent
+            | IntrinsicVariable::Multi
+            | IntrinsicVariable::Div => Type::intrinsic_from_str("I64").arrow(
                 Type::intrinsic_from_str("I64")
                     .arrow(Type::intrinsic_from_str("I64")),
             ),
-            IntrinsicVariable::Plus => Type::intrinsic_from_str("I64").arrow(
-                Type::intrinsic_from_str("I64")
-                    .arrow(Type::intrinsic_from_str("I64")),
-            ),
-            IntrinsicVariable::Percent => Type::intrinsic_from_str("I64")
-                .arrow(
-                    Type::intrinsic_from_str("I64")
-                        .arrow(Type::intrinsic_from_str("I64")),
-                ),
-            IntrinsicVariable::Multi => Type::intrinsic_from_str("I64").arrow(
-                Type::intrinsic_from_str("I64")
-                    .arrow(Type::intrinsic_from_str("I64")),
-            ),
-            IntrinsicVariable::Div => Type::intrinsic_from_str("I64").arrow(
-                Type::intrinsic_from_str("I64")
-                    .arrow(Type::intrinsic_from_str("I64")),
-            ),
-            IntrinsicVariable::Lt => Type::intrinsic_from_str("I64").arrow(
-                Type::intrinsic_from_str("I64").arrow(
-                    Type::intrinsic_from_str("True")
-                        .union(Type::intrinsic_from_str("False")),
-                ),
-            ),
-            IntrinsicVariable::Neq => Type::intrinsic_from_str("I64").arrow(
-                Type::intrinsic_from_str("I64").arrow(
-                    Type::intrinsic_from_str("True")
-                        .union(Type::intrinsic_from_str("False")),
-                ),
-            ),
-            IntrinsicVariable::Eq => Type::intrinsic_from_str("I64").arrow(
+            IntrinsicVariable::Lt
+            | IntrinsicVariable::Neq
+            | IntrinsicVariable::Eq => Type::intrinsic_from_str("I64").arrow(
                 Type::intrinsic_from_str("I64").arrow(
                     Type::intrinsic_from_str("True")
                         .union(Type::intrinsic_from_str("False")),
@@ -95,6 +82,60 @@ impl IntrinsicVariable {
                     Type::intrinsic_from_str("String")
                         .arrow(Type::intrinsic_from_str("String")),
                 ),
+        }
+    }
+
+    pub fn to_runtime_type(self) -> ast_step4::Type {
+        use crate::ast_step4::LambdaId;
+        use ast_step4::{Type, TypeUnit};
+        const I64: TypeUnit = runtime_intrinsic_type(IntrinsicType::I64);
+        const TRUE: TypeUnit = runtime_intrinsic_type(IntrinsicType::True);
+        const FALSE: TypeUnit = runtime_intrinsic_type(IntrinsicType::False);
+        const STRING: TypeUnit = runtime_intrinsic_type(IntrinsicType::String);
+        const UNIT: TypeUnit = runtime_intrinsic_type(IntrinsicType::Unit);
+        fn fn_t(arg: Type, ret: Type, lambda_id: LambdaId) -> Type {
+            TypeUnit::Fn(once(lambda_id).collect(), arg, ret).into()
+        }
+        match self {
+            a @ (IntrinsicVariable::Minus
+            | IntrinsicVariable::Plus
+            | IntrinsicVariable::Percent
+            | IntrinsicVariable::Multi
+            | IntrinsicVariable::Div) => fn_t(
+                I64.into(),
+                fn_t(I64.into(), I64.into(), LambdaId::IntrinsicVariable(a, 1)),
+                LambdaId::IntrinsicVariable(a, 0),
+            ),
+            a @ (IntrinsicVariable::Lt
+            | IntrinsicVariable::Neq
+            | IntrinsicVariable::Eq) => fn_t(
+                I64.into(),
+                fn_t(
+                    I64.into(),
+                    [TRUE, FALSE].into_iter().collect(),
+                    LambdaId::IntrinsicVariable(a, 1),
+                ),
+                LambdaId::IntrinsicVariable(a, 0),
+            ),
+            a @ IntrinsicVariable::PrintStr => fn_t(
+                STRING.into(),
+                UNIT.into(),
+                LambdaId::IntrinsicVariable(a, 0),
+            ),
+            a @ IntrinsicVariable::I64ToString => fn_t(
+                I64.into(),
+                STRING.into(),
+                LambdaId::IntrinsicVariable(a, 0),
+            ),
+            a @ IntrinsicVariable::AppendStr => fn_t(
+                STRING.into(),
+                fn_t(
+                    STRING.into(),
+                    STRING.into(),
+                    LambdaId::IntrinsicVariable(a, 1),
+                ),
+                LambdaId::IntrinsicVariable(a, 0),
+            ),
         }
     }
 }
@@ -180,6 +221,10 @@ impl IntrinsicConstructor {
             IntrinsicConstructor::False => Type::intrinsic_from_str("False"),
             IntrinsicConstructor::Unit => Type::intrinsic_from_str("()"),
         }
+    }
+
+    pub fn to_runtime_type(self) -> ast_step4::Type {
+        runtime_intrinsic_type(self.into()).into()
     }
 }
 
