@@ -2,12 +2,10 @@ mod ast_step1;
 mod ast_step2;
 mod ast_step3;
 mod ast_step4;
-mod ast_step5;
 mod codegen;
 mod errors;
 mod intrinsics;
 mod run_js;
-mod rust_backend;
 
 use ast_step1::ident_id::IdentId;
 use ast_step1::name_id::Path;
@@ -35,7 +33,6 @@ use std::process::{self, exit, Stdio};
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Command {
     RunJs,
-    RunRust,
     PrintJs,
     PrintTypes,
 }
@@ -101,18 +98,13 @@ pub fn run(
         print_types(&ast);
     } else {
         let ast = ast_step4::Ast::from(ast);
-        let ast = ast_step5::Ast::from(ast);
-        if command == Command::RunRust {
-            rust_backend::run(ast);
+        let js = codegen(ast);
+        if command == Command::PrintJs {
+            println!("{js}");
+        } else if command == Command::RunJs {
+            run_js::run(&js);
         } else {
-            let js = codegen(ast);
-            if command == Command::PrintJs {
-                println!("{js}");
-            } else if command == Command::RunJs {
-                run_js::run(&js);
-            } else {
-                unreachable!()
-            }
+            unreachable!()
         }
     }
 }

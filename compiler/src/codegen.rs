@@ -4,8 +4,7 @@ use self::type_restriction_pattern::IS_INSTANCE_OF;
 use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step2::types::merge_vec;
 use crate::ast_step3::{DataDecl, VariableId};
-use crate::ast_step4::{PatternUnit, Type};
-use crate::ast_step5::{Ast, Expr, ExprWithType, FnArm, Pattern, VariableDecl};
+use crate::ast_step4::{self, Ast, Type, VariableDecl};
 use crate::intrinsics::{IntrinsicConstructor, IntrinsicVariable};
 use fxhash::FxHashMap;
 use itertools::Itertools;
@@ -14,6 +13,12 @@ use std::fmt::Write;
 use stripmargin::StripMargin;
 use strum::IntoEnumIterator;
 use unic_ucd_category::GeneralCategory;
+
+type Expr = ast_step4::Expr<Type>;
+type ExprWithType = ast_step4::ExprWithType<Type>;
+type FnArm = ast_step4::FnArm<Type>;
+type Pattern = ast_step4::Pattern<Type>;
+type PatternUnit = ast_step4::PatternUnit<Type>;
 
 pub fn codegen(ast: Ast) -> String {
     format!(
@@ -69,7 +74,7 @@ fn variable_decl(d: &VariableDecl) -> String {
         "let ${}${}={};",
         d.decl_id,
         convert_name(&d.name.to_string()),
-        expr(&d.value, 0)
+        expr(&d.value)
     )
 }
 
@@ -105,19 +110,33 @@ static PRIMITIVE_CONSTRUCTOR_DEF: Lazy<
     .collect()
 });
 
-fn expr((e, t): &ExprWithType, name_count: u32) -> String {
+fn expr((e, t): &ExprWithType) -> String {
     let s = match e {
-        Expr::Lambda(a) => {
-            let bindings = a.iter().flat_map(|e| bindings(&e.pattern));
+        Expr::Lambda {
+            lambda_number: _,
+            context: _,
+            parameter,
+            parameter_type: _,
+            body,
+        } => {
+            format!(r#"(${parameter}=>{})"#, expr(body,))
+        }
+        Expr::Match { arms, arguments } => {
+            let bindings = arms.iter().flat_map(|e| bindings(&e.pattern));
             format!(
-                r#"({}{{{}return {}$$unexpected()}})"#,
-                (0..a[0].pattern.len())
-                    .map(|c| format!("${}=>", name_count + c as u32))
-                    .join(""),
+                r#"(()=>{{{}return {}$$unexpected()}})()"#,
                 bindings.format_with("", |(name, id, t), f| f(&format_args!(
                     "let ${id}${name} /* : {t} */;",
                 ))),
-                a.iter().map(|e| fn_arm(e, name_count)).join("")
+                arms.iter()
+                    .map(|e| fn_arm(
+                        e,
+                        &arguments
+                            .iter()
+                            .map(|a| format!("${a}"))
+                            .collect_vec()
+                    ))
+                    .join("")
             )
         }
         Expr::Number(a) => a.to_string(),
@@ -132,6 +151,18 @@ fn expr((e, t): &ExprWithType, name_count: u32) -> String {
         } => {
             format!("$field_accessor({field})")
         }
+        Expr::GlobalVariable {
+            name,
+            decl_id,
+            replace_map: _,
+        } => {
+            format!(
+                "${}${} /* ({}) */",
+                decl_id,
+                convert_name(name.to_string().as_str()),
+                name,
+            )
+        }
         Expr::Ident { name, variable_id } => {
             format!(
                 "${}${} /* ({}) */",
@@ -141,47 +172,31 @@ fn expr((e, t): &ExprWithType, name_count: u32) -> String {
             )
         }
         Expr::Call(f, a) => {
-            format!("{}({})", expr(f, name_count), expr(a, name_count))
+            format!("{}({})", expr(f), expr(a))
         }
         Expr::DoBlock(exprs) => {
-            format!("({})", exprs.iter().map(|e| expr(e, name_count)).join(","))
+            format!("({})", exprs.iter().map(expr).join(","))
         }
     };
     format!("{s} /*: {t} */")
 }
 
-fn fn_arm(e: &FnArm, name_count: u32) -> String {
-    let cond = condition(&e.pattern, name_count);
-    format!(
-        "{}?{}:",
-        cond,
-        expr(&e.expr, name_count + e.pattern.len() as u32),
-    )
+fn fn_arm(e: &FnArm, names: &[String]) -> String {
+    let cond = condition(&e.pattern, names);
+    format!("{}?{}:", cond, expr(&e.expr,),)
 }
 
-fn condition(pattern: &[Pattern], name_count: u32) -> String {
+fn condition(pattern: &[Pattern], names: &[String]) -> String {
     let mut condition = "true".to_string();
-    _condition(
-        pattern,
-        &(0..pattern.len())
-            .map(|i| format!("${}", i + name_count as usize))
-            .collect_vec(),
-        name_count + pattern.len() as u32,
-        &mut condition,
-    );
+    _condition(pattern, names, &mut condition);
     condition
 }
 
-fn single_condition(
-    p: &Pattern,
-    arg: &str,
-    name_count: u32,
-    condition: &mut String,
-) {
+fn single_condition(p: &Pattern, arg: &str, condition: &mut String) {
     if p.patterns.len() != 1 {
         unimplemented!()
     }
-    use PatternUnit::*;
+    use ast_step4::PatternUnit::*;
     match &p.patterns[0] {
         I64(a) | Str(a) => {
             write!(condition, "&&{a}==={arg}").unwrap();
@@ -204,7 +219,7 @@ fn single_condition(
                 t.type_to_js_obj().0
             )
             .unwrap();
-            single_condition(p, arg, name_count, condition);
+            single_condition(p, arg, condition);
         }
         Apply {
             pre_pattern,
@@ -213,14 +228,9 @@ fn single_condition(
         } => {
             let tmp = format!("$tmp${}", tmp_variable::new());
             write!(condition, "&&({tmp}={arg},true)").unwrap();
-            single_condition(pre_pattern, &tmp, name_count, condition);
-            let f = expr(function, name_count);
-            single_condition(
-                post_pattern,
-                &format!("{f}({tmp})"),
-                name_count,
-                condition,
-            );
+            single_condition(pre_pattern, &tmp, condition);
+            let f = expr(function);
+            single_condition(post_pattern, &format!("{f}({tmp})"), condition);
         }
         Binder(name, decl_id) => {
             write!(
@@ -234,14 +244,9 @@ fn single_condition(
     }
 }
 
-fn _condition(
-    pattern: &[Pattern],
-    names: &[String],
-    name_count: u32,
-    condition: &mut String,
-) {
+fn _condition(pattern: &[Pattern], names: &[String], condition: &mut String) {
     for (p, arg) in pattern.iter().zip(names) {
-        single_condition(p, arg, name_count, condition);
+        single_condition(p, arg, condition);
     }
 }
 

@@ -1,93 +1,45 @@
 use crate::ast_step1::decl_id::DeclId;
-use crate::ast_step1::name_id::Path;
-use crate::ast_step3::{DataDecl, VariableId};
-use crate::ast_step4::{self, PaddedTypeMap, PatternUnit, Type, TypePointer};
+use crate::ast_step3::VariableId;
+use crate::ast_step4::{
+    Expr, ExprWithType, FnArm, PaddedTypeMap, Pattern, PatternUnit, Type,
+    TypePointer, VariableDecl,
+};
 use fxhash::FxHashMap;
 
-/// Difference between `ast_step4::Ast` and `ast_step5::Ast`:
-/// - Some global variables are replicated and types are upcasted
-/// so that the arguments and parameters become the same type.
-#[derive(Debug)]
-pub struct Ast {
-    pub variable_decl: Vec<VariableDecl>,
-    pub data_decl: Vec<DataDecl>,
-    pub entry_point: DeclId,
+pub struct VariableMemo {
+    variable_decls: FxHashMap<DeclId, VariableDecl<TypePointer>>,
+    monomorphized_variable_map: FxHashMap<(DeclId, Type), DeclId>,
+    pub monomorphized_variables: Vec<VariableDecl>,
+    map: PaddedTypeMap,
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum Expr {
-    Lambda(Vec<FnArm>),
-    Number(String),
-    StrLiteral(String),
-    Ident {
-        name: String,
-        variable_id: VariableId,
-    },
-    Call(Box<ExprWithType>, Box<ExprWithType>),
-    DoBlock(Vec<ExprWithType>),
-}
-
-pub type ExprWithType = (Expr, Type);
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct VariableDecl {
-    pub name: Path,
-    pub value: ExprWithType,
-    pub decl_id: DeclId,
-}
-
-pub type Pattern = ast_step4::Pattern<Type, ExprWithType>;
-
-#[derive(Debug, PartialEq, Clone)]
-pub struct FnArm {
-    pub pattern: Vec<Pattern>,
-    pub expr: ExprWithType,
-}
-
-impl From<ast_step4::Ast> for Ast {
-    fn from(ast: ast_step4::Ast) -> Self {
-        let mut memo = VariableMemo {
-            variable_decls: ast
-                .variable_decl
+impl VariableMemo {
+    pub fn new(
+        variable_decls: Vec<VariableDecl<TypePointer>>,
+        map: PaddedTypeMap,
+    ) -> Self {
+        VariableMemo {
+            variable_decls: variable_decls
                 .into_iter()
                 .map(|d| (d.decl_id, d))
                 .collect(),
             monomorphized_variable_map: Default::default(),
             monomorphized_variables: Default::default(),
-            map: ast.map,
-        };
-        let p = memo.map.new_pointer();
-        let entry_point = memo.monomorphize_decl(
-            ast.entry_point,
+            map,
+        }
+    }
+
+    pub fn monomorphize_decl(&mut self, decl_id: DeclId) -> DeclId {
+        let p = self.map.new_pointer();
+        self.monomorphize_decl_rec(
+            decl_id,
             p,
             &Default::default(),
             &Default::default(),
-        );
-        Self {
-            variable_decl: memo.monomorphized_variables,
-            data_decl: ast
-                .data_decl
-                .into_iter()
-                .map(|d| DataDecl {
-                    name: d.name,
-                    field_len: d.field_len,
-                    decl_id: d.decl_id,
-                })
-                .collect(),
-            entry_point,
-        }
+        )
     }
-}
 
-struct VariableMemo {
-    variable_decls: FxHashMap<DeclId, ast_step4::VariableDecl<TypePointer>>,
-    monomorphized_variable_map: FxHashMap<(DeclId, Type), DeclId>,
-    monomorphized_variables: Vec<VariableDecl>,
-    map: PaddedTypeMap,
-}
-
-impl VariableMemo {
-    fn monomorphize_decl(
+    fn monomorphize_decl_rec(
         &mut self,
         decl_id: DeclId,
         p: TypePointer,
@@ -126,26 +78,46 @@ impl VariableMemo {
 
     fn monomorphize_expr(
         &mut self,
-        (e, t): ast_step4::ExprWithType,
+        (e, t): ExprWithType,
         replace_map: &FxHashMap<TypePointer, TypePointer>,
         trace: &FxHashMap<DeclId, DeclId>,
-    ) -> ExprWithType {
-        use self::Expr::*;
-        use ast_step4::Expr;
+    ) -> ExprWithType<Type> {
+        use Expr::*;
         let e = match e {
-            Expr::Lambda(arms) => Lambda(
-                arms.into_iter()
+            Expr::Lambda {
+                lambda_number,
+                context,
+                parameter,
+                parameter_type,
+                body,
+            } => Expr::Lambda {
+                lambda_number,
+                context,
+                parameter,
+                parameter_type: self
+                    .map
+                    .get_type_with_replace_map(parameter_type, replace_map),
+                body: Box::new(self.monomorphize_expr(
+                    *body,
+                    replace_map,
+                    trace,
+                )),
+            },
+            Expr::Match { arms, arguments } => Expr::Match {
+                arms: arms
+                    .into_iter()
                     .map(|arm| {
                         self.monomorphize_fn_arm(arm, replace_map, trace)
                     })
                     .collect(),
-            ),
+                arguments,
+            },
             Expr::Ident {
                 name,
                 variable_id: VariableId::Global(decl_id),
             } => Ident {
                 name,
-                variable_id: VariableId::Global(self.monomorphize_decl(
+                variable_id: VariableId::Global(self.monomorphize_decl_rec(
                     decl_id,
                     t,
                     replace_map,
@@ -159,7 +131,7 @@ impl VariableMemo {
             } => Ident {
                 name,
                 variable_id: VariableId::Global(
-                    self.monomorphize_decl(
+                    self.monomorphize_decl_rec(
                         decl_id,
                         t,
                         &r.iter()
@@ -195,10 +167,10 @@ impl VariableMemo {
 
     fn monomorphize_fn_arm(
         &mut self,
-        arm: ast_step4::FnArm,
+        arm: FnArm,
         replace_map: &FxHashMap<TypePointer, TypePointer>,
         trace: &FxHashMap<DeclId, DeclId>,
-    ) -> FnArm {
+    ) -> FnArm<Type> {
         FnArm {
             pattern: arm
                 .pattern
@@ -211,10 +183,10 @@ impl VariableMemo {
 
     fn monomorphize_pattern(
         &mut self,
-        pattern: ast_step4::Pattern<TypePointer>,
+        pattern: Pattern<TypePointer>,
         replace_map: &FxHashMap<TypePointer, TypePointer>,
         trace: &FxHashMap<DeclId, DeclId>,
-    ) -> Pattern {
+    ) -> Pattern<Type> {
         let patterns = pattern
             .patterns
             .into_iter()
