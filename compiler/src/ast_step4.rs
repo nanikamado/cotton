@@ -104,10 +104,10 @@ struct LinkedType(BTreeSet<LinkedTypeUnit>);
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 enum LinkedTypeUnit<T = LinkedType> {
     Normal { id: TypeId, args: Vec<T> },
-    RecursionPoint,
+    RecursionPoint(u32),
     RecursiveAlias(LinkedType),
     Pointer(TypePointer),
-    LambdaId(LambdaId),
+    LambdaId(LambdaId<T>),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Clone)]
@@ -116,16 +116,38 @@ pub struct Type(BTreeSet<TypeUnit>);
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 pub enum TypeUnit {
     Normal { id: TypeId, args: Vec<Type> },
-    Fn(BTreeSet<LambdaId>, Type, Type),
+    Fn(BTreeSet<LambdaId<Type>>, Type, Type),
     RecursiveAlias(Type),
-    RecursionPoint,
+    RecursionPoint(u32),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
-pub enum LambdaId {
-    Normal(u32),
+pub enum LambdaId<T> {
+    Normal(u32, T),
     IntrinsicVariable(IntrinsicVariable, u32),
     Constructor(ConstructorId, u32),
+}
+
+impl<T> LambdaId<T> {
+    fn map_type<U, F: FnMut(T) -> U>(self, mut f: F) -> LambdaId<U> {
+        match self {
+            LambdaId::Normal(a, t) => LambdaId::Normal(a, f(t)),
+            LambdaId::IntrinsicVariable(a, b) => {
+                LambdaId::IntrinsicVariable(a, b)
+            }
+            LambdaId::Constructor(a, b) => LambdaId::Constructor(a, b),
+        }
+    }
+
+    fn map_type_ref<U, F: FnMut(&T) -> U>(&self, mut f: F) -> LambdaId<U> {
+        match self {
+            LambdaId::Normal(a, t) => LambdaId::Normal(*a, f(t)),
+            LambdaId::IntrinsicVariable(a, b) => {
+                LambdaId::IntrinsicVariable(*a, *b)
+            }
+            LambdaId::Constructor(a, b) => LambdaId::Constructor(*a, *b),
+        }
+    }
 }
 
 impl TryFrom<LinkedType> for Type {
@@ -150,16 +172,26 @@ impl TryFrom<LinkedType> for Type {
                             .next()
                             .unwrap()
                             .0
-                            .iter()
+                            .into_iter()
                             .map(|id| {
                                 if let LinkedTypeUnit::LambdaId(lambda_id) = id
                                 {
-                                    *lambda_id
+                                    Ok(match lambda_id {
+                                        LambdaId::Normal(a, t) => {
+                                            LambdaId::Normal(a, t.try_into()?)
+                                        }
+                                        LambdaId::IntrinsicVariable(a, b) => {
+                                            LambdaId::IntrinsicVariable(a, b)
+                                        }
+                                        LambdaId::Constructor(a, b) => {
+                                            LambdaId::Constructor(a, b)
+                                        }
+                                    })
                                 } else {
                                     panic!()
                                 }
                             })
-                            .collect();
+                            .collect::<Result<BTreeSet<_>, Self::Error>>()?;
                         Ok(Fn(lambda_id, a, b))
                     }
                     LinkedTypeUnit::Normal { id, args } => {
@@ -169,7 +201,7 @@ impl TryFrom<LinkedType> for Type {
                             .collect::<Result<_, _>>()?;
                         Ok(Normal { id, args })
                     }
-                    LinkedTypeUnit::RecursionPoint => Ok(RecursionPoint),
+                    LinkedTypeUnit::RecursionPoint(d) => Ok(RecursionPoint(d)),
                     LinkedTypeUnit::RecursiveAlias(a) => {
                         Ok(RecursiveAlias(a.try_into()?))
                     }
@@ -240,20 +272,20 @@ impl Ast {
 }
 
 impl LinkedType {
-    fn replace_pointer(self, from: TypePointer, to: &Self) -> (Self, bool) {
+    fn replace_pointer(self, from: TypePointer, depth: u32) -> (Self, bool) {
         let mut t = BTreeSet::default();
         let mut replaced = false;
         for u in self.0 {
             match u {
                 LinkedTypeUnit::Pointer(p) if p == from => {
-                    t.extend(to.0.iter().cloned());
+                    t.insert(LinkedTypeUnit::RecursionPoint(depth));
                     replaced = true;
                 }
                 LinkedTypeUnit::Normal { id, args } => {
                     let args = args
                         .into_iter()
                         .map(|arg| {
-                            let (arg, r) = arg.replace_pointer(from, to);
+                            let (arg, r) = arg.replace_pointer(from, depth);
                             replaced |= r;
                             arg
                         })
@@ -261,11 +293,19 @@ impl LinkedType {
                     t.insert(LinkedTypeUnit::Normal { id, args });
                 }
                 LinkedTypeUnit::RecursiveAlias(u) => {
-                    let (u, r) = u.replace_pointer(from, to);
+                    let (u, r) = u.replace_pointer(from, depth + 1);
                     t.insert(LinkedTypeUnit::RecursiveAlias(u));
-                    replaced = r;
+                    replaced |= r;
                 }
-                u => {
+                LinkedTypeUnit::LambdaId(id) => {
+                    t.insert(LinkedTypeUnit::LambdaId(id.map_type(|t| {
+                        let (t, r) = t.replace_pointer(from, depth);
+                        replaced |= r;
+                        t
+                    })));
+                }
+                u @ (LinkedTypeUnit::RecursionPoint(_)
+                | LinkedTypeUnit::Pointer(_)) => {
                     t.insert(u);
                 }
             }
@@ -337,7 +377,7 @@ impl<'b> VariableMemo<'b> {
             let d = VariableDecl {
                 name: d.name,
                 value: (
-                    self.expr(d.value.0, p, &Default::default(), &trace),
+                    self.expr(d.value.0, p, p, &Default::default(), &trace),
                     p,
                 ),
                 decl_id,
@@ -353,6 +393,7 @@ impl<'b> VariableMemo<'b> {
         &mut self,
         e: ast_step3::Expr,
         type_pointer: TypePointer,
+        type_of_global_variable: TypePointer,
         local_variables: &FxHashMap<VariableId, TypePointer>,
         trace: &FxHashMap<VariableId, TypePointer>,
     ) -> Expr<TypePointer> {
@@ -372,6 +413,7 @@ impl<'b> VariableMemo<'b> {
                             local_variables,
                             &type_pointer_of_match_operands,
                             body_type,
+                            type_of_global_variable,
                             trace,
                         )
                     })
@@ -396,7 +438,10 @@ impl<'b> VariableMemo<'b> {
                     let lambda_number = self.functions.len() as u32;
                     self.type_map.insert_lambda_id(
                         lambda_id,
-                        LambdaId::Normal(lambda_number),
+                        LambdaId::Normal(
+                            lambda_number,
+                            type_of_global_variable,
+                        ),
                     );
                     self.type_map.insert_function(
                         new_body_type,
@@ -520,8 +565,20 @@ impl<'b> VariableMemo<'b> {
                 let f_t = self.type_map.new_pointer();
                 let a_t = self.type_map.new_pointer();
                 let (para, ret, _fn_id) = self.type_map.get_fn(f_t);
-                let f = self.expr(f.0, f_t, local_variables, trace);
-                let a = self.expr(a.0, a_t, local_variables, trace);
+                let f = self.expr(
+                    f.0,
+                    f_t,
+                    type_of_global_variable,
+                    local_variables,
+                    trace,
+                );
+                let a = self.expr(
+                    a.0,
+                    a_t,
+                    type_of_global_variable,
+                    local_variables,
+                    trace,
+                );
                 self.type_map.union(a_t, para);
                 self.type_map.union(type_pointer, ret);
                 Expr::Call((f, f_t).into(), (a, a_t).into())
@@ -531,7 +588,16 @@ impl<'b> VariableMemo<'b> {
                     .into_iter()
                     .map(|e| {
                         let p = self.type_map.new_pointer();
-                        (self.expr(e.0, p, local_variables, trace), p)
+                        (
+                            self.expr(
+                                e.0,
+                                p,
+                                type_of_global_variable,
+                                local_variables,
+                                trace,
+                            ),
+                            p,
+                        )
                     })
                     .collect();
                 self.type_map.union(type_pointer, es.last().unwrap().1);
@@ -546,6 +612,7 @@ impl<'b> VariableMemo<'b> {
         local_variables: &FxHashMap<VariableId, TypePointer>,
         type_pointer_of_match_operands: &[TypePointer],
         return_type: TypePointer,
+        type_of_global_variable: TypePointer,
         trace: &FxHashMap<VariableId, TypePointer>,
     ) -> FnArm {
         let mut local_variables = local_variables.clone();
@@ -555,12 +622,19 @@ impl<'b> VariableMemo<'b> {
         {
             patterns.push(self.unify_type_with_pattern(
                 *p,
+                type_of_global_variable,
                 &pattern,
                 &mut local_variables,
                 trace,
             ));
         }
-        let expr = self.expr(arm.expr.0, return_type, &local_variables, trace);
+        let expr = self.expr(
+            arm.expr.0,
+            return_type,
+            type_of_global_variable,
+            &local_variables,
+            trace,
+        );
         FnArm {
             pattern: patterns,
             expr: (expr, return_type),
@@ -570,6 +644,7 @@ impl<'b> VariableMemo<'b> {
     fn unify_type_with_pattern(
         &mut self,
         type_pointer: TypePointer,
+        type_of_global_variable: TypePointer,
         pattern: &ast_step3::Pattern,
         local_variables: &mut FxHashMap<VariableId, TypePointer>,
         trace: &FxHashMap<VariableId, TypePointer>,
@@ -606,6 +681,7 @@ impl<'b> VariableMemo<'b> {
                             let p = self.type_map.new_pointer();
                             self.unify_type_with_pattern(
                                 p,
+                                type_of_global_variable,
                                 pattern,
                                 local_variables,
                                 trace,
@@ -680,6 +756,7 @@ impl<'b> VariableMemo<'b> {
                 TypeRestriction(p, t) => PatternUnit::TypeRestriction(
                     self.unify_type_with_pattern(
                         type_pointer,
+                        type_of_global_variable,
                         p,
                         local_variables,
                         trace,
@@ -689,6 +766,7 @@ impl<'b> VariableMemo<'b> {
                 Apply(pre_pattern, applications) => {
                     let mut p = self.unify_type_with_pattern(
                         type_pointer,
+                        type_of_global_variable,
                         pre_pattern,
                         local_variables,
                         trace,
@@ -704,6 +782,7 @@ impl<'b> VariableMemo<'b> {
                                     self.expr(
                                         a.function.clone(),
                                         function_p,
+                                        type_of_global_variable,
                                         local_variables,
                                         trace,
                                     ),
@@ -711,6 +790,7 @@ impl<'b> VariableMemo<'b> {
                                 ),
                                 post_pattern: self.unify_type_with_pattern(
                                     post_pattern_p,
+                                    type_of_global_variable,
                                     &a.post_pattern,
                                     local_variables,
                                     trace,
@@ -791,21 +871,41 @@ impl Display for TypeUnit {
                 }
             }
             TypeUnit::RecursiveAlias(t) => write!(f, "rec[{t}]"),
-            TypeUnit::RecursionPoint => write!(f, "d0"),
+            TypeUnit::RecursionPoint(d) => write!(f, "d{d}"),
             TypeUnit::Fn(id, a, b) => {
-                if a.0.len() == 1
+                let paren = a.0.len() == 1
                     && matches!(
                         a.0.iter().next().unwrap(),
-                        TypeUnit::Normal {
-                            id: TypeId::Intrinsic(IntrinsicType::Fn),
-                            ..
-                        }
-                    )
-                {
-                    write!(f, "({a}) -{id:?}-> {b}")
-                } else {
-                    write!(f, "{a} -{id:?}-> {b}")
-                }
+                        TypeUnit::Fn(_, _, _)
+                    );
+                let id_paren = id.len() >= 2;
+                write!(
+                    f,
+                    "{}{}{} -{}{}{}-> {b}",
+                    if paren { "(" } else { "" },
+                    a,
+                    if paren { ")" } else { "" },
+                    if id_paren { "(" } else { "" },
+                    id.iter()
+                        .format_with(" | ", |a, f| f(&format_args!("{}", a))),
+                    if id_paren { ")" } else { "" },
+                )
+            }
+        }
+    }
+}
+
+impl<T: Display> Display for LambdaId<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LambdaId::Normal(a, id) => {
+                write!(f, "(lm{a}, {id})")
+            }
+            LambdaId::IntrinsicVariable(a, b) => {
+                write!(f, "intrinsic({a}, {b})")
+            }
+            LambdaId::Constructor(a, b) => {
+                write!(f, "constructor({a}, {b})")
             }
         }
     }
@@ -827,7 +927,7 @@ fn unify_type_pointer_with_type(
                 }
                 map.insert_normal(p, *id, p_args);
             }
-            RecursionPoint | RecursiveAlias(_) => {
+            RecursionPoint(_) | RecursiveAlias(_) => {
                 unimplemented!()
             }
             Fn(lambda_id, a, b) => {
@@ -835,7 +935,10 @@ fn unify_type_pointer_with_type(
                 let a_p = unify_type_pointer_with_type(a, map);
                 let b_p = unify_type_pointer_with_type(b, map);
                 for i in lambda_id {
-                    map.insert_lambda_id(lambda_id_p, *i);
+                    let i = i.map_type_ref(|t| {
+                        unify_type_pointer_with_type(t, map)
+                    });
+                    map.insert_lambda_id(lambda_id_p, i);
                 }
                 map.insert_function(p, a_p, b_p, lambda_id_p);
             }

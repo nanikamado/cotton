@@ -113,20 +113,20 @@ static PRIMITIVE_CONSTRUCTOR_DEF: Lazy<
 fn expr((e, t): &ExprWithType) -> String {
     let s = match e {
         Expr::Lambda {
-            lambda_number: _,
+            lambda_number,
             context: _,
             parameter,
             parameter_type: _,
             body,
         } => {
-            format!(r#"(${parameter}=>{})"#, expr(body,))
+            format!(r#"(/*lm{lambda_number}*/${parameter}=>{})"#, expr(body,))
         }
         Expr::Match { arms, arguments } => {
             let bindings = arms.iter().flat_map(|e| bindings(&e.pattern));
             format!(
                 r#"(()=>{{{}return {}$$unexpected()}})()"#,
                 bindings.format_with("", |(name, id, t), f| f(&format_args!(
-                    "let ${id}${name} /* : {t} */;",
+                    "let ${id}${name} /* -- {t} */;",
                 ))),
                 arms.iter()
                     .map(|e| fn_arm(
@@ -178,7 +178,7 @@ fn expr((e, t): &ExprWithType) -> String {
             format!("({})", exprs.iter().map(expr).join(","))
         }
     };
-    format!("{s} /*: {t} */")
+    format!("{s} /* -- {t} */")
 }
 
 fn fn_arm(e: &FnArm, names: &[String]) -> String {

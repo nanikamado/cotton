@@ -93,7 +93,7 @@ impl IntrinsicVariable {
         const FALSE: TypeUnit = runtime_intrinsic_type(IntrinsicType::False);
         const STRING: TypeUnit = runtime_intrinsic_type(IntrinsicType::String);
         const UNIT: TypeUnit = runtime_intrinsic_type(IntrinsicType::Unit);
-        fn fn_t(arg: Type, ret: Type, lambda_id: LambdaId) -> Type {
+        fn fn_t(arg: Type, ret: Type, lambda_id: LambdaId<Type>) -> Type {
             TypeUnit::Fn(once(lambda_id).collect(), arg, ret).into()
         }
         match self {

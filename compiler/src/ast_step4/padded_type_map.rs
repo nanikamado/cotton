@@ -3,6 +3,7 @@ use crate::ast_step2::TypeId;
 use crate::intrinsics::IntrinsicType;
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
+use std::collections::BTreeSet;
 use std::convert::TryInto;
 use std::fmt::Display;
 use std::{iter, mem};
@@ -23,7 +24,7 @@ pub struct TypeMap {
 #[derive(Debug, PartialEq, Clone)]
 enum Terminal {
     TypeMap(TypeMap),
-    LambdaId(FxHashSet<LambdaId>),
+    LambdaId(FxHashSet<LambdaId<TypePointer>>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -119,7 +120,11 @@ impl PaddedTypeMap {
         }
     }
 
-    pub fn insert_lambda_id(&mut self, p: TypePointer, id: LambdaId) {
+    pub fn insert_lambda_id(
+        &mut self,
+        p: TypePointer,
+        id: LambdaId<TypePointer>,
+    ) {
         let t = self.dereference_mut(p);
         let Terminal::LambdaId(t) = t else {
             panic!()
@@ -245,13 +250,19 @@ impl PaddedTypeMap {
                         .collect(),
                 )
             }
-            Node::Terminal(Terminal::LambdaId(id)) => LinkedType(
-                id.iter().map(|id| LinkedTypeUnit::LambdaId(*id)).collect(),
-            ),
+            Node::Terminal(Terminal::LambdaId(ids)) => {
+                let mut new_ids = BTreeSet::new();
+                for id in ids.clone() {
+                    let id = id.map_type(|t| {
+                        self.get_type_rec(t, replace_map, trace.clone())
+                    });
+                    new_ids.insert(LinkedTypeUnit::LambdaId(id));
+                }
+                LinkedType(new_ids)
+            }
             Node::Pointer(_) => panic!(),
         };
-        let (t, replaced) =
-            t.replace_pointer(p, &LinkedTypeUnit::RecursionPoint.into());
+        let (t, replaced) = t.replace_pointer(p, 0);
         if replaced {
             LinkedTypeUnit::RecursiveAlias(t).into()
         } else {
@@ -315,7 +326,17 @@ impl PaddedTypeMap {
                     })
                     .collect(),
             }),
-            Terminal::LambdaId(t) => Terminal::LambdaId(t),
+            Terminal::LambdaId(t) => Terminal::LambdaId(
+                t.into_iter()
+                    .map(|t| match t {
+                        LambdaId::Normal(a, p) => LambdaId::Normal(
+                            a,
+                            self.clone_pointer_rec(p, replace_map),
+                        ),
+                        a => a,
+                    })
+                    .collect(),
+            ),
         };
         self.map[new_p.0] = Node::Terminal(t);
         new_p
