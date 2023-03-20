@@ -5,7 +5,6 @@ use fxhash::FxHashMap;
 use once_cell::sync::Lazy;
 use parser::Associativity;
 use std::fmt::Display;
-use std::iter::once;
 use strum::EnumIter;
 
 #[derive(
@@ -85,57 +84,40 @@ impl IntrinsicVariable {
         }
     }
 
-    pub fn to_runtime_type(self) -> ast_step4::Type {
-        use crate::ast_step4::LambdaId;
-        use ast_step4::{Type, TypeUnit};
+    pub fn parameter_len(self) -> usize {
+        match self {
+            IntrinsicVariable::Minus
+            | IntrinsicVariable::Plus
+            | IntrinsicVariable::Percent
+            | IntrinsicVariable::Multi
+            | IntrinsicVariable::Div
+            | IntrinsicVariable::Lt
+            | IntrinsicVariable::Neq
+            | IntrinsicVariable::Eq
+            | IntrinsicVariable::AppendStr => 2,
+            IntrinsicVariable::PrintStr | IntrinsicVariable::I64ToString => 1,
+        }
+    }
+
+    pub fn runtime_return_type(self) -> ast_step4::Type {
+        use ast_step4::TypeUnit;
         const I64: TypeUnit = runtime_intrinsic_type(IntrinsicType::I64);
         const TRUE: TypeUnit = runtime_intrinsic_type(IntrinsicType::True);
         const FALSE: TypeUnit = runtime_intrinsic_type(IntrinsicType::False);
         const STRING: TypeUnit = runtime_intrinsic_type(IntrinsicType::String);
         const UNIT: TypeUnit = runtime_intrinsic_type(IntrinsicType::Unit);
-        fn fn_t(arg: Type, ret: Type, lambda_id: LambdaId<Type>) -> Type {
-            TypeUnit::Fn(once(lambda_id).collect(), arg, ret).into()
-        }
         match self {
-            a @ (IntrinsicVariable::Minus
+            IntrinsicVariable::Minus
             | IntrinsicVariable::Plus
             | IntrinsicVariable::Percent
             | IntrinsicVariable::Multi
-            | IntrinsicVariable::Div) => fn_t(
-                I64.into(),
-                fn_t(I64.into(), I64.into(), LambdaId::IntrinsicVariable(a, 1)),
-                LambdaId::IntrinsicVariable(a, 0),
-            ),
-            a @ (IntrinsicVariable::Lt
+            | IntrinsicVariable::Div => I64.into(),
+            IntrinsicVariable::Lt
             | IntrinsicVariable::Neq
-            | IntrinsicVariable::Eq) => fn_t(
-                I64.into(),
-                fn_t(
-                    I64.into(),
-                    [TRUE, FALSE].into_iter().collect(),
-                    LambdaId::IntrinsicVariable(a, 1),
-                ),
-                LambdaId::IntrinsicVariable(a, 0),
-            ),
-            a @ IntrinsicVariable::PrintStr => fn_t(
-                STRING.into(),
-                UNIT.into(),
-                LambdaId::IntrinsicVariable(a, 0),
-            ),
-            a @ IntrinsicVariable::I64ToString => fn_t(
-                I64.into(),
-                STRING.into(),
-                LambdaId::IntrinsicVariable(a, 0),
-            ),
-            a @ IntrinsicVariable::AppendStr => fn_t(
-                STRING.into(),
-                fn_t(
-                    STRING.into(),
-                    STRING.into(),
-                    LambdaId::IntrinsicVariable(a, 1),
-                ),
-                LambdaId::IntrinsicVariable(a, 0),
-            ),
+            | IntrinsicVariable::Eq => [TRUE, FALSE].into_iter().collect(),
+            IntrinsicVariable::PrintStr => UNIT.into(),
+            IntrinsicVariable::I64ToString => STRING.into(),
+            IntrinsicVariable::AppendStr => STRING.into(),
         }
     }
 }

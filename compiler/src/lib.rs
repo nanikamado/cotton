@@ -2,6 +2,7 @@ mod ast_step1;
 mod ast_step2;
 mod ast_step3;
 mod ast_step4;
+mod ast_step5;
 mod codegen;
 mod errors;
 mod intrinsics;
@@ -98,6 +99,7 @@ pub fn run(
         print_types(&ast);
     } else {
         let ast = ast_step4::Ast::from(ast);
+        let ast = ast_step5::Ast::from(ast);
         let js = codegen(ast);
         if command == Command::PrintJs {
             println!("{js}");
@@ -266,7 +268,7 @@ pub fn get_token_map(
 }
 
 pub fn print_types(ast: &ast_step3::Ast) {
-    for d in &ast.variable_decl {
+    for d in &ast.variable_decls {
         println!(
             "{} : {}",
             d.name,

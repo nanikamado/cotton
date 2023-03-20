@@ -132,6 +132,18 @@ impl PaddedTypeMap {
         t.insert(id);
     }
 
+    pub fn get_lambda_id<'a>(
+        &'a mut self,
+        p: TypePointer,
+        replace_map: &FxHashMap<TypePointer, TypePointer>,
+    ) -> &'a FxHashSet<LambdaId<TypePointer>> {
+        let t = self.dereference_with_replace_map(p, replace_map);
+        let Terminal::LambdaId(t) = t else {
+            panic!()
+        };
+        t
+    }
+
     pub fn insert_normal(
         &mut self,
         p: TypePointer,
@@ -192,19 +204,7 @@ impl PaddedTypeMap {
         p: TypePointer,
         replace_map: &FxHashMap<TypePointer, TypePointer>,
     ) -> Type {
-        let replace_map = replace_map
-            .iter()
-            .flat_map(|(a, b)| {
-                let a = self.find(*a);
-                let b = self.find(*b);
-                if a == b {
-                    None
-                } else {
-                    Some((a, b))
-                }
-            })
-            .collect();
-        self.get_type_rec(p, &replace_map, Default::default())
+        self.get_type_rec(p, replace_map, Default::default())
             .try_into()
             .unwrap()
     }
@@ -279,6 +279,23 @@ impl PaddedTypeMap {
         }
     }
 
+    fn dereference_with_replace_map(
+        &mut self,
+        p: TypePointer,
+        replace_map: &FxHashMap<TypePointer, TypePointer>,
+    ) -> &Terminal {
+        let p = self.find(p);
+        if let Some(v) = replace_map.get(&p) {
+            let t = self.dereference_with_replace_map(*v, replace_map);
+            return t;
+        }
+        if let Node::Terminal(t) = &self.map[p.0] {
+            t
+        } else {
+            panic!()
+        }
+    }
+
     fn dereference_mut(&mut self, p: TypePointer) -> &mut Terminal {
         let p = self.find(p);
         if let Node::Terminal(t) = &mut self.map[p.0] {
@@ -286,10 +303,6 @@ impl PaddedTypeMap {
         } else {
             panic!()
         }
-    }
-
-    pub fn clone_pointer(&mut self, p: TypePointer) -> TypePointer {
-        self.clone_pointer_rec(p, &mut Default::default())
     }
 
     pub fn clone_pointer_rec(
