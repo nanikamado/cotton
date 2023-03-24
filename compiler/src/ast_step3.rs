@@ -29,6 +29,7 @@ pub struct Ast<'a> {
     pub entry_point: Option<DeclId>,
     pub types_of_global_decls: FxHashMap<VariableId, GlobalVariableType>,
     pub types_of_local_decls: FxHashMap<VariableId, LocalVariableType>,
+    pub basic_call_decls: FxHashMap<VariableId, DeclId>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -59,6 +60,7 @@ pub enum Expr<'a> {
 pub enum BasicFunction {
     Intrinsic(IntrinsicVariable),
     Construction(ConstructorId),
+    FieldAccessor { constructor: DeclId, field: usize },
 }
 
 pub type Pattern<'a> = ast_step2::Pattern<'a, (), Expr<'a>>;
@@ -89,7 +91,7 @@ impl<'a> Ast<'a> {
             type_variable_map: map,
         } = type_check(&ast, token_map, imports)?;
         let mut variable_decls: Vec<VariableDecl> = Vec::new();
-        let mut basic_decl_ids: FxHashMap<VariableId, DeclId> =
+        let mut basic_call_decls: FxHashMap<VariableId, DeclId> =
             FxHashMap::default();
         for v in IntrinsicVariable::iter() {
             let d = basic_call(
@@ -97,7 +99,8 @@ impl<'a> Ast<'a> {
                 v.parameter_len(),
                 BasicFunction::Intrinsic(v),
             );
-            basic_decl_ids.insert(VariableId::IntrinsicVariable(v), d.decl_id);
+            basic_call_decls
+                .insert(VariableId::IntrinsicVariable(v), d.decl_id);
             variable_decls.push(d);
         }
         for v in IntrinsicConstructor::iter() {
@@ -106,7 +109,7 @@ impl<'a> Ast<'a> {
                 0,
                 BasicFunction::Construction(ConstructorId::Intrinsic(v)),
             );
-            basic_decl_ids
+            basic_call_decls
                 .insert(VariableId::IntrinsicConstructor(v), d.decl_id);
             variable_decls.push(d);
         }
@@ -116,22 +119,42 @@ impl<'a> Ast<'a> {
                 v.fields.len(),
                 BasicFunction::Construction(ConstructorId::DeclId(v.decl_id)),
             );
-            basic_decl_ids
+            basic_call_decls
                 .insert(VariableId::Constructor(v.decl_id), d.decl_id);
             variable_decls.push(d);
+            for i in 0..v.fields.len() {
+                let d = basic_call(
+                    Path::from_str(Path::root(), "field_accessor"),
+                    1,
+                    BasicFunction::FieldAccessor {
+                        constructor: v.decl_id,
+                        field: i,
+                    },
+                );
+                let decl_id = d.decl_id;
+                basic_call_decls.insert(
+                    VariableId::FieldAccessor {
+                        constructor: v.decl_id,
+                        field: i,
+                    },
+                    decl_id,
+                );
+                variable_decls.push(d);
+            }
         }
         let resolved_idents = resolved_idents
             .into_iter()
             .map(|(ident_id, r)| match &r.variable_id {
                 VariableId::IntrinsicVariable(_)
                 | VariableId::Constructor(_)
-                | VariableId::IntrinsicConstructor(_) => {
+                | VariableId::IntrinsicConstructor(_)
+                | VariableId::FieldAccessor { .. } => {
                     debug_assert!(r.implicit_args.is_empty());
                     (
                         ident_id,
                         ResolvedIdent {
                             variable_id: VariableId::Global(
-                                basic_decl_ids[&r.variable_id],
+                                basic_call_decls[&r.variable_id],
                             ),
                             implicit_args: Vec::new(),
                         },
@@ -144,17 +167,18 @@ impl<'a> Ast<'a> {
             resolved_idents: &resolved_idents,
             map,
             types_of_decls: local_variable_types,
-            basic_decl_ids: &basic_decl_ids,
+            basic_call_decls,
+            additional_variable_decls: variable_decls,
         };
-        let mut ds = variable_decl(ast.variable_decl, &mut env);
-        for v in &ds {
+        let mut variable_decls = variable_decl(ast.variable_decl, &mut env);
+        for v in &variable_decls {
             log::debug!(
                 "type_ {} : {}",
                 v.name,
                 global_variable_types[&VariableId::Global(v.decl_id)].t
             );
         }
-        variable_decls.append(&mut ds);
+        variable_decls.append(&mut env.additional_variable_decls);
         let data_decl: Vec<DataDecl> = ast
             .data_decl
             .into_iter()
@@ -171,6 +195,7 @@ impl<'a> Ast<'a> {
                 entry_point: ast.entry_point,
                 types_of_global_decls: global_variable_types,
                 types_of_local_decls: env.types_of_decls,
+                basic_call_decls: env.basic_call_decls,
             },
             resolved_idents,
         ))
@@ -211,11 +236,12 @@ fn basic_call(
     }
 }
 
-struct Env<'a> {
+struct Env<'a, 'b> {
     resolved_idents: &'a FxHashMap<IdentId, ResolvedIdent>,
     map: TypeVariableMap,
     types_of_decls: FxHashMap<VariableId, LocalVariableType>,
-    basic_decl_ids: &'a FxHashMap<VariableId, DeclId>,
+    basic_call_decls: FxHashMap<VariableId, DeclId>,
+    additional_variable_decls: Vec<VariableDecl<'b>>,
 }
 
 fn variable_decl<'a>(
@@ -299,13 +325,14 @@ fn expr<'a>(
             variable_id, name, ..
         } => Expr::Ident {
             name: name.unwrap().to_string(),
-            variable_id: if let VariableId::IntrinsicVariable(_)
-            | VariableId::Constructor(_)
-            | VariableId::IntrinsicConstructor(_) = variable_id
-            {
-                VariableId::Global(env.basic_decl_ids[&variable_id])
-            } else {
-                variable_id
+            variable_id: match variable_id {
+                VariableId::IntrinsicVariable(_)
+                | VariableId::Constructor(_)
+                | VariableId::IntrinsicConstructor(_)
+                | VariableId::FieldAccessor { .. } => {
+                    VariableId::Global(env.basic_call_decls[&variable_id])
+                }
+                _ => variable_id,
             },
         },
         ast_step2::Expr::Call(f, a) => {
@@ -382,7 +409,7 @@ where
 
 fn normalize_types_in_pattern<'a>(
     pattern: ast_step2::Pattern<'a, TypeVariable>,
-    env: &mut Env<'_>,
+    env: &mut Env<'_, '_>,
 ) -> Pattern<'a> {
     ast_step2::Pattern(
         pattern

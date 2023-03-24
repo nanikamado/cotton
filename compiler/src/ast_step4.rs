@@ -1,11 +1,14 @@
 mod padded_type_map;
 
-pub use self::padded_type_map::{PaddedTypeMap, TypePointer};
+pub use self::padded_type_map::{
+    PaddedTypeMap, ReplaceMap, Terminal, TypePointer,
+};
 use crate::ast_step1::decl_id::DeclId;
 use crate::ast_step1::name_id::Path;
 use crate::ast_step2::{types, ConstructorId, TypeId};
-use crate::ast_step3::{self, BasicFunction, DataDecl, VariableId};
-use crate::intrinsics::{IntrinsicType, IntrinsicVariable};
+use crate::ast_step3::{self, BasicFunction, DataDecl};
+use crate::ast_step5::Type;
+use crate::intrinsics::IntrinsicType;
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use std::collections::{hash_map, BTreeSet};
@@ -27,7 +30,7 @@ pub struct Ast {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct VariableDecl<T = Type> {
+pub struct VariableDecl<T = TypeForHash> {
     pub name: Path,
     pub value: ExprWithType<T>,
     pub decl_id: DeclId,
@@ -51,11 +54,11 @@ pub enum Expr<T> {
     Number(String),
     StrLiteral(String),
     Ident {
-        variable_id: VariableId,
+        variable_id: DeclId,
     },
     GlobalVariable {
         decl_id: DeclId,
-        replace_map: FxHashMap<TypePointer, TypePointer>,
+        replace_map: ReplaceMap,
     },
     Call(Box<ExprWithType<T>>, Box<ExprWithType<T>>),
     DoBlock(Vec<ExprWithType<T>>),
@@ -99,75 +102,57 @@ pub struct FnArm<T = TypePointer> {
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Clone)]
-struct LinkedType(BTreeSet<LinkedTypeUnit>);
+struct LinkedType {
+    ts: BTreeSet<LinkedTypeUnit>,
+    recursive: bool,
+}
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
-enum LinkedTypeUnit<T = LinkedType> {
-    Normal { id: TypeId, args: Vec<T> },
+enum LinkedTypeUnit {
+    Normal { id: TypeId, args: Vec<LinkedType> },
     RecursionPoint(u32),
-    RecursiveAlias(LinkedType),
     Pointer(TypePointer),
-    LambdaId(LambdaId<T>),
+    LambdaId(LambdaId<LinkedType>),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Clone)]
-pub struct Type(BTreeSet<TypeUnit>);
+pub struct TypeForHash {
+    pub ts: BTreeSet<TypeUnitForHash>,
+}
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
-pub enum TypeUnit {
-    Normal { id: TypeId, args: Vec<Type> },
-    Fn(BTreeSet<LambdaId<Type>>, Type, Type),
-    RecursiveAlias(Type),
+pub enum TypeUnitForHash {
+    Normal { id: TypeId, args: Vec<TypeForHash> },
+    Fn(BTreeSet<LambdaId<TypeForHash>>, TypeForHash, TypeForHash),
     RecursionPoint(u32),
+    Recursive(TypeForHash),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
-pub enum LambdaId<T> {
-    Normal(u32, T),
-    IntrinsicVariable(IntrinsicVariable, u32),
-    Constructor(ConstructorId, u32),
-    FieldAccessor { constructor: TypeId, field: usize },
+pub struct LambdaId<T>(pub u32, pub T);
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
+pub enum VariableId {
+    Local(DeclId),
+    Global(DeclId),
 }
 
 impl<T> LambdaId<T> {
     pub fn map_type<U, F: FnMut(T) -> U>(self, mut f: F) -> LambdaId<U> {
         match self {
-            LambdaId::Normal(a, t) => LambdaId::Normal(a, f(t)),
-            LambdaId::IntrinsicVariable(a, b) => {
-                LambdaId::IntrinsicVariable(a, b)
-            }
-            LambdaId::Constructor(a, b) => LambdaId::Constructor(a, b),
-            LambdaId::FieldAccessor { constructor, field } => {
-                LambdaId::FieldAccessor { constructor, field }
-            }
-        }
-    }
-
-    fn map_type_ref<U, F: FnMut(&T) -> U>(&self, mut f: F) -> LambdaId<U> {
-        match self {
-            LambdaId::Normal(a, t) => LambdaId::Normal(*a, f(t)),
-            LambdaId::IntrinsicVariable(a, b) => {
-                LambdaId::IntrinsicVariable(*a, *b)
-            }
-            LambdaId::Constructor(a, b) => LambdaId::Constructor(*a, *b),
-            LambdaId::FieldAccessor { constructor, field } => {
-                LambdaId::FieldAccessor {
-                    constructor: *constructor,
-                    field: *field,
-                }
-            }
+            LambdaId(a, t) => LambdaId(a, f(t)),
         }
     }
 }
 
-impl TryFrom<LinkedType> for Type {
+impl TryFrom<LinkedType> for TypeForHash {
     type Error = ();
 
     fn try_from(value: LinkedType) -> Result<Self, Self::Error> {
-        use TypeUnit::*;
-        Ok(Type(
-            value
-                .0
+        use TypeUnitForHash::*;
+        let t = TypeForHash {
+            ts: value
+                .ts
                 .into_iter()
                 .map(|t| match t {
                     LinkedTypeUnit::Normal {
@@ -178,32 +163,18 @@ impl TryFrom<LinkedType> for Type {
                         let mut args = args.into_iter();
                         let a = args.next().unwrap().try_into()?;
                         let b = args.next().unwrap().try_into()?;
-                        let lambda_id = args
-                            .next()
-                            .unwrap()
-                            .0
+                        let lambda_t = args.next().unwrap();
+                        debug_assert!(!lambda_t.recursive);
+                        let lambda_id = lambda_t
+                            .ts
                             .into_iter()
                             .map(|id| {
                                 if let LinkedTypeUnit::LambdaId(lambda_id) = id
                                 {
-                                    Ok(match lambda_id {
-                                        LambdaId::Normal(a, t) => {
-                                            LambdaId::Normal(a, t.try_into()?)
-                                        }
-                                        LambdaId::IntrinsicVariable(a, b) => {
-                                            LambdaId::IntrinsicVariable(a, b)
-                                        }
-                                        LambdaId::Constructor(a, b) => {
-                                            LambdaId::Constructor(a, b)
-                                        }
-                                        LambdaId::FieldAccessor {
-                                            constructor,
-                                            field,
-                                        } => LambdaId::FieldAccessor {
-                                            constructor,
-                                            field,
-                                        },
-                                    })
+                                    Ok(LambdaId(
+                                        lambda_id.0,
+                                        lambda_id.1.try_into()?,
+                                    ))
                                 } else {
                                     panic!()
                                 }
@@ -214,57 +185,59 @@ impl TryFrom<LinkedType> for Type {
                     LinkedTypeUnit::Normal { id, args } => {
                         let args = args
                             .into_iter()
-                            .map(Type::try_from)
+                            .map(TypeForHash::try_from)
                             .collect::<Result<_, _>>()?;
                         Ok(Normal { id, args })
                     }
                     LinkedTypeUnit::RecursionPoint(d) => Ok(RecursionPoint(d)),
-                    LinkedTypeUnit::RecursiveAlias(a) => {
-                        Ok(RecursiveAlias(a.try_into()?))
-                    }
                     LinkedTypeUnit::Pointer(_) => Err(()),
                     LinkedTypeUnit::LambdaId(_) => panic!(),
                 })
                 .collect::<Result<_, _>>()?,
-        ))
+        };
+        Ok(if value.recursive {
+            TypeUnitForHash::Recursive(t).into()
+        } else {
+            t
+        })
     }
 }
 
-impl From<TypeUnit> for Type {
-    fn from(value: TypeUnit) -> Self {
-        Self(once(value).collect())
+impl From<TypeUnitForHash> for TypeForHash {
+    fn from(value: TypeUnitForHash) -> Self {
+        Self {
+            ts: once(value).collect(),
+        }
     }
 }
 
-impl FromIterator<TypeUnit> for Type {
-    fn from_iter<T: IntoIterator<Item = TypeUnit>>(iter: T) -> Self {
-        Self(iter.into_iter().collect())
+impl FromIterator<TypeUnitForHash> for TypeForHash {
+    fn from_iter<T: IntoIterator<Item = TypeUnitForHash>>(iter: T) -> Self {
+        Self {
+            ts: iter.into_iter().collect(),
+        }
     }
 }
 
-impl Type {
-    pub fn iter(&self) -> std::collections::btree_set::Iter<TypeUnit> {
-        self.0.iter()
-    }
-
+impl TypeForHash {
     pub fn len(&self) -> usize {
-        self.0.len()
+        self.ts.len()
     }
 }
 
 impl Ast {
     pub fn from(ast: ast_step3::Ast) -> Self {
-        let mut memo = VariableMemo::new(ast.variable_decls, &ast.data_decl);
+        let mut memo = VariableMemo::new(
+            ast.variable_decls,
+            &ast.data_decl,
+            ast.basic_call_decls,
+        );
         let entry_point = ast
             .entry_point
             .unwrap_or_else(|| panic!("entry point not found"));
         let (type_of_entry_point, _) =
             memo.get_type_global(entry_point, &Default::default());
         let type_map = memo.type_map;
-        for d in &ast.data_decl {
-            memo.variable_names
-                .insert(VariableId::Constructor(d.decl_id), d.name.to_string());
-        }
         let variable_names = memo.variable_names;
         Self {
             variable_decl: memo.global_variables_done,
@@ -277,52 +250,75 @@ impl Ast {
     }
 }
 
+pub struct ReplacePointerResult {
+    t: LinkedType,
+    replaced: bool,
+    contains_pointer: bool,
+}
+
 impl LinkedType {
-    fn replace_pointer(self, from: TypePointer, depth: u32) -> (Self, bool) {
+    fn replace_pointer(
+        self,
+        from: TypePointer,
+        depth: u32,
+    ) -> ReplacePointerResult {
+        let depth = self.recursive as u32 + depth;
         let mut t = BTreeSet::default();
         let mut replaced = false;
-        for u in self.0 {
+        let mut contains_pointer = false;
+        for u in self.ts {
             match u {
                 LinkedTypeUnit::Pointer(p) if p == from => {
                     t.insert(LinkedTypeUnit::RecursionPoint(depth));
                     replaced = true;
+                    contains_pointer = true;
+                }
+                LinkedTypeUnit::Pointer(_) => {
+                    contains_pointer = true;
+                    t.insert(u);
                 }
                 LinkedTypeUnit::Normal { id, args } => {
                     let args = args
                         .into_iter()
                         .map(|arg| {
-                            let (arg, r) = arg.replace_pointer(from, depth);
-                            replaced |= r;
-                            arg
+                            let r = arg.replace_pointer(from, depth);
+                            replaced |= r.replaced;
+                            contains_pointer |= r.contains_pointer;
+                            r.t
                         })
                         .collect();
                     t.insert(LinkedTypeUnit::Normal { id, args });
                 }
-                LinkedTypeUnit::RecursiveAlias(u) => {
-                    let (u, r) = u.replace_pointer(from, depth + 1);
-                    t.insert(LinkedTypeUnit::RecursiveAlias(u));
-                    replaced |= r;
-                }
                 LinkedTypeUnit::LambdaId(id) => {
                     t.insert(LinkedTypeUnit::LambdaId(id.map_type(|t| {
-                        let (t, r) = t.replace_pointer(from, depth);
-                        replaced |= r;
-                        t
+                        let r = t.replace_pointer(from, depth);
+                        replaced |= r.replaced;
+                        contains_pointer |= r.contains_pointer;
+                        r.t
                     })));
                 }
-                u @ (LinkedTypeUnit::RecursionPoint(_)
-                | LinkedTypeUnit::Pointer(_)) => {
+                LinkedTypeUnit::RecursionPoint(_) => {
                     t.insert(u);
                 }
             }
         }
-        (LinkedType(t), replaced)
+        ReplacePointerResult {
+            t: LinkedType {
+                ts: t,
+                recursive: self.recursive,
+            },
+            replaced,
+            contains_pointer,
+        }
     }
 }
 
 impl From<LinkedTypeUnit> for LinkedType {
     fn from(t: LinkedTypeUnit) -> Self {
-        LinkedType(iter::once(t).collect())
+        LinkedType {
+            ts: iter::once(t).collect(),
+            recursive: false,
+        }
     }
 }
 
@@ -336,12 +332,14 @@ struct VariableMemo<'b> {
     used_local_variables: FxHashSet<DeclId>,
     defined_local_variables: FxHashSet<DeclId>,
     variable_names: FxHashMap<VariableId, String>,
+    basic_call_decls: FxHashMap<ast_step3::VariableId, DeclId>,
 }
 
 impl<'b> VariableMemo<'b> {
     pub fn new(
         global_variables: Vec<ast_step3::VariableDecl<'b>>,
         data_decls: &'b [ast_step3::DataDecl],
+        basic_call_decls: FxHashMap<ast_step3::VariableId, DeclId>,
     ) -> Self {
         Self {
             type_map: PaddedTypeMap::default(),
@@ -356,6 +354,7 @@ impl<'b> VariableMemo<'b> {
             used_local_variables: FxHashSet::default(),
             defined_local_variables: FxHashSet::default(),
             variable_names: FxHashMap::default(),
+            basic_call_decls,
         }
     }
 
@@ -448,10 +447,7 @@ impl<'b> VariableMemo<'b> {
                     let lambda_number = self.lambda_number;
                     self.type_map.insert_lambda_id(
                         lambda_id,
-                        LambdaId::Normal(
-                            lambda_number,
-                            type_of_global_variable,
-                        ),
+                        LambdaId(lambda_number, type_of_global_variable),
                     );
                     self.type_map.insert_function(
                         new_body_type,
@@ -494,16 +490,16 @@ impl<'b> VariableMemo<'b> {
             }
             ast_step3::Expr::Ident {
                 name,
-                variable_id: variable_id @ VariableId::Local(d),
+                variable_id: ast_step3::VariableId::Local(d),
             } => {
                 self.insert_type_pointer(VariableId::Local(d), type_pointer);
                 self.used_local_variables.insert(d);
-                self.variable_names.insert(variable_id, name);
-                Expr::Ident { variable_id }
+                self.variable_names.insert(VariableId::Local(d), name);
+                Expr::Ident { variable_id: d }
             }
             ast_step3::Expr::Ident {
                 name: _,
-                variable_id: VariableId::Global(decl_id),
+                variable_id: ast_step3::VariableId::Global(decl_id),
             } => {
                 let (p, is_recursive) = self.get_type_global(decl_id, trace);
                 if is_recursive {
@@ -515,7 +511,7 @@ impl<'b> VariableMemo<'b> {
                 } else {
                     let mut replace_map = Default::default();
                     let v_cloned =
-                        self.type_map.clone_pointer_rec(p, &mut replace_map);
+                        self.type_map.clone_pointer(p, &mut replace_map);
                     self.type_map.union(type_pointer, v_cloned);
                     Expr::GlobalVariable {
                         decl_id,
@@ -526,26 +522,12 @@ impl<'b> VariableMemo<'b> {
             ast_step3::Expr::Ident {
                 name: _,
                 variable_id:
-                    VariableId::IntrinsicVariable(_)
-                    | VariableId::IntrinsicConstructor(_)
-                    | VariableId::Constructor(_),
+                    ast_step3::VariableId::IntrinsicVariable(_)
+                    | ast_step3::VariableId::IntrinsicConstructor(_)
+                    | ast_step3::VariableId::Constructor(_)
+                    | ast_step3::VariableId::FieldAccessor { .. },
             } => {
                 panic!()
-            }
-            ast_step3::Expr::Ident {
-                name,
-                variable_id:
-                    variable_id @ VariableId::FieldAccessor { constructor, field },
-            } => {
-                insert_accessor_type(
-                    type_pointer,
-                    self.data_decls[&constructor].field_len,
-                    TypeId::DeclId(constructor),
-                    field,
-                    &mut self.type_map,
-                );
-                self.variable_names.insert(variable_id, name);
-                Expr::Ident { variable_id }
             }
             ast_step3::Expr::Call(f, a) => {
                 let f_t = self.type_map.new_pointer();
@@ -621,6 +603,33 @@ impl<'b> VariableMemo<'b> {
                         Expr::IntrinsicCall {
                             args,
                             id: BasicFunction::Construction(id),
+                        }
+                    }
+                    FieldAccessor { constructor, field } => {
+                        debug_assert_eq!(args.len(), 1);
+                        let args_p = (0..self.data_decls[&constructor]
+                            .field_len)
+                            .map(|_| self.type_map.new_pointer())
+                            .collect_vec();
+                        self.type_map.union(type_pointer, args_p[field]);
+                        let data_t = self.type_map.new_pointer();
+                        self.type_map.insert_normal(
+                            data_t,
+                            TypeId::DeclId(constructor),
+                            args_p,
+                        );
+                        let arg = self.expr(
+                            args.into_iter().next().unwrap(),
+                            data_t,
+                            type_of_global_variable,
+                            trace,
+                        );
+                        Expr::IntrinsicCall {
+                            args: vec![(arg, data_t)],
+                            id: BasicFunction::FieldAccessor {
+                                constructor,
+                                field,
+                            },
                         }
                     }
                 }
@@ -705,34 +714,32 @@ impl<'b> VariableMemo<'b> {
                         args.iter().map(|p| p.type_).collect(),
                     );
                     let mut p = PatternUnit::Constructor { id: *id };
-                    let field_len = args.len();
                     for (i, arg) in args.into_iter().enumerate() {
-                        let accessor_t = self.type_map.new_pointer();
-                        insert_accessor_type(
-                            accessor_t,
-                            field_len,
-                            TypeId::DeclId(*decl_id),
-                            i,
-                            &mut self.type_map,
-                        );
-                        self.variable_names.insert(
-                            VariableId::FieldAccessor {
+                        let function_variable_id = self.basic_call_decls
+                            [&ast_step3::VariableId::FieldAccessor {
                                 constructor: *decl_id,
                                 field: i,
-                            },
-                            format!("_{i}"),
-                        );
+                            }];
+                        let (accessor_t, recursive) =
+                            self.get_type_global(function_variable_id, trace);
+                        let mut replace_map = Default::default();
+                        let accessor_t = self
+                            .type_map
+                            .clone_pointer(accessor_t, &mut replace_map);
+                        debug_assert!(!recursive);
+                        let (arg_t, ret_t, _) =
+                            self.type_map.get_fn(accessor_t);
+                        self.type_map.union(arg.type_, ret_t);
+                        self.type_map.union(type_pointer, arg_t);
                         p = PatternUnit::Apply {
                             pre_pattern: Pattern {
                                 patterns: vec![p],
                                 type_: type_pointer,
                             },
                             function: (
-                                Expr::Ident {
-                                    variable_id: VariableId::FieldAccessor {
-                                        constructor: *decl_id,
-                                        field: i,
-                                    },
+                                Expr::GlobalVariable {
+                                    decl_id: function_variable_id,
+                                    replace_map,
                                 },
                                 accessor_t,
                             ),
@@ -838,41 +845,21 @@ impl<'b> VariableMemo<'b> {
     }
 }
 
-fn insert_accessor_type(
-    p: TypePointer,
-    field_len: usize,
-    id: TypeId,
-    field: usize,
-    map: &mut PaddedTypeMap,
-) {
-    let args = (0..field_len).map(|_| map.new_pointer()).collect_vec();
-    let t = map.new_pointer();
-    let fn_id = map.new_lambda_id_pointer();
-    map.insert_lambda_id(
-        fn_id,
-        LambdaId::FieldAccessor {
-            constructor: id,
-            field,
-        },
-    );
-    map.insert_function(p, t, args[field], fn_id);
-    map.insert_normal(t, id, args);
-}
-
-impl Display for Type {
+impl Display for TypeForHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.0.len() {
+        match self.ts.len() {
             0 => write!(f, "∅"),
-            1 => write!(f, "{}", self.0.iter().next().unwrap()),
-            _ => write!(f, "{{{}}}", self.0.iter().format(" | ")),
-        }
+            1 => write!(f, "{}", self.ts.iter().next().unwrap()),
+            _ => write!(f, "{{{}}}", self.ts.iter().format(" | ")),
+        }?;
+        Ok(())
     }
 }
 
-impl Display for TypeUnit {
+impl Display for TypeUnitForHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TypeUnit::Normal { args, id } => {
+            TypeUnitForHash::Normal { args, id } => {
                 debug_assert_ne!(*id, TypeId::Intrinsic(IntrinsicType::Fn));
                 if args.is_empty() {
                     write!(f, "{id}")
@@ -880,13 +867,12 @@ impl Display for TypeUnit {
                     write!(f, "{}[{}]", id, args.iter().format(", "))
                 }
             }
-            TypeUnit::RecursiveAlias(t) => write!(f, "rec[{t}]"),
-            TypeUnit::RecursionPoint(d) => write!(f, "d{d}"),
-            TypeUnit::Fn(id, a, b) => {
-                let paren = a.0.len() == 1
+            TypeUnitForHash::RecursionPoint(d) => write!(f, "d{d}"),
+            TypeUnitForHash::Fn(id, a, b) => {
+                let paren = a.ts.len() == 1
                     && matches!(
-                        a.0.iter().next().unwrap(),
-                        TypeUnit::Fn(_, _, _)
+                        a.ts.iter().next().unwrap(),
+                        TypeUnitForHash::Fn(_, _, _)
                     );
                 let id_paren = id.len() >= 2;
                 write!(
@@ -901,26 +887,16 @@ impl Display for TypeUnit {
                     if id_paren { ")" } else { "" },
                 )
             }
+            TypeUnitForHash::Recursive(t) => {
+                write!(f, "rec[{}]", t)
+            }
         }
     }
 }
 
 impl<T: Display> Display for LambdaId<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LambdaId::Normal(a, id) => {
-                write!(f, "(lm{a}, {id})")
-            }
-            LambdaId::IntrinsicVariable(a, b) => {
-                write!(f, "intrinsic({a}, {b})")
-            }
-            LambdaId::Constructor(a, b) => {
-                write!(f, "constructor({a}, {b})")
-            }
-            LambdaId::FieldAccessor { constructor, field } => {
-                write!(f, "field_accessor({constructor}, {field})")
-            }
-        }
+        write!(f, "(lm{}, {})", self.0, self.1)
     }
 }
 
@@ -929,8 +905,8 @@ fn unify_type_pointer_with_type(
     map: &mut PaddedTypeMap,
 ) -> TypePointer {
     let p = map.new_pointer();
-    for t in t.0.iter() {
-        use TypeUnit::*;
+    for t in t.iter() {
+        use crate::ast_step5::TypeUnit::*;
         match t {
             Normal { id, args } => {
                 let mut p_args = Vec::with_capacity(args.len());
@@ -940,19 +916,8 @@ fn unify_type_pointer_with_type(
                 }
                 map.insert_normal(p, *id, p_args);
             }
-            RecursionPoint(_) | RecursiveAlias(_) => {
+            RecursionPoint(_) | Recursive(_) | Fn(_, _, _) => {
                 unimplemented!()
-            }
-            Fn(lambda_id, a, b) => {
-                let lambda_id_p = map.new_lambda_id_pointer();
-                let a_p = unify_type_pointer_with_type(a, map);
-                let b_p = unify_type_pointer_with_type(b, map);
-                for i in lambda_id {
-                    let i = i
-                        .map_type_ref(|t| unify_type_pointer_with_type(t, map));
-                    map.insert_lambda_id(lambda_id_p, i);
-                }
-                map.insert_function(p, a_p, b_p, lambda_id_p);
             }
         }
     }

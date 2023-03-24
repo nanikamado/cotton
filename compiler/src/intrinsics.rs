@@ -1,6 +1,6 @@
 use crate::ast_step2::types::Type;
 use crate::ast_step2::TypeId;
-use crate::ast_step4;
+use crate::ast_step5;
 use fxhash::FxHashMap;
 use once_cell::sync::Lazy;
 use parser::Associativity;
@@ -30,8 +30,8 @@ impl Display for IntrinsicVariable {
     }
 }
 
-const fn runtime_intrinsic_type(i: IntrinsicType) -> ast_step4::TypeUnit {
-    ast_step4::TypeUnit::Normal {
+const fn runtime_intrinsic_type(i: IntrinsicType) -> ast_step5::TypeUnit {
+    ast_step5::TypeUnit::Normal {
         id: TypeId::Intrinsic(i),
         args: Vec::new(),
     }
@@ -99,8 +99,8 @@ impl IntrinsicVariable {
         }
     }
 
-    pub fn runtime_return_type(self) -> ast_step4::Type {
-        use ast_step4::TypeUnit;
+    pub fn runtime_return_type(self) -> ast_step5::Type {
+        use ast_step5::TypeUnit;
         const I64: TypeUnit = runtime_intrinsic_type(IntrinsicType::I64);
         const TRUE: TypeUnit = runtime_intrinsic_type(IntrinsicType::True);
         const FALSE: TypeUnit = runtime_intrinsic_type(IntrinsicType::False);
@@ -205,7 +205,7 @@ impl IntrinsicConstructor {
         }
     }
 
-    pub fn to_runtime_type(self) -> ast_step4::Type {
+    pub fn to_runtime_type(self) -> ast_step5::Type {
         runtime_intrinsic_type(self.into()).into()
     }
 }

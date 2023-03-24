@@ -1,117 +1,140 @@
 mod type_restriction_pattern;
 
+use self::struct_collector::Collector;
 use self::type_restriction_pattern::IS_INSTANCE_OF;
 use crate::ast_step1::decl_id::DeclId;
-use crate::ast_step2::types::merge_vec;
-use crate::ast_step2::{get_type_name, TypeId};
-use crate::ast_step3::{DataDecl, VariableId};
-use crate::ast_step4::Type;
-use crate::ast_step5::{
-    Ast, Expr, ExprWithType, FnArm, Function, LambdaId, Pattern, PatternUnit,
-    VariableDecl,
+use crate::ast_step2::{ConstructorId, TypeId};
+use crate::ast_step3::DataDecl;
+use crate::ast_step4::VariableId;
+use crate::ast_step5::{LambdaId, Type, TypeUnit};
+use crate::ast_step6::{
+    Ast, Block, Expr, Instruction, Tag, Tester, VariableDecl,
 };
-use crate::intrinsics::{IntrinsicConstructor, IntrinsicVariable};
-use fxhash::FxHashMap;
+use crate::intrinsics::{
+    IntrinsicConstructor, IntrinsicType, IntrinsicVariable,
+};
+use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
-use once_cell::sync::Lazy;
 use std::fmt::{Display, Write};
 use stripmargin::StripMargin;
 use strum::IntoEnumIterator;
 use unic_ucd_category::GeneralCategory;
 
 pub fn codegen(ast: Ast) -> String {
-    format!(
-        "let $$bool=a=>a?{}:{};{}{IS_INSTANCE_OF}{}{}{}{}{}{}({},{{}});}}",
-        PRIMITIVE_CONSTRUCTOR_DEF[&IntrinsicConstructor::True],
-        PRIMITIVE_CONSTRUCTOR_DEF[&IntrinsicConstructor::False],
-        r#"{
+    let function_context = ast
+        .functions
+        .iter()
+        .map(|f| {
+            let ctx = f
+                .context
+                .iter()
+                .map(|d| ast.variable_types[&VariableId::Local(*d)].clone())
+                .collect_vec();
+            (f.id, ctx)
+        })
+        .collect();
+    let mut aggregate_types = Default::default();
+    let variable_types: FxHashMap<_, _> = ast
+        .variable_types
+        .into_iter()
+        .map(|(id, t)| {
+            let ct =
+                c_type(&function_context, &mut aggregate_types, &t, None, None);
+            (id, (ct, t))
+        })
+        .collect();
+    let env = Env {
+        context: &Default::default(),
+        variable_names: &ast.variable_names,
+        variable_types: &variable_types,
+    };
+    let mut s = String::new();
+    write!(
+        &mut s,
+        "let $$bool=a=>a?{{tag:0}}:{{tag:1}};{}{IS_INSTANCE_OF}{}{}{}{}
+        /*{}*/",
+        r#"
         |let $$unexpected=()=>{throw new Error("unexpected")};
-        |let $field_accessor=i=>a=>a[i];
+        |let $field_accessor=(i,a)=>a[i];
         |"#
         .strip_margin(),
         IntrinsicVariable::iter()
             .map(|v| format!("let $intrinsic${}={};", v, primitive_def(v)))
             .format(""),
-        PRIMITIVE_CONSTRUCTOR_DEF
-            .iter()
-            .map(|(variable, def)| {
-                format!(
-                    "let ${}${}={};",
-                    variable,
-                    convert_name(variable.to_str()),
-                    def
-                )
-            })
-            .join(""),
-        ast.functions
+        IntrinsicConstructor::iter().format_with("", |i, f| f(&format_args!(
+            "let {0}={{name: '{0}'}};",
+            Dis(&ConstructorId::Intrinsic(i), &env),
+        ))),
+        ast.data_decl
             .into_iter()
-            .map(|f| FunctionWithEnv(f, &ast.variable_names))
-            .join(""),
-        ast.data_decl.into_iter().map(data_decl).join(""),
+            .format_with("", |d, f| f(&Dis(&d, &env))),
         ast.variable_decl
             .iter()
-            .map(|d| variable_decl(d, &ast.variable_names))
-            .join(""),
-        ast.entry_point,
-        PRIMITIVE_CONSTRUCTOR_DEF[&IntrinsicConstructor::Unit],
-    )
-}
-
-struct FunctionWithEnv<'a>(Function, &'a FxHashMap<VariableId, String>);
-
-impl Display for FunctionWithEnv<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let context = self
-            .0
-            .context
+            .format_with("", |d, f| f(&format_args!(
+                "let ${}${}=()=>{};",
+                d.decl_id,
+                convert_name(
+                    &env.variable_names[&VariableId::Global(d.decl_id)]
+                ),
+                Dis(&TerminalBlock(&d.value, d.ret), &env)
+            ))),
+        aggregate_types
+            .into_raw()
             .iter()
-            .enumerate()
-            .map(|(i, c)| (*c, i))
-            .collect();
-        let mut env = Env {
-            context: &context,
-            variable_names: self.1,
-        };
-        let e = expr(&self.0.body, &mut env);
-        write!(
-            f,
-            "let {}/*(lm{},{})*/=(${}$pa,ctx)=>{};",
-            LambdaId::Normal(self.0.id),
-            self.0.original_id,
-            self.0.origin_type,
-            self.0.parameter,
-            e
-        )
-    }
-}
-
-fn data_decl(d: DataDecl) -> String {
-    let name = convert_name(&d.name.to_string());
-    format!(
-        "let ${}${}=({})=>({{name:'${}${}',{}}});",
-        d.decl_id,
-        name,
-        (0..d.field_len).format_with(",", |i, f| f(&format_args!("${i}"))),
-        d.decl_id,
-        name,
-        (0..d.field_len).map(|i| format!("{i}:${i}")).join(", "),
+            .format_with("", |(t, i), f| {
+                match t {
+                    CAggregateType::Struct(fields) => f(&format_args!(
+                        "{} {{{}}}\n",
+                        CType::Struct(*i),
+                        fields
+                            .iter()
+                            .enumerate()
+                            .format_with("", |(i, field), f| f(&format_args!(
+                                "{field} _{i};",
+                            )))
+                    )),
+                    CAggregateType::Union(ts) => f(&format_args!(
+                        "{} {{int tag;union {{{}}} value}}\n",
+                        CType::Struct(*i),
+                        ts.iter().enumerate().format_with("", |(i, t), f| f(
+                            &format_args!("{t} _{i};")
+                        ))
+                    )),
+                }
+            })
     )
-}
-
-fn variable_decl(
-    d: &VariableDecl,
-    variable_names: &FxHashMap<VariableId, String>,
-) -> String {
-    let mut env = Env {
-        context: &Default::default(),
-        variable_names,
-    };
-    format!(
-        "let ${}${}={};",
-        d.decl_id,
-        convert_name(&d.name.to_string()),
-        expr(&d.value, &mut env)
+    .unwrap();
+    write!(
+        &mut s,
+        "{}{}({{tag:0}},{{}});",
+        ast.functions.into_iter().format_with("", |function, f| {
+            let env = Env {
+                context: &function
+                    .context
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, d)| (d, i))
+                    .collect(),
+                variable_names: &ast.variable_names,
+                variable_types: &variable_types,
+            };
+            let (ct, tu) =
+                &variable_types[&VariableId::Local(function.parameter)];
+            f(&format_args!(
+                "let {}/*(lm{},{})*/=({}/*({},{})*/,ctx)=>{};",
+                function.id,
+                function.original_id,
+                function.origin_type,
+                Dis(&VariableId::Local(function.parameter), &env),
+                ct,
+                tu,
+                Dis(&TerminalBlock(&function.body, function.ret), &env)
+            ))
+        }),
+        ast.entry_point
     )
+    .unwrap();
+    s
 }
 
 fn primitive_def(i: IntrinsicVariable) -> &'static str {
@@ -132,338 +155,465 @@ fn primitive_def(i: IntrinsicVariable) -> &'static str {
     }
 }
 
-static PRIMITIVE_CONSTRUCTOR_DEF: Lazy<
-    FxHashMap<IntrinsicConstructor, &'static str>,
-> = Lazy::new(|| {
-    use IntrinsicConstructor::*;
-    [
-        (True, "{name: '$True$True'}"),
-        (False, "{name: '$False$False'}"),
-        (Unit, "{name: '$Unit$unicode_28_29'}"),
-    ]
-    .iter()
-    .copied()
-    .collect()
-});
-
-struct DeclIdWithEnv<'a> {
-    decl_id: DeclId,
-    ctx: &'a FxHashMap<DeclId, usize>,
-    variable_names: &'a FxHashMap<VariableId, String>,
-}
-
-impl Display for DeclIdWithEnv<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(c) = self.ctx.get(&self.decl_id) {
-            write!(f, "ctx._{c}")
-        } else {
-            write!(
-                f,
-                "{}",
-                VariableIdWithEnv(
-                    VariableId::Local(self.decl_id),
-                    self.variable_names
-                )
-            )
-        }
-    }
-}
-
-struct VariableIdWithEnv<'a>(VariableId, &'a FxHashMap<VariableId, String>);
-
-impl Display for VariableIdWithEnv<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let VariableId::IntrinsicVariable(_) = self.0 {
-            write!(f, "$intrinsic${}", self.0)
-        } else if let VariableId::IntrinsicConstructor(i) = self.0 {
-            write!(
-                f,
-                "${}${}",
-                self.0,
-                convert_name(
-                    get_type_name(TypeId::Intrinsic(i.into()))
-                        .unwrap()
-                        .to_string()
-                        .as_str()
-                )
-            )
-        } else if self.1.contains_key(&self.0) {
-            write!(f, "${}${}", self.0, convert_name(self.1[&self.0].as_str()))
-        } else {
-            write!(f, "${}$pa", self.0)
-        }
-    }
-}
-
+#[derive(Debug)]
 struct Env<'a> {
     context: &'a FxHashMap<DeclId, usize>,
     variable_names: &'a FxHashMap<VariableId, String>,
+    variable_types: &'a FxHashMap<VariableId, (CType, Type)>,
 }
 
-fn expr((e, t): &ExprWithType, env: &mut Env) -> String {
-    let s = match e {
-        Expr::Lambda {
-            tag,
-            context: ctx,
-            lambda_id: _,
-        } => {
-            format!(
-                r#"({{name:"fn",tag:{tag},ctx:{{{}}}}})"#,
-                ctx.iter().enumerate().format_with(",", |(i, c), f| f(
-                    &format_args!(
-                        "_{i}:{}",
-                        DeclIdWithEnv {
-                            decl_id: *c,
-                            ctx: env.context,
-                            variable_names: env.variable_names
-                        }
-                    )
-                ))
-            )
+fn collect_local_variables_block(b: &Block, vs: &mut FxHashSet<DeclId>) {
+    for i in &b.instructions {
+        match i {
+            Instruction::Assign(Some(d), _) => {
+                vs.insert(*d);
+            }
+            Instruction::TryCatch(a, b) => {
+                collect_local_variables_block(a, vs);
+                collect_local_variables_block(b, vs);
+            }
+            _ => (),
         }
-        Expr::Match { arms, arguments } => {
-            let bindings = arms.iter().flat_map(|e| bindings(&e.pattern));
-            format!(
-                r#"{{{}return {}$$unexpected()}}"#,
-                bindings.format_with("", |(id, t), f| f(&format_args!(
-                    "let {} /* -- {t} */;",
-                    VariableIdWithEnv(
-                        VariableId::Local(id),
-                        env.variable_names
-                    )
-                ))),
-                arms.iter().map(|e| fn_arm(e, arguments, env)).join("")
-            )
-        }
-        Expr::Number(a) => a.to_string(),
-        Expr::StrLiteral(a) => format!("{a:?}"),
-        Expr::Ident {
-            variable_id:
-                VariableId::FieldAccessor {
-                    constructor: _,
-                    field,
-                },
-        } => {
-            format!("$field_accessor({field})")
-        }
-        Expr::Ident {
-            variable_id: VariableId::Local(decl_id),
-        } => {
-            format!(
-                "{} /* ({}) */",
-                DeclIdWithEnv {
-                    decl_id: *decl_id,
-                    variable_names: env.variable_names,
-                    ctx: env.context
-                },
-                env.variable_names[&VariableId::Local(*decl_id)],
-            )
-        }
-        Expr::Ident { variable_id } => {
-            format!(
-                "{} /* ({}) */",
-                VariableIdWithEnv(*variable_id, env.variable_names),
-                env.variable_names[variable_id],
-            )
-        }
-        Expr::Call {
+    }
+}
+
+struct Dis<'a, T>(&'a T, &'a Env<'a>);
+
+impl<'a, T: DisplayWithEnv> Display for Dis<'a, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt_with_env(self.1, f)
+    }
+}
+
+trait DisplayWithEnv {
+    fn fmt_with_env(
+        &self,
+        env: &Env<'_>,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result;
+}
+
+impl DisplayWithEnv for DataDecl {
+    fn fmt_with_env(
+        &self,
+        env: &Env<'_>,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        write!(
             f,
-            a,
-            possible_functions,
-        } => {
-            format!(
-                "((tmp,a)=>{}$$unexpected())({},{})",
+            "let {0}=({1})=>({{name:'{0}',{2}}});",
+            Dis(&ConstructorId::DeclId(self.decl_id), env),
+            (0..self.field_len)
+                .format_with(",", |i, f| f(&format_args!("${i}"))),
+            (0..self.field_len).map(|i| format!("{i}:${i}")).join(", "),
+        )
+    }
+}
+
+impl DisplayWithEnv for VariableDecl {
+    fn fmt_with_env(
+        &self,
+        env: &Env<'_>,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        let v = VariableId::Global(self.decl_id);
+        let (ct, tu) = &env.variable_types[&v];
+        write!(
+            f,
+            "let {}/*({},{})*/=(()=>({{{}||$$unexpected();{}}}))();",
+            Dis(&v, env),
+            ct,
+            tu,
+            Dis(&self.value, env),
+            Dis(&self.ret, env)
+        )
+    }
+}
+
+struct TerminalBlock<'a>(&'a Block, VariableId);
+
+impl DisplayWithEnv for TerminalBlock<'_> {
+    fn fmt_with_env(
+        &self,
+        env: &Env<'_>,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        let mut vs = FxHashSet::default();
+        collect_local_variables_block(self.0, &mut vs);
+        if vs.is_empty() {
+            write!(
+                f,
+                "{{{}||$$unexpected();return {};}}",
+                Dis(self.0, env),
+                Dis(&self.1, env)
+            )
+        } else {
+            write!(
+                f,
+                "{{let {};{}||$$unexpected();return {};}}",
+                vs.iter().format_with(",", |v, f| {
+                    let v = VariableId::Local(*v);
+                    let (ct, tu) = &env.variable_types[&v];
+                    f(&format_args!("{}/*({},{})*/", Dis(&v, env), ct, tu))
+                }),
+                Dis(self.0, env),
+                Dis(&self.1, env)
+            )
+        }
+    }
+}
+
+impl DisplayWithEnv for Block {
+    fn fmt_with_env(
+        &self,
+        env: &Env<'_>,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        if self.instructions.is_empty() {
+            write!(f, "true")
+        } else {
+            write!(f, "(")?;
+            self.instructions[0].fmt_with_env(env, f)?;
+            for i in &self.instructions[1..] {
+                write!(f, "&&")?;
+                i.fmt_with_env(env, f)?;
+            }
+            write!(f, ")")
+        }
+    }
+}
+
+struct TagCheck<'a>(&'a Tag, VariableId);
+
+impl DisplayWithEnv for TagCheck<'_> {
+    fn fmt_with_env(
+        &self,
+        env: &Env<'_>,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            self.0.iter().enumerate().format_with("&&", |(i, tag), f| f(
+                &format_args!(
+                    "{}{}.tag==={tag}",
+                    Dis(&self.1, env),
+                    (0..i).format_with("", |_, f| f(&".value"))
+                )
+            )),
+        )
+    }
+}
+
+impl DisplayWithEnv for Instruction {
+    fn fmt_with_env(
+        &self,
+        env: &Env<'_>,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        match self {
+            Instruction::Assign(d, e) => {
+                match d {
+                    Some(d) => {
+                        write!(f, "({}=", Dis(&VariableId::Local(*d), env),)?
+                    }
+                    None => write!(f, "(")?,
+                }
+                write!(f, "{},true)", Dis(e, env))
+            }
+            Instruction::Test(Tester::Constructor { id, tag }, e) => {
+                write!(
+                    f,
+                    "({}/* is {}? */)",
+                    Dis(&TagCheck(tag, *e), env),
+                    Dis(id, env)
+                )
+            }
+            Instruction::Test(Tester::I64 { value, tag }, e) => {
+                write!(
+                    f,
+                    "({}&&{}{}==={value})",
+                    Dis(&TagCheck(tag, *e), env),
+                    Dis(e, env),
+                    tag.iter().format_with("", |_, f| f(&".value"))
+                )
+            }
+            Instruction::Test(Tester::Str { value, tag }, e) => {
+                write!(
+                    f,
+                    "({}&&{}{}==={value:?})",
+                    Dis(&TagCheck(tag, *e), env),
+                    Dis(e, env),
+                    tag.iter().format_with("", |_, f| f(&".value"))
+                )
+            }
+            Instruction::TryCatch(a, b) => {
+                write!(f, "({}||{})", Dis(a, env), Dis(b, env))
+            }
+        }
+    }
+}
+
+impl DisplayWithEnv for Expr {
+    fn fmt_with_env(
+        &self,
+        env: &Env<'_>,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        match self {
+            Expr::Lambda {
+                lambda_id: _,
+                context,
+            } => write!(
+                f,
+                r#"({{{}}})"#,
+                context.iter().enumerate().format_with(",", |(i, c), f| f(
+                    &format_args!("_{i}:{}", Dis(&VariableId::Local(*c), env))
+                ))
+            ),
+            Expr::I64(a) => write!(f, "{a}"),
+            Expr::Str(a) => write!(f, "{a:?}"),
+            Expr::Ident(i) => i.fmt_with_env(env, f),
+            Expr::Call {
+                f: g,
+                a,
+                possible_functions,
+            } => write!(
+                f,
+                "({}$$unexpected())",
                 possible_functions.iter().enumerate().format_with(
                     "",
                     |(i, lambda_id), f| f(&format_args!(
-                        "tmp.tag==={i}?{lambda_id}(a,tmp.ctx):"
+                        "{0}.tag==={i}?{lambda_id}({1},{0}.value):",
+                        Dis(g, env),
+                        Dis(a, env),
                     ))
                 ),
-                expr(f, env),
-                expr(a, env),
-            )
-        }
-        Expr::DoBlock(exprs) => {
-            format!("({})", exprs.iter().map(|e| expr(e, env)).join(","))
-        }
-        Expr::BasicCall { args, id } => {
-            use crate::ast_step3::BasicFunction::*;
-            match id {
-                Intrinsic(id) => {
-                    format!(
+            ),
+            Expr::BasicCall { args, id } => {
+                use crate::ast_step3::BasicFunction::*;
+                match id {
+                    Intrinsic(id) => write!(
+                        f,
                         "$intrinsic${id}({})",
                         args.iter().format_with(",", |a, f| f(&format_args!(
-                            "{}",
-                            expr(a, env)
+                            "{}.value",
+                            Dis(a, env)
                         )))
-                    )
-                }
-                Construction(id) => {
-                    if args.is_empty() {
-                        format!(
-                            "${id}${}",
-                            convert_name(
-                                get_type_name(TypeId::from(*id))
-                                    .unwrap()
-                                    .to_string()
-                                    .as_str()
-                            ),
-                        )
-                    } else {
-                        format!(
-                            "${id}${}({})",
-                            convert_name(
-                                get_type_name(TypeId::from(*id))
-                                    .unwrap()
-                                    .to_string()
-                                    .as_str()
-                            ),
-                            args.iter().format_with(",", |a, f| f(
-                                &format_args!("{}", expr(a, env))
-                            ))
+                    ),
+                    Construction(id) => {
+                        if args.is_empty() {
+                            id.fmt_with_env(env, f)
+                        } else {
+                            write!(
+                                f,
+                                "{}({})",
+                                Dis(id, env),
+                                args.iter()
+                                    .format_with(",", |a, f| f(&Dis(a, env)))
+                            )
+                        }
+                    }
+                    FieldAccessor {
+                        constructor: _,
+                        field,
+                    } => {
+                        debug_assert_eq!(args.len(), 1);
+                        write!(
+                            f,
+                            "$field_accessor({field},{})",
+                            Dis(&args[0], env)
                         )
                     }
                 }
             }
-        }
-    };
-    format!("{s} /* -- {t} */")
-}
-
-fn fn_arm(e: &FnArm, names: &[DeclId], env: &mut Env) -> String {
-    let cond = condition(&e.pattern, names, env);
-    format!("{}?{}:", cond, expr(&e.expr, env))
-}
-
-fn condition(pattern: &[Pattern], names: &[DeclId], env: &mut Env) -> String {
-    let mut condition = "true".to_string();
-    _condition(pattern, names, &mut condition, env);
-    condition
-}
-
-fn single_condition(
-    p: &Pattern,
-    arg: &str,
-    condition: &mut String,
-
-    env: &mut Env,
-) {
-    if p.patterns.len() != 1 {
-        unimplemented!()
-    }
-    use PatternUnit::*;
-    match &p.patterns[0] {
-        I64(a) | Str(a) => {
-            write!(condition, "&&{a}==={arg}").unwrap();
-        }
-        Constructor { id } => {
-            write!(
-                condition,
-                "&&'{}'==={}.name",
-                VariableIdWithEnv((*id).into(), env.variable_names),
-                arg
-            )
-            .unwrap();
-        }
-        TypeRestriction(p, t) => {
-            write!(
-                condition,
-                "&&is_instance_of({},{},[])",
-                arg,
-                t.type_to_js_obj().0
-            )
-            .unwrap();
-            single_condition(p, arg, condition, env);
-        }
-        Apply {
-            pre_pattern,
-            function,
-            post_pattern,
-            possible_functions,
-        } => {
-            let tmp = format!("$tmp${}", tmp_variable::new());
-            write!(condition, "&&({tmp}={arg},true)").unwrap();
-            single_condition(pre_pattern, &tmp, condition, env);
-            let tmp2 = format!("$tmp${}", tmp_variable::new());
-            let f = expr(function, env);
-            write!(condition, "&&({tmp2}={f},true)").unwrap();
-            single_condition(
-                post_pattern,
-                &format!(
-                    "({}$$unexpected())",
-                    possible_functions.iter().enumerate().format_with(
-                        "",
-                        |(i, lambda_id), f| f(&format_args!(
-                            "{tmp2}.tag==={i}?{lambda_id}({tmp},{tmp2}.ctx):"
-                        ))
-                    ),
-                ),
-                condition,
-                env,
-            );
-        }
-        Binder(decl_id) => {
-            write!(
-                condition,
-                "&&({}={arg},true)",
-                VariableIdWithEnv(
-                    VariableId::Local(*decl_id),
-                    env.variable_names
+            Expr::Upcast { tag, value } => {
+                write!(f, "{{tag:{tag},value:{}}}", Dis(value, env))
+            }
+            Expr::Downcast { tag, value } => {
+                write!(
+                    f,
+                    "({0}.tag==={tag}?{0}.value:$$unexpected())",
+                    Dis(value, env)
                 )
-            )
-            .unwrap();
-        }
-        Underscore => (),
-    }
-}
-
-fn _condition(
-    pattern: &[Pattern],
-    names: &[DeclId],
-    condition: &mut String,
-
-    env: &mut Env,
-) {
-    for (p, arg) in pattern.iter().zip(names) {
-        single_condition(
-            p,
-            DeclIdWithEnv {
-                decl_id: *arg,
-                ctx: env.context,
-                variable_names: env.variable_names,
             }
-            .to_string()
-            .as_str(),
-            condition,
-            env,
-        );
+        }
     }
 }
 
-fn bindings(pattern: &[Pattern]) -> Vec<(DeclId, &Type)> {
-    fn _bindings_unit(p: &Pattern) -> Vec<(DeclId, &Type)> {
-        if p.patterns.len() == 1 {
-            match &p.patterns[0] {
-                PatternUnit::Binder(id) => {
-                    vec![(*id, &p.type_)]
+impl DisplayWithEnv for VariableId {
+    fn fmt_with_env(
+        &self,
+        env: &Env<'_>,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        match self {
+            VariableId::Global(d) => {
+                write!(f, "${d}${}()", convert_name(&env.variable_names[self]))
+            }
+            VariableId::Local(d) => {
+                if let Some(d) = env.context.get(d) {
+                    write!(f, "ctx._{d}")
+                } else {
+                    write!(f, "${d}")
                 }
-                PatternUnit::TypeRestriction(p, _) => _bindings_unit(p),
-                PatternUnit::Apply {
-                    pre_pattern,
-                    post_pattern,
-                    function: _,
-                    possible_functions: _,
-                } => merge_vec(
-                    _bindings_unit(pre_pattern),
-                    _bindings_unit(post_pattern),
-                ),
-                _ => Vec::new(),
             }
-        } else {
-            unimplemented!()
         }
     }
-    pattern.iter().flat_map(_bindings_unit).collect()
+}
+
+impl DisplayWithEnv for ConstructorId {
+    fn fmt_with_env(
+        &self,
+        _env: &Env<'_>,
+        f: &mut std::fmt::Formatter<'_>,
+    ) -> std::fmt::Result {
+        match self {
+            ConstructorId::DeclId(d) => write!(f, "c{d}"),
+            ConstructorId::Intrinsic(d) => write!(f, "c{d}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+enum CType {
+    Int,
+    String,
+    Struct(usize),
+}
+
+impl Display for CType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CType::Int => write!(f, "int"),
+            CType::String => write!(f, "char*"),
+            CType::Struct(i) => write!(f, "struct t{i}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+enum CAggregateType {
+    Union(Vec<CType>),
+    Struct(Vec<CType>),
+}
+
+fn c_type(
+    function_context: &FxHashMap<LambdaId, Vec<Type>>,
+    aggregate_types: &mut Collector<CAggregateType>,
+    t: &Type,
+    c_type_stack: Option<usize>,
+    reserved_id: Option<usize>,
+) -> CType {
+    let mut ts = Vec::new();
+    for tu in t.iter() {
+        use TypeUnit::*;
+        match tu {
+            Normal { id, args } => match id {
+                TypeId::Intrinsic(IntrinsicType::String) => {
+                    ts.push(CType::String)
+                }
+                TypeId::Intrinsic(IntrinsicType::I64) => ts.push(CType::Int),
+                _ => {
+                    let t = CAggregateType::Struct(
+                        args.iter()
+                            .map(|t| {
+                                c_type(
+                                    function_context,
+                                    aggregate_types,
+                                    t,
+                                    c_type_stack,
+                                    None,
+                                )
+                            })
+                            .collect(),
+                    );
+                    ts.push(CType::Struct(aggregate_types.get(t)));
+                }
+            },
+            Fn(lambda_id, _, _) => {
+                for l in lambda_id {
+                    let ctx = &function_context[l];
+                    let t = CAggregateType::Struct(
+                        ctx.iter()
+                            .map(|t| {
+                                c_type(
+                                    function_context,
+                                    aggregate_types,
+                                    t,
+                                    c_type_stack,
+                                    None,
+                                )
+                            })
+                            .collect(),
+                    );
+                    ts.push(CType::Struct(aggregate_types.get(t)))
+                }
+            }
+            RecursionPoint(p) => {
+                assert_eq!(*p, 0);
+                ts.push(CType::Struct(c_type_stack.unwrap()));
+            }
+            Recursive(t_in) => {
+                let i = aggregate_types.get_empty_id();
+                let t = c_type(
+                    function_context,
+                    aggregate_types,
+                    t_in,
+                    Some(i),
+                    Some(i),
+                );
+                ts.push(t);
+            }
+        }
+    }
+    if let Some(i) = reserved_id {
+        aggregate_types.insert_with_id(CAggregateType::Union(ts), i);
+        CType::Struct(i)
+    } else {
+        CType::Struct(aggregate_types.get(CAggregateType::Union(ts)))
+    }
+}
+
+mod struct_collector {
+    use fxhash::FxHashMap;
+    use std::hash::Hash;
+
+    #[derive(Debug, Clone)]
+    pub struct Collector<T: Eq + Hash> {
+        map: FxHashMap<T, usize>,
+        len: usize,
+    }
+
+    impl<T: Eq + Hash> Collector<T> {
+        pub fn get(&mut self, t: T) -> usize {
+            self.len += 1;
+            *self.map.entry(t).or_insert(self.len - 1)
+        }
+
+        pub fn get_empty_id(&mut self) -> usize {
+            self.len += 1;
+            self.len - 1
+        }
+
+        pub fn insert_with_id(&mut self, t: T, id: usize) {
+            let o = self.map.insert(t, id);
+            debug_assert!(o.is_none());
+        }
+
+        pub fn into_raw(self) -> FxHashMap<T, usize> {
+            self.map
+        }
+    }
+
+    impl<T: Eq + Hash> Default for Collector<T> {
+        fn default() -> Self {
+            Self {
+                map: Default::default(),
+                len: 0,
+            }
+        }
+    }
 }
 
 fn convert_name(name: &str) -> String {
@@ -488,16 +638,4 @@ fn is_valid_name(name: &str) -> bool {
             )
             || c == '_'
     }) && !(name.len() >= 8 && name[0..8] == *"unicode_")
-}
-
-mod tmp_variable {
-    use std::sync::Mutex;
-
-    static COUNT: Mutex<u32> = Mutex::new(0);
-
-    pub fn new() -> u32 {
-        let mut c = COUNT.lock().unwrap();
-        *c += 1;
-        *c
-    }
 }

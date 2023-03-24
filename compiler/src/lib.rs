@@ -3,6 +3,7 @@ mod ast_step2;
 mod ast_step3;
 mod ast_step4;
 mod ast_step5;
+mod ast_step6;
 mod codegen;
 mod errors;
 mod intrinsics;
@@ -100,6 +101,7 @@ pub fn run(
     } else {
         let ast = ast_step4::Ast::from(ast);
         let ast = ast_step5::Ast::from(ast);
+        let ast = ast_step6::Ast::from(ast);
         let js = codegen(ast);
         if command == Command::PrintJs {
             println!("{js}");
