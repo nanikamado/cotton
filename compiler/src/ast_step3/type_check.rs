@@ -89,7 +89,6 @@ pub struct TypeCheckResult {
     pub resolved_idents: FxHashMap<IdentId, ResolvedIdent>,
     pub global_variable_types: FxHashMap<VariableId, GlobalVariableType>,
     pub local_variable_types: FxHashMap<VariableId, LocalVariableType>,
-    pub type_variable_map: TypeVariableMap,
 }
 
 pub fn type_check(
@@ -306,7 +305,6 @@ pub fn type_check(
                 )
             })
             .collect(),
-        type_variable_map: map,
     })
 }
 

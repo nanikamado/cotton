@@ -1,20 +1,19 @@
 pub use self::replace_map::ReplaceMap;
-use super::{LambdaId, LinkedType, LinkedTypeUnit, TypeForHash};
 use crate::ast_step2::TypeId;
+use crate::ast_step4::LambdaId;
 use crate::intrinsics::IntrinsicType;
-use fxhash::{FxHashMap, FxHashSet};
+use fxhash::FxHashSet;
 use itertools::Itertools;
-use std::collections::BTreeSet;
-use std::convert::TryInto;
+use std::collections::BTreeMap;
 use std::fmt::Display;
-use std::{iter, mem};
+use std::mem;
 
 #[derive(Debug, PartialEq, Clone, Eq, PartialOrd, Ord, Copy, Hash)]
 pub struct TypePointer(usize);
 
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct TypeMap {
-    pub normals: FxHashMap<TypeId, Vec<TypePointer>>,
+    pub normals: BTreeMap<TypeId, Vec<TypePointer>>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -124,12 +123,11 @@ impl PaddedTypeMap {
         t.insert(id);
     }
 
-    pub fn get_lambda_id<'a>(
-        &'a mut self,
+    pub fn get_lambda_id_with_replace_map(
+        &mut self,
         p: TypePointer,
-        replace_map: &mut ReplaceMap,
-    ) -> &'a FxHashSet<LambdaId<TypePointer>> {
-        let t = self.dereference_with_replace_map(p, replace_map);
+    ) -> &FxHashSet<LambdaId<TypePointer>> {
+        let t = self.dereference(p);
         let Terminal::LambdaId(t) = t else {
             panic!()
         };
@@ -146,14 +144,12 @@ impl PaddedTypeMap {
         let Terminal::TypeMap(t) = t else {
             panic!()
         };
-        let abs = if let Some(t) = t.normals.get(&id) {
-            t.iter().copied().zip(args).collect_vec()
+        if let Some(t) = t.normals.get(&id) {
+            for (a, b) in t.clone().into_iter().zip(args) {
+                self.union(a, b);
+            }
         } else {
             t.normals.insert(id, args);
-            return;
-        };
-        for (a, b) in abs {
-            self.union(a, b);
         }
     }
 
@@ -191,74 +187,15 @@ impl PaddedTypeMap {
         })
     }
 
-    pub fn get_type_with_replace_map(
-        &mut self,
-        p: TypePointer,
-        replace_map: &mut ReplaceMap,
-    ) -> TypeForHash {
-        self.get_type(p, replace_map, Default::default())
-            .try_into()
-            .unwrap()
-    }
-
-    fn get_type(
-        &mut self,
-        p: TypePointer,
-        replace_map: &mut ReplaceMap,
-        mut trace: FxHashSet<TypePointer>,
-    ) -> LinkedType {
-        let p = replace_map.get(p, self);
-        if trace.contains(&p) {
-            return LinkedType {
-                ts: iter::once(LinkedTypeUnit::Pointer(p)).collect(),
-                recursive: false,
-            };
-        }
-        trace.insert(p);
-        let t = match &self.map[p.0] {
-            Node::Terminal(Terminal::TypeMap(type_map)) => {
-                let mut t = Vec::default();
-                for (type_id, normal_type) in &type_map.normals {
-                    t.push((*type_id, normal_type.clone()));
-                }
-                LinkedType {
-                    ts: t
-                        .into_iter()
-                        .map(|(id, args)| LinkedTypeUnit::Normal {
-                            id,
-                            args: args
-                                .into_iter()
-                                .map(|t| {
-                                    self.get_type(t, replace_map, trace.clone())
-                                })
-                                .collect(),
-                        })
-                        .collect(),
-                    recursive: false,
-                }
-            }
-            Node::Terminal(Terminal::LambdaId(ids)) => {
-                let mut new_ids = BTreeSet::new();
-                for id in ids.clone() {
-                    let id = id.map_type(|t| {
-                        self.get_type(t, replace_map, trace.clone())
-                    });
-                    new_ids.insert(LinkedTypeUnit::LambdaId(id));
-                }
-                LinkedType {
-                    ts: new_ids,
-                    recursive: false,
-                }
-            }
-            Node::Pointer(_) => panic!(),
-        };
-        let r = t.replace_pointer(p, 0);
-        let mut t = r.t;
-        if r.replaced {
-            t.recursive = true;
-        };
-        t
-    }
+    // pub fn get_type_with_replace_map(
+    //     &mut self,
+    //     p: TypePointer,
+    //     replace_map: &mut ReplaceMap,
+    // ) -> TypeForHash {
+    //     self.get_type(p, replace_map, Default::default())
+    //         .try_into()
+    //         .unwrap()
+    // }
 
     fn dereference(&mut self, p: TypePointer) -> &Terminal {
         let p = self.find(p);
@@ -277,15 +214,6 @@ impl PaddedTypeMap {
         }
     }
 
-    fn dereference_with_replace_map(
-        &mut self,
-        p: TypePointer,
-        replace_map: &mut ReplaceMap,
-    ) -> &Terminal {
-        let p = replace_map.get(p, self);
-        self.dereference(p)
-    }
-
     fn dereference_mut(&mut self, p: TypePointer) -> &mut Terminal {
         let p = self.find(p);
         if let Node::Terminal(t) = &mut self.map[p.0] {
@@ -301,12 +229,12 @@ impl PaddedTypeMap {
         replace_map: &mut ReplaceMap,
     ) -> TypePointer {
         let p = self.find(p);
-        if let Some(p) = replace_map.get_option(p, self) {
+        if let Some(p) = replace_map.get(p, self) {
             return p;
         }
         let new_p = self.new_pointer();
         replace_map.insert(p, new_p);
-        let t = self.dereference(p).clone();
+        let t = self.dereference_without_find(p).clone();
         let t = match t {
             Terminal::TypeMap(t) => Terminal::TypeMap(TypeMap {
                 normals: t
@@ -316,10 +244,7 @@ impl PaddedTypeMap {
                         (
                             *id,
                             t.iter()
-                                .map(|p| {
-                                    let p = self.find(*p);
-                                    self.clone_pointer(p, replace_map)
-                                })
+                                .map(|p| self.clone_pointer(*p, replace_map))
                                 .collect(),
                         )
                     })
@@ -327,14 +252,31 @@ impl PaddedTypeMap {
             }),
             Terminal::LambdaId(t) => Terminal::LambdaId(
                 t.into_iter()
-                    .map(|t| {
-                        LambdaId(t.0, self.clone_pointer(t.1, replace_map))
+                    .map(|t| LambdaId {
+                        id: t.id,
+                        root_t: self.clone_pointer(t.root_t, replace_map),
                     })
                     .collect(),
             ),
         };
         self.map[new_p.0] = Node::Terminal(t);
         new_p
+    }
+}
+
+impl<T> LambdaId<T> {
+    pub fn map_type<U>(self, mut f: impl FnMut(T) -> U) -> LambdaId<U> {
+        LambdaId {
+            id: self.id,
+            root_t: f(self.root_t),
+        }
+    }
+
+    pub fn map_type_ref<U>(&self, mut f: impl FnMut(&T) -> U) -> LambdaId<U> {
+        LambdaId {
+            id: self.id,
+            root_t: f(&self.root_t),
+        }
     }
 }
 
@@ -345,50 +287,56 @@ impl Display for TypePointer {
 }
 
 mod replace_map {
-    use super::PaddedTypeMap;
-    use crate::ast_step4::TypePointer;
-    use fxhash::FxHashMap;
+    use super::{PaddedTypeMap, TypePointer};
+    use fxhash::{FxHashMap, FxHashSet};
 
     #[derive(Debug, Default, Clone, PartialEq, Eq)]
-    pub struct ReplaceMap(FxHashMap<TypePointer, TypePointer>);
+    pub struct ReplaceMap {
+        map: FxHashMap<TypePointer, TypePointer>,
+        replaced: FxHashSet<TypePointer>,
+    }
 
     impl ReplaceMap {
-        pub fn merge(mut self, other: Self) -> Self {
-            self.0.extend(other.0);
-            self
+        pub fn merge(mut self, new: Self, map: &mut PaddedTypeMap) -> Self {
+            let mut replaced: FxHashSet<_> = new
+                .replaced
+                .into_iter()
+                .map(|p| map.clone_pointer(p, &mut self))
+                .collect();
+            replaced.extend(self.replaced.clone());
+            let mut new_map: FxHashMap<_, _> = new
+                .map
+                .into_iter()
+                .map(|(from, to)| (from, map.clone_pointer(to, &mut self)))
+                .collect();
+            new_map.extend(self.map);
+            Self {
+                map: new_map,
+                replaced,
+            }
         }
 
         pub fn get(
             &mut self,
             p: TypePointer,
             map: &mut PaddedTypeMap,
-        ) -> TypePointer {
-            let p = map.find(p);
-            if let Some(p2) = self.0.get(&p) {
-                let p2 = self.get(*p2, map);
-                self.0.insert(p, p2);
-                p2
-            } else {
-                p
-            }
-        }
-
-        pub fn get_option(
-            &mut self,
-            p: TypePointer,
-            map: &mut PaddedTypeMap,
         ) -> Option<TypePointer> {
-            if let Some(p2) = self.0.get(&p) {
-                let p2 = self.get(*p2, map);
-                self.0.insert(p, p2);
+            if let Some(p2) = self.map.get(&p) {
+                debug_assert!(!self.replaced.contains(&p));
+                let p2 = map.clone_pointer(*p2, self);
+                self.map.insert(p, p2);
                 Some(p2)
+            } else if self.replaced.contains(&p) {
+                Some(p)
             } else {
                 None
             }
         }
 
         pub fn insert(&mut self, from: TypePointer, to: TypePointer) {
-            self.0.insert(from, to);
+            let o = self.map.insert(from, to);
+            debug_assert!(o.is_none());
+            self.replaced.insert(to);
         }
     }
 }

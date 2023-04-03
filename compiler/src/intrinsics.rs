@@ -114,7 +114,11 @@ impl IntrinsicVariable {
             | IntrinsicVariable::Div => I64.into(),
             IntrinsicVariable::Lt
             | IntrinsicVariable::Neq
-            | IntrinsicVariable::Eq => [TRUE, FALSE].into_iter().collect(),
+            | IntrinsicVariable::Eq => ast_step5::Type {
+                ts: [TRUE, FALSE].into_iter().collect(),
+                recursive: false,
+                reference: false,
+            },
             IntrinsicVariable::PrintStr => UNIT.into(),
             IntrinsicVariable::I64ToString => STRING.into(),
             IntrinsicVariable::AppendStr => STRING.into(),

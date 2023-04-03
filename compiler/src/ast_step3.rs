@@ -11,7 +11,7 @@ use crate::ast_step1::ident_id::IdentId;
 use crate::ast_step1::name_id::Path;
 use crate::ast_step1::token_map::TokenMap;
 use crate::ast_step2::imports::Imports;
-use crate::ast_step2::types::{Type, TypeConstructor, TypeUnit, TypeVariable};
+use crate::ast_step2::types::{TypeConstructor, TypeUnit, TypeVariable};
 use crate::ast_step2::{self, ApplyPattern, ConstructorId, PatternUnit};
 use crate::errors::CompileError;
 use crate::intrinsics::{IntrinsicConstructor, IntrinsicVariable};
@@ -88,7 +88,6 @@ impl<'a> Ast<'a> {
             resolved_idents,
             global_variable_types,
             local_variable_types,
-            type_variable_map: map,
         } = type_check(&ast, token_map, imports)?;
         let mut variable_decls: Vec<VariableDecl> = Vec::new();
         let mut basic_call_decls: FxHashMap<VariableId, DeclId> =
@@ -165,7 +164,6 @@ impl<'a> Ast<'a> {
             .collect();
         let mut env = Env {
             resolved_idents: &resolved_idents,
-            map,
             types_of_decls: local_variable_types,
             basic_call_decls,
             additional_variable_decls: variable_decls,
@@ -238,7 +236,6 @@ fn basic_call(
 
 struct Env<'a, 'b> {
     resolved_idents: &'a FxHashMap<IdentId, ResolvedIdent>,
-    map: TypeVariableMap,
     types_of_decls: FxHashMap<VariableId, LocalVariableType>,
     basic_call_decls: FxHashMap<VariableId, DeclId>,
     additional_variable_decls: Vec<VariableDecl<'b>>,
@@ -282,7 +279,7 @@ fn variable_decl<'a>(
 }
 
 fn expr<'a>(
-    (e, t, _): ast_step2::ExprWithTypeAndSpan<'a, TypeVariable>,
+    (e, _, _): ast_step2::ExprWithTypeAndSpan<'a, TypeVariable>,
     env: &mut Env,
 ) -> Expr<'a> {
     let e = match e {
@@ -310,7 +307,6 @@ fn expr<'a>(
             get_expr_from_resolved_ident(
                 name.path.last().unwrap().0.to_string(),
                 &resolved_item,
-                env.map.find(t),
                 env.resolved_idents,
             )
         }
@@ -349,27 +345,18 @@ fn expr<'a>(
 fn get_expr_from_resolved_ident(
     name: String,
     resolved_ident: &ResolvedIdent,
-    t: Type,
     resolved_idents: &FxHashMap<IdentId, ResolvedIdent>,
 ) -> Expr<'static> {
     let mut value = Expr::Ident {
         name,
         variable_id: resolved_ident.variable_id,
     };
-    let mut ts = Vec::new();
-    let mut fn_t = t;
-    for (_, implicit_arg_t, _) in resolved_ident.implicit_args.iter().rev() {
-        fn_t = Type::arrow(implicit_arg_t.clone(), fn_t);
-        ts.push(fn_t.clone());
-    }
-    for (name, implicit_arg_t, resolved_ident) in &resolved_ident.implicit_args
-    {
+    for (name, _, resolved_ident) in &resolved_ident.implicit_args {
         value = Expr::Call(
             Box::new(value),
             Box::new(get_expr_from_resolved_ident(
                 name.to_string(),
                 &resolved_idents[resolved_ident],
-                implicit_arg_t.clone(),
                 resolved_idents,
             )),
         );

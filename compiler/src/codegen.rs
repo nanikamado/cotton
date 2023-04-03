@@ -1,18 +1,17 @@
+mod c_type;
+mod collector;
 mod type_restriction_pattern;
 
-use self::struct_collector::Collector;
+use self::c_type::{CAggregateType, CType};
 use self::type_restriction_pattern::IS_INSTANCE_OF;
 use crate::ast_step1::decl_id::DeclId;
-use crate::ast_step2::{ConstructorId, TypeId};
+use crate::ast_step2::ConstructorId;
 use crate::ast_step3::DataDecl;
-use crate::ast_step4::VariableId;
-use crate::ast_step5::{LambdaId, Type, TypeUnit};
-use crate::ast_step6::{
-    Ast, Block, Expr, Instruction, Tag, Tester, VariableDecl,
+use crate::ast_step5::{
+    Ast, Block, Expr, Instruction, LocalVariable, LocalVariableCollector,
+    TaggedFn, Tester, Type, VariableDecl, VariableId,
 };
-use crate::intrinsics::{
-    IntrinsicConstructor, IntrinsicType, IntrinsicVariable,
-};
+use crate::intrinsics::{IntrinsicConstructor, IntrinsicVariable};
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use std::fmt::{Display, Write};
@@ -25,28 +24,36 @@ pub fn codegen(ast: Ast) -> String {
         .functions
         .iter()
         .map(|f| {
-            let ctx = f
-                .context
-                .iter()
-                .map(|d| ast.variable_types[&VariableId::Local(*d)].clone())
-                .collect_vec();
-            (f.id, ctx)
+            (
+                f.id,
+                f.context
+                    .iter()
+                    .map(|&c| ast.variable_types.get_type(c).clone())
+                    .collect_vec(),
+            )
         })
         .collect();
-    let mut aggregate_types = Default::default();
-    let variable_types: FxHashMap<_, _> = ast
-        .variable_types
-        .into_iter()
-        .map(|(id, t)| {
-            let ct =
-                c_type(&function_context, &mut aggregate_types, &t, None, None);
-            (id, (ct, t))
-        })
+    let mut c_type_env = c_type::Env {
+        function_context,
+        aggregate_types: Default::default(),
+        memo: Default::default(),
+        fx_type_map: ast.fx_type_map,
+    };
+    let local_variable_types: LocalVariableCollector<(Type, CType)> =
+        ast.variable_types.map(|t| {
+            let ct = c_type_env.c_type(&t, None);
+            (t, ct)
+        });
+    let global_variable_types = ast
+        .variable_decls
+        .iter()
+        .map(|d| (d.decl_id, c_type_env.c_type(&d.t, None)))
         .collect();
     let env = Env {
         context: &Default::default(),
         variable_names: &ast.variable_names,
-        variable_types: &variable_types,
+        local_variable_types: &local_variable_types,
+        global_variable_types: &global_variable_types,
     };
     let mut s = String::new();
     write!(
@@ -62,13 +69,13 @@ pub fn codegen(ast: Ast) -> String {
             .map(|v| format!("let $intrinsic${}={};", v, primitive_def(v)))
             .format(""),
         IntrinsicConstructor::iter().format_with("", |i, f| f(&format_args!(
-            "let {0}={{name: '{0}'}};",
+            "let {0}=()=>{{name: '{0}'}};",
             Dis(&ConstructorId::Intrinsic(i), &env),
         ))),
-        ast.data_decl
+        ast.data_decls
             .into_iter()
             .format_with("", |d, f| f(&Dis(&d, &env))),
-        ast.variable_decl
+        ast.variable_decls
             .iter()
             .format_with("", |d, f| f(&format_args!(
                 "let ${}${}=()=>{};",
@@ -78,14 +85,13 @@ pub fn codegen(ast: Ast) -> String {
                 ),
                 Dis(&TerminalBlock(&d.value, d.ret), &env)
             ))),
-        aggregate_types
-            .into_raw()
-            .iter()
-            .format_with("", |(t, i), f| {
+        c_type_env.aggregate_types.into_raw().iter().format_with(
+            "",
+            |(t, i), f| {
                 match t {
                     CAggregateType::Struct(fields) => f(&format_args!(
                         "{} {{{}}}\n",
-                        CType::Struct(*i),
+                        CType::Aggregate(*i),
                         fields
                             .iter()
                             .enumerate()
@@ -95,13 +101,14 @@ pub fn codegen(ast: Ast) -> String {
                     )),
                     CAggregateType::Union(ts) => f(&format_args!(
                         "{} {{int tag;union {{{}}} value}}\n",
-                        CType::Struct(*i),
+                        CType::Aggregate(*i),
                         ts.iter().enumerate().format_with("", |(i, t), f| f(
                             &format_args!("{t} _{i};")
                         ))
                     )),
                 }
-            })
+            }
+        )
     )
     .unwrap();
     write!(
@@ -116,18 +123,16 @@ pub fn codegen(ast: Ast) -> String {
                     .map(|(i, d)| (d, i))
                     .collect(),
                 variable_names: &ast.variable_names,
-                variable_types: &variable_types,
+                local_variable_types: &local_variable_types,
+                global_variable_types: &global_variable_types,
             };
-            let (ct, tu) =
-                &variable_types[&VariableId::Local(function.parameter)];
+            let (t, ct) = env.local_variable_types.get_type(function.parameter);
             f(&format_args!(
-                "let {}/*(lm{},{})*/=({}/*({},{})*/,ctx)=>{};",
+                "let {}=({}/*({},{})*/,ctx)=>{};",
                 function.id,
-                function.original_id,
-                function.origin_type,
                 Dis(&VariableId::Local(function.parameter), &env),
                 ct,
-                tu,
+                t,
                 Dis(&TerminalBlock(&function.body, function.ret), &env)
             ))
         }),
@@ -157,12 +162,13 @@ fn primitive_def(i: IntrinsicVariable) -> &'static str {
 
 #[derive(Debug)]
 struct Env<'a> {
-    context: &'a FxHashMap<DeclId, usize>,
+    context: &'a FxHashMap<LocalVariable, usize>,
     variable_names: &'a FxHashMap<VariableId, String>,
-    variable_types: &'a FxHashMap<VariableId, (CType, Type)>,
+    local_variable_types: &'a LocalVariableCollector<(Type, CType)>,
+    global_variable_types: &'a FxHashMap<DeclId, CType>,
 }
 
-fn collect_local_variables_block(b: &Block, vs: &mut FxHashSet<DeclId>) {
+fn collect_local_variables_block(b: &Block, vs: &mut FxHashSet<LocalVariable>) {
     for i in &b.instructions {
         match i {
             Instruction::Assign(Some(d), _) => {
@@ -216,14 +222,13 @@ impl DisplayWithEnv for VariableDecl {
         env: &Env<'_>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
-        let v = VariableId::Global(self.decl_id);
-        let (ct, tu) = &env.variable_types[&v];
+        let ct = &env.global_variable_types[&self.decl_id];
         write!(
             f,
             "let {}/*({},{})*/=(()=>({{{}||$$unexpected();{}}}))();",
-            Dis(&v, env),
+            Dis(&VariableId::Global(self.decl_id), env),
             ct,
-            tu,
+            self.t,
             Dis(&self.value, env),
             Dis(&self.ret, env)
         )
@@ -252,9 +257,13 @@ impl DisplayWithEnv for TerminalBlock<'_> {
                 f,
                 "{{let {};{}||$$unexpected();return {};}}",
                 vs.iter().format_with(",", |v, f| {
-                    let v = VariableId::Local(*v);
-                    let (ct, tu) = &env.variable_types[&v];
-                    f(&format_args!("{}/*({},{})*/", Dis(&v, env), ct, tu))
+                    let (t, ct) = env.local_variable_types.get_type(*v);
+                    f(&format_args!(
+                        "{}/*({},{})*/",
+                        Dis(&VariableId::Local(*v), env),
+                        ct,
+                        t
+                    ))
                 }),
                 Dis(self.0, env),
                 Dis(&self.1, env)
@@ -283,7 +292,7 @@ impl DisplayWithEnv for Block {
     }
 }
 
-struct TagCheck<'a>(&'a Tag, VariableId);
+struct TagCheck<'a>(&'a u32, VariableId);
 
 impl DisplayWithEnv for TagCheck<'_> {
     fn fmt_with_env(
@@ -291,17 +300,7 @@ impl DisplayWithEnv for TagCheck<'_> {
         env: &Env<'_>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            self.0.iter().enumerate().format_with("&&", |(i, tag), f| f(
-                &format_args!(
-                    "{}{}.tag==={tag}",
-                    Dis(&self.1, env),
-                    (0..i).format_with("", |_, f| f(&".value"))
-                )
-            )),
-        )
+        write!(f, "{}.tag==={}", Dis(&self.1, env), self.0)
     }
 }
 
@@ -322,30 +321,16 @@ impl DisplayWithEnv for Instruction {
                 write!(f, "{},true)", Dis(e, env))
             }
             Instruction::Test(Tester::Constructor { id, tag }, e) => {
-                write!(
-                    f,
-                    "({}/* is {}? */)",
-                    Dis(&TagCheck(tag, *e), env),
-                    Dis(id, env)
-                )
+                write!(f, "({}/* is {}? */)", Dis(&TagCheck(tag, *e), env), id)
             }
-            Instruction::Test(Tester::I64 { value, tag }, e) => {
-                write!(
-                    f,
-                    "({}&&{}{}==={value})",
-                    Dis(&TagCheck(tag, *e), env),
-                    Dis(e, env),
-                    tag.iter().format_with("", |_, f| f(&".value"))
-                )
+            Instruction::Test(Tester::I64 { value }, e) => {
+                write!(f, "({}==={value})", Dis(e, env))
             }
-            Instruction::Test(Tester::Str { value, tag }, e) => {
-                write!(
-                    f,
-                    "({}&&{}{}==={value:?})",
-                    Dis(&TagCheck(tag, *e), env),
-                    Dis(e, env),
-                    tag.iter().format_with("", |_, f| f(&".value"))
-                )
+            Instruction::Test(Tester::Str { value }, e) => {
+                write!(f, "({}==={value:?})", Dis(e, env))
+            }
+            Instruction::FailTest => {
+                write!(f, "false")
             }
             Instruction::TryCatch(a, b) => {
                 write!(f, "({}||{})", Dis(a, env), Dis(b, env))
@@ -377,7 +362,12 @@ impl DisplayWithEnv for Expr {
             Expr::Call {
                 f: g,
                 a,
-                possible_functions,
+                possible_functions: TaggedFn::Untagged(id),
+            } => write!(f, "{id}({},{})", Dis(a, env), Dis(g, env)),
+            Expr::Call {
+                f: g,
+                a,
+                possible_functions: TaggedFn::Tagged(possible_functions),
             } => write!(
                 f,
                 "({}$$unexpected())",
@@ -397,22 +387,18 @@ impl DisplayWithEnv for Expr {
                         f,
                         "$intrinsic${id}({})",
                         args.iter().format_with(",", |a, f| f(&format_args!(
-                            "{}.value",
+                            "{}",
                             Dis(a, env)
                         )))
                     ),
                     Construction(id) => {
-                        if args.is_empty() {
-                            id.fmt_with_env(env, f)
-                        } else {
-                            write!(
-                                f,
-                                "{}({})",
-                                Dis(id, env),
-                                args.iter()
-                                    .format_with(",", |a, f| f(&Dis(a, env)))
-                            )
-                        }
+                        write!(
+                            f,
+                            "{}({})",
+                            Dis(id, env),
+                            args.iter()
+                                .format_with(",", |a, f| f(&Dis(a, env)))
+                        )
                     }
                     FieldAccessor {
                         constructor: _,
@@ -437,6 +423,8 @@ impl DisplayWithEnv for Expr {
                     Dis(value, env)
                 )
             }
+            Expr::Ref(v) => write!(f, "{{ref:{}}}", Dis(v, env)),
+            Expr::Deref(v) => write!(f, "{}.ref", Dis(v, env)),
         }
     }
 }
@@ -455,7 +443,7 @@ impl DisplayWithEnv for VariableId {
                 if let Some(d) = env.context.get(d) {
                     write!(f, "ctx._{d}")
                 } else {
-                    write!(f, "${d}")
+                    write!(f, "${d}$")
                 }
             }
         }
@@ -471,147 +459,6 @@ impl DisplayWithEnv for ConstructorId {
         match self {
             ConstructorId::DeclId(d) => write!(f, "c{d}"),
             ConstructorId::Intrinsic(d) => write!(f, "c{d}"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
-enum CType {
-    Int,
-    String,
-    Struct(usize),
-}
-
-impl Display for CType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            CType::Int => write!(f, "int"),
-            CType::String => write!(f, "char*"),
-            CType::Struct(i) => write!(f, "struct t{i}"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-enum CAggregateType {
-    Union(Vec<CType>),
-    Struct(Vec<CType>),
-}
-
-fn c_type(
-    function_context: &FxHashMap<LambdaId, Vec<Type>>,
-    aggregate_types: &mut Collector<CAggregateType>,
-    t: &Type,
-    c_type_stack: Option<usize>,
-    reserved_id: Option<usize>,
-) -> CType {
-    let mut ts = Vec::new();
-    for tu in t.iter() {
-        use TypeUnit::*;
-        match tu {
-            Normal { id, args } => match id {
-                TypeId::Intrinsic(IntrinsicType::String) => {
-                    ts.push(CType::String)
-                }
-                TypeId::Intrinsic(IntrinsicType::I64) => ts.push(CType::Int),
-                _ => {
-                    let t = CAggregateType::Struct(
-                        args.iter()
-                            .map(|t| {
-                                c_type(
-                                    function_context,
-                                    aggregate_types,
-                                    t,
-                                    c_type_stack,
-                                    None,
-                                )
-                            })
-                            .collect(),
-                    );
-                    ts.push(CType::Struct(aggregate_types.get(t)));
-                }
-            },
-            Fn(lambda_id, _, _) => {
-                for l in lambda_id {
-                    let ctx = &function_context[l];
-                    let t = CAggregateType::Struct(
-                        ctx.iter()
-                            .map(|t| {
-                                c_type(
-                                    function_context,
-                                    aggregate_types,
-                                    t,
-                                    c_type_stack,
-                                    None,
-                                )
-                            })
-                            .collect(),
-                    );
-                    ts.push(CType::Struct(aggregate_types.get(t)))
-                }
-            }
-            RecursionPoint(p) => {
-                assert_eq!(*p, 0);
-                ts.push(CType::Struct(c_type_stack.unwrap()));
-            }
-            Recursive(t_in) => {
-                let i = aggregate_types.get_empty_id();
-                let t = c_type(
-                    function_context,
-                    aggregate_types,
-                    t_in,
-                    Some(i),
-                    Some(i),
-                );
-                ts.push(t);
-            }
-        }
-    }
-    if let Some(i) = reserved_id {
-        aggregate_types.insert_with_id(CAggregateType::Union(ts), i);
-        CType::Struct(i)
-    } else {
-        CType::Struct(aggregate_types.get(CAggregateType::Union(ts)))
-    }
-}
-
-mod struct_collector {
-    use fxhash::FxHashMap;
-    use std::hash::Hash;
-
-    #[derive(Debug, Clone)]
-    pub struct Collector<T: Eq + Hash> {
-        map: FxHashMap<T, usize>,
-        len: usize,
-    }
-
-    impl<T: Eq + Hash> Collector<T> {
-        pub fn get(&mut self, t: T) -> usize {
-            self.len += 1;
-            *self.map.entry(t).or_insert(self.len - 1)
-        }
-
-        pub fn get_empty_id(&mut self) -> usize {
-            self.len += 1;
-            self.len - 1
-        }
-
-        pub fn insert_with_id(&mut self, t: T, id: usize) {
-            let o = self.map.insert(t, id);
-            debug_assert!(o.is_none());
-        }
-
-        pub fn into_raw(self) -> FxHashMap<T, usize> {
-            self.map
-        }
-    }
-
-    impl<T: Eq + Hash> Default for Collector<T> {
-        fn default() -> Self {
-            Self {
-                map: Default::default(),
-                len: 0,
-            }
         }
     }
 }

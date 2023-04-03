@@ -1,209 +1,266 @@
+pub use self::local_variable::{LocalVariable, LocalVariableCollector};
 use self::unhashable_type::UnhashableTypeMemo;
 use crate::ast_step1::decl_id::DeclId;
-use crate::ast_step1::name_id::Path;
-use crate::ast_step2::{types, ConstructorId, TypeId};
+use crate::ast_step2::TypeId;
 use crate::ast_step3::{BasicFunction, DataDecl};
 use crate::ast_step4::{
-    self, PaddedTypeMap, ReplaceMap, TypeForHash, TypePointer, VariableId,
+    self, LambdaId, PaddedTypeMap, ReplaceMap, TypePointer,
 };
 use crate::intrinsics::IntrinsicType;
 use fxhash::FxHashMap;
 use itertools::Itertools;
-use smallvec::{smallvec, SmallVec};
 use std::collections::BTreeSet;
-use std::fmt::Display;
+use std::fmt::{Debug, Display};
 use std::iter::once;
 
 #[derive(Debug)]
 pub struct Ast {
-    pub variable_decl: Vec<VariableDecl>,
-    pub data_decl: Vec<DataDecl>,
-    pub entry_point: LambdaId,
-    pub functions: Vec<Function>,
+    pub variable_decls: Vec<VariableDecl>,
+    pub data_decls: Vec<DataDecl>,
+    pub entry_point: FxLambdaId,
     pub variable_names: FxHashMap<VariableId, String>,
+    pub functions: Vec<Function>,
+    pub type_map: PaddedTypeMap,
+    pub variable_types: LocalVariableCollector<Type>,
+    pub fx_type_map: FxHashMap<LambdaId<Type>, FxLambdaId>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VariableDecl {
-    pub name: Path,
-    pub value: ExprWithType,
+    pub name: String,
+    pub value: Block,
+    pub ret: VariableId,
     pub decl_id: DeclId,
+    pub t: Type,
 }
 
-pub type ExprWithType = (Expr, Type);
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Default, Clone)]
-pub struct Type(BTreeSet<TypeUnit>);
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
-pub enum TypeUnit {
-    Normal { id: TypeId, args: Vec<Type> },
-    Fn(BTreeSet<LambdaId>, Type, Type),
-    RecursionPoint(u32),
-    Recursive(Type),
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Block {
+    pub instructions: Vec<Instruction>,
 }
 
-impl From<TypeUnit> for Type {
-    fn from(value: TypeUnit) -> Self {
-        Type(once(value).collect())
-    }
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Tester {
+    Constructor { id: TypeId, tag: u32 },
+    I64 { value: String },
+    Str { value: String },
 }
 
-impl FromIterator<TypeUnit> for Type {
-    fn from_iter<T: IntoIterator<Item = TypeUnit>>(iter: T) -> Self {
-        Type(iter.into_iter().collect())
-    }
-}
-
-impl Type {
-    pub fn iter(&self) -> impl Iterator<Item = &TypeUnit> {
-        self.0.iter()
-    }
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Instruction {
+    Assign(Option<LocalVariable>, Expr),
+    Test(Tester, VariableId),
+    FailTest,
+    TryCatch(Block, Block),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Expr {
     Lambda {
-        lambda_id: LambdaId,
-        context: Vec<DeclId>,
+        lambda_id: FxLambdaId,
+        context: Vec<LocalVariable>,
     },
-    Match {
-        arms: Vec<FnArm>,
-        arguments: Vec<DeclId>,
-    },
-    Number(String),
-    StrLiteral(String),
-    Ident {
-        variable_id: VariableId,
-    },
+    I64(String),
+    Str(String),
+    Ident(VariableId),
     Call {
-        possible_functions: Vec<LambdaId>,
-        f: Box<ExprWithType>,
-        a: Box<ExprWithType>,
+        f: VariableId,
+        a: VariableId,
+        possible_functions: TaggedFn,
     },
-    DoBlock(Vec<ExprWithType>),
     BasicCall {
-        args: Vec<ExprWithType>,
+        args: Vec<VariableId>,
         id: BasicFunction,
     },
     Upcast {
         tag: u32,
-        value: Box<Expr>,
+        value: VariableId,
     },
     Downcast {
         tag: u32,
-        value: Box<Expr>,
+        value: VariableId,
     },
+    Ref(VariableId),
+    Deref(VariableId),
 }
 
-/// Represents a multi-case pattern which matches if any of the `PatternUnit` in it matches.
-/// It should have at least one `PatternUnit`.
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Pattern {
-    pub patterns: Vec<PatternUnit>,
-    pub type_: Type,
+#[derive(Debug, PartialEq, Hash, Clone, Copy, Eq)]
+pub enum VariableId {
+    Local(LocalVariable),
+    Global(DeclId),
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum PatternUnit {
-    I64(String),
-    Str(String),
-    Constructor {
-        id: ConstructorId,
-    },
-    Binder(DeclId),
-    Underscore,
-    TypeRestriction(Pattern, types::Type),
-    Apply {
-        pre_pattern: Pattern,
-        function: ExprWithType,
-        possible_functions: Vec<LambdaId>,
-        post_pattern: Pattern,
-    },
+#[derive(Debug, PartialEq, Clone)]
+pub struct Function {
+    pub id: FxLambdaId,
+    pub context: Vec<LocalVariable>,
+    pub parameter: LocalVariable,
+    pub body: Block,
+    pub ret: VariableId,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct FnArm {
-    pub pattern: Vec<Pattern>,
-    pub expr: ExprWithType,
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Default, Clone, Hash)]
+pub struct Type<R = u32> {
+    pub ts: Vec<TypeUnit<R>>,
+    pub recursive: bool,
+    pub reference: bool,
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
+pub enum TypeInner<R = u32> {
+    RecursionPoint(R),
+    Type(Type<R>),
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
+pub enum TypeUnit<R = u32> {
+    Normal { id: TypeId, args: Vec<TypeInner<R>> },
+    Fn(BTreeSet<LambdaId<TypeInner<R>>>, TypeInner<R>, TypeInner<R>),
+}
+
+impl From<TypeUnit> for Type {
+    fn from(value: TypeUnit) -> Self {
+        Type {
+            ts: once(value).collect(),
+            recursive: false,
+            reference: false,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+enum IndexOrPointer {
+    Index(u32),
+    Pointer(TypePointer),
+}
+
+impl Type {
+    pub fn iter(&self) -> impl Iterator<Item = &TypeUnit> {
+        self.ts.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.ts.len()
+    }
+
+    pub fn contains_broken_link_rec(&self, depth: u32) -> bool {
+        let depth = self.recursive as u32 + depth;
+        self.ts.iter().any(|t| match t {
+            TypeUnit::Normal { id: _, args } => {
+                args.iter().any(|a| a.contains_broken_link(depth))
+            }
+            TypeUnit::Fn(l, a, r) => {
+                l.iter().any(|l| l.root_t.contains_broken_link(depth))
+                    || a.contains_broken_link(depth)
+                    || r.contains_broken_link(depth)
+            }
+        })
+    }
+
+    pub fn contains_broken_link(&self) -> bool {
+        self.contains_broken_link_rec(0)
+    }
+}
+
+impl TypeInner {
+    pub fn contains_broken_link(&self, depth: u32) -> bool {
+        match self {
+            TypeInner::RecursionPoint(d) => *d >= depth,
+            TypeInner::Type(t) => t.contains_broken_link_rec(depth),
+        }
+    }
 }
 
 impl Ast {
     pub fn from(ast: ast_step4::Ast) -> Self {
-        let mut memo = VariableMemo::new(ast.variable_decl, ast.type_map);
+        let mut memo = Env::new(
+            ast.variable_decls,
+            ast.local_variable_types_old,
+            ast.type_map,
+        );
         memo.monomorphize_decl_rec(
             ast.entry_point,
             ast.type_of_entry_point,
             &mut Default::default(),
         );
-        let mut variable_names: FxHashMap<_, _> = ast.variable_names;
+        let mut variable_names = FxHashMap::default();
         for v in &memo.monomorphized_variables {
             variable_names
                 .insert(VariableId::Global(v.decl_id), v.name.to_string());
         }
-        let v = &memo.monomorphized_variables.last().unwrap().value.0;
-        let v = if let Expr::Upcast { tag: _, value } = v {
-            value
-        } else {
-            v
-        };
-        let lambda_id = if let Expr::Lambda { lambda_id, .. } = v {
-            *lambda_id
-        } else {
-            panic!()
-        };
-        Self {
-            variable_decl: memo.monomorphized_variables,
-            data_decl: ast.data_decl,
-            entry_point: lambda_id,
-            functions: memo
-                .functions
-                .into_values()
-                .map(|f| match f {
-                    FunctionEntry::Placeholder(_) => panic!(),
-                    FunctionEntry::Function(f) => f,
-                })
-                .collect(),
-            variable_names,
+        let b = &memo.monomorphized_variables.last().unwrap().value;
+        match &b.instructions[0] {
+            Instruction::Assign(_, Expr::Lambda { lambda_id, context }) => {
+                debug_assert!(context.is_empty());
+                let entry_point = *lambda_id;
+                let mut functions = Vec::new();
+                let mut fx_type_map = FxHashMap::default();
+                for (id, f) in memo.functions {
+                    if let FunctionEntry::Function(f) = f {
+                        functions.push(f.clone());
+                        fx_type_map.insert(id, f.id);
+                    } else {
+                        panic!()
+                    }
+                }
+                Self {
+                    variable_decls: memo.monomorphized_variables,
+                    data_decls: ast.data_decls,
+                    entry_point,
+                    functions,
+                    variable_names,
+                    type_map: memo.map,
+                    variable_types: memo.local_variable_collector,
+                    fx_type_map,
+                }
+            }
+            _ => panic!(),
         }
     }
 }
 
-pub struct VariableMemo {
-    variable_decls: FxHashMap<DeclId, ast_step4::VariableDecl<TypePointer>>,
-    monomorphized_variable_map: FxHashMap<(DeclId, TypeForHash), DeclId>,
+#[derive(Debug, PartialEq, Clone)]
+struct FnId {
+    arg_t: Type,
+    ret_t: Type,
+    lambda_id: LambdaId<Type>,
+}
+
+pub struct Env {
+    variable_decls: FxHashMap<DeclId, ast_step4::VariableDecl>,
+    monomorphized_variable_map: FxHashMap<(DeclId, Type), DeclId>,
     monomorphized_variables: Vec<VariableDecl>,
     map: PaddedTypeMap,
-    functions: FxHashMap<(u32, TypeForHash), FunctionEntry>,
+    functions: FxHashMap<LambdaId<Type>, FunctionEntry>,
     unhashable_type_memo: UnhashableTypeMemo,
+    local_variable_types_old: FxHashMap<ast_step4::LocalVariable, TypePointer>,
+    local_variable_replace_map:
+        FxHashMap<ast_step4::LocalVariable, LocalVariable>,
+    local_variable_collector: LocalVariableCollector<Type>,
 }
 
 #[derive(Debug)]
 pub enum FunctionEntry {
-    Placeholder(LambdaId),
+    Placeholder(FxLambdaId),
     Function(Function),
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct Function {
-    pub parameter: DeclId,
-    pub parameter_type: Type,
-    pub body: ExprWithType,
-    pub id: LambdaId,
-    pub original_id: u32,
-    pub origin_type: TypeForHash,
-    pub context: Vec<DeclId>,
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+pub struct FxLambdaId(pub u32);
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+pub enum TaggedFn {
+    Tagged(Vec<FxLambdaId>),
+    Untagged(FxLambdaId),
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
-pub struct LambdaId(pub u32);
-
-impl VariableMemo {
+impl Env {
     pub fn new(
-        variable_decls: Vec<ast_step4::VariableDecl<TypePointer>>,
+        variable_decls: Vec<ast_step4::VariableDecl>,
+        local_variable_types: FxHashMap<ast_step4::LocalVariable, TypePointer>,
         map: PaddedTypeMap,
     ) -> Self {
-        VariableMemo {
+        Env {
             variable_decls: variable_decls
                 .into_iter()
                 .map(|d| (d.decl_id, d))
@@ -213,6 +270,9 @@ impl VariableMemo {
             map,
             functions: FxHashMap::default(),
             unhashable_type_memo: UnhashableTypeMemo::default(),
+            local_variable_types_old: local_variable_types,
+            local_variable_replace_map: FxHashMap::default(),
+            local_variable_collector: LocalVariableCollector::new(),
         }
     }
 
@@ -222,203 +282,307 @@ impl VariableMemo {
         p: TypePointer,
         replace_map: &mut ReplaceMap,
     ) -> DeclId {
-        let t = self.map.get_type_with_replace_map(p, replace_map);
+        let p = self.map.clone_pointer(p, replace_map);
+        let t = self.get_type_unhashable_with_replace_map(p);
         let decl_id_t = (decl_id, t);
         if let Some(d) = self.monomorphized_variable_map.get(&decl_id_t) {
             *d
         } else {
             let (_, t) = decl_id_t;
             let new_decl_id = DeclId::new();
-            let d = &self.variable_decls[&decl_id];
-            let mut local_variable_replace_map = FxHashMap::default();
+            let d = self.variable_decls.get(&decl_id).unwrap().clone();
             self.monomorphized_variable_map
                 .insert((decl_id, t.clone()), new_decl_id);
+            let local_variable_replace_map_tmp =
+                std::mem::take(&mut self.local_variable_replace_map);
+            let ht = self.get_type_for_hash_with_replace_map(p);
+            let b = self.block(d.value, &ht, replace_map);
             let d = VariableDecl {
-                name: d.name,
-                value: self.expr(
-                    d.value.clone(),
-                    &t,
-                    replace_map,
-                    &mut local_variable_replace_map,
-                ),
+                value: b,
                 decl_id: new_decl_id,
+                ret: self.variable_id(d.ret, replace_map),
+                name: d.name,
+                t,
             };
+            self.local_variable_replace_map = local_variable_replace_map_tmp;
             self.monomorphized_variables.push(d);
             new_decl_id
         }
     }
 
-    fn expr(
+    fn variable_id(
         &mut self,
-        (e, t): ast_step4::ExprWithType,
-        global_variable_type: &TypeForHash,
+        v: ast_step4::VariableId,
         replace_map: &mut ReplaceMap,
-        local_variable_map: &mut FxHashMap<DeclId, DeclId>,
-    ) -> ExprWithType {
-        debug_assert_ne!(global_variable_type.len(), 0);
-        use Expr::*;
-        let fixed_t = self.get_type_unhashable_with_replace_map(t, replace_map);
-        let e = match e {
-            ast_step4::Expr::Lambda {
-                lambda_number,
-                context,
-                parameter,
-                parameter_type,
-                body,
-            } => {
-                let parameter =
-                    replace_local_decl(parameter, local_variable_map);
-                let context = context
-                    .into_iter()
-                    .map(|d| replace_local_decl(d, local_variable_map))
-                    .collect_vec();
-                let possible_functions =
-                    self.get_possible_functions(t, replace_map);
-                let parameter_type = self.get_type_unhashable_with_replace_map(
-                    parameter_type,
+    ) -> VariableId {
+        match v {
+            ast_step4::VariableId::Local(d) => {
+                VariableId::Local(self.local_variable_replace_map[&d])
+            }
+            ast_step4::VariableId::Global(d, r, p) => {
+                let mut r = replace_map.clone().merge(r, &mut self.map);
+                VariableId::Global(self.monomorphize_decl_rec(d, p, &mut r))
+            }
+        }
+    }
+
+    fn block(
+        &mut self,
+        block: ast_step4::Block,
+        root_t: &Type,
+        replace_map: &mut ReplaceMap,
+    ) -> Block {
+        let mut instructions = Vec::new();
+        for i in block.instructions {
+            self.instruction(i, root_t, replace_map, &mut instructions);
+        }
+        Block { instructions }
+    }
+
+    fn instruction(
+        &mut self,
+        instruction: ast_step4::Instruction,
+        root_t: &Type,
+        replace_map: &mut ReplaceMap,
+        instructions: &mut Vec<Instruction>,
+    ) {
+        match instruction {
+            ast_step4::Instruction::Assign(Some(v), e, t) => {
+                let t = self.map.clone_pointer(t, replace_map);
+                let e = self.expr(e, t, root_t, replace_map, instructions);
+                let t = self.get_type_unhashable_with_replace_map(t);
+                use std::collections::hash_map::Entry::*;
+                let new_v = match self.local_variable_replace_map.entry(v) {
+                    Occupied(v) => *v.get(),
+                    Vacant(e) => {
+                        let new_v =
+                            self.local_variable_collector.new_variable(t);
+                        e.insert(new_v);
+                        new_v
+                    }
+                };
+                instructions.push(Instruction::Assign(Some(new_v), e))
+            }
+            ast_step4::Instruction::Assign(None, e, t) => {
+                let e = self.expr(e, t, root_t, replace_map, instructions);
+                instructions.push(Instruction::Assign(None, e))
+            }
+            ast_step4::Instruction::Test(
+                ast_step4::Tester::I64 { value },
+                a,
+            ) => {
+                let type_id = TypeId::Intrinsic(IntrinsicType::I64);
+                let a =
+                    self.test_type_id(a, type_id, replace_map, instructions);
+                instructions.push(Instruction::Test(Tester::I64 { value }, a))
+            }
+            ast_step4::Instruction::Test(
+                ast_step4::Tester::Str { value },
+                a,
+            ) => {
+                let type_id = TypeId::Intrinsic(IntrinsicType::String);
+                let a =
+                    self.test_type_id(a, type_id, replace_map, instructions);
+                instructions.push(Instruction::Test(Tester::Str { value }, a))
+            }
+            ast_step4::Instruction::Test(
+                ast_step4::Tester::Constructor { id },
+                a,
+            ) => {
+                let id = id.into();
+                let t = self.map.clone_pointer(
+                    a.type_(&self.local_variable_types_old),
                     replace_map,
                 );
-                let f = Function {
-                    parameter,
-                    parameter_type,
-                    body: self.expr(
-                        *body,
-                        global_variable_type,
-                        replace_map,
-                        local_variable_map,
-                    ),
-                    id: LambdaId(0),
-                    context: context.clone(),
-                    original_id: lambda_number,
-                    origin_type: global_variable_type.clone(),
-                };
-                let e = self
-                    .functions
-                    .get_mut(&(lambda_number, global_variable_type.clone()))
-                    .unwrap();
-                let FunctionEntry::Placeholder(id) = *e else {
-                    panic!()
-                };
-                *e = FunctionEntry::Function(Function { id, ..f });
-                let lambda_id = id;
-                Upcast {
-                    tag: possible_functions.binary_search(&lambda_id).unwrap()
-                        as u32,
-                    value: Box::new(Lambda { context, lambda_id }),
+                let t = self.get_type_unhashable_with_replace_map(t);
+                let a = self.variable_id(a, replace_map);
+                match get_tag_normal(&t, id) {
+                    GetTagNormalResult::Tagged(tag, _untagged_t) => {
+                        let a = self.deref(a, &t, instructions);
+                        instructions.push(Instruction::Test(
+                            Tester::Constructor { id, tag },
+                            a,
+                        ));
+                    }
+                    GetTagNormalResult::NotTagged => (),
+                    GetTagNormalResult::Impossible => {
+                        instructions.push(Instruction::FailTest);
+                    }
                 }
             }
-            ast_step4::Expr::Match { arms, arguments } => Match {
-                arms: arms
-                    .into_iter()
-                    .map(|arm| {
-                        self.monomorphize_fn_arm(
-                            arm,
-                            replace_map,
-                            global_variable_type,
-                            local_variable_map,
+            ast_step4::Instruction::TryCatch(b1, b2) => {
+                instructions.push(Instruction::TryCatch(
+                    self.block(b1, root_t, replace_map),
+                    self.block(b2, root_t, replace_map),
+                ));
+            }
+        }
+    }
+
+    fn test_type_id(
+        &mut self,
+        a: ast_step4::VariableId,
+        type_id: TypeId,
+        replace_map: &mut ReplaceMap,
+        instructions: &mut Vec<Instruction>,
+    ) -> VariableId {
+        let t = self.map.clone_pointer(
+            a.type_(&self.local_variable_types_old),
+            replace_map,
+        );
+        let t = self.get_type_unhashable_with_replace_map(t);
+        let a = self.variable_id(a, replace_map);
+        match get_tag_normal(&t, type_id) {
+            GetTagNormalResult::Tagged(tag, _untagged_t) => {
+                let a = self.deref(a, &t, instructions);
+                instructions.push(Instruction::Test(
+                    Tester::Constructor { id: type_id, tag },
+                    a,
+                ));
+                self.expr_to_variable(
+                    Expr::Downcast { tag, value: a },
+                    TypeUnit::Normal {
+                        id: type_id,
+                        args: Vec::new(),
+                    }
+                    .into(),
+                    instructions,
+                )
+            }
+            GetTagNormalResult::NotTagged => a,
+            GetTagNormalResult::Impossible => panic!(),
+        }
+    }
+
+    fn expr(
+        &mut self,
+        e: ast_step4::Expr,
+        p: TypePointer,
+        root_t: &Type,
+        replace_map: &mut ReplaceMap,
+        instructions: &mut Vec<Instruction>,
+    ) -> Expr {
+        use Expr::*;
+        let p = self.map.clone_pointer(p, replace_map);
+        let t = self.get_type_unhashable_with_replace_map(p);
+        match e {
+            ast_step4::Expr::Lambda {
+                lambda_id,
+                context,
+                parameter,
+                body,
+                ret,
+            } => {
+                let possible_functions = self.get_possible_functions(p);
+                let parameter_type = self.local_variable_types_old[&parameter];
+                let parameter_type =
+                    self.map.clone_pointer(parameter_type, replace_map);
+                let parameter_type_fixed =
+                    self.get_type_unhashable_with_replace_map(parameter_type);
+                let new_parameter = self
+                    .local_variable_collector
+                    .new_variable(parameter_type_fixed);
+                self.local_variable_replace_map
+                    .insert(parameter, new_parameter);
+                let (p_param, _, _) = self.map.get_fn(p);
+                debug_assert_eq!(
+                    self.map.find(p_param),
+                    self.map.find(parameter_type)
+                );
+                let b = self.block(body, root_t, replace_map);
+                let new_context = context
+                    .iter()
+                    .map(|c| self.local_variable_replace_map[c])
+                    .collect_vec();
+                let f = Function {
+                    parameter: new_parameter,
+                    body: b,
+                    id: FxLambdaId(0),
+                    context: new_context.clone(),
+                    ret: self.variable_id(ret, replace_map),
+                };
+                let lambda_id = LambdaId {
+                    id: lambda_id.id,
+                    root_t: root_t.clone(),
+                };
+                let e = self.functions.get_mut(&lambda_id).unwrap();
+                let FunctionEntry::Placeholder(fx_lambda_id) = *e else {
+                    panic!()
+                };
+                *e = FunctionEntry::Function(Function {
+                    id: fx_lambda_id,
+                    ..f
+                });
+                match possible_functions {
+                    TaggedFn::Tagged(possible_functions) => {
+                        let mut ts = t.iter();
+                        let TypeUnit::Fn(_, a, b) = ts.next().unwrap() else {
+                            panic!()
+                        };
+                        debug_assert!(ts.next().is_none());
+                        let fn_t: Type = TypeUnit::Fn(
+                            once(lambda_id.map_type(TypeInner::Type)).collect(),
+                            a.clone(),
+                            b.clone(),
                         )
-                    })
-                    .collect(),
-                arguments: arguments
-                    .into_iter()
-                    .map(|d| replace_local_decl(d, local_variable_map))
-                    .collect(),
-            },
-            ast_step4::Expr::Ident { variable_id } => Ident {
-                variable_id: VariableId::Local(replace_local_decl(
-                    variable_id,
-                    local_variable_map,
-                )),
-            },
-            ast_step4::Expr::GlobalVariable {
-                decl_id,
-                replace_map: r,
-            } => Ident {
-                variable_id: VariableId::Global(self.monomorphize_decl_rec(
-                    decl_id,
-                    t,
-                    &mut replace_map.clone().merge(r),
-                )),
-            },
-            ast_step4::Expr::Call(f, a) => {
-                let possible_functions: Vec<_> =
-                    self.get_possible_functions(f.1, replace_map);
+                        .into();
+                        let d =
+                            self.local_variable_collector.new_variable(fn_t);
+                        instructions.push(Instruction::Assign(
+                            Some(d),
+                            Lambda {
+                                context: new_context,
+                                lambda_id: fx_lambda_id,
+                            },
+                        ));
+                        Upcast {
+                            tag: possible_functions
+                                .binary_search(&fx_lambda_id)
+                                .unwrap()
+                                as u32,
+                            value: VariableId::Local(d),
+                        }
+                    }
+                    TaggedFn::Untagged(lambda_id) => Lambda {
+                        context: new_context,
+                        lambda_id,
+                    },
+                }
+            }
+            ast_step4::Expr::I64(s) => I64(s),
+            ast_step4::Expr::Str(s) => Str(s),
+            ast_step4::Expr::Ident(v) => {
+                Ident(self.variable_id(v, replace_map))
+            }
+            ast_step4::Expr::Call { f, a } => {
+                let f_t = f.type_(&self.local_variable_types_old);
+                let f_t = self.map.clone_pointer(f_t, replace_map);
+                let possible_functions = self.get_possible_functions(f_t);
                 Call {
-                    f: Box::new(self.expr(
-                        *f,
-                        global_variable_type,
-                        replace_map,
-                        local_variable_map,
-                    )),
-                    a: Box::new(self.expr(
-                        *a,
-                        global_variable_type,
-                        replace_map,
-                        local_variable_map,
-                    )),
+                    f: self.variable_id(f, replace_map),
+                    a: self.variable_id(a, replace_map),
                     possible_functions,
                 }
             }
-            ast_step4::Expr::DoBlock(es) => DoBlock(
-                es.into_iter()
-                    .map(|e| {
-                        self.expr(
-                            e,
-                            global_variable_type,
-                            replace_map,
-                            local_variable_map,
-                        )
-                    })
-                    .collect(),
-            ),
-            ast_step4::Expr::IntrinsicCall {
+            ast_step4::Expr::BasicCall {
                 args,
-                id: BasicFunction::Intrinsic(id),
+                id: BasicFunction::Construction(id),
             } => {
-                let rt = id.runtime_return_type();
-                assert_eq!(fixed_t, rt);
-                let v = BasicCall {
-                    args: args
-                        .into_iter()
-                        .map(|a| {
-                            self.expr(
-                                a,
-                                global_variable_type,
-                                replace_map,
-                                local_variable_map,
-                            )
-                        })
-                        .collect(),
-                    id: BasicFunction::Intrinsic(id),
-                };
-                if rt.0.len() == 1 {
-                    Upcast {
-                        tag: 0,
-                        value: Box::new(v),
-                    }
-                } else {
-                    v
-                }
-            }
-            ast_step4::Expr::IntrinsicCall {
-                args,
-                id: BasicFunction::Construction(id),
-            } => BasicCall {
-                args: args
+                let args = args
                     .into_iter()
-                    .map(|a| {
-                        self.expr(
-                            a,
-                            global_variable_type,
-                            replace_map,
-                            local_variable_map,
-                        )
-                    })
-                    .collect(),
-                id: BasicFunction::Construction(id),
+                    .map(|a| self.variable_id(a, replace_map))
+                    .collect();
+                self.add_tags_to_expr(
+                    BasicCall {
+                        args,
+                        id: BasicFunction::Construction(id),
+                    },
+                    &t,
+                    TypeId::from(id),
+                    instructions,
+                )
             }
-            .add_tags(&fixed_t, TypeId::from(id)),
-            ast_step4::Expr::IntrinsicCall {
+            ast_step4::Expr::BasicCall {
                 args,
                 id:
                     id @ BasicFunction::FieldAccessor {
@@ -426,496 +590,600 @@ impl VariableMemo {
                         field: _,
                     },
             } => {
+                debug_assert_eq!(args.len(), 1);
                 let a = args.into_iter().next().unwrap();
-                let a = self.expr(
-                    a,
-                    global_variable_type,
-                    replace_map,
-                    local_variable_map,
-                );
-                let t = a.1;
-                let tags =
-                    get_tag_normal(&t, TypeId::DeclId(constructor)).unwrap();
-                let a = tags.iter().fold(a.0, |acc, tag| Downcast {
-                    tag: *tag,
-                    value: Box::new(acc),
-                });
-                BasicCall {
-                    args: vec![(a, t)],
-                    id,
+                let t = a.type_(&self.local_variable_types_old);
+                let t = self.map.clone_pointer(t, replace_map);
+                let t = self.get_type_unhashable_with_replace_map(t);
+                let a = self.variable_id(a, replace_map);
+                let a = self.deref(a, &t, instructions);
+                match get_tag_normal(&t, TypeId::DeclId(constructor)) {
+                    GetTagNormalResult::Tagged(tag, casted_t) => {
+                        let casted_t = casted_t.into();
+                        let a = Downcast { tag, value: a };
+                        let d = self
+                            .local_variable_collector
+                            .new_variable(casted_t);
+                        instructions.push(Instruction::Assign(Some(d), a));
+                        BasicCall {
+                            args: vec![VariableId::Local(d)],
+                            id,
+                        }
+                    }
+                    GetTagNormalResult::NotTagged => {
+                        BasicCall { args: vec![a], id }
+                    }
+                    GetTagNormalResult::Impossible => {
+                        panic!()
+                    }
                 }
             }
-            ast_step4::Expr::Number(a) => Number(a)
-                .add_tags(&fixed_t, TypeId::Intrinsic(IntrinsicType::I64)),
-            ast_step4::Expr::StrLiteral(a) => StrLiteral(a)
-                .add_tags(&fixed_t, TypeId::Intrinsic(IntrinsicType::String)),
-        };
-        (e, fixed_t)
+            ast_step4::Expr::BasicCall {
+                args,
+                id: BasicFunction::Intrinsic(id),
+            } => {
+                let rt = id.runtime_return_type();
+                assert_eq!(t, rt);
+                BasicCall {
+                    args: args
+                        .into_iter()
+                        .map(|a| self.variable_id(a, replace_map))
+                        .collect(),
+                    id: BasicFunction::Intrinsic(id),
+                }
+            }
+        }
     }
 
-    fn get_possible_functions(
-        &mut self,
-        p: TypePointer,
-        replace_map: &mut ReplaceMap,
-    ) -> Vec<LambdaId> {
+    fn get_possible_functions(&mut self, p: TypePointer) -> TaggedFn {
+        let n_len = match self.map.dereference_without_find(p) {
+            ast_step4::Terminal::TypeMap(t) => t.normals.len(),
+            ast_step4::Terminal::LambdaId(_) => panic!(),
+        };
         let (_, _, fn_id) = self.map.get_fn(p);
-        self.map
-            .get_lambda_id(fn_id, replace_map)
+        let fs = self
+            .map
+            .get_lambda_id_with_replace_map(fn_id)
             .clone()
             .into_iter()
             .map(|id| {
-                let t = self.map.get_type_with_replace_map(id.1, replace_map);
                 let len = self.functions.len() as u32;
+                let id =
+                    id.map_type(|t| self.get_type_for_hash_with_replace_map(t));
                 let e = self
                     .functions
-                    .entry((id.0, t))
-                    .or_insert(FunctionEntry::Placeholder(LambdaId(len)));
+                    .entry(id)
+                    .or_insert(FunctionEntry::Placeholder(FxLambdaId(len)));
                 match e {
                     FunctionEntry::Placeholder(id) => *id,
                     FunctionEntry::Function(f) => f.id,
                 }
             })
             .sorted_unstable()
-            .collect()
-    }
-
-    fn monomorphize_fn_arm(
-        &mut self,
-        arm: ast_step4::FnArm,
-        replace_map: &mut ReplaceMap,
-        global_variable_type: &TypeForHash,
-        local_variable_replace_map: &mut FxHashMap<DeclId, DeclId>,
-    ) -> FnArm {
-        FnArm {
-            pattern: arm
-                .pattern
-                .into_iter()
-                .map(|p| {
-                    self.monomorphize_pattern(
-                        p,
-                        replace_map,
-                        global_variable_type,
-                        local_variable_replace_map,
-                    )
-                })
-                .collect(),
-            expr: self.expr(
-                arm.expr,
-                global_variable_type,
-                replace_map,
-                local_variable_replace_map,
-            ),
+            .collect_vec();
+        if fs.is_empty() {
+            TaggedFn::Tagged(Vec::new())
+        } else if n_len == 1 && fs.len() == 1 {
+            TaggedFn::Untagged(fs[0])
+        } else {
+            TaggedFn::Tagged(fs)
         }
     }
 
-    fn monomorphize_pattern(
-        &mut self,
-        pattern: ast_step4::Pattern,
-        replace_map: &mut ReplaceMap,
-        global_variable_type: &TypeForHash,
-        local_variable_map: &mut FxHashMap<DeclId, DeclId>,
-    ) -> Pattern {
-        let patterns = pattern
-            .patterns
-            .into_iter()
-            .map(|p| {
-                use self::PatternUnit::*;
-                use ast_step4::PatternUnit;
-                match p {
-                    PatternUnit::Constructor { id } => Constructor { id },
-                    PatternUnit::I64(a) => I64(a),
-                    PatternUnit::Str(a) => Str(a),
-                    PatternUnit::Binder(id) => {
-                        Binder(replace_local_decl(id, local_variable_map))
-                    }
-                    PatternUnit::Underscore => Underscore,
-                    PatternUnit::TypeRestriction(p, t) => TypeRestriction(
-                        self.monomorphize_pattern(
-                            p,
-                            replace_map,
-                            global_variable_type,
-                            local_variable_map,
-                        ),
-                        t,
-                    ),
-                    PatternUnit::Apply {
-                        pre_pattern,
-                        function,
-                        post_pattern,
-                    } => {
-                        let p = function.1;
-                        Apply {
-                            pre_pattern: self.monomorphize_pattern(
-                                pre_pattern,
-                                replace_map,
-                                global_variable_type,
-                                local_variable_map,
-                            ),
-                            function: self.expr(
-                                function,
-                                global_variable_type,
-                                replace_map,
-                                local_variable_map,
-                            ),
-                            post_pattern: self.monomorphize_pattern(
-                                post_pattern,
-                                replace_map,
-                                global_variable_type,
-                                local_variable_map,
-                            ),
-                            possible_functions: self
-                                .get_possible_functions(p, replace_map),
-                        }
-                    }
-                }
-            })
-            .collect();
-        Pattern {
-            patterns,
-            type_: self.get_type_unhashable_with_replace_map(
-                pattern.type_,
-                replace_map,
-            ),
-        }
-    }
-
-    fn get_type_unhashable_with_replace_map(
-        &mut self,
-        p: TypePointer,
-        replace_map: &mut ReplaceMap,
-    ) -> Type {
+    fn get_type_unhashable_with_replace_map(&mut self, p: TypePointer) -> Type {
         self.unhashable_type_memo
-            .get_type_unhashable_with_replace_map(
-                p,
-                replace_map,
-                &mut self.functions,
-                &mut self.map,
-            )
+            .get_type_for_hash(p, &mut self.map, false)
     }
-}
 
-impl Expr {
-    fn add_tags(self, t: &Type, id: TypeId) -> Self {
-        get_tag_normal(t, id)
-            .unwrap()
-            .into_iter()
-            .rev()
-            .fold(self, |acc, i| Expr::Upcast {
-                tag: i,
-                value: Box::new(acc),
-            })
+    fn get_type_for_hash_with_replace_map(&mut self, p: TypePointer) -> Type {
+        self.unhashable_type_memo
+            .get_type_for_hash(p, &mut self.map, true)
     }
-}
 
-fn replace_local_decl(
-    d: DeclId,
-    local_variable_replace_map: &mut FxHashMap<DeclId, DeclId>,
-) -> DeclId {
-    if let Some(d) = local_variable_replace_map.get(&d) {
-        *d
-    } else {
-        let new_d = DeclId::new();
-        local_variable_replace_map.insert(d, new_d);
-        new_d
+    fn expr_to_variable(
+        &mut self,
+        e: Expr,
+        t: Type,
+        instructions: &mut Vec<Instruction>,
+    ) -> VariableId {
+        let d = self.local_variable_collector.new_variable(t);
+        instructions.push(Instruction::Assign(Some(d), e));
+        VariableId::Local(d)
     }
-}
 
-pub fn get_tag_normal(
-    ot: &Type,
-    type_id: TypeId,
-) -> Option<SmallVec<[u32; 2]>> {
-    let mut tag = 0;
-    for t in ot.0.iter() {
-        use TypeUnit::*;
-        match t {
-            Normal { id, args: _ } => {
-                if *id == type_id {
-                    return Some(smallvec![tag]);
-                } else {
-                    tag += 1;
+    fn deref(
+        &mut self,
+        v: VariableId,
+        t: &Type,
+        instructions: &mut Vec<Instruction>,
+    ) -> VariableId {
+        if t.reference {
+            debug_assert!(t.recursive);
+            let d = self.local_variable_collector.new_variable(Type {
+                ts: t.ts.clone(),
+                recursive: true,
+                reference: false,
+            });
+            instructions.push(Instruction::Assign(Some(d), Expr::Deref(v)));
+            VariableId::Local(d)
+        } else {
+            v
+        }
+    }
+
+    fn add_tags_to_expr(
+        &mut self,
+        e: Expr,
+        t: &Type,
+        id: TypeId,
+        instructions: &mut Vec<Instruction>,
+    ) -> Expr {
+        let e = match get_tag_normal(t, id) {
+            GetTagNormalResult::Tagged(tag, tu) => {
+                let d = self.local_variable_collector.new_variable(tu.into());
+                instructions.push(Instruction::Assign(Some(d), e));
+                Expr::Upcast {
+                    tag,
+                    value: VariableId::Local(d),
                 }
             }
-            Fn(id, _, _) => tag += id.len() as u32,
-            RecursionPoint(_) => panic!(),
-            Recursive(t) => {
-                if let Some(mut in_tag) = get_tag_normal(t, type_id) {
-                    in_tag.insert(0, tag);
-                    return Some(in_tag);
+            GetTagNormalResult::NotTagged => e,
+            GetTagNormalResult::Impossible => {
+                panic!()
+            }
+        };
+        if t.reference {
+            debug_assert!(t.recursive);
+            let d = self.local_variable_collector.new_variable(Type {
+                ts: t.ts.clone(),
+                recursive: true,
+                reference: false,
+            });
+            instructions.push(Instruction::Assign(Some(d), e));
+            Expr::Ref(VariableId::Local(d))
+        } else {
+            e
+        }
+    }
+}
+
+enum GetTagNormalResult {
+    NotTagged,
+    Impossible,
+    Tagged(u32, TypeUnit),
+}
+
+fn get_tag_normal(ot: &Type, type_id: TypeId) -> GetTagNormalResult {
+    debug_assert_ne!(type_id, TypeId::Intrinsic(IntrinsicType::Fn));
+    let mut tag = 0;
+    if ot.len() == 1 {
+        let t = ot.ts.first().unwrap();
+        #[cfg(debug_assertions)]
+        match t {
+            TypeUnit::Normal { id, .. } => {
+                return if *id == type_id {
+                    GetTagNormalResult::NotTagged
                 } else {
-                    tag += 1;
-                }
+                    GetTagNormalResult::Impossible
+                };
+            }
+            TypeUnit::Fn(_, _, _) => panic!(),
+        }
+    }
+    for t in &ot.ts {
+        match t {
+            TypeUnit::Normal { id, args } if *id == type_id => {
+                let t = if ot.recursive {
+                    TypeUnit::Normal {
+                        id: *id,
+                        args: args
+                            .iter()
+                            .map(|a| a.clone().replace_index(ot, 0))
+                            .collect(),
+                    }
+                } else {
+                    t.clone()
+                };
+                return GetTagNormalResult::Tagged(tag, t);
+            }
+            TypeUnit::Fn(lambda_ids, _, _) => {
+                tag += lambda_ids.len() as u32;
+            }
+            _ => {
+                tag += 1;
             }
         }
     }
-    None
+    GetTagNormalResult::Impossible
 }
 
-impl Display for LambdaId {
+impl TypeInner {
+    pub fn replace_index(self, to: &Type, depth: u32) -> Self {
+        debug_assert!(to.reference);
+        match self {
+            TypeInner::RecursionPoint(a) if a == depth => {
+                TypeInner::Type(to.clone())
+            }
+            TypeInner::RecursionPoint(a) => TypeInner::RecursionPoint(a),
+            TypeInner::Type(Type {
+                ts,
+                recursive,
+                reference,
+            }) => TypeInner::Type(Type {
+                ts: ts
+                    .into_iter()
+                    .map(|t| t.replace_index(to, depth + recursive as u32))
+                    .collect(),
+                recursive,
+                reference,
+            }),
+        }
+    }
+}
+
+impl TypeUnit {
+    pub fn replace_index(self, to: &Type, depth: u32) -> Self {
+        debug_assert!(to.reference);
+        match self {
+            TypeUnit::Normal { id, args } => TypeUnit::Normal {
+                id,
+                args: args
+                    .into_iter()
+                    .map(|t| t.replace_index(to, depth))
+                    .collect(),
+            },
+            TypeUnit::Fn(ids, a, b) => TypeUnit::Fn(
+                ids,
+                a.replace_index(to, depth),
+                b.replace_index(to, depth),
+            ),
+        }
+    }
+}
+
+impl Display for FxLambdaId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "la{}", self.0)
     }
 }
 
 mod unhashable_type {
-    use super::{FunctionEntry, LambdaId};
+    use super::{IndexOrPointer, LambdaId};
     use crate::ast_step2::TypeId;
-    use crate::ast_step4::{
-        PaddedTypeMap, ReplaceMap, Terminal, TypeForHash, TypePointer,
-    };
-    use crate::ast_step5::{Type, TypeUnit};
+    use crate::ast_step4::{PaddedTypeMap, Terminal, TypePointer};
+    use crate::ast_step5::{Type, TypeInner, TypeUnit};
     use crate::intrinsics::IntrinsicType;
     use fxhash::{FxHashMap, FxHashSet};
     use std::collections::BTreeSet;
-    use std::iter::once;
-
-    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Clone)]
-    struct LinkedTypeUnhashable {
-        ts: BTreeSet<LinkedTypeUnitUnhashable>,
-        recursive: bool,
-    }
-
-    #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
-    enum LinkedTypeUnitUnhashable {
-        Normal {
-            id: TypeId,
-            args: Vec<LinkedTypeUnhashable>,
-        },
-        RecursionPoint(u32),
-        Pointer(TypePointer),
-        LambdaId(super::LambdaId),
-    }
-
-    pub struct ReplacePointerResult {
-        t: LinkedTypeUnhashable,
-        replaced: bool,
-        contains_pointer: bool,
-    }
-
-    impl LinkedTypeUnhashable {
-        fn replace_pointer(
-            self,
-            from: TypePointer,
-            depth: u32,
-        ) -> ReplacePointerResult {
-            let depth = self.recursive as u32 + depth;
-            let mut t = BTreeSet::default();
-            let mut replaced = false;
-            let mut contains_pointer = false;
-            use LinkedTypeUnitUnhashable::*;
-            for u in self.ts {
-                match u {
-                    Pointer(p) if p == from => {
-                        t.insert(RecursionPoint(depth));
-                        replaced = true;
-                        contains_pointer = true;
-                    }
-                    Pointer(_) => {
-                        contains_pointer = true;
-                        t.insert(u);
-                    }
-                    Normal { id, args } => {
-                        let args = args
-                            .into_iter()
-                            .map(|arg| {
-                                let r = arg.replace_pointer(from, depth);
-                                replaced |= r.replaced;
-                                contains_pointer |= r.contains_pointer;
-                                r.t
-                            })
-                            .collect();
-                        t.insert(Normal { id, args });
-                    }
-                    LambdaId(id) => {
-                        t.insert(LambdaId(id));
-                    }
-                    RecursionPoint(_) => {
-                        t.insert(u);
-                    }
-                }
-            }
-            ReplacePointerResult {
-                t: LinkedTypeUnhashable {
-                    ts: t,
-                    recursive: self.recursive,
-                },
-                replaced,
-                contains_pointer,
-            }
-        }
-    }
-
-    impl From<LinkedTypeUnhashable> for Type {
-        fn from(value: LinkedTypeUnhashable) -> Self {
-            use TypeUnit::*;
-            let t = value
-                .ts
-                .into_iter()
-                .map(|t| match t {
-                    LinkedTypeUnitUnhashable::Normal {
-                        id: TypeId::Intrinsic(IntrinsicType::Fn),
-                        args,
-                    } => {
-                        debug_assert_eq!(args.len(), 3);
-                        let mut args = args.into_iter();
-                        let a = args.next().unwrap().into();
-                        let b = args.next().unwrap().into();
-                        let lambda_t = args.next().unwrap();
-                        debug_assert!(!lambda_t.recursive);
-                        let lambda_id = lambda_t
-                            .ts
-                            .into_iter()
-                            .map(|id| {
-                                if let LinkedTypeUnitUnhashable::LambdaId(
-                                    lambda_id,
-                                ) = id
-                                {
-                                    lambda_id
-                                } else {
-                                    panic!()
-                                }
-                            })
-                            .collect::<BTreeSet<_>>();
-                        Fn(lambda_id, a, b)
-                    }
-                    LinkedTypeUnitUnhashable::Normal { id, args } => {
-                        let args = args.into_iter().map(Type::from).collect();
-                        Normal { id, args }
-                    }
-                    LinkedTypeUnitUnhashable::RecursionPoint(d) => {
-                        RecursionPoint(d)
-                    }
-                    LinkedTypeUnitUnhashable::Pointer(_) => panic!(),
-                    LinkedTypeUnitUnhashable::LambdaId(_) => panic!(),
-                })
-                .collect();
-            if value.recursive {
-                Recursive(t).into()
-            } else {
-                t
-            }
-        }
-    }
 
     #[derive(Debug, Default)]
     pub struct UnhashableTypeMemo {
-        get_type_memo: FxHashMap<TypePointer, LinkedTypeUnhashable>,
+        type_memo: FxHashMap<TypePointer, TypeInner<IndexOrPointer>>,
+        type_memo_for_hash: FxHashMap<TypePointer, TypeInner<IndexOrPointer>>,
+    }
+
+    fn remove_pointer_from_type_inner(
+        t: TypeInner<IndexOrPointer>,
+    ) -> TypeInner {
+        match t {
+            TypeInner::RecursionPoint(IndexOrPointer::Pointer(_)) => {
+                panic!()
+            }
+            TypeInner::RecursionPoint(IndexOrPointer::Index(d)) => {
+                TypeInner::RecursionPoint(d)
+            }
+            TypeInner::Type(Type {
+                ts,
+                recursive,
+                reference,
+            }) => TypeInner::Type(Type {
+                ts: ts.into_iter().map(remove_pointer_from_type_unit).collect(),
+                recursive,
+                reference,
+            }),
+        }
+    }
+
+    fn remove_pointer_from_type_unit(t: TypeUnit<IndexOrPointer>) -> TypeUnit {
+        match t {
+            TypeUnit::Normal { id, args } => TypeUnit::Normal {
+                id,
+                args: args
+                    .into_iter()
+                    .map(remove_pointer_from_type_inner)
+                    .collect(),
+            },
+            TypeUnit::Fn(id, a, b) => TypeUnit::Fn(
+                id.into_iter()
+                    .map(|l| l.map_type(remove_pointer_from_type_inner))
+                    .collect(),
+                remove_pointer_from_type_inner(a),
+                remove_pointer_from_type_inner(b),
+            ),
+        }
     }
 
     impl UnhashableTypeMemo {
-        pub fn get_type_unhashable_with_replace_map(
+        pub fn get_type_for_hash(
             &mut self,
             p: TypePointer,
-            replace_map: &mut ReplaceMap,
-            function_map: &mut FxHashMap<(u32, TypeForHash), FunctionEntry>,
             map: &mut PaddedTypeMap,
+            for_hash: bool,
         ) -> Type {
-            let p = map.clone_pointer(p, replace_map);
-            self.get_type_unhashable(
+            let t = self.get_type_inner_for_hash(
                 p,
-                Default::default(),
-                replace_map,
-                function_map,
+                &Default::default(),
                 map,
-            )
-            .into()
+                for_hash,
+            );
+            match remove_pointer_from_type_inner(t) {
+                TypeInner::RecursionPoint(_) => panic!(),
+                TypeInner::Type(t) => {
+                    debug_assert!(!t.contains_broken_link());
+                    t
+                }
+            }
         }
 
-        fn get_type_unhashable(
+        fn get_lambda_ids(
             &mut self,
             p: TypePointer,
-            mut trace: FxHashSet<TypePointer>,
-            replace_map: &mut ReplaceMap,
-            function_map: &mut FxHashMap<(u32, TypeForHash), FunctionEntry>,
+            trace: &FxHashSet<TypePointer>,
             map: &mut PaddedTypeMap,
-        ) -> LinkedTypeUnhashable {
-            map.dereference_without_find(p);
-            if let Some(t) = self.get_type_memo.get(&p) {
+        ) -> BTreeSet<LambdaId<TypeInner<IndexOrPointer>>> {
+            let Terminal::LambdaId(ids) = map.dereference_without_find(p) else {
+                panic!()
+            };
+            let mut new_ids = BTreeSet::new();
+            for id in ids.clone() {
+                let id = id.map_type(|p| {
+                    self.get_type_inner_for_hash(p, trace, map, true)
+                });
+                new_ids.insert(id);
+            }
+            new_ids
+        }
+
+        fn get_type_inner_for_hash(
+            &mut self,
+            p: TypePointer,
+            trace: &FxHashSet<TypePointer>,
+            map: &mut PaddedTypeMap,
+            for_hash: bool,
+        ) -> TypeInner<IndexOrPointer> {
+            if for_hash {
+                if let Some(t) = self.type_memo_for_hash.get(&p) {
+                    return t.clone();
+                }
+            } else if let Some(t) = self.type_memo.get(&p) {
                 return t.clone();
             }
             if trace.contains(&p) {
-                return LinkedTypeUnhashable {
-                    ts: once(LinkedTypeUnitUnhashable::Pointer(p)).collect(),
-                    recursive: false,
-                };
+                return TypeInner::RecursionPoint(IndexOrPointer::Pointer(p));
             }
+            let mut trace = trace.clone();
             trace.insert(p);
             let t = match &map.dereference_without_find(p) {
                 Terminal::TypeMap(type_map) => {
-                    let mut t = Vec::default();
+                    let mut t = Vec::new();
                     for (type_id, normal_type) in &type_map.normals {
                         t.push((*type_id, normal_type.clone()));
                     }
-                    LinkedTypeUnhashable {
+                    TypeInner::Type(Type {
                         ts: t
                             .into_iter()
                             .map(|(id, args)| {
-                                LinkedTypeUnitUnhashable::Normal {
-                                    id,
-                                    args: args
-                                        .into_iter()
-                                        .map(|t| {
-                                            self.get_type_unhashable(
-                                                t,
-                                                trace.clone(),
-                                                replace_map,
-                                                function_map,
-                                                map,
-                                            )
-                                        })
-                                        .collect(),
-                                }
+                                self.get_type_from_id_and_args_rec(
+                                    id, &args, &trace, map, for_hash,
+                                )
                             })
                             .collect(),
                         recursive: false,
-                    }
+                        reference: false,
+                    })
                 }
-                Terminal::LambdaId(ids) => {
-                    let mut new_ids = BTreeSet::new();
-                    for id in ids.clone() {
-                        let t =
-                            map.get_type_with_replace_map(id.1, replace_map);
-                        let len = function_map.len() as u32;
-                        let e = function_map.entry((id.0, t)).or_insert(
-                            FunctionEntry::Placeholder(LambdaId(len)),
-                        );
-                        let id = match e {
-                            FunctionEntry::Placeholder(id) => *id,
-                            FunctionEntry::Function(f) => f.id,
-                        };
-                        new_ids.insert(LinkedTypeUnitUnhashable::LambdaId(id));
-                    }
-                    LinkedTypeUnhashable {
-                        ts: new_ids,
-                        recursive: false,
-                    }
-                }
+                Terminal::LambdaId(_) => panic!(),
             };
-            let r = t.replace_pointer(p, 0);
+            let r = replace_pointer(t, p, 0);
             let mut t = r.t;
             if r.replaced {
-                t.recursive = true;
+                if let TypeInner::Type(t) = &mut t {
+                    t.recursive = true;
+                    t.reference = true;
+                } else {
+                    panic!()
+                }
             };
             if !r.contains_pointer {
-                let o = self.get_type_memo.insert(p, t.clone());
+                let o = if for_hash {
+                    self.type_memo_for_hash.insert(p, t.clone())
+                } else {
+                    self.type_memo.insert(p, t.clone())
+                };
                 debug_assert!(o.is_none());
             }
             t
         }
+
+        fn get_type_from_id_and_args_rec(
+            &mut self,
+            id: TypeId,
+            args: &[TypePointer],
+            trace: &FxHashSet<TypePointer>,
+            map: &mut PaddedTypeMap,
+            for_hash: bool,
+        ) -> TypeUnit<IndexOrPointer> {
+            if let TypeId::Intrinsic(IntrinsicType::Fn) = id {
+                debug_assert_eq!(args.len(), 3);
+                let mut args = args.iter();
+                let a = self.get_type_inner_for_hash(
+                    *args.next().unwrap(),
+                    trace,
+                    map,
+                    for_hash,
+                );
+                let b = self.get_type_inner_for_hash(
+                    *args.next().unwrap(),
+                    trace,
+                    map,
+                    for_hash,
+                );
+                let empty_trace;
+                let lambda_id = self.get_lambda_ids(
+                    *args.next().unwrap(),
+                    if for_hash {
+                        trace
+                    } else {
+                        empty_trace = Default::default();
+                        &empty_trace
+                    },
+                    map,
+                );
+                TypeUnit::Fn(lambda_id, a, b)
+            } else {
+                TypeUnit::Normal {
+                    id,
+                    args: args
+                        .iter()
+                        .map(|t| {
+                            self.get_type_inner_for_hash(
+                                *t, trace, map, for_hash,
+                            )
+                        })
+                        .collect(),
+                }
+            }
+        }
+    }
+
+    pub struct ReplacePointerResult {
+        t: TypeInner<IndexOrPointer>,
+        replaced: bool,
+        contains_pointer: bool,
+    }
+
+    fn replace_pointer(
+        t: TypeInner<IndexOrPointer>,
+        from: TypePointer,
+        depth: u32,
+    ) -> ReplacePointerResult {
+        match t {
+            TypeInner::RecursionPoint(IndexOrPointer::Index(i)) => {
+                ReplacePointerResult {
+                    t: TypeInner::RecursionPoint(IndexOrPointer::Index(i)),
+                    replaced: false,
+                    contains_pointer: i > depth,
+                }
+            }
+            TypeInner::RecursionPoint(IndexOrPointer::Pointer(i)) => {
+                if i == from {
+                    ReplacePointerResult {
+                        t: TypeInner::RecursionPoint(IndexOrPointer::Index(
+                            depth,
+                        )),
+                        replaced: true,
+                        contains_pointer: false,
+                    }
+                } else {
+                    ReplacePointerResult {
+                        t: TypeInner::RecursionPoint(IndexOrPointer::Pointer(
+                            i,
+                        )),
+                        replaced: false,
+                        contains_pointer: true,
+                    }
+                }
+            }
+            TypeInner::Type(t) => {
+                let depth = t.recursive as u32 + depth;
+                let mut new_t = Vec::new();
+                let mut replaced = false;
+                let mut contains_pointer = false;
+                use TypeUnit::*;
+                for u in t.ts {
+                    match u {
+                        Normal { id, args } => {
+                            let args = args
+                                .into_iter()
+                                .map(|arg| {
+                                    let r = replace_pointer(arg, from, depth);
+                                    replaced |= r.replaced;
+                                    contains_pointer |= r.contains_pointer;
+                                    r.t
+                                })
+                                .collect();
+                            new_t.push(Normal { id, args });
+                        }
+                        Fn(l, a, b) => {
+                            let l = l
+                                .into_iter()
+                                .map(|l| {
+                                    l.map_type(|t| {
+                                        let r = replace_pointer(t, from, depth);
+                                        replaced |= r.replaced;
+                                        contains_pointer |= r.contains_pointer;
+                                        r.t
+                                    })
+                                })
+                                .collect();
+                            let r = replace_pointer(a, from, depth);
+                            replaced |= r.replaced;
+                            contains_pointer |= r.contains_pointer;
+                            let a = r.t;
+                            let r = replace_pointer(b, from, depth);
+                            replaced |= r.replaced;
+                            contains_pointer |= r.contains_pointer;
+                            let b = r.t;
+                            new_t.push(Fn(l, a, b));
+                        }
+                    }
+                }
+                ReplacePointerResult {
+                    t: TypeInner::Type(Type {
+                        ts: new_t,
+                        recursive: t.recursive,
+                        reference: t.reference,
+                    }),
+                    replaced,
+                    contains_pointer,
+                }
+            }
+        }
     }
 }
 
-impl Display for Type {
+impl<R: Debug> Display for Type<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.0.len() {
+        if self.reference {
+            write!(f, "&")?;
+        }
+        if self.recursive {
+            write!(f, "rec[")?;
+        }
+        match self.ts.len() {
             0 => write!(f, "∅"),
-            1 => write!(f, "{}", self.0.iter().next().unwrap()),
-            _ => write!(f, "{{{}}}", self.0.iter().format(" | ")),
+            1 => write!(f, "{}", self.ts.first().unwrap()),
+            _ => write!(f, "{{{}}}", self.ts.iter().format(" | ")),
         }?;
+        if self.recursive {
+            write!(f, "]")?;
+        }
         Ok(())
     }
 }
 
-impl Display for TypeUnit {
+impl<R: Debug> Display for TypeInner<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TypeInner::RecursionPoint(d) => {
+                write!(f, "d{d:?}")
+            }
+            TypeInner::Type(t) => write!(f, "{t}"),
+        }
+    }
+}
+
+impl<R: Debug> Display for TypeUnit<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use TypeUnit::*;
         match self {
@@ -927,26 +1195,57 @@ impl Display for TypeUnit {
                     write!(f, "{}[{}]", id, args.iter().format(", "))
                 }
             }
-            RecursionPoint(d) => write!(f, "d{d}"),
             Fn(id, a, b) => {
-                let paren = a.0.len() == 1
-                    && matches!(a.0.iter().next().unwrap(), Fn(_, _, _));
                 let id_paren = id.len() >= 2;
                 write!(
                     f,
-                    "{}{}{} -{}{}{}-> {b}",
-                    if paren { "(" } else { "" },
-                    a,
-                    if paren { ")" } else { "" },
+                    "({a}) -{}{}{}-> {b}",
                     if id_paren { "(" } else { "" },
                     id.iter()
                         .format_with(" | ", |a, f| f(&format_args!("{}", a))),
                     if id_paren { ")" } else { "" },
                 )
             }
-            Recursive(t) => {
-                write!(f, "rec[{}]", t)
-            }
+        }
+    }
+}
+
+mod local_variable {
+    use std::fmt::{Debug, Display};
+
+    #[derive(Debug, PartialEq, Hash, Clone, Copy, Eq)]
+    pub struct LocalVariable(usize);
+
+    #[derive(Debug, PartialEq)]
+    pub struct LocalVariableCollector<T>(Vec<T>);
+
+    impl<T: Display> LocalVariableCollector<T> {
+        pub fn new_variable(&mut self, t: T) -> LocalVariable {
+            self.0.push(t);
+            LocalVariable(self.0.len() - 1)
+        }
+    }
+
+    impl<T> LocalVariableCollector<T> {
+        pub fn new() -> Self {
+            LocalVariableCollector(Vec::new())
+        }
+
+        pub fn get_type(&self, i: LocalVariable) -> &T {
+            &self.0[i.0]
+        }
+
+        pub fn map<U>(
+            self,
+            f: impl FnMut(T) -> U,
+        ) -> LocalVariableCollector<U> {
+            LocalVariableCollector(self.0.into_iter().map(f).collect())
+        }
+    }
+
+    impl Display for LocalVariable {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.0)
         }
     }
 }
