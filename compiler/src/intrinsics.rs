@@ -37,6 +37,9 @@ const fn runtime_intrinsic_type(i: IntrinsicType) -> ast_step5::TypeUnit {
     }
 }
 
+const TRUE: ast_step5::TypeUnit = runtime_intrinsic_type(IntrinsicType::True);
+const FALSE: ast_step5::TypeUnit = runtime_intrinsic_type(IntrinsicType::False);
+
 impl IntrinsicVariable {
     pub fn to_str(self) -> &'static str {
         match self {
@@ -102,8 +105,6 @@ impl IntrinsicVariable {
     pub fn runtime_return_type(self) -> ast_step5::Type {
         use ast_step5::TypeUnit;
         const I64: TypeUnit = runtime_intrinsic_type(IntrinsicType::I64);
-        const TRUE: TypeUnit = runtime_intrinsic_type(IntrinsicType::True);
-        const FALSE: TypeUnit = runtime_intrinsic_type(IntrinsicType::False);
         const STRING: TypeUnit = runtime_intrinsic_type(IntrinsicType::String);
         const UNIT: TypeUnit = runtime_intrinsic_type(IntrinsicType::Unit);
         match self {
@@ -114,15 +115,50 @@ impl IntrinsicVariable {
             | IntrinsicVariable::Div => I64.into(),
             IntrinsicVariable::Lt
             | IntrinsicVariable::Neq
-            | IntrinsicVariable::Eq => ast_step5::Type {
-                ts: [TRUE, FALSE].into_iter().collect(),
-                recursive: false,
-                reference: false,
-            },
+            | IntrinsicVariable::Eq => bool_t(),
             IntrinsicVariable::PrintStr => UNIT.into(),
             IntrinsicVariable::I64ToString => STRING.into(),
             IntrinsicVariable::AppendStr => STRING.into(),
         }
+    }
+
+    pub fn runtime_arg_type_id(self) -> Vec<TypeId> {
+        const I64: TypeId = TypeId::Intrinsic(IntrinsicType::I64);
+        const STRING: TypeId = TypeId::Intrinsic(IntrinsicType::String);
+        match self {
+            IntrinsicVariable::Minus
+            | IntrinsicVariable::Plus
+            | IntrinsicVariable::Percent
+            | IntrinsicVariable::Multi
+            | IntrinsicVariable::Div
+            | IntrinsicVariable::Lt
+            | IntrinsicVariable::Neq
+            | IntrinsicVariable::Eq => vec![I64, I64],
+            IntrinsicVariable::PrintStr => vec![STRING],
+            IntrinsicVariable::I64ToString => vec![I64],
+            IntrinsicVariable::AppendStr => vec![STRING, STRING],
+        }
+    }
+
+    pub fn runtime_arg_type(self) -> Vec<ast_step5::Type> {
+        self.runtime_arg_type_id()
+            .into_iter()
+            .map(|id| {
+                ast_step5::TypeUnit::Normal {
+                    id,
+                    args: Vec::new(),
+                }
+                .into()
+            })
+            .collect()
+    }
+}
+
+pub fn bool_t() -> ast_step5::Type {
+    ast_step5::Type {
+        ts: [TRUE, FALSE].into_iter().collect(),
+        recursive: false,
+        reference: false,
     }
 }
 

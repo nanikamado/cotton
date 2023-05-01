@@ -41,16 +41,17 @@ pub struct Block {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Tester {
-    Constructor { id: TypeId, tag: u32 },
+    Tag { tag: u32 },
     I64 { value: String },
     Str { value: String },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Instruction {
-    Assign(Option<LocalVariable>, Expr),
+    Assign(LocalVariable, Expr),
     Test(Tester, VariableId),
     FailTest,
+    ImpossibleTypeError,
     TryCatch(Block, Block),
 }
 
@@ -66,7 +67,7 @@ pub enum Expr {
     Call {
         f: VariableId,
         a: VariableId,
-        possible_functions: TaggedFn,
+        real_function: FxLambdaId,
     },
     BasicCall {
         args: Vec<VariableId>,
@@ -248,12 +249,6 @@ pub enum FunctionEntry {
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 pub struct FxLambdaId(pub u32);
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
-pub enum TaggedFn {
-    Tagged(Vec<FxLambdaId>),
-    Untagged(FxLambdaId),
-}
-
 impl Env {
     pub fn new(
         variable_decls: Vec<ast_step4::VariableDecl>,
@@ -296,7 +291,7 @@ impl Env {
             let local_variable_replace_map_tmp =
                 std::mem::take(&mut self.local_variable_replace_map);
             let ht = self.get_type_for_hash_with_replace_map(p);
-            let b = self.block(d.value, &ht, replace_map);
+            let (b, _) = self.block(d.value, &ht, replace_map);
             let d = VariableDecl {
                 value: b,
                 decl_id: new_decl_id,
@@ -310,6 +305,20 @@ impl Env {
         }
     }
 
+    fn local_variable(
+        &mut self,
+        v: ast_step4::LocalVariable,
+        replace_map: &mut ReplaceMap,
+    ) -> LocalVariable {
+        debug_assert!(!self.local_variable_replace_map.contains_key(&v));
+        let t = self.local_variable_types_old[&v];
+        let t = self.map.clone_pointer(t, replace_map);
+        let t = self.get_type_unhashable_with_replace_map(t);
+        let new_v = self.local_variable_collector.new_variable(t);
+        self.local_variable_replace_map.insert(v, new_v);
+        new_v
+    }
+
     fn variable_id(
         &mut self,
         v: ast_step4::VariableId,
@@ -317,7 +326,11 @@ impl Env {
     ) -> VariableId {
         match v {
             ast_step4::VariableId::Local(d) => {
-                VariableId::Local(self.local_variable_replace_map[&d])
+                if let Some(d) = self.local_variable_replace_map.get(&d) {
+                    VariableId::Local(*d)
+                } else {
+                    VariableId::Local(self.local_variable(d, replace_map))
+                }
             }
             ast_step4::VariableId::Global(d, r, p) => {
                 let mut r = replace_map.clone().merge(r, &mut self.map);
@@ -331,59 +344,100 @@ impl Env {
         block: ast_step4::Block,
         root_t: &Type,
         replace_map: &mut ReplaceMap,
-    ) -> Block {
+    ) -> (Block, bool) {
         let mut instructions = Vec::new();
+        let mut unreachable_block = false;
         for i in block.instructions {
-            self.instruction(i, root_t, replace_map, &mut instructions);
+            if self.instruction(i, root_t, replace_map, &mut instructions) {
+                unreachable_block = true;
+                break;
+            }
         }
-        Block { instructions }
+        (Block { instructions }, unreachable_block)
     }
 
+    // Returns true if the block is unreachable
     fn instruction(
         &mut self,
         instruction: ast_step4::Instruction,
         root_t: &Type,
         replace_map: &mut ReplaceMap,
         instructions: &mut Vec<Instruction>,
-    ) {
+    ) -> bool {
         match instruction {
             ast_step4::Instruction::Assign(Some(v), e, t) => {
                 let t = self.map.clone_pointer(t, replace_map);
                 let e = self.expr(e, t, root_t, replace_map, instructions);
-                let t = self.get_type_unhashable_with_replace_map(t);
-                use std::collections::hash_map::Entry::*;
-                let new_v = match self.local_variable_replace_map.entry(v) {
-                    Occupied(v) => *v.get(),
-                    Vacant(e) => {
+                match e {
+                    Some(e) => {
+                        let t = self.get_type_unhashable_with_replace_map(t);
+                        use std::collections::hash_map::Entry::*;
                         let new_v =
-                            self.local_variable_collector.new_variable(t);
-                        e.insert(new_v);
-                        new_v
+                            match self.local_variable_replace_map.entry(v) {
+                                Occupied(v) => *v.get(),
+                                Vacant(e) => {
+                                    let new_v = self
+                                        .local_variable_collector
+                                        .new_variable(t);
+                                    e.insert(new_v);
+                                    new_v
+                                }
+                            };
+                        instructions.push(Instruction::Assign(new_v, e));
+                        false
                     }
-                };
-                instructions.push(Instruction::Assign(Some(new_v), e))
+                    None => {
+                        instructions.push(Instruction::ImpossibleTypeError);
+                        true
+                    }
+                }
             }
             ast_step4::Instruction::Assign(None, e, t) => {
+                let t = self.map.clone_pointer(t, replace_map);
                 let e = self.expr(e, t, root_t, replace_map, instructions);
-                instructions.push(Instruction::Assign(None, e))
+                match e {
+                    Some(e) => {
+                        let t = self.get_type_unhashable_with_replace_map(t);
+                        let new_v =
+                            self.local_variable_collector.new_variable(t);
+                        instructions.push(Instruction::Assign(new_v, e));
+                        false
+                    }
+                    None => {
+                        instructions.push(Instruction::ImpossibleTypeError);
+                        true
+                    }
+                }
             }
             ast_step4::Instruction::Test(
                 ast_step4::Tester::I64 { value },
                 a,
             ) => {
                 let type_id = TypeId::Intrinsic(IntrinsicType::I64);
-                let a =
-                    self.test_type_id(a, type_id, replace_map, instructions);
-                instructions.push(Instruction::Test(Tester::I64 { value }, a))
+                let a = self.downcast(a, type_id, replace_map, instructions);
+                match a {
+                    Some(a) => instructions
+                        .push(Instruction::Test(Tester::I64 { value }, a)),
+                    None => {
+                        instructions.push(Instruction::FailTest);
+                    }
+                }
+                false
             }
             ast_step4::Instruction::Test(
                 ast_step4::Tester::Str { value },
                 a,
             ) => {
                 let type_id = TypeId::Intrinsic(IntrinsicType::String);
-                let a =
-                    self.test_type_id(a, type_id, replace_map, instructions);
-                instructions.push(Instruction::Test(Tester::Str { value }, a))
+                let a = self.downcast(a, type_id, replace_map, instructions);
+                match a {
+                    Some(a) => instructions
+                        .push(Instruction::Test(Tester::Str { value }, a)),
+                    None => {
+                        instructions.push(Instruction::FailTest);
+                    }
+                }
+                false
             }
             ast_step4::Instruction::Test(
                 ast_step4::Tester::Constructor { id },
@@ -399,61 +453,53 @@ impl Env {
                 match get_tag_normal(&t, id) {
                     GetTagNormalResult::Tagged(tag, _untagged_t) => {
                         let a = self.deref(a, &t, instructions);
-                        instructions.push(Instruction::Test(
-                            Tester::Constructor { id, tag },
-                            a,
-                        ));
+                        instructions
+                            .push(Instruction::Test(Tester::Tag { tag }, a));
                     }
                     GetTagNormalResult::NotTagged => (),
                     GetTagNormalResult::Impossible => {
                         instructions.push(Instruction::FailTest);
                     }
                 }
+                false
             }
             ast_step4::Instruction::TryCatch(b1, b2) => {
-                instructions.push(Instruction::TryCatch(
-                    self.block(b1, root_t, replace_map),
-                    self.block(b2, root_t, replace_map),
-                ));
+                let (b1, u1) = self.block(b1, root_t, replace_map);
+                let (b2, u2) = self.block(b2, root_t, replace_map);
+                instructions.push(Instruction::TryCatch(b1, b2));
+                u1 && u2
             }
         }
     }
 
-    fn test_type_id(
+    fn downcast(
         &mut self,
         a: ast_step4::VariableId,
         type_id: TypeId,
         replace_map: &mut ReplaceMap,
         instructions: &mut Vec<Instruction>,
-    ) -> VariableId {
+    ) -> Option<VariableId> {
         let t = self.map.clone_pointer(
             a.type_(&self.local_variable_types_old),
             replace_map,
         );
         let t = self.get_type_unhashable_with_replace_map(t);
         let a = self.variable_id(a, replace_map);
+        let a = self.deref(a, &t, instructions);
         match get_tag_normal(&t, type_id) {
-            GetTagNormalResult::Tagged(tag, _untagged_t) => {
-                let a = self.deref(a, &t, instructions);
-                instructions.push(Instruction::Test(
-                    Tester::Constructor { id: type_id, tag },
-                    a,
-                ));
-                self.expr_to_variable(
+            GetTagNormalResult::Tagged(tag, casted_t) => {
+                Some(self.expr_to_variable(
                     Expr::Downcast { tag, value: a },
-                    TypeUnit::Normal {
-                        id: type_id,
-                        args: Vec::new(),
-                    }
-                    .into(),
+                    casted_t.into(),
                     instructions,
-                )
+                ))
             }
-            GetTagNormalResult::NotTagged => a,
-            GetTagNormalResult::Impossible => panic!(),
+            GetTagNormalResult::NotTagged => Some(a),
+            GetTagNormalResult::Impossible => None,
         }
     }
 
+    // Returns `None` if impossible type error
     fn expr(
         &mut self,
         e: ast_step4::Expr,
@@ -461,11 +507,11 @@ impl Env {
         root_t: &Type,
         replace_map: &mut ReplaceMap,
         instructions: &mut Vec<Instruction>,
-    ) -> Expr {
+    ) -> Option<Expr> {
         use Expr::*;
         let p = self.map.clone_pointer(p, replace_map);
         let t = self.get_type_unhashable_with_replace_map(p);
-        match e {
+        let e = match e {
             ast_step4::Expr::Lambda {
                 lambda_id,
                 context,
@@ -474,22 +520,8 @@ impl Env {
                 ret,
             } => {
                 let possible_functions = self.get_possible_functions(p);
-                let parameter_type = self.local_variable_types_old[&parameter];
-                let parameter_type =
-                    self.map.clone_pointer(parameter_type, replace_map);
-                let parameter_type_fixed =
-                    self.get_type_unhashable_with_replace_map(parameter_type);
-                let new_parameter = self
-                    .local_variable_collector
-                    .new_variable(parameter_type_fixed);
-                self.local_variable_replace_map
-                    .insert(parameter, new_parameter);
-                let (p_param, _, _) = self.map.get_fn(p);
-                debug_assert_eq!(
-                    self.map.find(p_param),
-                    self.map.find(parameter_type)
-                );
-                let b = self.block(body, root_t, replace_map);
+                let new_parameter = self.local_variable(parameter, replace_map);
+                let (b, _) = self.block(body, root_t, replace_map);
                 let new_context = context
                     .iter()
                     .map(|c| self.local_variable_replace_map[c])
@@ -513,40 +545,29 @@ impl Env {
                     id: fx_lambda_id,
                     ..f
                 });
-                match possible_functions {
-                    TaggedFn::Tagged(possible_functions) => {
-                        let mut ts = t.iter();
-                        let TypeUnit::Fn(_, a, b) = ts.next().unwrap() else {
-                            panic!()
-                        };
-                        debug_assert!(ts.next().is_none());
-                        let fn_t: Type = TypeUnit::Fn(
-                            once(lambda_id.map_type(TypeInner::Type)).collect(),
-                            a.clone(),
-                            b.clone(),
-                        )
-                        .into();
-                        let d =
-                            self.local_variable_collector.new_variable(fn_t);
-                        instructions.push(Instruction::Assign(
-                            Some(d),
-                            Lambda {
-                                context: new_context,
-                                lambda_id: fx_lambda_id,
-                            },
-                        ));
-                        Upcast {
-                            tag: possible_functions
-                                .binary_search(&fx_lambda_id)
-                                .unwrap()
-                                as u32,
-                            value: VariableId::Local(d),
-                        }
-                    }
-                    TaggedFn::Untagged(lambda_id) => Lambda {
+                if possible_functions.len() == 1 {
+                    Lambda {
                         context: new_context,
-                        lambda_id,
-                    },
+                        lambda_id: possible_functions[0].0,
+                    }
+                } else {
+                    let tag = possible_functions
+                        .binary_search_by_key(&fx_lambda_id, |(l, _)| *l)
+                        .unwrap();
+                    let d = self
+                        .local_variable_collector
+                        .new_variable(possible_functions[tag].1.clone());
+                    instructions.push(Instruction::Assign(
+                        d,
+                        Lambda {
+                            context: new_context,
+                            lambda_id: fx_lambda_id,
+                        },
+                    ));
+                    Upcast {
+                        tag: tag as u32,
+                        value: VariableId::Local(d),
+                    }
                 }
             }
             ast_step4::Expr::I64(s) => I64(s),
@@ -558,10 +579,53 @@ impl Env {
                 let f_t = f.type_(&self.local_variable_types_old);
                 let f_t = self.map.clone_pointer(f_t, replace_map);
                 let possible_functions = self.get_possible_functions(f_t);
-                Call {
-                    f: self.variable_id(f, replace_map),
-                    a: self.variable_id(a, replace_map),
-                    possible_functions,
+                let f = self.variable_id(f, replace_map);
+                let a = self.variable_id(a, replace_map);
+                if possible_functions.is_empty() {
+                    instructions.push(Instruction::ImpossibleTypeError);
+                    return None;
+                }
+                if possible_functions.len() == 1 {
+                    Call {
+                        f,
+                        a,
+                        real_function: possible_functions[0].0,
+                    }
+                } else {
+                    let ret_v = self.local_variable_collector.new_variable(t);
+                    let mut b = vec![Instruction::ImpossibleTypeError];
+                    for (tag, (id, casted_t)) in
+                        possible_functions.into_iter().enumerate()
+                    {
+                        let mut b2 = vec![Instruction::Test(
+                            Tester::Tag { tag: tag as u32 },
+                            f,
+                        )];
+                        let new_f = self
+                            .local_variable_collector
+                            .new_variable(casted_t);
+                        b2.push(Instruction::Assign(
+                            new_f,
+                            Expr::Downcast {
+                                tag: tag as u32,
+                                value: f,
+                            },
+                        ));
+                        b2.push(Instruction::Assign(
+                            ret_v,
+                            Expr::Call {
+                                f: VariableId::Local(new_f),
+                                a,
+                                real_function: id,
+                            },
+                        ));
+                        b = vec![Instruction::TryCatch(
+                            Block { instructions: b2 },
+                            Block { instructions: b },
+                        )];
+                    }
+                    instructions.append(&mut b);
+                    Ident(VariableId::Local(ret_v))
                 }
             }
             ast_step4::Expr::BasicCall {
@@ -592,82 +656,77 @@ impl Env {
             } => {
                 debug_assert_eq!(args.len(), 1);
                 let a = args.into_iter().next().unwrap();
-                let t = a.type_(&self.local_variable_types_old);
-                let t = self.map.clone_pointer(t, replace_map);
-                let t = self.get_type_unhashable_with_replace_map(t);
-                let a = self.variable_id(a, replace_map);
-                let a = self.deref(a, &t, instructions);
-                match get_tag_normal(&t, TypeId::DeclId(constructor)) {
-                    GetTagNormalResult::Tagged(tag, casted_t) => {
-                        let casted_t = casted_t.into();
-                        let a = Downcast { tag, value: a };
-                        let d = self
-                            .local_variable_collector
-                            .new_variable(casted_t);
-                        instructions.push(Instruction::Assign(Some(d), a));
-                        BasicCall {
-                            args: vec![VariableId::Local(d)],
-                            id,
-                        }
-                    }
-                    GetTagNormalResult::NotTagged => {
-                        BasicCall { args: vec![a], id }
-                    }
-                    GetTagNormalResult::Impossible => {
-                        panic!()
-                    }
-                }
+                let a = self.downcast(
+                    a,
+                    TypeId::DeclId(constructor),
+                    replace_map,
+                    instructions,
+                )?;
+                BasicCall { args: vec![a], id }
             }
             ast_step4::Expr::BasicCall {
                 args,
                 id: BasicFunction::Intrinsic(id),
             } => {
                 let rt = id.runtime_return_type();
+                let arg_ts = id.runtime_arg_type_id();
                 assert_eq!(t, rt);
+                let args = args
+                    .into_iter()
+                    .zip_eq(arg_ts)
+                    .map(|(a, param_t)| {
+                        self.downcast(a, param_t, replace_map, instructions)
+                    })
+                    .collect::<Option<_>>()?;
                 BasicCall {
-                    args: args
-                        .into_iter()
-                        .map(|a| self.variable_id(a, replace_map))
-                        .collect(),
+                    args,
                     id: BasicFunction::Intrinsic(id),
                 }
             }
-        }
+        };
+        Some(e)
     }
 
-    fn get_possible_functions(&mut self, p: TypePointer) -> TaggedFn {
+    fn get_possible_functions(
+        &mut self,
+        p: TypePointer,
+    ) -> Vec<(FxLambdaId, Type)> {
         let n_len = match self.map.dereference_without_find(p) {
             ast_step4::Terminal::TypeMap(t) => t.normals.len(),
             ast_step4::Terminal::LambdaId(_) => panic!(),
         };
-        let (_, _, fn_id) = self.map.get_fn(p);
-        let fs = self
-            .map
+        assert_eq!(n_len, 1);
+        let (arg_t, ret_t, fn_id) = self.map.get_fn(p);
+        self.map
             .get_lambda_id_with_replace_map(fn_id)
             .clone()
             .into_iter()
             .map(|id| {
                 let len = self.functions.len() as u32;
-                let id =
+                let id_t =
                     id.map_type(|t| self.get_type_for_hash_with_replace_map(t));
                 let e = self
                     .functions
-                    .entry(id)
+                    .entry(id_t.clone())
                     .or_insert(FunctionEntry::Placeholder(FxLambdaId(len)));
-                match e {
+                let id = match e {
                     FunctionEntry::Placeholder(id) => *id,
                     FunctionEntry::Function(f) => f.id,
-                }
+                };
+                (
+                    id,
+                    Type::from(TypeUnit::Fn(
+                        [id_t.map_type(TypeInner::Type)].into(),
+                        TypeInner::Type(
+                            self.get_type_unhashable_with_replace_map(arg_t),
+                        ),
+                        TypeInner::Type(
+                            self.get_type_unhashable_with_replace_map(ret_t),
+                        ),
+                    )),
+                )
             })
-            .sorted_unstable()
-            .collect_vec();
-        if fs.is_empty() {
-            TaggedFn::Tagged(Vec::new())
-        } else if n_len == 1 && fs.len() == 1 {
-            TaggedFn::Untagged(fs[0])
-        } else {
-            TaggedFn::Tagged(fs)
-        }
+            .collect()
     }
 
     fn get_type_unhashable_with_replace_map(&mut self, p: TypePointer) -> Type {
@@ -687,7 +746,7 @@ impl Env {
         instructions: &mut Vec<Instruction>,
     ) -> VariableId {
         let d = self.local_variable_collector.new_variable(t);
-        instructions.push(Instruction::Assign(Some(d), e));
+        instructions.push(Instruction::Assign(d, e));
         VariableId::Local(d)
     }
 
@@ -704,7 +763,7 @@ impl Env {
                 recursive: true,
                 reference: false,
             });
-            instructions.push(Instruction::Assign(Some(d), Expr::Deref(v)));
+            instructions.push(Instruction::Assign(d, Expr::Deref(v)));
             VariableId::Local(d)
         } else {
             v
@@ -721,7 +780,7 @@ impl Env {
         let e = match get_tag_normal(t, id) {
             GetTagNormalResult::Tagged(tag, tu) => {
                 let d = self.local_variable_collector.new_variable(tu.into());
-                instructions.push(Instruction::Assign(Some(d), e));
+                instructions.push(Instruction::Assign(d, e));
                 Expr::Upcast {
                     tag,
                     value: VariableId::Local(d),
@@ -739,7 +798,7 @@ impl Env {
                 recursive: true,
                 reference: false,
             });
-            instructions.push(Instruction::Assign(Some(d), e));
+            instructions.push(Instruction::Assign(d, e));
             Expr::Ref(VariableId::Local(d))
         } else {
             e
@@ -758,7 +817,6 @@ fn get_tag_normal(ot: &Type, type_id: TypeId) -> GetTagNormalResult {
     let mut tag = 0;
     if ot.len() == 1 {
         let t = ot.ts.first().unwrap();
-        #[cfg(debug_assertions)]
         match t {
             TypeUnit::Normal { id, .. } => {
                 return if *id == type_id {
@@ -843,7 +901,7 @@ impl TypeUnit {
 
 impl Display for FxLambdaId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "la{}", self.0)
+        write!(f, "f_{}", self.0)
     }
 }
 

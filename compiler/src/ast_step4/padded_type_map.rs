@@ -2,9 +2,8 @@ pub use self::replace_map::ReplaceMap;
 use crate::ast_step2::TypeId;
 use crate::ast_step4::LambdaId;
 use crate::intrinsics::IntrinsicType;
-use fxhash::FxHashSet;
 use itertools::Itertools;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use std::mem;
 
@@ -19,7 +18,7 @@ pub struct TypeMap {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Terminal {
     TypeMap(TypeMap),
-    LambdaId(FxHashSet<LambdaId<TypePointer>>),
+    LambdaId(BTreeSet<LambdaId<TypePointer>>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -44,7 +43,7 @@ impl PaddedTypeMap {
     pub fn new_lambda_id_pointer(&mut self) -> TypePointer {
         let p = self.map.len();
         self.map
-            .push(Node::Terminal(Terminal::LambdaId(FxHashSet::default())));
+            .push(Node::Terminal(Terminal::LambdaId(BTreeSet::default())));
         TypePointer(p)
     }
 
@@ -126,7 +125,7 @@ impl PaddedTypeMap {
     pub fn get_lambda_id_with_replace_map(
         &mut self,
         p: TypePointer,
-    ) -> &FxHashSet<LambdaId<TypePointer>> {
+    ) -> &BTreeSet<LambdaId<TypePointer>> {
         let t = self.dereference(p);
         let Terminal::LambdaId(t) = t else {
             panic!()

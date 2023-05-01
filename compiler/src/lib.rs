@@ -6,7 +6,7 @@ mod ast_step5;
 mod codegen;
 mod errors;
 mod intrinsics;
-mod run_js;
+mod run_c;
 
 use ast_step1::ident_id::IdentId;
 use ast_step1::name_id::Path;
@@ -28,13 +28,12 @@ pub use parser::{lex, Token};
 use simplelog::{
     self, ColorChoice, ConfigBuilder, LevelFilter, TermLogger, TerminalMode,
 };
-use std::io::ErrorKind;
-use std::process::{self, exit, Stdio};
+use std::process::{self, exit};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Command {
-    RunJs,
-    PrintJs,
+    RunC,
+    PrintCSrc,
     PrintTypes,
 }
 
@@ -56,25 +55,6 @@ pub fn run(
         ColorChoice::Auto,
     )
     .unwrap();
-    if command == Command::RunJs {
-        match process::Command::new("node")
-            .arg("--version")
-            .stdout(Stdio::null())
-            .spawn()
-        {
-            Ok(_) => (),
-            Err(e) => {
-                match e.kind() {
-                    ErrorKind::NotFound => eprintln!(
-                        "node command not found. \
-                        You need to install node."
-                    ),
-                    _ => eprintln!("failed to run node"),
-                };
-                exit(1)
-            }
-        }
-    }
     let ast = parser::parse(source);
     let ast = combine_with_prelude(ast);
     let mut imports = Imports::default();
@@ -100,11 +80,13 @@ pub fn run(
     } else {
         let ast = ast_step4::Ast::from(ast);
         let ast = ast_step5::Ast::from(ast);
-        let js = codegen(ast);
-        if command == Command::PrintJs {
-            println!("{js}");
-        } else if command == Command::RunJs {
-            run_js::run(&js);
+        let c_src = codegen(ast);
+        if command == Command::PrintCSrc {
+            println!("{c_src}");
+        } else if command == Command::RunC {
+            if run_c::run(&c_src).is_err() {
+                exit(1);
+            }
         } else {
             unreachable!()
         }

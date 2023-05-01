@@ -3,7 +3,7 @@ use crate::ast_step2::TypeId;
 use crate::ast_step4;
 use crate::ast_step5::{FxLambdaId as LambdaId, Type, TypeInner, TypeUnit};
 use crate::intrinsics::IntrinsicType;
-use fxhash::FxHashMap;
+use fxhash::{FxHashMap, FxHashSet};
 use std::fmt::Display;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -36,6 +36,7 @@ pub struct Env {
     pub aggregate_types: Collector<CAggregateType>,
     pub memo: FxHashMap<Type, CType>,
     pub fx_type_map: FxHashMap<ast_step4::LambdaId<Type>, LambdaId>,
+    pub reffed_aggregates: FxHashSet<usize>,
 }
 
 impl Env {
@@ -171,14 +172,16 @@ impl Env {
         t: &Type,
         type_stack: Option<(usize, Type)>,
     ) -> CType {
-        if type_stack.is_none() {
-            if let Some(t) = self.memo.get(t) {
-                t.clone()
-            } else {
-                let c_t = self.c_type_inner(t, type_stack);
-                self.memo.insert(t.clone(), c_t.clone());
-                c_t
+        if let Some(t) = self.memo.get(t) {
+            t.clone()
+        } else if type_stack.is_none() {
+            let c_t = self.c_type_inner(t, type_stack);
+            let o = self.memo.insert(t.clone(), c_t.clone());
+            #[cfg(debug_assertions)]
+            if let Some(t) = o {
+                assert_eq!(t, c_t);
             }
+            c_t
         } else {
             self.c_type_inner(t, type_stack)
         }
@@ -191,13 +194,19 @@ impl Env {
     ) -> CType {
         debug_assert!(!t.contains_broken_link_rec(type_stack.is_some() as u32));
         if t.reference {
-            CType::Ref(Box::new(self.c_type_memoize(
+            let t = self.c_type_memoize(
                 &Type {
                     reference: false,
                     ..t.clone()
                 },
                 type_stack,
-            )))
+            );
+            let i = match t {
+                CType::Aggregate(i) => i,
+                _ => panic!(),
+            };
+            self.reffed_aggregates.insert(i);
+            CType::Ref(Box::new(t))
         } else {
             self.c_type_memoize(t, type_stack)
         }

@@ -21,11 +21,11 @@ fn main() {
                 .required_unless_present_any(["language-server"]),
         )
         .arg(
-            Arg::new("js")
-                .short('j')
-                .long("js")
+            Arg::new("emit-c")
+                .short('c')
+                .long("emit-c")
                 .help(
-                    "Output the generated JavaScript code \
+                    "Output the generated C code \
                     instead of executing it",
                 )
                 .action(ArgAction::SetTrue),
@@ -40,7 +40,7 @@ fn main() {
         .group(
             ArgGroup::new("action")
                 .required(false)
-                .args(&["js", "types"]),
+                .args(&["emit-c", "types"]),
         )
         .arg(
             Arg::new("loglevel")
@@ -54,11 +54,11 @@ fn main() {
         )
         .get_matches();
     let command = match (
-        matches.get_flag("js"),
+        matches.get_flag("emit-c"),
         matches.get_flag("types"),
         matches.get_flag("language-server"),
     ) {
-        (true, false, false) => Command::PrintJs,
+        (true, false, false) => Command::PrintCSrc,
         (false, true, false) => Command::PrintTypes,
         (false, false, true) => {
             #[cfg(feature = "language-server")]
@@ -69,7 +69,7 @@ fn main() {
             #[cfg(not(feature = "language-server"))]
             panic!();
         }
-        (false, false, false) => Command::RunJs,
+        (false, false, false) => Command::RunC,
         _ => unreachable!(),
     };
     let file_name = matches.value_of("filename").unwrap();
