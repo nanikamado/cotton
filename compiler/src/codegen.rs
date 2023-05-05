@@ -2,10 +2,9 @@ mod c_type;
 mod collector;
 
 use self::c_type::{CAggregateType, CType};
-use crate::ast_step1::decl_id::DeclId;
-use crate::ast_step2::{ConstructorId, TypeId};
+use crate::ast_step4::{ConstructorId, TypeId};
 use crate::ast_step5::{
-    Ast, Block, Expr, Function, Instruction, LocalVariable,
+    Ast, Block, Expr, Function, GlobalVariableId, Instruction, LocalVariable,
     LocalVariableCollector, Tester, Type, TypeUnit, VariableDecl, VariableId,
 };
 use crate::intrinsics::{bool_t, IntrinsicType, IntrinsicVariable};
@@ -142,7 +141,7 @@ pub fn codegen(ast: Ast) -> String {
         #include <stdio.h>
         #include <stdlib.h>
         #include <string.h>
-        {}{}{fn_headers}{s}",
+        {}{}{fn_headers}{}{s}",
         sorted.iter().format_with("", |(i, t), f| {
             match t {
                 CAggregateType::Struct(fields) => f(&format_args!(
@@ -174,7 +173,17 @@ pub fn codegen(ast: Ast) -> String {
                     return tmp;
                 }}"
             ))
-        })
+        }),
+        ast.variable_decls
+            .iter()
+            .format_with("", |d, f| f(&format_args!(
+                "{} g_{}_{}();",
+                env.global_variable_types[&d.decl_id],
+                d.decl_id,
+                convert_name(
+                    &env.variable_names[&VariableId::Global(d.decl_id)]
+                ),
+            )))
     )
     .unwrap();
     s2
@@ -261,7 +270,7 @@ fn write_fns(
     functions: &[Function],
     variable_names: &FxHashMap<VariableId, String>,
     local_variable_types: &LocalVariableCollector<(Type, CType)>,
-    global_variable_types: &FxHashMap<DeclId, CType>,
+    global_variable_types: &FxHashMap<GlobalVariableId, CType>,
     c_type_env: &mut c_type::Env,
     write_body: bool,
 ) {
@@ -320,7 +329,7 @@ struct Env<'a> {
     context: &'a FxHashMap<LocalVariable, usize>,
     variable_names: &'a FxHashMap<VariableId, String>,
     local_variable_types: &'a LocalVariableCollector<(Type, CType)>,
-    global_variable_types: &'a FxHashMap<DeclId, CType>,
+    global_variable_types: &'a FxHashMap<GlobalVariableId, CType>,
 }
 
 impl Env<'_> {
@@ -521,7 +530,7 @@ impl DisplayWithEnv for (&Expr, &CType) {
                 real_function,
             } => write!(f, "{real_function}({},{})", Dis(a, env), Dis(g, env)),
             Expr::BasicCall { args, id } => {
-                use crate::ast_step3::BasicFunction::*;
+                use crate::ast_step4::BasicFunction::*;
                 match id {
                     Intrinsic(id) => write!(
                         f,
@@ -536,6 +545,16 @@ impl DisplayWithEnv for (&Expr, &CType) {
                             f,
                             "/*{}*/({}){{{}}}",
                             Dis(id, env),
+                            t,
+                            args.iter()
+                                .format_with(",", |a, f| f(&Dis(a, env)))
+                        )
+                    }
+                    IntrinsicConstruction(id) => {
+                        write!(
+                            f,
+                            "/*{}*/({}){{{}}}",
+                            id,
                             t,
                             args.iter()
                                 .format_with(",", |a, f| f(&Dis(a, env)))
@@ -606,10 +625,7 @@ impl DisplayWithEnv for ConstructorId {
         _env: &Env<'_>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
-        match self {
-            ConstructorId::DeclId(d) => write!(f, "c{d}"),
-            ConstructorId::Intrinsic(d) => write!(f, "c{d}"),
-        }
+        write!(f, "{self}")
     }
 }
 

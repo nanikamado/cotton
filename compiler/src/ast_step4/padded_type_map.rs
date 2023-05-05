@@ -1,11 +1,16 @@
 pub use self::replace_map::ReplaceMap;
-use crate::ast_step2::TypeId;
-use crate::ast_step4::LambdaId;
+use super::{ConstructorId, LambdaId};
 use crate::intrinsics::IntrinsicType;
 use itertools::Itertools;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Display;
 use std::mem;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TypeId {
+    UserDefined(ConstructorId),
+    Intrinsic(IntrinsicType),
+}
 
 #[derive(Debug, PartialEq, Clone, Eq, PartialOrd, Ord, Copy, Hash)]
 pub struct TypePointer(usize);
@@ -27,9 +32,17 @@ enum Node {
     Terminal(Terminal),
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct PaddedTypeMap {
     map: Vec<Node>,
+}
+
+impl Default for PaddedTypeMap {
+    fn default() -> Self {
+        Self {
+            map: vec![Node::Terminal(Terminal::TypeMap(TypeMap::default()))],
+        }
+    }
 }
 
 impl PaddedTypeMap {
@@ -38,6 +51,10 @@ impl PaddedTypeMap {
         self.map
             .push(Node::Terminal(Terminal::TypeMap(TypeMap::default())));
         TypePointer(p)
+    }
+
+    pub fn dummy_pointer() -> TypePointer {
+        TypePointer(0)
     }
 
     pub fn new_lambda_id_pointer(&mut self) -> TypePointer {
@@ -153,6 +170,7 @@ impl PaddedTypeMap {
     }
 
     pub fn find(&mut self, p: TypePointer) -> TypePointer {
+        debug_assert_ne!(p.0, 0);
         let next_p = match &self.map[p.0] {
             Node::Pointer(p) => *p,
             Node::Terminal(_) => {
@@ -186,16 +204,6 @@ impl PaddedTypeMap {
         })
     }
 
-    // pub fn get_type_with_replace_map(
-    //     &mut self,
-    //     p: TypePointer,
-    //     replace_map: &mut ReplaceMap,
-    // ) -> TypeForHash {
-    //     self.get_type(p, replace_map, Default::default())
-    //         .try_into()
-    //         .unwrap()
-    // }
-
     fn dereference(&mut self, p: TypePointer) -> &Terminal {
         let p = self.find(p);
         if let Node::Terminal(t) = &self.map[p.0] {
@@ -206,6 +214,7 @@ impl PaddedTypeMap {
     }
 
     pub fn dereference_without_find(&self, p: TypePointer) -> &Terminal {
+        debug_assert_ne!(p.0, 0);
         if let Node::Terminal(t) = &self.map[p.0] {
             t
         } else {
@@ -356,5 +365,20 @@ impl Display for Terminal {
                 write!(f, "lambda({})", l.iter().format(" | "))
             }
         }
+    }
+}
+
+impl Display for TypeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TypeId::UserDefined(a) => write!(f, "{a}"),
+            TypeId::Intrinsic(a) => write!(f, "{a:?}"),
+        }
+    }
+}
+
+impl Display for ConstructorId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "c{}", self.0)
     }
 }

@@ -1,6 +1,5 @@
 use super::collector::Collector;
-use crate::ast_step2::TypeId;
-use crate::ast_step4;
+use crate::ast_step4::{self, TypeId};
 use crate::ast_step5::{FxLambdaId as LambdaId, Type, TypeInner, TypeUnit};
 use crate::intrinsics::IntrinsicType;
 use fxhash::{FxHashMap, FxHashSet};

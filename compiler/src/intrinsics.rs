@@ -1,6 +1,4 @@
-use crate::ast_step2::types::Type;
-use crate::ast_step2::TypeId;
-use crate::ast_step5;
+use crate::{ast_step4, ast_step5};
 use fxhash::FxHashMap;
 use once_cell::sync::Lazy;
 use parser::Associativity;
@@ -32,7 +30,7 @@ impl Display for IntrinsicVariable {
 
 const fn runtime_intrinsic_type(i: IntrinsicType) -> ast_step5::TypeUnit {
     ast_step5::TypeUnit::Normal {
-        id: TypeId::Intrinsic(i),
+        id: ast_step4::TypeId::Intrinsic(i),
         args: Vec::new(),
     }
 }
@@ -54,36 +52,6 @@ impl IntrinsicVariable {
             IntrinsicVariable::PrintStr => "print_str",
             IntrinsicVariable::I64ToString => "i64_to_string",
             IntrinsicVariable::AppendStr => "append_str",
-        }
-    }
-
-    pub fn to_type(self) -> Type {
-        match self {
-            IntrinsicVariable::Minus
-            | IntrinsicVariable::Plus
-            | IntrinsicVariable::Percent
-            | IntrinsicVariable::Multi
-            | IntrinsicVariable::Div => Type::intrinsic_from_str("I64").arrow(
-                Type::intrinsic_from_str("I64")
-                    .arrow(Type::intrinsic_from_str("I64")),
-            ),
-            IntrinsicVariable::Lt
-            | IntrinsicVariable::Neq
-            | IntrinsicVariable::Eq => Type::intrinsic_from_str("I64").arrow(
-                Type::intrinsic_from_str("I64").arrow(
-                    Type::intrinsic_from_str("True")
-                        .union(Type::intrinsic_from_str("False")),
-                ),
-            ),
-            IntrinsicVariable::PrintStr => Type::intrinsic_from_str("String")
-                .arrow(Type::intrinsic_from_str("()")),
-            IntrinsicVariable::I64ToString => Type::intrinsic_from_str("I64")
-                .arrow(Type::intrinsic_from_str("String")),
-            IntrinsicVariable::AppendStr => Type::intrinsic_from_str("String")
-                .arrow(
-                    Type::intrinsic_from_str("String")
-                        .arrow(Type::intrinsic_from_str("String")),
-                ),
         }
     }
 
@@ -122,7 +90,8 @@ impl IntrinsicVariable {
         }
     }
 
-    pub fn runtime_arg_type_id(self) -> Vec<TypeId> {
+    pub fn runtime_arg_type_id(self) -> Vec<ast_step4::TypeId> {
+        use ast_step4::TypeId;
         const I64: TypeId = TypeId::Intrinsic(IntrinsicType::I64);
         const STRING: TypeId = TypeId::Intrinsic(IntrinsicType::String);
         match self {
@@ -234,14 +203,6 @@ impl IntrinsicConstructor {
             IntrinsicConstructor::Unit => "()",
             IntrinsicConstructor::True => "True",
             IntrinsicConstructor::False => "False",
-        }
-    }
-
-    pub fn to_type(self) -> Type {
-        match self {
-            IntrinsicConstructor::True => Type::intrinsic_from_str("True"),
-            IntrinsicConstructor::False => Type::intrinsic_from_str("False"),
-            IntrinsicConstructor::Unit => Type::intrinsic_from_str("()"),
         }
     }
 

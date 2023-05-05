@@ -1,11 +1,13 @@
 mod ast_step1;
 mod ast_step2;
 mod ast_step3;
+mod ast_step3_5;
 mod ast_step4;
 mod ast_step5;
 mod codegen;
 mod errors;
 mod intrinsics;
+mod intrinsics2;
 mod run_c;
 
 use ast_step1::ident_id::IdentId;
@@ -78,7 +80,7 @@ pub fn run(
     if command == Command::PrintTypes {
         print_types(&ast);
     } else {
-        let ast = ast_step4::Ast::from(ast);
+        let ast = ast_step3_5::convert(ast);
         let ast = ast_step5::Ast::from(ast);
         let c_src = codegen(ast);
         if command == Command::PrintCSrc {

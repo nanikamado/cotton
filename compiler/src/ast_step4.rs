@@ -1,13 +1,12 @@
 mod padded_type_map;
 
 pub use self::padded_type_map::{
-    PaddedTypeMap, ReplaceMap, Terminal, TypePointer,
+    PaddedTypeMap, ReplaceMap, Terminal, TypeId, TypePointer,
 };
-use crate::ast_step1::decl_id::DeclId;
-use crate::ast_step2::{ApplyPattern, ConstructorId, PatternUnit, TypeId};
-use crate::ast_step3::{self, BasicFunction, DataDecl, FnArm};
 use crate::ast_step5::Type;
-use crate::intrinsics::IntrinsicType;
+use crate::intrinsics::{
+    IntrinsicConstructor, IntrinsicType, IntrinsicVariable,
+};
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use std::fmt::Display;
@@ -15,20 +14,25 @@ use std::fmt::Display;
 #[derive(Debug)]
 pub struct Ast {
     pub variable_decls: Vec<VariableDecl>,
-    pub data_decls: Vec<DataDecl>,
-    pub entry_point: DeclId,
+    pub entry_point: GlobalVariable,
     pub type_of_entry_point: TypePointer,
-    pub local_variable_types_old: FxHashMap<LocalVariable, TypePointer>,
+    pub local_variable_types: LocalVariableTypes,
     pub type_map: PaddedTypeMap,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
-pub struct LocalVariable(DeclId);
+pub struct LocalVariable(usize);
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
+pub struct GlobalVariable(usize);
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, PartialOrd, Ord)]
+pub struct ConstructorId(usize);
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum VariableId {
     Local(LocalVariable),
-    Global(DeclId, ReplaceMap, TypePointer),
+    Global(GlobalVariable, ReplaceMap, TypePointer),
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
@@ -40,27 +44,27 @@ pub struct LambdaId<T> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct VariableDecl {
     pub value: Block,
-    pub ret: VariableId,
-    pub decl_id: DeclId,
+    pub ret: LocalVariable,
+    pub decl_id: GlobalVariable,
     pub name: String,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Block {
     pub instructions: Vec<Instruction>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Tester {
-    Constructor { id: ConstructorId },
+    Constructor { id: TypeId },
     I64 { value: String },
     Str { value: String },
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Instruction {
-    Assign(Option<LocalVariable>, Expr, TypePointer),
-    Test(Tester, VariableId),
+    Assign(LocalVariable, Expr),
+    Test(Tester, LocalVariable),
     TryCatch(Block, Block),
 }
 
@@ -68,520 +72,455 @@ pub enum Instruction {
 pub enum Expr {
     Lambda {
         lambda_id: LambdaId<TypePointer>,
-        context: Vec<LocalVariable>,
         parameter: LocalVariable,
         body: Block,
-        ret: VariableId,
+        ret: LocalVariable,
     },
     I64(String),
     Str(String),
     Ident(VariableId),
     Call {
-        f: VariableId,
-        a: VariableId,
+        f: LocalVariable,
+        a: LocalVariable,
     },
     BasicCall {
-        args: Vec<VariableId>,
+        args: Vec<LocalVariable>,
         id: BasicFunction,
     },
 }
 
-impl Ast {
-    pub fn from(ast: ast_step3::Ast) -> Self {
-        let mut env = Env {
-            type_map: PaddedTypeMap::default(),
-            global_variable_types: Default::default(),
-            local_variable_types: Default::default(),
-            global_variables_step3: ast
-                .variable_decls
-                .into_iter()
-                .map(|d| (d.decl_id, d))
-                .collect(),
-            global_variables_done: Default::default(),
-            data_decls: ast.data_decl.iter().map(|d| (d.decl_id, d)).collect(),
-            used_local_variables: FxHashSet::default(),
-            defined_local_variables: FxHashSet::default(),
-            trace: Default::default(),
-            lambda_count: 0,
+#[derive(Debug, PartialEq, Clone, Copy, Eq)]
+pub enum BasicFunction {
+    Intrinsic(IntrinsicVariable),
+    Construction(ConstructorId),
+    IntrinsicConstruction(IntrinsicConstructor),
+    FieldAccessor {
+        constructor: ConstructorId,
+        field: usize,
+    },
+}
+
+struct TypeInfEnv {
+    type_map: PaddedTypeMap,
+    global_variable_types: FxHashMap<GlobalVariable, TypePointer>,
+    local_variable_types: LocalVariableTypes,
+    global_variables_before_type_inf: FxHashMap<GlobalVariable, VariableDecl>,
+    global_variables_done: Vec<VariableDecl>,
+    trace: FxHashMap<GlobalVariable, TypePointer>,
+    used_trace: FxHashSet<GlobalVariable>,
+    field_len: Vec<usize>,
+}
+
+impl TypeInfEnv {
+    fn get_type_global(
+        &mut self,
+        decl_id: GlobalVariable,
+    ) -> (TypePointer, bool) {
+        if let Some(p) = self.trace.get(&decl_id) {
+            self.used_trace.insert(decl_id);
+            (*p, true)
+        } else if let Some(p) = self.global_variable_types.get(&decl_id) {
+            (*p, false)
+        } else {
+            let mut d = self
+                .global_variables_before_type_inf
+                .remove(&decl_id)
+                .unwrap();
+            let root_t = self.local_variable_types.get(d.ret);
+            self.trace.insert(decl_id, root_t);
+            let used_trace_len_base = self.used_trace.len();
+            self.block(&mut d.value, root_t);
+            self.used_trace.remove(&decl_id);
+            self.trace.remove(&decl_id);
+            let recurring = used_trace_len_base < self.used_trace.len();
+            self.global_variable_types.insert(decl_id, root_t);
+            self.global_variables_done.push(d);
+            (root_t, recurring)
+        }
+    }
+
+    fn block(&mut self, block: &mut Block, root_t: TypePointer) {
+        for i in &mut block.instructions {
+            match i {
+                Instruction::Assign(v, e) => {
+                    let t = self.local_variable_types.get(*v);
+                    match e {
+                        Expr::Lambda {
+                            lambda_id,
+                            parameter,
+                            body,
+                            ret,
+                        } => {
+                            let arg = self.local_variable_types.get(*parameter);
+                            let ret = self.local_variable_types.get(*ret);
+                            let fn_id = self.type_map.new_lambda_id_pointer();
+                            self.type_map.insert_lambda_id(
+                                fn_id,
+                                LambdaId {
+                                    id: lambda_id.id,
+                                    root_t,
+                                },
+                            );
+                            self.type_map.insert_function(t, arg, ret, fn_id);
+                            self.block(body, root_t);
+                        }
+                        Expr::I64(_) => {
+                            self.type_map.insert_normal(
+                                t,
+                                TypeId::Intrinsic(IntrinsicType::I64),
+                                Vec::new(),
+                            );
+                        }
+                        Expr::Str(_) => {
+                            self.type_map.insert_normal(
+                                t,
+                                TypeId::Intrinsic(IntrinsicType::String),
+                                Vec::new(),
+                            );
+                        }
+                        Expr::Ident(VariableId::Global(
+                            decl_id,
+                            replace_map_p,
+                            pp,
+                        )) => {
+                            let (p, is_recursive) =
+                                self.get_type_global(*decl_id);
+                            if is_recursive {
+                                self.type_map.union(p, t);
+                                *pp = p;
+                            } else {
+                                let mut replace_map = Default::default();
+                                let v_cloned = self
+                                    .type_map
+                                    .clone_pointer(p, &mut replace_map);
+                                self.type_map.union(t, v_cloned);
+                                *pp = t;
+                                *replace_map_p = replace_map;
+                            };
+                        }
+                        Expr::Ident(VariableId::Local(d)) => {
+                            let t2 = self.local_variable_types.get(*d);
+                            self.type_map.union(t, t2);
+                        }
+                        Expr::Call { f, a } => {
+                            let f_t = self.local_variable_types.get(*f);
+                            let a_t = self.local_variable_types.get(*a);
+                            let (f_arg_t, ret_t, _) = self.type_map.get_fn(f_t);
+                            self.type_map.union(f_arg_t, a_t);
+                            self.type_map.union(t, ret_t);
+                        }
+                        Expr::BasicCall {
+                            args,
+                            id: BasicFunction::Construction(d),
+                        } => {
+                            self.type_map.insert_normal(
+                                t,
+                                TypeId::UserDefined(*d),
+                                args.iter()
+                                    .map(|a| self.local_variable_types.get(*a))
+                                    .collect(),
+                            );
+                        }
+                        Expr::BasicCall {
+                            args,
+                            id: BasicFunction::IntrinsicConstruction(d),
+                        } => {
+                            self.type_map.insert_normal(
+                                t,
+                                TypeId::Intrinsic((*d).into()),
+                                args.iter()
+                                    .map(|a| self.local_variable_types.get(*a))
+                                    .collect(),
+                            );
+                        }
+                        Expr::BasicCall {
+                            args,
+                            id:
+                                BasicFunction::FieldAccessor { constructor, field },
+                        } => {
+                            debug_assert_eq!(args.len(), 1);
+                            let fields_p = (0..self.field_len[constructor.0])
+                                .map(|_| self.type_map.new_pointer())
+                                .collect_vec();
+                            self.type_map.union(t, fields_p[*field]);
+                            self.type_map.insert_normal(
+                                self.local_variable_types.get(args[0]),
+                                TypeId::UserDefined(*constructor),
+                                fields_p,
+                            );
+                        }
+                        Expr::BasicCall {
+                            args: _,
+                            id: BasicFunction::Intrinsic(v),
+                        } => {
+                            let ret_type = v.runtime_return_type();
+                            unify_type_pointer_with_type(
+                                &ret_type,
+                                t,
+                                &mut self.type_map,
+                            );
+                        }
+                    }
+                }
+                Instruction::Test(_, _) => (),
+                Instruction::TryCatch(a, b) => {
+                    self.block(a, root_t);
+                    self.block(b, root_t);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct LocalVariableTypes(Vec<TypePointer>);
+
+impl LocalVariableTypes {
+    pub fn get(&self, v: LocalVariable) -> TypePointer {
+        self.0[v.0]
+    }
+}
+
+pub struct Lambda<'a> {
+    pub parameter: LocalVariable,
+    pub ret: LocalVariable,
+    pub body: &'a mut Block,
+}
+
+#[derive(Debug, Default)]
+pub struct Env {
+    type_map: PaddedTypeMap,
+    global_variable_types: FxHashMap<GlobalVariable, TypePointer>,
+    local_variable_types: LocalVariableTypes,
+    lambda_count: u32,
+    global_variable_count: usize,
+    global_variables_done: FxHashMap<GlobalVariable, VariableDecl>,
+    field_len: Vec<usize>,
+}
+
+impl Env {
+    pub fn lambda<'b>(
+        &mut self,
+        block: &'b mut Block,
+        assign_v: LocalVariable,
+    ) -> Lambda<'b> {
+        let parameter = self.new_local_variable();
+        let lambda_id = LambdaId {
+            id: self.lambda_count,
+            root_t: PaddedTypeMap::dummy_pointer(),
         };
-        let entry_point = ast
-            .entry_point
-            .unwrap_or_else(|| panic!("entry point not found"));
-        let (type_of_entry_point, rec) = env.get_type_global(entry_point);
-        let (p, _, _) = env.type_map.get_fn(type_of_entry_point);
-        env.type_map.insert_normal(
+        self.lambda_count += 1;
+        let ret = self.new_local_variable();
+        let e = Expr::Lambda {
+            lambda_id,
+            parameter,
+            body: Block::default(),
+            ret,
+        };
+        block.instructions.push(Instruction::Assign(assign_v, e));
+        let body = if let Instruction::Assign(_, Expr::Lambda { body, .. }) =
+            block.instructions.last_mut().unwrap()
+        {
+            body
+        } else {
+            panic!()
+        };
+        Lambda {
+            parameter,
+            ret,
+            body,
+        }
+    }
+
+    pub fn new_global_variable(&mut self) -> GlobalVariable {
+        self.global_variable_count += 1;
+        GlobalVariable(self.global_variable_count - 1)
+    }
+
+    pub fn global_variable(
+        &mut self,
+        ret: LocalVariable,
+        v: GlobalVariable,
+        block: &mut Block,
+    ) {
+        block.assign(
+            ret,
+            Expr::Ident(VariableId::Global(
+                v,
+                Default::default(),
+                PaddedTypeMap::dummy_pointer(),
+            )),
+        );
+    }
+
+    pub fn string(&mut self, ret: LocalVariable, a: String, block: &mut Block) {
+        block.assign(ret, Expr::Str(a));
+    }
+
+    pub fn i64(&mut self, ret: LocalVariable, a: String, block: &mut Block) {
+        block.assign(ret, Expr::I64(a));
+    }
+
+    pub fn local_variable(
+        &mut self,
+        ret: LocalVariable,
+        a: LocalVariable,
+        block: &mut Block,
+    ) {
+        block.assign(ret, Expr::Ident(VariableId::Local(a)));
+    }
+
+    pub fn call(
+        &mut self,
+        f: LocalVariable,
+        a: LocalVariable,
+        ret: LocalVariable,
+        block: &mut Block,
+    ) {
+        block.assign(ret, Expr::Call { f, a });
+    }
+
+    pub fn intrinsic_call(
+        &mut self,
+        ret: LocalVariable,
+        args: Vec<LocalVariable>,
+        v: IntrinsicVariable,
+        block: &mut Block,
+    ) {
+        block.assign(
+            ret,
+            Expr::BasicCall {
+                args,
+                id: BasicFunction::Intrinsic(v),
+            },
+        )
+    }
+
+    pub fn field_access(
+        &mut self,
+        ret: LocalVariable,
+        arg: LocalVariable,
+        constructor_id: ConstructorId,
+        field: usize,
+        block: &mut Block,
+    ) {
+        block.assign(
+            ret,
+            Expr::BasicCall {
+                args: vec![arg],
+                id: BasicFunction::FieldAccessor {
+                    constructor: constructor_id,
+                    field,
+                },
+            },
+        );
+    }
+
+    pub fn construction(
+        &mut self,
+        ret: LocalVariable,
+        args: Vec<LocalVariable>,
+        constructor_id: ConstructorId,
+        block: &mut Block,
+    ) {
+        block.assign(
+            ret,
+            Expr::BasicCall {
+                args,
+                id: BasicFunction::Construction(constructor_id),
+            },
+        );
+    }
+
+    pub fn intrinsic_construction(
+        &mut self,
+        ret: LocalVariable,
+        constructor_id: IntrinsicConstructor,
+        block: &mut Block,
+    ) {
+        block.assign(
+            ret,
+            Expr::BasicCall {
+                args: Vec::new(),
+                id: BasicFunction::IntrinsicConstruction(constructor_id),
+            },
+        );
+    }
+
+    pub fn new_local_variable(&mut self) -> LocalVariable {
+        let t = self.type_map.new_pointer();
+        self.local_variable_types.0.push(t);
+        LocalVariable(self.local_variable_types.0.len() - 1)
+    }
+
+    pub fn new_block(&mut self) -> Block {
+        Block::default()
+    }
+
+    pub fn set_global_variable(&mut self, d: VariableDecl) {
+        self.global_variables_done.insert(d.decl_id, d);
+    }
+
+    pub fn new_constructor(&mut self, field_len: usize) -> ConstructorId {
+        self.field_len.push(field_len);
+        ConstructorId(self.field_len.len() - 1)
+    }
+
+    pub fn build_ast4(self, entry_point: GlobalVariable) -> Ast {
+        let mut env_next = TypeInfEnv {
+            type_map: self.type_map,
+            global_variable_types: self.global_variable_types,
+            local_variable_types: self.local_variable_types,
+            global_variables_before_type_inf: self.global_variables_done,
+            trace: Default::default(),
+            used_trace: Default::default(),
+            global_variables_done: Default::default(),
+            field_len: self.field_len,
+        };
+        let (type_of_entry_point, rec) = env_next.get_type_global(entry_point);
+        let (p, _, _) = env_next.type_map.get_fn(type_of_entry_point);
+        env_next.type_map.insert_normal(
             p,
             TypeId::Intrinsic(IntrinsicType::Unit),
             Vec::new(),
         );
         debug_assert!(!rec);
-        let variable_decls = env.global_variables_done;
-        let local_variable_types = env.local_variable_types;
-        let type_map = env.type_map;
-        Self {
-            variable_decls,
-            data_decls: ast.data_decl,
+        let type_map = env_next.type_map;
+        let local_variable_types_old = env_next.local_variable_types;
+        Ast {
+            variable_decls: env_next.global_variables_done,
             entry_point,
             type_of_entry_point,
-            local_variable_types_old: local_variable_types,
+            local_variable_types: local_variable_types_old,
             type_map,
         }
     }
 }
 
-struct Env<'a> {
-    type_map: PaddedTypeMap,
-    global_variable_types: FxHashMap<DeclId, TypePointer>,
-    local_variable_types: FxHashMap<LocalVariable, TypePointer>,
-    global_variables_step3: FxHashMap<DeclId, ast_step3::VariableDecl<'a>>,
-    global_variables_done: Vec<VariableDecl>,
-    data_decls: FxHashMap<DeclId, &'a ast_step3::DataDecl>,
-    used_local_variables: FxHashSet<LocalVariable>,
-    defined_local_variables: FxHashSet<LocalVariable>,
-    trace: FxHashMap<DeclId, TypePointer>,
-    lambda_count: u32,
-}
+impl Block {
+    pub fn append(&mut self, mut other: Block) {
+        self.instructions.append(&mut other.instructions);
+    }
 
-impl<'a> Env<'a> {
-    fn get_type_global(&mut self, decl_id: DeclId) -> (TypePointer, bool) {
-        if let Some(p) = self.trace.get(&decl_id) {
-            (*p, true)
-        } else if let Some(p) = self.global_variable_types.get(&decl_id) {
-            (*p, false)
-        } else {
-            let d = self.global_variables_step3.remove(&decl_id).unwrap();
-            let p = self.type_map.new_pointer();
-            self.trace.insert(decl_id, p);
-            let free_variable_len = self
-                .used_local_variables
-                .len()
-                .saturating_sub(self.defined_local_variables.len());
-            let mut instructions = Vec::new();
-            let ret = self.expr(d.value, p, p, &mut instructions);
-            self.trace.remove(&decl_id);
-            let d = VariableDecl {
-                value: Block { instructions },
-                decl_id,
-                ret,
-                name: d.name.to_string(),
-            };
-            debug_assert!(
-                free_variable_len
-                    >= self
-                        .used_local_variables
-                        .len()
-                        .saturating_sub(self.defined_local_variables.len())
-            );
-            self.global_variable_types.insert(decl_id, p);
-            self.global_variables_done.push(d);
-            (p, false)
+    fn assign(&mut self, v: LocalVariable, e: Expr) {
+        self.instructions.push(Instruction::Assign(v, e));
+    }
+
+    pub fn test(&mut self, v: LocalVariable, tester: Tester) {
+        self.instructions.push(Instruction::Test(tester, v));
+    }
+
+    pub fn test_constructor(&mut self, v: LocalVariable, constructor: TypeId) {
+        self.instructions.push(Instruction::Test(
+            Tester::Constructor { id: constructor },
+            v,
+        ));
+    }
+
+    pub fn try_catch(self, other: Block) -> Block {
+        Block {
+            instructions: vec![Instruction::TryCatch(self, other)],
         }
-    }
-
-    fn expr(
-        &mut self,
-        e: ast_step3::Expr,
-        type_pointer: TypePointer,
-        root_t: TypePointer,
-        instructions: &mut Vec<Instruction>,
-    ) -> VariableId {
-        match e {
-            ast_step3::Expr::Lambda(arms) => {
-                let param_len = arms[0].pattern.len();
-                let args = (0..param_len)
-                    .map(|_| {
-                        let t = self.type_map.new_pointer();
-                        self.new_local_variable(t)
-                    })
-                    .collect_vec();
-                let used_local_variables_tmp =
-                    std::mem::take(&mut self.used_local_variables);
-                let defined_local_variables_tmp =
-                    std::mem::take(&mut self.defined_local_variables);
-                let mut body_instructions = Vec::new();
-                let ret_type = self.type_map.new_pointer();
-                let mut ret = if arms.len() == 1 {
-                    let arm = arms.into_iter().next().unwrap();
-                    self.fn_arm(
-                        arm,
-                        ret_type,
-                        root_t,
-                        &args,
-                        &mut body_instructions,
-                    )
-                } else {
-                    let ret = self.new_local_variable(ret_type);
-                    let mut b = arms
-                        .into_iter()
-                        .map(|arm| {
-                            let mut is = Vec::new();
-                            let d = self
-                                .fn_arm(arm, ret_type, root_t, &args, &mut is);
-                            is.push(Instruction::Assign(
-                                Some(ret),
-                                Expr::Ident(d),
-                                ret_type,
-                            ));
-                            Block { instructions: is }
-                        })
-                        .reduce(|a, b| Block {
-                            instructions: vec![Instruction::TryCatch(a, b)],
-                        })
-                        .unwrap();
-                    body_instructions.append(&mut b.instructions);
-                    VariableId::Local(ret)
-                };
-                let mut context: Vec<_> = self
-                    .used_local_variables
-                    .iter()
-                    .filter(|d| !self.defined_local_variables.contains(d))
-                    .copied()
-                    .chain(args)
-                    .collect();
-                for _ in 0..param_len {
-                    let lambda_id = LambdaId {
-                        id: self.lambda_count,
-                        root_t,
-                    };
-                    self.lambda_count += 1;
-                    let parameter = context.pop().unwrap();
-                    let fn_id = self.type_map.new_lambda_id_pointer();
-                    self.type_map.insert_lambda_id(fn_id, lambda_id.clone());
-                    let t = self.type_map.new_pointer();
-                    self.type_map.insert_function(
-                        t,
-                        self.local_variable_types[&parameter],
-                        self.variable_id_to_type(&ret),
-                        fn_id,
-                    );
-                    let e = Expr::Lambda {
-                        lambda_id,
-                        context: context.clone(),
-                        parameter,
-                        body: Block {
-                            instructions: body_instructions,
-                        },
-                        ret,
-                    };
-                    body_instructions = Vec::new();
-                    ret = self
-                        .expr_to_variable(e, t, &mut body_instructions)
-                        .into();
-                }
-                self.type_map
-                    .union(ret.type_(&self.local_variable_types), type_pointer);
-                instructions.append(&mut body_instructions);
-                self.used_local_variables
-                    .extend(used_local_variables_tmp.into_iter());
-                self.defined_local_variables
-                    .extend(defined_local_variables_tmp.into_iter());
-                ret
-            }
-            ast_step3::Expr::Number(s) => {
-                self.type_map.insert_normal(
-                    type_pointer,
-                    TypeId::Intrinsic(crate::intrinsics::IntrinsicType::I64),
-                    Vec::new(),
-                );
-                self.expr_to_variable(
-                    Expr::I64(s.to_string()),
-                    type_pointer,
-                    instructions,
-                )
-                .into()
-            }
-            ast_step3::Expr::StrLiteral(s) => {
-                self.type_map.insert_normal(
-                    type_pointer,
-                    TypeId::Intrinsic(crate::intrinsics::IntrinsicType::String),
-                    Vec::new(),
-                );
-                self.expr_to_variable(
-                    Expr::Str(s.to_string()),
-                    type_pointer,
-                    instructions,
-                )
-                .into()
-            }
-            ast_step3::Expr::Ident {
-                name: _,
-                variable_id: ast_step3::VariableId::Local(d),
-            } => {
-                let d = LocalVariable(d);
-                self.used_local_variables.insert(d);
-                let t = self.local_variable_types[&d];
-                self.type_map.union(type_pointer, t);
-                self.expr_to_variable(
-                    Expr::Ident(VariableId::Local(d)),
-                    t,
-                    instructions,
-                )
-                .into()
-            }
-            ast_step3::Expr::Ident {
-                name: _,
-                variable_id: ast_step3::VariableId::Global(d),
-            } => {
-                let (p, is_recursive) = self.get_type_global(d);
-                if is_recursive {
-                    self.type_map.union(p, type_pointer);
-                    VariableId::Global(d, Default::default(), p)
-                } else {
-                    let mut replace_map = Default::default();
-                    let v_cloned =
-                        self.type_map.clone_pointer(p, &mut replace_map);
-                    self.type_map.union(type_pointer, v_cloned);
-                    VariableId::Global(d, replace_map, type_pointer)
-                }
-            }
-            ast_step3::Expr::Ident {
-                name: _,
-                variable_id:
-                    ast_step3::VariableId::IntrinsicVariable(_)
-                    | ast_step3::VariableId::IntrinsicConstructor(_)
-                    | ast_step3::VariableId::Constructor(_)
-                    | ast_step3::VariableId::FieldAccessor { .. },
-            } => {
-                panic!()
-            }
-            ast_step3::Expr::Call(f, a) => {
-                let f_t = self.type_map.new_pointer();
-                let a_t = self.type_map.new_pointer();
-                let f = self.expr(*f, f_t, root_t, instructions);
-                let a = self.expr(*a, a_t, root_t, instructions);
-                self.call(f, f_t, a, a_t, type_pointer, instructions).into()
-            }
-            ast_step3::Expr::DoBlock(mut es) => {
-                let e = es.pop().unwrap();
-                for e in es {
-                    let t = self.type_map.new_pointer();
-                    self.expr(e, t, root_t, instructions);
-                }
-                self.expr(e, type_pointer, root_t, instructions)
-            }
-            ast_step3::Expr::IntrinsicCall { args, id } => {
-                let (args, arg_ps): (Vec<_>, Vec<_>) = args
-                    .into_iter()
-                    .map(|a| {
-                        let p = self.type_map.new_pointer();
-                        (self.expr(a, p, root_t, instructions), p)
-                    })
-                    .unzip();
-                match id {
-                    BasicFunction::Intrinsic(i) => {
-                        let ret_type = i.runtime_return_type();
-                        unify_type_pointer_with_type(
-                            &ret_type,
-                            type_pointer,
-                            &mut self.type_map,
-                        );
-                    }
-                    BasicFunction::Construction(i) => {
-                        self.type_map.insert_normal(
-                            type_pointer,
-                            i.into(),
-                            arg_ps,
-                        );
-                    }
-                    BasicFunction::FieldAccessor { constructor, field } => {
-                        debug_assert_eq!(args.len(), 1);
-                        let args_p = (0..self.data_decls[&constructor]
-                            .field_len)
-                            .map(|_| self.type_map.new_pointer())
-                            .collect_vec();
-                        self.type_map.union(type_pointer, args_p[field]);
-                        self.type_map.insert_normal(
-                            arg_ps[0],
-                            TypeId::DeclId(constructor),
-                            args_p,
-                        );
-                    }
-                }
-                self.expr_to_variable(
-                    Expr::BasicCall { args, id },
-                    type_pointer,
-                    instructions,
-                )
-                .into()
-            }
-        }
-    }
-
-    fn variable_id_to_type(&self, v: &VariableId) -> TypePointer {
-        match v {
-            VariableId::Local(d) => self.local_variable_types[d],
-            VariableId::Global(_, _, t) => *t,
-        }
-    }
-
-    fn call(
-        &mut self,
-        f: VariableId,
-        f_t: TypePointer,
-        a: VariableId,
-        a_t: TypePointer,
-        ret_t: TypePointer,
-        instructions: &mut Vec<Instruction>,
-    ) -> LocalVariable {
-        let (arg, ret, _) = self.type_map.get_fn(f_t);
-        self.type_map.union(a_t, arg);
-        self.type_map.union(ret, ret_t);
-        self.expr_to_variable(Expr::Call { f, a }, ret_t, instructions)
-    }
-
-    fn fn_arm(
-        &mut self,
-        arm: FnArm,
-        ret_type: TypePointer,
-        root_t: TypePointer,
-        args: &[LocalVariable],
-        instructions: &mut Vec<Instruction>,
-    ) -> VariableId {
-        for (p, operand) in arm.pattern.into_iter().zip_eq(args) {
-            self.pattern(p, *operand, root_t, instructions)
-        }
-        self.expr(arm.expr, ret_type, root_t, instructions)
-    }
-
-    fn pattern(
-        &mut self,
-        p: ast_step3::Pattern,
-        operand: LocalVariable,
-        root_t: TypePointer,
-        instructions: &mut Vec<Instruction>,
-    ) {
-        let mut p = p.0.into_iter();
-        let mut block = Vec::new();
-        self.pattern_unit(p.next().unwrap(), operand, root_t, &mut block);
-        for p in p {
-            let mut b = Vec::new();
-            self.pattern_unit(p, operand, root_t, &mut b);
-            block = vec![Instruction::TryCatch(
-                Block {
-                    instructions: block,
-                },
-                Block { instructions: b },
-            )];
-        }
-        instructions.append(&mut block);
-    }
-
-    fn pattern_unit(
-        &mut self,
-        p: PatternUnit<(), ast_step3::Expr>,
-        operand: LocalVariable,
-        root_t: TypePointer,
-        instructions: &mut Vec<Instruction>,
-    ) {
-        let t = self.local_variable_types[&operand];
-        match p {
-            PatternUnit::I64(s) => {
-                instructions.push(Instruction::Test(
-                    Tester::I64 {
-                        value: s.to_string(),
-                    },
-                    operand.into(),
-                ));
-            }
-            PatternUnit::Str(s) => {
-                instructions.push(Instruction::Test(
-                    Tester::Str {
-                        value: s.to_string(),
-                    },
-                    operand.into(),
-                ));
-            }
-            PatternUnit::Constructor { id, args } => {
-                instructions.push(Instruction::Test(
-                    Tester::Constructor { id },
-                    operand.into(),
-                ));
-                if !args.is_empty() {
-                    let constructor = if let ConstructorId::DeclId(id) = id {
-                        id
-                    } else {
-                        panic!()
-                    };
-                    let arg_ts = args
-                        .iter()
-                        .map(|_| self.type_map.new_pointer())
-                        .collect_vec();
-                    self.type_map.insert_normal(t, id.into(), arg_ts.clone());
-                    for (field, ((a, _), t)) in
-                        args.into_iter().zip_eq(arg_ts).enumerate()
-                    {
-                        let d = self.expr_to_variable(
-                            Expr::BasicCall {
-                                args: vec![operand.into()],
-                                id: BasicFunction::FieldAccessor {
-                                    constructor,
-                                    field,
-                                },
-                            },
-                            t,
-                            instructions,
-                        );
-                        self.pattern(a, d, root_t, instructions);
-                    }
-                }
-            }
-            PatternUnit::Binder(_, d, _)
-            | PatternUnit::ResolvedBinder(d, _) => {
-                let d = LocalVariable(d);
-                debug_assert!(!self.local_variable_types.contains_key(&d));
-                self.defined_local_variables.insert(d);
-                self.local_variable_types.insert(d, t);
-                instructions.push(Instruction::Assign(
-                    Some(d),
-                    Expr::Ident(operand.into()),
-                    t,
-                ));
-            }
-            PatternUnit::Underscore => (),
-            PatternUnit::TypeRestriction(_, _) => {
-                unimplemented!()
-            }
-            PatternUnit::Apply(pre_pattern, applications) => {
-                self.pattern(*pre_pattern, operand, root_t, instructions);
-                for ApplyPattern {
-                    function,
-                    post_pattern,
-                } in applications
-                {
-                    let fp = self.type_map.new_pointer();
-                    let (ap, rp, _) = self.type_map.get_fn(fp);
-                    self.type_map
-                        .union(ap, self.local_variable_types[&operand]);
-                    let f = self.expr(function, fp, root_t, instructions);
-                    let operand = self.expr_to_variable(
-                        Expr::Call {
-                            f,
-                            a: operand.into(),
-                        },
-                        rp,
-                        instructions,
-                    );
-                    self.pattern(post_pattern, operand, root_t, instructions);
-                }
-            }
-        }
-    }
-
-    fn expr_to_variable(
-        &mut self,
-        e: Expr,
-        t: TypePointer,
-        instructions: &mut Vec<Instruction>,
-    ) -> LocalVariable {
-        let d = self.new_local_variable(t);
-        instructions.push(Instruction::Assign(Some(d), e, t));
-        d
-    }
-
-    fn new_local_variable(&mut self, t: TypePointer) -> LocalVariable {
-        let l = LocalVariable(DeclId::new());
-        self.local_variable_types.insert(l, t);
-        l
     }
 }
 
@@ -618,18 +557,6 @@ fn unify_type_pointer_with_type(
             map.insert_normal(p, *id, p_args);
         } else {
             unimplemented!()
-        }
-    }
-}
-
-impl VariableId {
-    pub fn type_(
-        &self,
-        local_variable_types: &FxHashMap<LocalVariable, TypePointer>,
-    ) -> TypePointer {
-        match self {
-            VariableId::Local(l) => local_variable_types[l],
-            VariableId::Global(_, _, p) => *p,
         }
     }
 }
