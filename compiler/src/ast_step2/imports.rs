@@ -4,8 +4,9 @@ use crate::ast_step1::name_id::Path;
 use crate::ast_step1::token_map::{TokenMap, TokenMapEntry};
 use crate::ast_step3::{VariableId, VariableIdInScope};
 use crate::errors::CompileError;
-use crate::intrinsics::{
-    IntrinsicConstructor, IntrinsicVariable, INTRINSIC_TYPES, OP_PRECEDENCE,
+use crate::intrinsics::OP_PRECEDENCE;
+use doki::intrinsics::{
+    IntrinsicConstructor, IntrinsicVariable, INTRINSIC_TYPES,
 };
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;

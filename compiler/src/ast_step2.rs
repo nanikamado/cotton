@@ -16,7 +16,7 @@ use crate::ast_step1::{self, merge_span};
 use crate::ast_step2::variance::VarianceMap;
 use crate::ast_step3::{VariableId, VariableRequirement};
 use crate::errors::CompileError;
-use crate::intrinsics::{IntrinsicConstructor, IntrinsicType, INTRINSIC_TYPES};
+use doki::intrinsics::{IntrinsicConstructor, IntrinsicType, INTRINSIC_TYPES};
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use once_cell::sync::Lazy;
@@ -194,7 +194,6 @@ pub enum PatternUnit<'a, T, E = ExprWithTypeAndSpan<'a, TypeVariable>> {
     I64(&'a str),
     Str(&'a str),
     Constructor {
-        name: Path,
         id: ConstructorId,
         args: Vec<(Pattern<'a, T, E>, Span)>,
     },
@@ -1118,7 +1117,7 @@ fn pattern<'a>(
         ast_step1::Pattern::Number(n) => I64(n).into(),
         ast_step1::Pattern::StrLiteral(s) => Str(s).into(),
         ast_step1::Pattern::Constructor { path, args } => {
-            let (name, id) = env.imports.get_constructor(
+            let (_, id) = env.imports.get_constructor(
                 module_path,
                 if path.from_root {
                     Path::pkg_root()
@@ -1133,7 +1132,6 @@ fn pattern<'a>(
                 TokenMapEntry::Constructor(id),
             );
             Constructor {
-                name,
                 id,
                 args: args
                     .into_iter()
@@ -1192,7 +1190,6 @@ fn pattern<'a>(
             if pre_pattern.0.len() == 1 {
                 match &mut pre_pattern.0[0] {
                     PatternUnit::Constructor {
-                        name: _,
                         id: ConstructorId::DeclId(constructor_id),
                         args,
                     } if args.is_empty() => {
@@ -1747,5 +1744,14 @@ impl Display for PatternRestriction {
                 format_args!("")
             }
         )
+    }
+}
+
+impl From<ConstructorId> for VariableId {
+    fn from(value: ConstructorId) -> Self {
+        match value {
+            ConstructorId::DeclId(d) => VariableId::Constructor(d),
+            ConstructorId::Intrinsic(d) => VariableId::IntrinsicConstructor(d),
+        }
     }
 }

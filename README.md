@@ -9,12 +9,12 @@ cargo install --git 'https://github.com/nanikamado/cotton.git' --features langua
 
 ### Dependencies
 - cargo
-- node
+- clang
 
 ## Run
 
 ```
-cotton examples/helloworld.cot -j | node
+cotton examples/helloworld.cot --emit-c | clang -x c -o /tmp/a - && /tmp/a
 ```
 
 or

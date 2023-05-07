@@ -6,7 +6,7 @@ use crate::ast_step2::types::{
 };
 use crate::ast_step2::{RelOrigin, SubtypeRelations, TypeId};
 use crate::errors::CompileError;
-use crate::intrinsics::{IntrinsicType, INTRINSIC_TYPES};
+use doki::intrinsics::{IntrinsicType, INTRINSIC_TYPES};
 use fxhash::FxHashMap;
 use itertools::Itertools;
 use parser::Span;

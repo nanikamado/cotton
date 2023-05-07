@@ -1,0 +1,12 @@
+[package]
+name = "doki"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+itertools = "0.10.3"
+fxhash = "0.2.1"
+stripmargin = "*"
+strum = { version = "0.24", features = ["derive"] }
+once_cell = "1.8.0"
+unic-ucd-category = "0.9.0"

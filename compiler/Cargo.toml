@@ -15,11 +15,13 @@ log = "0.4.14"
 strum = { version = "0.24", features = ["derive"] }
 index_list = "0.2.7"
 parser = { path = "parser" }
+doki = { path = "../doki" }
 unic-ucd-category = "0.9.0"
 tracing-mutex = "0.2"
 ariadne = "0.1.5"
 colored = "2.0.0"
 smallvec = "1.10.0"
+tempfile = "3.5.0"
 
 [dev-dependencies]
 assert_cmd = "2.0.4"

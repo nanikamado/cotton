@@ -5,7 +5,7 @@ use crate::ast_step2::types::{
 use crate::ast_step2::{RelOrigin, TypeId, TypeWithEnv};
 use crate::ast_step3::type_check::unwrap_recursive_alias;
 use crate::errors::NotSubtypeReason;
-use crate::intrinsics::{IntrinsicType, INTRINSIC_TYPES};
+use doki::intrinsics::{IntrinsicType, INTRINSIC_TYPES};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -20,7 +20,7 @@ impl TypeUnit {
             TypeUnit::Const { .. } | TypeUnit::Any => Vec::new(),
             TypeUnit::Tuple(a, b) => a
                 .all_type_variables_iter()
-                .chain(b.all_type_variables_iter().into_iter())
+                .chain(b.all_type_variables_iter())
                 .collect(),
             TypeUnit::TypeLevelFn(f) => f
                 .all_type_variables_iter()
@@ -753,7 +753,7 @@ impl TypeUnit {
             matches!(
                 a.matchable_ref(),
                 TypeMatchableRef::Const {
-                    id: TypeId::Intrinsic(crate::intrinsics::IntrinsicType::Fn),
+                    id: TypeId::Intrinsic(doki::intrinsics::IntrinsicType::Fn),
                 }
             )
         } else {
@@ -1048,7 +1048,7 @@ impl Type {
                     a.matchable_ref(),
                     TypeMatchableRef::Const {
                         id: TypeId::Intrinsic(
-                            crate::intrinsics::IntrinsicType::Fn
+                            doki::intrinsics::IntrinsicType::Fn
                         ),
                     }
                 )

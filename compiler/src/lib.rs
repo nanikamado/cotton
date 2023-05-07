@@ -2,12 +2,9 @@ mod ast_step1;
 mod ast_step2;
 mod ast_step3;
 mod ast_step4;
-mod ast_step5;
-mod codegen;
 mod errors;
 mod intrinsics;
-mod run_js;
-mod rust_backend;
+mod run_c;
 
 use ast_step1::ident_id::IdentId;
 use ast_step1::name_id::Path;
@@ -20,7 +17,6 @@ use ast_step2::types::{Type, TypeMatchableRef, TypeUnit};
 use ast_step3::{
     GlobalVariableType, LocalVariableType, ResolvedIdent, VariableId,
 };
-use codegen::codegen;
 use errors::CompileError;
 pub use fxhash::FxHashMap;
 pub use parser::parse::parse_result;
@@ -29,14 +25,12 @@ pub use parser::{lex, Token};
 use simplelog::{
     self, ColorChoice, ConfigBuilder, LevelFilter, TermLogger, TerminalMode,
 };
-use std::io::ErrorKind;
-use std::process::{self, exit, Stdio};
+use std::process::{self, exit};
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Command {
-    RunJs,
-    RunRust,
-    PrintJs,
+    RunC,
+    PrintCSrc,
     PrintTypes,
 }
 
@@ -58,25 +52,6 @@ pub fn run(
         ColorChoice::Auto,
     )
     .unwrap();
-    if command == Command::RunJs {
-        match process::Command::new("node")
-            .arg("--version")
-            .stdout(Stdio::null())
-            .spawn()
-        {
-            Ok(_) => (),
-            Err(e) => {
-                match e.kind() {
-                    ErrorKind::NotFound => eprintln!(
-                        "node command not found. \
-                        You need to install node."
-                    ),
-                    _ => eprintln!("failed to run node"),
-                };
-                exit(1)
-            }
-        }
-    }
     let ast = parser::parse(source);
     let ast = combine_with_prelude(ast);
     let mut imports = Imports::default();
@@ -100,19 +75,15 @@ pub fn run(
     if command == Command::PrintTypes {
         print_types(&ast);
     } else {
-        let ast = ast_step4::Ast::from(ast);
-        let ast = ast_step5::Ast::from(ast);
-        if command == Command::RunRust {
-            rust_backend::run(ast);
-        } else {
-            let js = codegen(ast);
-            if command == Command::PrintJs {
-                println!("{js}");
-            } else if command == Command::RunJs {
-                run_js::run(&js);
-            } else {
-                unreachable!()
+        let c_src = ast_step4::codegen(ast);
+        if command == Command::PrintCSrc {
+            println!("{c_src}");
+        } else if command == Command::RunC {
+            if run_c::run(&c_src).is_err() {
+                exit(1);
             }
+        } else {
+            unreachable!()
         }
     }
 }
@@ -259,7 +230,7 @@ pub fn get_token_map(
                     }
                     ast_step2::ConstructorId::Intrinsic(id) => {
                         TokenKind::Constructor(Some(GlobalVariableType {
-                            t: id.to_type(),
+                            t: intrinsics::constructor_type(id),
                             fixed_parameters: Default::default(),
                         }))
                     }
@@ -274,7 +245,7 @@ pub fn get_token_map(
 }
 
 pub fn print_types(ast: &ast_step3::Ast) {
-    for d in &ast.variable_decl {
+    for d in &ast.variable_decls {
         println!(
             "{} : {}",
             d.name,

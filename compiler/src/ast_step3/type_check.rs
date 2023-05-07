@@ -21,10 +21,10 @@ use crate::ast_step2::{
     PatternUnitForRestriction, RelOrigin, SubtypeRelations, TypeId,
 };
 use crate::errors::CompileError;
-use crate::intrinsics::{
+use crate::{intrinsics, TypeMatchableRef};
+use doki::intrinsics::{
     IntrinsicConstructor, IntrinsicType, IntrinsicVariable,
 };
-use crate::TypeMatchableRef;
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use parser::Span;
@@ -89,7 +89,6 @@ pub struct TypeCheckResult {
     pub resolved_idents: FxHashMap<IdentId, ResolvedIdent>,
     pub global_variable_types: FxHashMap<VariableId, GlobalVariableType>,
     pub local_variable_types: FxHashMap<VariableId, LocalVariableType>,
-    pub type_variable_map: TypeVariableMap,
 }
 
 pub fn type_check(
@@ -100,7 +99,7 @@ pub fn type_check(
     let mut toplevels: Vec<Toplevel> = Default::default();
     for v in IntrinsicVariable::iter() {
         toplevels.push(Toplevel {
-            type_with_env: v.to_type().clone().into(),
+            type_with_env: intrinsics::variable_type(v).clone().into(),
             type_annotation: None,
             resolved_idents: Default::default(),
             decl_id: VariableId::IntrinsicVariable(v),
@@ -111,7 +110,7 @@ pub fn type_check(
     let mut data_decls = FxHashMap::default();
     for v in IntrinsicConstructor::iter() {
         toplevels.push(Toplevel {
-            type_with_env: v.to_type().clone().into(),
+            type_with_env: intrinsics::constructor_type(v).clone().into(),
             type_annotation: None,
             resolved_idents: Default::default(),
             decl_id: VariableId::IntrinsicConstructor(v),
@@ -306,7 +305,6 @@ pub fn type_check(
                 )
             })
             .collect(),
-        type_variable_map: map,
     })
 }
 

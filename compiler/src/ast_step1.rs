@@ -8,7 +8,7 @@ use self::name_id::Path;
 use self::token_map::{TokenMap, TokenMapEntry};
 use crate::ast_step2::imports::Imports;
 use crate::errors::CompileError;
-use crate::intrinsics::INTRINSIC_CONSTRUCTORS;
+use doki::intrinsics::INTRINSIC_CONSTRUCTORS;
 use fxhash::FxHashSet;
 use index_list::{Index, IndexList};
 use itertools::Itertools;
