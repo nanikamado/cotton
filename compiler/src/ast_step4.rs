@@ -328,11 +328,7 @@ impl Env {
                         let t = unwrap_recursive_alias(t.clone());
                         let f = self.type_check_fn(&t);
                         let fl = self.build_env.new_local_variable();
-                        self.build_env.global_variable(
-                            fl,
-                            f,
-                            &mut prev_branch,
-                        );
+                        self.build_env.global_variable(fl, f, &mut prev_branch);
                         let check_result = self.build_env.new_local_variable();
                         self.build_env.call(
                             fl,

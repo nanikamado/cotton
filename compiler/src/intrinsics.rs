@@ -22,14 +22,12 @@ pub fn variable_type(id: IntrinsicVariable) -> Type {
             Type::intrinsic_from_str("I64")
                 .arrow(Type::intrinsic_from_str("I64")),
         ),
-        IntrinsicVariable::Lt
-        | IntrinsicVariable::Neq
-        | IntrinsicVariable::Eq => Type::intrinsic_from_str("I64").arrow(
+        IntrinsicVariable::Lt | IntrinsicVariable::Eq => {
             Type::intrinsic_from_str("I64").arrow(
-                Type::intrinsic_from_str("True")
-                    .union(Type::intrinsic_from_str("False")),
-            ),
-        ),
+                Type::intrinsic_from_str("I64")
+                    .arrow(Type::intrinsic_from_str("I64")),
+            )
+        }
         IntrinsicVariable::PrintStr => Type::intrinsic_from_str("String")
             .arrow(Type::intrinsic_from_str("()")),
         IntrinsicVariable::I64ToString => Type::intrinsic_from_str("I64")
@@ -51,9 +49,6 @@ pub static OP_PRECEDENCE: Lazy<FxHashMap<&'static str, (Associativity, i32)>> =
             ("/", (Left, 7)),
             ("+", (Left, 6)),
             ("-", (Left, 6)),
-            ("<", (Left, 5)),
-            ("!=", (Left, 5)),
-            ("==", (Left, 5)),
             ("|", (Left, 2)),
             ("->", (Right, 1)),
         ]

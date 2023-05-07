@@ -11,6 +11,29 @@ pub (++) : String -> String -> String = append_str
 
 pub infixl 4 ++
 
+pub (<) : I64 -> I64 -> Bool =
+    | a, b => a.lt(b).
+        | 0 => False
+        | _ => True
+
+pub infixl 5 <
+
+pub (==) : I64 -> I64 -> Bool =
+    | a, b => a.eq(b).
+        | 0 => False
+        | _ => True
+
+pub infixl 5 ==
+
+pub not : Bool -> Bool =
+    | True => False
+    | False => True
+
+pub (!=) : I64 -> I64 -> Bool =
+    | a, b => (a == b).not
+
+pub infixl 5 !=
+
 pub println_str : String -> () =
     | a => (a ++ "\n").print_str
 

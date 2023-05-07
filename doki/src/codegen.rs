@@ -7,7 +7,7 @@ use crate::ast_step2::{
     Ast, Block, Expr, Function, GlobalVariableId, Instruction, LocalVariable,
     LocalVariableCollector, Tester, Type, TypeUnit, VariableDecl, VariableId,
 };
-use crate::intrinsics::{bool_t, IntrinsicType, IntrinsicVariable};
+use crate::intrinsics::{IntrinsicType, IntrinsicVariable};
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use std::fmt::{Display, Write};
@@ -60,12 +60,10 @@ pub fn codegen(ast: Ast) -> String {
     .into();
     write!(
         &mut s,
-        "{0} __bool(int a){{return a ? ({0}){{0,{{(struct t0){{}}}}}} : ({0}){{1,{{(struct t0){{}}}}}};}}
-        {1} __unit(){{
-            return ({1}){{}};
+        "{0} __unit(){{
+            return ({0}){{}};
         }}
-        {2}{3}{4}",
-        c_type_env.c_type(&bool_t(), None),
+        {1}{2}{3}",
         c_type_env.c_type(&unit_t, None),
         r#"
         |int __unexpected(){
@@ -196,9 +194,8 @@ fn primitive_def(i: IntrinsicVariable) -> &'static str {
         IntrinsicVariable::Percent => "{return _0 % _1;}",
         IntrinsicVariable::Multi => "{return _0 * _1;}",
         IntrinsicVariable::Div => "{return _0 / _1;}",
-        IntrinsicVariable::Lt => "{return __bool(_0 < _1);}",
-        IntrinsicVariable::Neq => "{return __bool(_0 != _1);}",
-        IntrinsicVariable::Eq => "{return __bool(_0 == _1);}",
+        IntrinsicVariable::Lt => "{return _0 < _1;}",
+        IntrinsicVariable::Eq => "{return _0 == _1;}",
         IntrinsicVariable::PrintStr => r#"{printf("%s", _0);return __unit();}"#,
         IntrinsicVariable::I64ToString => {
             r#"{
@@ -230,7 +227,12 @@ fn primitive_arg_types(
 }
 
 fn primitive_ret_type(i: IntrinsicVariable, env: &mut c_type::Env) -> CType {
-    env.c_type(&i.runtime_return_type(), None)
+    let t = TypeUnit::Normal {
+        id: TypeId::Intrinsic(i.runtime_return_type()),
+        args: Vec::new(),
+    }
+    .into();
+    env.c_type(&t, None)
 }
 
 fn sort_aggregates(

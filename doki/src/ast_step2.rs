@@ -712,7 +712,6 @@ impl Env {
             } => {
                 let rt = id.runtime_return_type();
                 let arg_ts = id.runtime_arg_type_id();
-                assert_eq!(t, rt);
                 let args = args
                     .into_iter()
                     .zip_eq(arg_ts)
@@ -720,10 +719,15 @@ impl Env {
                         self.downcast(a, param_t, replace_map, instructions)
                     })
                     .collect::<Option<_>>()?;
-                BasicCall {
-                    args,
-                    id: BasicFunction::Intrinsic(id),
-                }
+                self.add_tags_to_expr(
+                    BasicCall {
+                        args,
+                        id: BasicFunction::Intrinsic(id),
+                    },
+                    &t,
+                    TypeId::Intrinsic(rt),
+                    instructions,
+                )
             }
         };
         Some(e)

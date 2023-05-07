@@ -14,7 +14,6 @@ pub enum IntrinsicVariable {
     Multi,
     Div,
     Lt,
-    Neq,
     Eq,
     PrintStr,
     I64ToString,
@@ -34,9 +33,6 @@ const fn runtime_intrinsic_type(i: IntrinsicType) -> ast_step2::TypeUnit {
     }
 }
 
-const TRUE: ast_step2::TypeUnit = runtime_intrinsic_type(IntrinsicType::True);
-const FALSE: ast_step2::TypeUnit = runtime_intrinsic_type(IntrinsicType::False);
-
 impl IntrinsicVariable {
     pub fn to_str(self) -> &'static str {
         match self {
@@ -45,9 +41,8 @@ impl IntrinsicVariable {
             IntrinsicVariable::Percent => "%",
             IntrinsicVariable::Multi => "*",
             IntrinsicVariable::Div => "/",
-            IntrinsicVariable::Lt => "<",
-            IntrinsicVariable::Neq => "!=",
-            IntrinsicVariable::Eq => "==",
+            IntrinsicVariable::Lt => "lt",
+            IntrinsicVariable::Eq => "eq",
             IntrinsicVariable::PrintStr => "print_str",
             IntrinsicVariable::I64ToString => "i64_to_string",
             IntrinsicVariable::AppendStr => "append_str",
@@ -62,30 +57,24 @@ impl IntrinsicVariable {
             | IntrinsicVariable::Multi
             | IntrinsicVariable::Div
             | IntrinsicVariable::Lt
-            | IntrinsicVariable::Neq
             | IntrinsicVariable::Eq
             | IntrinsicVariable::AppendStr => 2,
             IntrinsicVariable::PrintStr | IntrinsicVariable::I64ToString => 1,
         }
     }
 
-    pub fn runtime_return_type(self) -> ast_step2::Type {
-        use ast_step2::TypeUnit;
-        const I64: TypeUnit = runtime_intrinsic_type(IntrinsicType::I64);
-        const STRING: TypeUnit = runtime_intrinsic_type(IntrinsicType::String);
-        const UNIT: TypeUnit = runtime_intrinsic_type(IntrinsicType::Unit);
+    pub fn runtime_return_type(self) -> IntrinsicType {
+        use IntrinsicType::*;
         match self {
             IntrinsicVariable::Minus
             | IntrinsicVariable::Plus
             | IntrinsicVariable::Percent
             | IntrinsicVariable::Multi
-            | IntrinsicVariable::Div => I64.into(),
-            IntrinsicVariable::Lt
-            | IntrinsicVariable::Neq
-            | IntrinsicVariable::Eq => bool_t(),
-            IntrinsicVariable::PrintStr => UNIT.into(),
-            IntrinsicVariable::I64ToString => STRING.into(),
-            IntrinsicVariable::AppendStr => STRING.into(),
+            | IntrinsicVariable::Div => I64,
+            IntrinsicVariable::Lt | IntrinsicVariable::Eq => I64,
+            IntrinsicVariable::PrintStr => Unit,
+            IntrinsicVariable::I64ToString => String,
+            IntrinsicVariable::AppendStr => String,
         }
     }
 
@@ -100,7 +89,6 @@ impl IntrinsicVariable {
             | IntrinsicVariable::Multi
             | IntrinsicVariable::Div
             | IntrinsicVariable::Lt
-            | IntrinsicVariable::Neq
             | IntrinsicVariable::Eq => vec![I64, I64],
             IntrinsicVariable::PrintStr => vec![STRING],
             IntrinsicVariable::I64ToString => vec![I64],
@@ -119,14 +107,6 @@ impl IntrinsicVariable {
                 .into()
             })
             .collect()
-    }
-}
-
-pub fn bool_t() -> ast_step2::Type {
-    ast_step2::Type {
-        ts: [TRUE, FALSE].into_iter().collect(),
-        recursive: false,
-        reference: false,
     }
 }
 

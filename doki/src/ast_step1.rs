@@ -3,7 +3,6 @@ mod padded_type_map;
 pub use self::padded_type_map::{
     PaddedTypeMap, ReplaceMap, Terminal, TypeId, TypePointer,
 };
-use crate::ast_step2::Type;
 use crate::intrinsics::{
     IntrinsicConstructor, IntrinsicType, IntrinsicVariable,
 };
@@ -255,10 +254,10 @@ impl TypeInfEnv {
                             id: BasicFunction::Intrinsic(v),
                         } => {
                             let ret_type = v.runtime_return_type();
-                            unify_type_pointer_with_type(
-                                &ret_type,
+                            self.type_map.insert_normal(
                                 t,
-                                &mut self.type_map,
+                                TypeId::Intrinsic(ret_type),
+                                Vec::new(),
                             );
                         }
                     }
@@ -544,31 +543,6 @@ impl<T: Display> Display for LambdaId<T> {
 impl From<LocalVariable> for VariableId {
     fn from(value: LocalVariable) -> Self {
         VariableId::Local(value)
-    }
-}
-
-fn unify_type_pointer_with_type(
-    t: &Type,
-    p: TypePointer,
-    map: &mut PaddedTypeMap,
-) {
-    for t in t.iter() {
-        use crate::ast_step2::TypeUnit::*;
-        if let Normal { id, args } = t {
-            let mut p_args = Vec::with_capacity(args.len());
-            for a in args {
-                if let crate::ast_step2::TypeInner::Type(a) = a {
-                    let p = map.new_pointer();
-                    unify_type_pointer_with_type(a, p, map);
-                    p_args.push(p);
-                } else {
-                    unimplemented!()
-                }
-            }
-            map.insert_normal(p, *id, p_args);
-        } else {
-            unimplemented!()
-        }
     }
 }
 
