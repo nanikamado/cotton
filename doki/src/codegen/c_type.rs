@@ -175,9 +175,9 @@ impl Env {
             t.clone()
         } else if type_stack.is_none() {
             let c_t = self.c_type_inner(t, type_stack);
-            let o = self.memo.insert(t.clone(), c_t.clone());
+            let _o = self.memo.insert(t.clone(), c_t.clone());
             #[cfg(debug_assertions)]
-            if let Some(t) = o {
+            if let Some(t) = _o {
                 assert_eq!(t, c_t);
             }
             c_t
