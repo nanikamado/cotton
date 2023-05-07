@@ -3,7 +3,7 @@ pub use self::type_unit::{TypeUnit, TypeVariable, Variance};
 use super::TypeWithEnv;
 use crate::ast_step2::{types, TypeId};
 use crate::ast_step3::simplify_subtype_rel;
-use crate::intrinsics::{IntrinsicType, INTRINSIC_TYPES};
+use doki::intrinsics::{IntrinsicType, INTRINSIC_TYPES};
 use fxhash::FxHashSet;
 use itertools::Itertools;
 use std::collections::BTreeSet;

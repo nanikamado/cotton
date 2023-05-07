@@ -2,8 +2,8 @@ mod c_type;
 mod collector;
 
 use self::c_type::{CAggregateType, CType};
-use crate::ast_step4::{ConstructorId, TypeId};
-use crate::ast_step5::{
+use crate::ast_step1::{ConstructorId, TypeId};
+use crate::ast_step2::{
     Ast, Block, Expr, Function, GlobalVariableId, Instruction, LocalVariable,
     LocalVariableCollector, Tester, Type, TypeUnit, VariableDecl, VariableId,
 };
@@ -530,7 +530,7 @@ impl DisplayWithEnv for (&Expr, &CType) {
                 real_function,
             } => write!(f, "{real_function}({},{})", Dis(a, env), Dis(g, env)),
             Expr::BasicCall { args, id } => {
-                use crate::ast_step4::BasicFunction::*;
+                use crate::ast_step1::BasicFunction::*;
                 match id {
                     Intrinsic(id) => write!(
                         f,

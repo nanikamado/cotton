@@ -1,6 +1,6 @@
 use super::types::{self, Type, TypeUnit, TypeVariable};
 use super::TypeId;
-use crate::intrinsics::IntrinsicType;
+use doki::intrinsics::IntrinsicType;
 use fxhash::FxHashMap;
 
 pub trait VarianceMapI {

@@ -16,7 +16,7 @@ use crate::ast_step1::{self, merge_span};
 use crate::ast_step2::variance::VarianceMap;
 use crate::ast_step3::{VariableId, VariableRequirement};
 use crate::errors::CompileError;
-use crate::intrinsics::{IntrinsicConstructor, IntrinsicType, INTRINSIC_TYPES};
+use doki::intrinsics::{IntrinsicConstructor, IntrinsicType, INTRINSIC_TYPES};
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use once_cell::sync::Lazy;

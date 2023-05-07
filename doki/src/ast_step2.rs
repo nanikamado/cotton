@@ -1,6 +1,6 @@
 pub use self::local_variable::{LocalVariable, LocalVariableCollector};
 use self::unhashable_type::UnhashableTypeMemo;
-use crate::ast_step4::{
+use crate::ast_step1::{
     self, BasicFunction, GlobalVariable, LambdaId, LocalVariableTypes,
     PaddedTypeMap, ReplaceMap, TypeId, TypePointer,
 };
@@ -174,7 +174,7 @@ impl TypeInner {
 }
 
 impl Ast {
-    pub fn from(ast: ast_step4::Ast) -> Self {
+    pub fn from(ast: ast_step1::Ast) -> Self {
         let mut memo = Env::new(
             ast.variable_decls,
             ast.local_variable_types,
@@ -228,7 +228,7 @@ struct FnId {
 }
 
 pub struct Env {
-    variable_decls: FxHashMap<GlobalVariable, ast_step4::VariableDecl>,
+    variable_decls: FxHashMap<GlobalVariable, ast_step1::VariableDecl>,
     monomorphized_variable_map:
         FxHashMap<(GlobalVariable, Type), GlobalVariableId>,
     monomorphized_variables: Vec<VariableDecl>,
@@ -237,7 +237,7 @@ pub struct Env {
     unhashable_type_memo: UnhashableTypeMemo,
     local_variable_types_old: LocalVariableTypes,
     local_variable_replace_map:
-        FxHashMap<ast_step4::LocalVariable, LocalVariable>,
+        FxHashMap<ast_step1::LocalVariable, LocalVariable>,
     local_variable_collector: LocalVariableCollector<Type>,
     used_local_variables: FxHashSet<LocalVariable>,
     defined_local_variables: FxHashSet<LocalVariable>,
@@ -255,7 +255,7 @@ pub struct FxLambdaId(pub u32);
 
 impl Env {
     pub fn new(
-        variable_decls: Vec<ast_step4::VariableDecl>,
+        variable_decls: Vec<ast_step1::VariableDecl>,
         local_variable_types: LocalVariableTypes,
         map: PaddedTypeMap,
     ) -> Self {
@@ -304,7 +304,7 @@ impl Env {
                 value: b,
                 decl_id: new_decl_id,
                 ret: self.get_defined_variable_id(
-                    ast_step4::VariableId::Local(d.ret),
+                    ast_step1::VariableId::Local(d.ret),
                     replace_map,
                 ),
                 name: d.name,
@@ -324,7 +324,7 @@ impl Env {
 
     fn local_variable_def_replace(
         &mut self,
-        v: ast_step4::LocalVariable,
+        v: ast_step1::LocalVariable,
         replace_map: &mut ReplaceMap,
     ) -> LocalVariable {
         debug_assert!(!self.local_variable_replace_map.contains_key(&v));
@@ -338,7 +338,7 @@ impl Env {
 
     fn get_defined_local_variable(
         &mut self,
-        v: ast_step4::LocalVariable,
+        v: ast_step1::LocalVariable,
         replace_map: &mut ReplaceMap,
     ) -> VariableId {
         if let Some(d) = self.local_variable_replace_map.get(&v) {
@@ -357,14 +357,14 @@ impl Env {
 
     fn get_defined_variable_id(
         &mut self,
-        v: ast_step4::VariableId,
+        v: ast_step1::VariableId,
         replace_map: &mut ReplaceMap,
     ) -> VariableId {
         match v {
-            ast_step4::VariableId::Local(d) => {
+            ast_step1::VariableId::Local(d) => {
                 self.get_defined_local_variable(d, replace_map)
             }
-            ast_step4::VariableId::Global(d, r, p) => {
+            ast_step1::VariableId::Global(d, r, p) => {
                 let mut r = replace_map.clone().merge(r, &mut self.map);
                 VariableId::Global(self.monomorphize_decl_rec(d, p, &mut r))
             }
@@ -373,7 +373,7 @@ impl Env {
 
     fn block(
         &mut self,
-        block: ast_step4::Block,
+        block: ast_step1::Block,
         root_t: &Type,
         replace_map: &mut ReplaceMap,
     ) -> (Block, bool) {
@@ -391,13 +391,13 @@ impl Env {
     // Returns true if the block is unreachable
     fn instruction(
         &mut self,
-        instruction: ast_step4::Instruction,
+        instruction: ast_step1::Instruction,
         root_t: &Type,
         replace_map: &mut ReplaceMap,
         instructions: &mut Vec<Instruction>,
     ) -> bool {
         match instruction {
-            ast_step4::Instruction::Assign(v, e) => {
+            ast_step1::Instruction::Assign(v, e) => {
                 let t = self.map.clone_pointer(
                     self.local_variable_types_old.get(v),
                     replace_map,
@@ -424,8 +424,8 @@ impl Env {
                     }
                 }
             }
-            ast_step4::Instruction::Test(
-                ast_step4::Tester::I64 { value },
+            ast_step1::Instruction::Test(
+                ast_step1::Tester::I64 { value },
                 a,
             ) => {
                 let type_id = TypeId::Intrinsic(IntrinsicType::I64);
@@ -439,8 +439,8 @@ impl Env {
                 }
                 false
             }
-            ast_step4::Instruction::Test(
-                ast_step4::Tester::Str { value },
+            ast_step1::Instruction::Test(
+                ast_step1::Tester::Str { value },
                 a,
             ) => {
                 let type_id = TypeId::Intrinsic(IntrinsicType::String);
@@ -454,8 +454,8 @@ impl Env {
                 }
                 false
             }
-            ast_step4::Instruction::Test(
-                ast_step4::Tester::Constructor { id },
+            ast_step1::Instruction::Test(
+                ast_step1::Tester::Constructor { id },
                 a,
             ) => {
                 let t = self.map.clone_pointer(
@@ -477,7 +477,7 @@ impl Env {
                 }
                 false
             }
-            ast_step4::Instruction::TryCatch(b1, b2) => {
+            ast_step1::Instruction::TryCatch(b1, b2) => {
                 let (b1, u1) = self.block(b1, root_t, replace_map);
                 let (b2, u2) = self.block(b2, root_t, replace_map);
                 instructions.push(Instruction::TryCatch(b1, b2));
@@ -488,7 +488,7 @@ impl Env {
 
     fn downcast(
         &mut self,
-        a: ast_step4::LocalVariable,
+        a: ast_step1::LocalVariable,
         type_id: TypeId,
         replace_map: &mut ReplaceMap,
         instructions: &mut Vec<Instruction>,
@@ -515,7 +515,7 @@ impl Env {
     // Returns `None` if impossible type error
     fn expr(
         &mut self,
-        e: ast_step4::Expr,
+        e: ast_step1::Expr,
         p: TypePointer,
         root_t: &Type,
         replace_map: &mut ReplaceMap,
@@ -525,7 +525,7 @@ impl Env {
         let p = self.map.clone_pointer(p, replace_map);
         let t = self.get_type_unhashable_with_replace_map(p);
         let e = match e {
-            ast_step4::Expr::Lambda {
+            ast_step1::Expr::Lambda {
                 lambda_id,
                 parameter,
                 body,
@@ -540,7 +540,7 @@ impl Env {
                     self.local_variable_def_replace(parameter, replace_map);
                 let (b, _) = self.block(body, root_t, replace_map);
                 let ret = self.get_defined_variable_id(
-                    ast_step4::VariableId::Local(ret),
+                    ast_step1::VariableId::Local(ret),
                     replace_map,
                 );
                 let context = self
@@ -595,12 +595,12 @@ impl Env {
                     }
                 }
             }
-            ast_step4::Expr::I64(s) => I64(s),
-            ast_step4::Expr::Str(s) => Str(s),
-            ast_step4::Expr::Ident(v) => {
+            ast_step1::Expr::I64(s) => I64(s),
+            ast_step1::Expr::Str(s) => Str(s),
+            ast_step1::Expr::Ident(v) => {
                 Ident(self.get_defined_variable_id(v, replace_map))
             }
-            ast_step4::Expr::Call { f, a } => {
+            ast_step1::Expr::Call { f, a } => {
                 let f_t = self.local_variable_types_old.get(f);
                 let f_t = self.map.clone_pointer(f_t, replace_map);
                 let possible_functions = self.get_possible_functions(f_t);
@@ -651,7 +651,7 @@ impl Env {
                     Ident(VariableId::Local(ret_v))
                 }
             }
-            ast_step4::Expr::BasicCall {
+            ast_step1::Expr::BasicCall {
                 args,
                 id: BasicFunction::Construction(id),
             } => {
@@ -669,7 +669,7 @@ impl Env {
                     instructions,
                 )
             }
-            ast_step4::Expr::BasicCall {
+            ast_step1::Expr::BasicCall {
                 args,
                 id: BasicFunction::IntrinsicConstruction(id),
             } => {
@@ -684,7 +684,7 @@ impl Env {
                     instructions,
                 )
             }
-            ast_step4::Expr::BasicCall {
+            ast_step1::Expr::BasicCall {
                 args,
                 id:
                     id @ BasicFunction::FieldAccessor {
@@ -702,7 +702,7 @@ impl Env {
                 )?;
                 BasicCall { args: vec![a], id }
             }
-            ast_step4::Expr::BasicCall {
+            ast_step1::Expr::BasicCall {
                 args,
                 id: BasicFunction::Intrinsic(id),
             } => {
@@ -730,8 +730,8 @@ impl Env {
         p: TypePointer,
     ) -> Vec<(FxLambdaId, Type)> {
         let n_len = match self.map.dereference_without_find(p) {
-            ast_step4::Terminal::TypeMap(t) => t.normals.len(),
-            ast_step4::Terminal::LambdaId(_) => panic!(),
+            ast_step1::Terminal::TypeMap(t) => t.normals.len(),
+            ast_step1::Terminal::LambdaId(_) => panic!(),
         };
         assert_eq!(n_len, 1);
         let (arg_t, ret_t, fn_id) = self.map.get_fn(p);
@@ -945,8 +945,8 @@ impl Display for FxLambdaId {
 
 mod unhashable_type {
     use super::{IndexOrPointer, LambdaId};
-    use crate::ast_step4::{PaddedTypeMap, Terminal, TypeId, TypePointer};
-    use crate::ast_step5::{Type, TypeInner, TypeUnit};
+    use crate::ast_step1::{PaddedTypeMap, Terminal, TypeId, TypePointer};
+    use crate::ast_step2::{Type, TypeInner, TypeUnit};
     use crate::intrinsics::IntrinsicType;
     use fxhash::{FxHashMap, FxHashSet};
     use std::collections::BTreeSet;

@@ -19,7 +19,7 @@ use crate::ast_step3::type_check::match_operand::{
     close_type, MatchOperandUnit,
 };
 use crate::errors::CompileError;
-use crate::intrinsics::IntrinsicType;
+use doki::intrinsics::IntrinsicType;
 use fxhash::FxHashMap;
 use itertools::Itertools;
 use parser::Span;

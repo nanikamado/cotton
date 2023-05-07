@@ -1,6 +1,6 @@
 use super::collector::Collector;
-use crate::ast_step4::{self, TypeId};
-use crate::ast_step5::{FxLambdaId as LambdaId, Type, TypeInner, TypeUnit};
+use crate::ast_step1::{self, TypeId};
+use crate::ast_step2::{FxLambdaId as LambdaId, Type, TypeInner, TypeUnit};
 use crate::intrinsics::IntrinsicType;
 use fxhash::{FxHashMap, FxHashSet};
 use std::fmt::Display;
@@ -34,7 +34,7 @@ pub struct Env {
     pub function_context: FxHashMap<LambdaId, Vec<Type>>,
     pub aggregate_types: Collector<CAggregateType>,
     pub memo: FxHashMap<Type, CType>,
-    pub fx_type_map: FxHashMap<ast_step4::LambdaId<Type>, LambdaId>,
+    pub fx_type_map: FxHashMap<ast_step1::LambdaId<Type>, LambdaId>,
     pub reffed_aggregates: FxHashSet<usize>,
 }
 

@@ -14,7 +14,7 @@ use crate::ast_step2::imports::Imports;
 use crate::ast_step2::types::{TypeConstructor, TypeUnit, TypeVariable};
 use crate::ast_step2::{self, ApplyPattern, ConstructorId, PatternUnit};
 use crate::errors::CompileError;
-use crate::intrinsics::{IntrinsicConstructor, IntrinsicVariable};
+use doki::intrinsics::{IntrinsicConstructor, IntrinsicVariable};
 use fxhash::FxHashMap;
 use itertools::Itertools;
 use strum::IntoEnumIterator;

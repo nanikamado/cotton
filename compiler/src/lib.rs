@@ -1,13 +1,9 @@
 mod ast_step1;
 mod ast_step2;
 mod ast_step3;
-mod ast_step3_5;
 mod ast_step4;
-mod ast_step5;
-mod codegen;
 mod errors;
 mod intrinsics;
-mod intrinsics2;
 mod run_c;
 
 use ast_step1::ident_id::IdentId;
@@ -21,7 +17,6 @@ use ast_step2::types::{Type, TypeMatchableRef, TypeUnit};
 use ast_step3::{
     GlobalVariableType, LocalVariableType, ResolvedIdent, VariableId,
 };
-use codegen::codegen;
 use errors::CompileError;
 pub use fxhash::FxHashMap;
 pub use parser::parse::parse_result;
@@ -80,9 +75,7 @@ pub fn run(
     if command == Command::PrintTypes {
         print_types(&ast);
     } else {
-        let ast = ast_step3_5::convert(ast);
-        let ast = ast_step5::Ast::from(ast);
-        let c_src = codegen(ast);
+        let c_src = ast_step4::codegen(ast);
         if command == Command::PrintCSrc {
             println!("{c_src}");
         } else if command == Command::RunC {
@@ -237,7 +230,7 @@ pub fn get_token_map(
                     }
                     ast_step2::ConstructorId::Intrinsic(id) => {
                         TokenKind::Constructor(Some(GlobalVariableType {
-                            t: id.to_type(),
+                            t: intrinsics::constructor_type(id),
                             fixed_parameters: Default::default(),
                         }))
                     }

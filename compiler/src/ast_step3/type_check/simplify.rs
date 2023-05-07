@@ -15,7 +15,7 @@ use crate::ast_step2::{
     TypeWithEnv,
 };
 use crate::errors::{CompileError, NotSubtypeReason};
-use crate::intrinsics::IntrinsicType;
+use doki::intrinsics::IntrinsicType;
 use fxhash::{FxHashMap, FxHashSet};
 use hashbag::HashBag;
 use itertools::Itertools;
@@ -2556,8 +2556,8 @@ mod tests {
         TypeVariableMap,
     };
     use crate::ast_step3::type_check::RemovedParameters;
-    use crate::intrinsics::IntrinsicType;
     use crate::{ast_step1, ast_step2, combine_with_prelude, Imports};
+    use doki::intrinsics::IntrinsicType;
     use itertools::Itertools;
     use stripmargin::StripMargin;
 

@@ -119,7 +119,7 @@ fn fmt_type_unit_with_env(
                 if let TypeUnit::Const { id } = &**h {
                     if *id
                         == TypeId::Intrinsic(
-                            crate::intrinsics::IntrinsicType::Fn,
+                            doki::intrinsics::IntrinsicType::Fn,
                         )
                     {
                         let mut tuple_rev = tuple_rev.to_vec();
