@@ -2,8 +2,9 @@ mod type_check;
 pub mod type_util;
 
 pub use self::type_check::{
-    simplify_subtype_rel, GlobalVariableType, LocalVariableType, ResolvedIdent,
-    TypeVariableMap, VariableId, VariableIdInScope, VariableRequirement,
+    simplify_subtype_rel, unwrap_recursive_alias, GlobalVariableType,
+    LocalVariableType, ResolvedIdent, TypeVariableMap, VariableId,
+    VariableIdInScope, VariableRequirement,
 };
 use self::type_check::{type_check, TypeCheckResult};
 use crate::ast_step1::decl_id::DeclId;

@@ -137,7 +137,6 @@ pub enum IntrinsicType {
     Unit,
     True,
     False,
-    ArgumentTuple,
     Fn,
 }
 

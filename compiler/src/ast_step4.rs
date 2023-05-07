@@ -1,6 +1,8 @@
 use crate::ast_step1::decl_id::DeclId;
-use crate::ast_step2::{ApplyPattern, ConstructorId, PatternUnit};
-use crate::ast_step3::{self, BasicFunction, FnArm};
+use crate::ast_step2::types::{Type, TypeUnit};
+use crate::ast_step2::{self, ApplyPattern, ConstructorId, PatternUnit};
+use crate::ast_step3::{self, unwrap_recursive_alias, BasicFunction, FnArm};
+use doki::intrinsics::IntrinsicType;
 use doki::{self, Block, GlobalVariable, LocalVariable, TypeId, VariableDecl};
 use fxhash::FxHashMap;
 use itertools::Itertools;
@@ -10,6 +12,7 @@ struct Env {
     local_variable_map: FxHashMap<DeclId, LocalVariable>,
     global_variable_map: FxHashMap<DeclId, GlobalVariable>,
     data_decl_map: FxHashMap<DeclId, doki::ConstructorId>,
+    type_check_fns: FxHashMap<Type, GlobalVariable>,
     build_env: doki::Env,
 }
 
@@ -112,8 +115,17 @@ impl Env {
                 self.local_variable_map.insert(d, operand);
             }
             PatternUnit::Underscore => (),
-            PatternUnit::TypeRestriction(_, _) => {
-                unimplemented!()
+            PatternUnit::TypeRestriction(p, t) => {
+                let f = self.type_check_fn(&t);
+                let fl = self.build_env.new_local_variable();
+                self.build_env.global_variable(fl, f, block);
+                let v = self.build_env.new_local_variable();
+                self.build_env.call(fl, operand, v, block);
+                block.test_constructor(
+                    v,
+                    TypeId::Intrinsic(IntrinsicType::True),
+                );
+                self.pattern(p, operand, block);
             }
             PatternUnit::Apply(pre_pattern, applications) => {
                 self.pattern(*pre_pattern, operand, block);
@@ -283,5 +295,132 @@ impl Env {
                 );
             }
         }
+    }
+
+    fn type_check_fn(&mut self, t: &Type) -> GlobalVariable {
+        if let Some(v) = self.type_check_fns.get(t) {
+            *v
+        } else {
+            let v = self.build_env.new_global_variable();
+            self.type_check_fns.insert(t.clone(), v);
+            let ret = self.build_env.new_local_variable();
+            let mut block = self.build_env.new_block();
+            let l = self.build_env.lambda(&mut block, ret);
+            let parameter = l.parameter;
+            let body = l.body;
+            let fn_ret = l.ret;
+            let mut branch = self.build_env.new_block();
+            self.build_env.intrinsic_construction(
+                fn_ret,
+                doki::intrinsics::IntrinsicConstructor::False,
+                &mut branch,
+            );
+            for t in t.iter() {
+                match &**t {
+                    TypeUnit::Variable(_)
+                    | TypeUnit::TypeLevelFn(_)
+                    | TypeUnit::TypeLevelApply { .. }
+                    | TypeUnit::Restrictions { .. }
+                    | TypeUnit::Variance(_, _)
+                    | TypeUnit::Const { .. } => panic!(),
+                    TypeUnit::RecursiveAlias { body: t } => {
+                        let mut prev_branch = self.build_env.new_block();
+                        let t = unwrap_recursive_alias(t.clone());
+                        let f = self.type_check_fn(&t);
+                        let fl = self.build_env.new_local_variable();
+                        self.build_env.global_variable(
+                            fl,
+                            f,
+                            &mut prev_branch,
+                        );
+                        let check_result = self.build_env.new_local_variable();
+                        self.build_env.call(
+                            fl,
+                            parameter,
+                            check_result,
+                            &mut prev_branch,
+                        );
+                        body.test_constructor(
+                            check_result,
+                            TypeId::Intrinsic(IntrinsicType::True),
+                        );
+                        self.build_env.intrinsic_construction(
+                            fn_ret,
+                            doki::intrinsics::IntrinsicConstructor::True,
+                            &mut prev_branch,
+                        );
+                        branch = prev_branch.try_catch(branch);
+                    }
+                    TypeUnit::Tuple(a, b) => {
+                        let field_types = b.arguments_from_argument_tuple_ref();
+                        for id in a.iter() {
+                            if let TypeUnit::Const { id } = &**id {
+                                let mut prev_branch =
+                                    self.build_env.new_block();
+                                self.type_check_normal(
+                                    parameter,
+                                    &mut prev_branch,
+                                    *id,
+                                    &field_types,
+                                );
+                                self.build_env.intrinsic_construction(
+                                    fn_ret,
+                                    doki::intrinsics::IntrinsicConstructor::True,
+                                    &mut prev_branch,
+                                );
+                                branch = prev_branch.try_catch(branch);
+                            } else {
+                                panic!()
+                            }
+                        }
+                    }
+                    TypeUnit::Any => (),
+                }
+            }
+            body.append(branch);
+            let d = VariableDecl {
+                value: block,
+                ret,
+                decl_id: v,
+                name: "type_check_fn".to_string(),
+            };
+            self.build_env.set_global_variable(d);
+            v
+        }
+    }
+
+    fn type_check_normal(
+        &mut self,
+        parameter: LocalVariable,
+        block: &mut Block,
+        type_id: ast_step2::TypeId,
+        field_types: &[&Type],
+    ) {
+        match type_id {
+            ast_step2::TypeId::DeclId(d) => {
+                let id = self.data_decl_map[&d];
+                block.test_constructor(parameter, TypeId::UserDefined(id));
+                for (i, ft) in field_types.iter().enumerate() {
+                    let field = self.build_env.new_local_variable();
+                    self.build_env.field_access(field, parameter, id, i, block);
+                    let checker_g = self.type_check_fn(ft);
+                    let checker = self.build_env.new_local_variable();
+                    self.build_env.global_variable(checker, checker_g, block);
+                    let check_result = self.build_env.new_local_variable();
+                    self.build_env.call(checker, field, check_result, block);
+                    block.test_constructor(
+                        check_result,
+                        TypeId::Intrinsic(IntrinsicType::True),
+                    );
+                }
+            }
+            ast_step2::TypeId::Intrinsic(d) => {
+                debug_assert!(field_types.is_empty());
+                block.test_constructor(parameter, TypeId::Intrinsic(d));
+            }
+            ast_step2::TypeId::FixedVariable(_) => {
+                panic!()
+            }
+        };
     }
 }

@@ -483,6 +483,10 @@ impl Env {
                 instructions.push(Instruction::TryCatch(b1, b2));
                 u1 && u2
             }
+            ast_step1::Instruction::FailTest => {
+                instructions.push(Instruction::FailTest);
+                false
+            }
         }
     }
 
