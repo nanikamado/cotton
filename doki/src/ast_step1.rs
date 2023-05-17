@@ -17,6 +17,7 @@ pub struct Ast {
     pub type_of_entry_point: TypePointer,
     pub local_variable_types: LocalVariableTypes,
     pub type_map: PaddedTypeMap,
+    pub constructor_names: ConstructorNames,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
@@ -288,6 +289,15 @@ pub struct Lambda<'a> {
 }
 
 #[derive(Debug, Default)]
+pub struct ConstructorNames(Vec<String>);
+
+impl ConstructorNames {
+    pub fn get(&self, c: ConstructorId) -> &str {
+        &self.0[c.0]
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct Env {
     type_map: PaddedTypeMap,
     global_variable_types: FxHashMap<GlobalVariable, TypePointer>,
@@ -296,6 +306,7 @@ pub struct Env {
     global_variable_count: usize,
     global_variables_done: FxHashMap<GlobalVariable, VariableDecl>,
     field_len: Vec<usize>,
+    constructor_names: ConstructorNames,
 }
 
 impl Env {
@@ -461,8 +472,13 @@ impl Env {
         self.global_variables_done.insert(d.decl_id, d);
     }
 
-    pub fn new_constructor(&mut self, field_len: usize) -> ConstructorId {
+    pub fn new_constructor(
+        &mut self,
+        field_len: usize,
+        name: String,
+    ) -> ConstructorId {
         self.field_len.push(field_len);
+        self.constructor_names.0.push(name);
         ConstructorId(self.field_len.len() - 1)
     }
 
@@ -493,6 +509,7 @@ impl Env {
             type_of_entry_point,
             local_variable_types: local_variable_types_old,
             type_map,
+            constructor_names: self.constructor_names,
         }
     }
 }

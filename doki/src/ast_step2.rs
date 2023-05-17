@@ -1,8 +1,8 @@
 pub use self::local_variable::{LocalVariable, LocalVariableCollector};
 use self::unhashable_type::UnhashableTypeMemo;
 use crate::ast_step1::{
-    self, BasicFunction, GlobalVariable, LambdaId, LocalVariableTypes,
-    PaddedTypeMap, ReplaceMap, TypeId, TypePointer,
+    self, BasicFunction, ConstructorNames, GlobalVariable, LambdaId,
+    LocalVariableTypes, PaddedTypeMap, ReplaceMap, TypeId, TypePointer,
 };
 use crate::intrinsics::IntrinsicType;
 use fxhash::{FxHashMap, FxHashSet};
@@ -21,6 +21,7 @@ pub struct Ast {
     pub type_map: PaddedTypeMap,
     pub variable_types: LocalVariableCollector<Type>,
     pub fx_type_map: FxHashMap<LambdaId<Type>, FxLambdaId>,
+    pub constructor_names: ConstructorNames,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
@@ -101,20 +102,20 @@ pub struct Function {
     pub ret: VariableId,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Default, Clone, Hash)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Default, Clone, Hash)]
 pub struct Type<R = u32> {
     pub ts: Vec<TypeUnit<R>>,
     pub recursive: bool,
     pub reference: bool,
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
 pub enum TypeInner<R = u32> {
     RecursionPoint(R),
     Type(Type<R>),
 }
 
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
 pub enum TypeUnit<R = u32> {
     Normal { id: TypeId, args: Vec<TypeInner<R>> },
     Fn(BTreeSet<LambdaId<TypeInner<R>>>, TypeInner<R>, TypeInner<R>),
@@ -213,6 +214,7 @@ impl Ast {
                     type_map: memo.map,
                     variable_types: memo.local_variable_collector,
                     fx_type_map,
+                    constructor_names: ast.constructor_names,
                 }
             }
             _ => panic!(),
@@ -1255,18 +1257,108 @@ mod unhashable_type {
     }
 }
 
-impl<R: Debug> Display for Type<R> {
+pub struct TypeWithEnv<'a, T>(pub &'a T, pub &'a ConstructorNames);
+
+impl<R: Debug> Display for TypeWithEnv<'_, Type<R>> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.reference {
+        if self.0.recursive {
+            write!(f, "rec[")?;
+        }
+        if self.0.reference {
             write!(f, "&")?;
         }
+        match self.0.ts.len() {
+            0 => write!(f, "Never"),
+            1 => {
+                write!(f, "{}", TypeWithEnv(self.0.ts.first().unwrap(), self.1))
+            }
+            _ => write!(
+                f,
+                "({})",
+                self.0
+                    .ts
+                    .iter()
+                    .format_with(" | ", |t, f| f(&TypeWithEnv(t, self.1)))
+            ),
+        }?;
+        if self.0.recursive {
+            write!(f, "]")?;
+        }
+        Ok(())
+    }
+}
+
+impl<R: Debug> Display for TypeWithEnv<'_, TypeInner<R>> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            TypeInner::RecursionPoint(d) => {
+                write!(f, "d{d:?}")
+            }
+            TypeInner::Type(t) => write!(f, "{}", TypeWithEnv(t, self.1)),
+        }
+    }
+}
+
+impl<R: Debug> Display for TypeWithEnv<'_, TypeUnit<R>> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use TypeUnit::*;
+        match self.0 {
+            Normal { args, id } => {
+                debug_assert_ne!(*id, TypeId::Intrinsic(IntrinsicType::Fn));
+                match id {
+                    TypeId::UserDefined(u) => {
+                        write!(f, "{}", self.1.get(*u))?;
+                    }
+                    TypeId::Intrinsic(d) => {
+                        write!(f, "{d:?}")?;
+                    }
+                }
+                if !args.is_empty() {
+                    write!(
+                        f,
+                        "[{}]",
+                        args.iter().format_with(", ", |a, f| f(&TypeWithEnv(
+                            a, self.1
+                        )))
+                    )?;
+                };
+                Ok(())
+            }
+            Fn(id, a, b) => {
+                let id_paren = id.len() >= 2;
+                write!(
+                    f,
+                    "({}) -{}{}{}-> {}",
+                    TypeWithEnv(a, self.1),
+                    if id_paren { "(" } else { "" },
+                    id.iter()
+                        .format_with(" | ", |a, f| f(&TypeWithEnv(a, self.1))),
+                    if id_paren { ")" } else { "" },
+                    TypeWithEnv(b, self.1)
+                )
+            }
+        }
+    }
+}
+
+impl<R: Debug> Display for TypeWithEnv<'_, LambdaId<TypeInner<R>>> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "f{}({})", self.0.id, TypeWithEnv(&self.0.root_t, self.1))
+    }
+}
+
+impl<R: Debug> Debug for Type<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.recursive {
             write!(f, "rec[")?;
         }
+        if self.reference {
+            write!(f, "&")?;
+        }
         match self.ts.len() {
-            0 => write!(f, "∅"),
-            1 => write!(f, "{}", self.ts.first().unwrap()),
-            _ => write!(f, "{{{}}}", self.ts.iter().format(" | ")),
+            0 => write!(f, "Never"),
+            1 => write!(f, "{:?}", self.ts.first().unwrap()),
+            _ => write!(f, "({:?})", self.ts.iter().format(" | ")),
         }?;
         if self.recursive {
             write!(f, "]")?;
@@ -1275,18 +1367,18 @@ impl<R: Debug> Display for Type<R> {
     }
 }
 
-impl<R: Debug> Display for TypeInner<R> {
+impl<R: Debug> Debug for TypeInner<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TypeInner::RecursionPoint(d) => {
                 write!(f, "d{d:?}")
             }
-            TypeInner::Type(t) => write!(f, "{t}"),
+            TypeInner::Type(t) => write!(f, "{t:?}"),
         }
     }
 }
 
-impl<R: Debug> Display for TypeUnit<R> {
+impl<R: Debug> Debug for TypeUnit<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use TypeUnit::*;
         match self {
@@ -1295,17 +1387,17 @@ impl<R: Debug> Display for TypeUnit<R> {
                 if args.is_empty() {
                     write!(f, "{id}")
                 } else {
-                    write!(f, "{}[{}]", id, args.iter().format(", "))
+                    write!(f, "{}[{:?}]", id, args.iter().format(", "))
                 }
             }
             Fn(id, a, b) => {
                 let id_paren = id.len() >= 2;
                 write!(
                     f,
-                    "({a}) -{}{}{}-> {b}",
+                    "({a:?}) -{}{}{}-> {b:?}",
                     if id_paren { "(" } else { "" },
                     id.iter()
-                        .format_with(" | ", |a, f| f(&format_args!("{}", a))),
+                        .format_with(" | ", |a, f| f(&format_args!("{:?}", a))),
                     if id_paren { ")" } else { "" },
                 )
             }
@@ -1328,7 +1420,7 @@ mod local_variable {
     #[derive(Debug, PartialEq)]
     pub struct LocalVariableCollector<T>(Vec<T>);
 
-    impl<T: Display> LocalVariableCollector<T> {
+    impl<T> LocalVariableCollector<T> {
         pub fn new_variable(&mut self, t: T) -> LocalVariable {
             self.0.push(t);
             LocalVariable(self.0.len() - 1)

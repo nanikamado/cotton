@@ -19,7 +19,9 @@ struct Env {
 pub fn codegen(ast: ast_step3::Ast) -> String {
     let mut env = Env::default();
     for d in &ast.data_decl {
-        let id = env.build_env.new_constructor(d.field_len);
+        let id = env
+            .build_env
+            .new_constructor(d.field_len, d.name.to_string());
         env.data_decl_map.insert(d.decl_id, id);
     }
     for d in &ast.variable_decls {

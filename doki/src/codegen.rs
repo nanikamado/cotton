@@ -2,10 +2,11 @@ mod c_type;
 mod collector;
 
 use self::c_type::{CAggregateType, CType};
-use crate::ast_step1::{ConstructorId, TypeId};
+use crate::ast_step1::{ConstructorId, ConstructorNames, TypeId};
 use crate::ast_step2::{
-    Ast, Block, Expr, Function, GlobalVariableId, Instruction, LocalVariable,
-    LocalVariableCollector, Tester, Type, TypeUnit, VariableDecl, VariableId,
+    self, Ast, Block, Expr, Function, GlobalVariableId, Instruction,
+    LocalVariable, LocalVariableCollector, Tester, Type, TypeUnit,
+    VariableDecl, VariableId,
 };
 use crate::intrinsics::{IntrinsicType, IntrinsicVariable};
 use fxhash::{FxHashMap, FxHashSet};
@@ -51,6 +52,7 @@ pub fn codegen(ast: Ast) -> String {
         variable_names: &ast.variable_names,
         local_variable_types: &local_variable_types,
         global_variable_types: &global_variable_types,
+        constructor_names: &ast.constructor_names,
     };
     let mut s = String::new();
     let unit_t: Type = TypeUnit::Normal {
@@ -98,23 +100,13 @@ pub fn codegen(ast: Ast) -> String {
             ))),
     )
     .unwrap();
-    write_fns(
-        &mut s,
-        &ast.functions,
-        &ast.variable_names,
-        &local_variable_types,
-        &global_variable_types,
-        &mut c_type_env,
-        true,
-    );
+    write_fns(&mut s, &ast.functions, &mut c_type_env, &env, true);
     let mut fn_headers = String::new();
     write_fns(
         &mut fn_headers,
         &ast.functions,
-        &ast.variable_names,
-        &local_variable_types,
-        &global_variable_types,
         &mut c_type_env,
+        &env,
         false,
     );
     write!(
@@ -270,10 +262,8 @@ fn sort_aggregates_rec<'a>(
 fn write_fns(
     s: &mut String,
     functions: &[Function],
-    variable_names: &FxHashMap<VariableId, String>,
-    local_variable_types: &LocalVariableCollector<(Type, CType)>,
-    global_variable_types: &FxHashMap<GlobalVariableId, CType>,
     c_type_env: &mut c_type::Env,
+    env: &Env,
     write_body: bool,
 ) {
     write!(
@@ -287,9 +277,10 @@ fn write_fns(
                     .enumerate()
                     .map(|(i, d)| (*d, i))
                     .collect(),
-                variable_names,
-                local_variable_types,
-                global_variable_types,
+                variable_names: env.variable_names,
+                local_variable_types: env.local_variable_types,
+                global_variable_types: env.global_variable_types,
+                constructor_names: env.constructor_names,
             };
             let (t, ct) = env.local_variable_types.get_type(function.parameter);
             f(&format_args!(
@@ -298,7 +289,7 @@ fn write_fns(
                 function.id,
                 ct,
                 Dis(&VariableId::Local(function.parameter), &env),
-                t,
+                ast_step2::TypeWithEnv(t, env.constructor_names),
                 CType::Aggregate(
                     c_type_env.aggregate_types.get(CAggregateType::Struct(
                         function
@@ -332,6 +323,7 @@ struct Env<'a> {
     variable_names: &'a FxHashMap<VariableId, String>,
     local_variable_types: &'a LocalVariableCollector<(Type, CType)>,
     global_variable_types: &'a FxHashMap<GlobalVariableId, CType>,
+    constructor_names: &'a ConstructorNames,
 }
 
 impl Env<'_> {
@@ -386,7 +378,7 @@ impl DisplayWithEnv for VariableDecl {
             "{} {}/*{}*/=(()=>({{{}||__unexpected();{}}}))();",
             ct,
             Dis(&VariableId::Global(self.decl_id), env),
-            self.t,
+            ast_step2::TypeWithEnv(&self.t, env.constructor_names),
             Dis(&self.value, env),
             Dis(&self.ret, env)
         )
@@ -422,7 +414,7 @@ impl DisplayWithEnv for TerminalBlock<'_> {
                     f(&format_args!(
                         "{} /*{}*/ {};",
                         ct,
-                        t,
+                        ast_step2::TypeWithEnv(t, env.constructor_names),
                         Dis(&VariableId::Local(*v), env),
                     ))
                 }),
