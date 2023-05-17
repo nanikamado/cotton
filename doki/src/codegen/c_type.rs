@@ -57,13 +57,7 @@ impl Env {
         if t.recursive {
             let i = self.aggregate_types.get_empty_id();
             debug_assert!(!t.contains_broken_link());
-            type_stack = Some((
-                i,
-                Type {
-                    reference: true,
-                    ..t.clone()
-                },
-            ));
+            type_stack = Some((i, t.clone().get_ref()));
             reserved_id = Some(i);
         } else {
             reserved_id = None;
@@ -193,13 +187,7 @@ impl Env {
     ) -> CType {
         debug_assert!(!t.contains_broken_link_rec(type_stack.is_some() as u32));
         if t.reference {
-            let t = self.c_type_memoize(
-                &Type {
-                    reference: false,
-                    ..t.clone()
-                },
-                type_stack,
-            );
+            let t = self.c_type_memoize(&t.clone().deref(), type_stack);
             let i = match t {
                 CType::Aggregate(i) => i,
                 _ => panic!(),

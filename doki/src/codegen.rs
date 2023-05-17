@@ -289,7 +289,7 @@ fn write_fns(
                 function.id,
                 ct,
                 Dis(&VariableId::Local(function.parameter), &env),
-                ast_step2::TypeWithEnv(t, env.constructor_names),
+                ast_step2::DisplayTypeWithEnv(t, env.constructor_names),
                 CType::Aggregate(
                     c_type_env.aggregate_types.get(CAggregateType::Struct(
                         function
@@ -378,7 +378,7 @@ impl DisplayWithEnv for VariableDecl {
             "{} {}/*{}*/=(()=>({{{}||__unexpected();{}}}))();",
             ct,
             Dis(&VariableId::Global(self.decl_id), env),
-            ast_step2::TypeWithEnv(&self.t, env.constructor_names),
+            ast_step2::DisplayTypeWithEnv(&self.t, env.constructor_names),
             Dis(&self.value, env),
             Dis(&self.ret, env)
         )
@@ -414,7 +414,7 @@ impl DisplayWithEnv for TerminalBlock<'_> {
                     f(&format_args!(
                         "{} /*{}*/ {};",
                         ct,
-                        ast_step2::TypeWithEnv(t, env.constructor_names),
+                        ast_step2::DisplayTypeWithEnv(t, env.constructor_names),
                         Dis(&VariableId::Local(*v), env),
                     ))
                 }),
