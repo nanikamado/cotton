@@ -109,9 +109,7 @@ impl PaddedTypeMap {
     ) {
         debug_assert!(matches!(self.dereference(fn_id), Terminal::LambdaId(_)));
         let t = self.dereference_mut(p);
-        let Terminal::TypeMap(t) = t else {
-            panic!()
-        };
+        let Terminal::TypeMap(t) = t else { panic!() };
         if let Some(f) = t.normals.get(&TypeId::Intrinsic(IntrinsicType::Fn)) {
             let f_0 = f[0];
             let f_1 = f[1];
@@ -133,9 +131,7 @@ impl PaddedTypeMap {
         id: LambdaId<TypePointer>,
     ) {
         let t = self.dereference_mut(p);
-        let Terminal::LambdaId(t) = t else {
-            panic!()
-        };
+        let Terminal::LambdaId(t) = t else { panic!() };
         t.insert(id);
     }
 
@@ -144,9 +140,7 @@ impl PaddedTypeMap {
         p: TypePointer,
     ) -> &BTreeSet<LambdaId<TypePointer>> {
         let t = self.dereference(p);
-        let Terminal::LambdaId(t) = t else {
-            panic!()
-        };
+        let Terminal::LambdaId(t) = t else { panic!() };
         t
     }
 
@@ -157,9 +151,7 @@ impl PaddedTypeMap {
         args: Vec<TypePointer>,
     ) {
         let t = self.dereference_mut(p);
-        let Terminal::TypeMap(t) = t else {
-            panic!()
-        };
+        let Terminal::TypeMap(t) = t else { panic!() };
         if let Some(t) = t.normals.get(&id) {
             for (a, b) in t.clone().into_iter().zip(args) {
                 self.union(a, b);

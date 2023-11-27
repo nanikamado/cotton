@@ -263,9 +263,11 @@ impl VarianceMap {
                     &f.clone().unwrap_recursive_fn_apply().0,
                 )
             } else {
-                let super::types::TypeMatchableRef::TypeLevelFn(t) = f.matchable_ref() else {
-                   panic!()
-               };
+                let super::types::TypeMatchableRef::TypeLevelFn(t) =
+                    f.matchable_ref()
+                else {
+                    panic!()
+                };
                 let r = self.t_has_v_in_covariant_position(
                     TypeVariable::RecursiveIndex(0),
                     t,
@@ -297,9 +299,11 @@ impl VarianceMap {
                     &f.clone().unwrap_recursive_fn_apply().0,
                 )
             } else {
-                let super::types::TypeMatchableRef::TypeLevelFn(t) = f.matchable_ref() else {
-                   panic!()
-               };
+                let super::types::TypeMatchableRef::TypeLevelFn(t) =
+                    f.matchable_ref()
+                else {
+                    panic!()
+                };
                 let r = self.t_has_v_in_contravariant_position(
                     TypeVariable::RecursiveIndex(0),
                     t,
