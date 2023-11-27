@@ -259,7 +259,7 @@ impl MatchOperand {
         use MatchOperandUnit::*;
         self.into_iter()
             .flat_map(|t| match t {
-                Const(id) if id == TypeId::Intrinsic(IntrinsicType::Unit) => {
+                Const(TypeId::Intrinsic(IntrinsicType::Unit)) => {
                     vec![Vec::new()]
                 }
                 Tuple(a1, a2) => a2

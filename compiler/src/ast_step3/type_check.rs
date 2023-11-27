@@ -497,11 +497,10 @@ impl Type {
             Tuple(a1, a2) => std::iter::once(a1)
                 .chain(a2.arguments_from_argument_tuple())
                 .collect(),
-            Const { id, .. }
-                if id == TypeId::Intrinsic(IntrinsicType::Unit) =>
-            {
-                Vec::new()
-            }
+            Const {
+                id: TypeId::Intrinsic(IntrinsicType::Unit),
+                ..
+            } => Vec::new(),
             t => {
                 panic!("expected AT or Unit but got {}", Type::from(t))
             }
@@ -512,9 +511,10 @@ impl Type {
         use TypeUnit::*;
         self.into_iter()
             .flat_map(|t| match unwrap_or_clone(t) {
-                Const { id, .. }
-                    if id == TypeId::Intrinsic(IntrinsicType::Unit) =>
-                {
+                Const {
+                    id: TypeId::Intrinsic(IntrinsicType::Unit),
+                    ..
+                } => {
                     vec![Vec::new()]
                 }
                 Tuple(a1, a2) => a2
@@ -538,11 +538,10 @@ impl Type {
             Tuple(a1, a2) => std::iter::once(a1)
                 .chain(a2.arguments_from_argument_tuple_ref())
                 .collect(),
-            Const { id, .. }
-                if id == TypeId::Intrinsic(IntrinsicType::Unit) =>
-            {
-                Vec::new()
-            }
+            Const {
+                id: TypeId::Intrinsic(IntrinsicType::Unit),
+                ..
+            } => Vec::new(),
             t => {
                 panic!("expected AT or Unit but got {t:?}")
             }
@@ -619,11 +618,10 @@ impl PatternUnitForRestriction {
             Tuple(a1, a2) => std::iter::once(*a1)
                 .chain(a2.arguments_from_argument_tuple())
                 .collect(),
-            Const { id, .. }
-                if id == TypeId::Intrinsic(IntrinsicType::Unit) =>
-            {
-                Vec::new()
-            }
+            Const {
+                id: TypeId::Intrinsic(IntrinsicType::Unit),
+                ..
+            } => Vec::new(),
             _ => panic!(),
         }
     }

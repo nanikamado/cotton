@@ -1847,7 +1847,7 @@ fn apply_type_to_pattern(
                  (decl_id, t, span)| {
                     match m.entry(decl_id) {
                         std::collections::hash_map::Entry::Occupied(mut a) => {
-                            let mut m = a.get_mut();
+                            let m = a.get_mut();
                             m.0.append(t);
                             m.1 = merge_span(&m.1, &span);
                         }

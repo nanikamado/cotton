@@ -1156,21 +1156,26 @@ fn fmt_tuple(
 ) -> std::fmt::Result {
     if let TypeMatchableRef::Const { id: id_a } = a.matchable_ref() {
         if matches!(id_a, TypeId::Intrinsic(IntrinsicType::Fn)) {
-            let pairs = b.iter().map(|b|{
-                let TypeUnit::Tuple(arg, rtn) = &**b else {
-                    panic!()
-                };
-                let TypeMatchableRef::Tuple(rtn, rest) = rtn.matchable_ref() else {
-                    panic!()
-                };
-                debug_assert!(matches!(
-                    rest.matchable_ref(),
-                    TypeMatchableRef::Const {
-                        id: TypeId::Intrinsic(IntrinsicType::Unit)
-                    }
-                ));
-                (arg, rtn)
-            }) .collect_vec();
+            let pairs = b
+                .iter()
+                .map(|b| {
+                    let TypeUnit::Tuple(arg, rtn) = &**b else {
+                        panic!()
+                    };
+                    let TypeMatchableRef::Tuple(rtn, rest) =
+                        rtn.matchable_ref()
+                    else {
+                        panic!()
+                    };
+                    debug_assert!(matches!(
+                        rest.matchable_ref(),
+                        TypeMatchableRef::Const {
+                            id: TypeId::Intrinsic(IntrinsicType::Unit)
+                        }
+                    ));
+                    (arg, rtn)
+                })
+                .collect_vec();
             if pairs.len() == 1 {
                 let (arg, rtn) = pairs[0];
                 if arg.is_function() {
@@ -1190,9 +1195,10 @@ fn fmt_tuple(
             Ok(())
         } else {
             match b.matchable_ref() {
-                TypeMatchableRef::Const { id: id_b, .. }
-                    if id_b == TypeId::Intrinsic(IntrinsicType::Unit) =>
-                {
+                TypeMatchableRef::Const {
+                    id: TypeId::Intrinsic(IntrinsicType::Unit),
+                    ..
+                } => {
                     write!(f, "{id_a}")
                 }
                 TypeMatchableRef::Tuple(h, t) => {
@@ -1223,7 +1229,10 @@ fn fmt_tuple_tail(
             write!(f, ", {a}")?;
             fmt_tuple_tail(b, f)
         }
-        Const { id, .. } if id == TypeId::Intrinsic(IntrinsicType::Unit) => {
+        Const {
+            id: TypeId::Intrinsic(IntrinsicType::Unit),
+            ..
+        } => {
             write!(f, "]")
         }
         _ => panic!("expected tuple but found {tuple}"),
