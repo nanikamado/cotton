@@ -167,7 +167,7 @@ fn lexer(
     });
 
     #[allow(clippy::is_digit_ascii_radix)]
-    // This `escape` copied from https://github.com/zesterer/chumsky/blob/6107b2f98a22e8d22a6ee64b0ab4f727166d6769/examples/json.rs#L39
+    // This `escape` was copied from https://github.com/zesterer/chumsky/blob/6107b2f98a22e8d22a6ee64b0ab4f727166d6769/examples/json.rs#L39
     // MIT License: https://github.com/zesterer/chumsky/blob/6107b2f98a22e8d22a6ee64b0ab4f727166d6769/LICENSE
     let escape = just('\\').ignore_then(
         just('\\')
